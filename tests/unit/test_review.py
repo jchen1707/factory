@@ -8,12 +8,14 @@ The state-machine transitions are exercised in `tests/integration/test_pipeline.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from factory.harness import HarnessConfig
 from factory.machine import Blocked
-from factory.steps.review import _axis_prompt, _decide_tier2, _matches_any
+from factory.steps.review import _axis_prompt, _decide_tier2, _matches_any, _review_argv
 
 # -- _decide_tier2 (§15.2's trigger table) -------------------------------------
 
@@ -156,7 +158,10 @@ def test_axis_prompt_concatenates_frame_and_checklist(tmp_path: Path) -> None:
     checklist = tmp_path / "docs/agents/subagents"
     _write(checklist / "standards-reviewer.md", "checklist body")
     prompt = _axis_prompt(
-        tmp_path, _harness(".agents/agents", "docs/agents/subagents"), "standards-reviewer"
+        tmp_path,
+        _harness(".agents/agents", "docs/agents/subagents"),
+        "standards-reviewer",
+        "origin/v2",
     )
     assert "frame body" in prompt
     assert "checklist body" in prompt
@@ -169,9 +174,12 @@ def test_axis_prompt_returns_frame_only_when_no_checklist(tmp_path: Path) -> Non
     vendored = tmp_path / ".agents/vendor/harness/agents"
     _write(vendored / "spec-checker.md", "frame only body")
     prompt = _axis_prompt(
-        tmp_path, _harness(".agents/agents", "docs/agents/subagents"), "spec-checker"
+        tmp_path, _harness(".agents/agents", "docs/agents/subagents"), "spec-checker", "origin/v2"
     )
-    assert prompt == "frame only body"
+    # The frame, plus the two lines that name the target — never a review criterion.
+    assert prompt.startswith("frame only body")
+    assert "git diff origin/v2...HEAD" in prompt
+    assert "An empty findings list is a valid" in prompt
 
 
 def test_axis_prompt_stack_override_wins_over_vendored_frame(tmp_path: Path) -> None:
@@ -180,13 +188,35 @@ def test_axis_prompt_stack_override_wins_over_vendored_frame(tmp_path: Path) -> 
     vendored = tmp_path / ".agents/vendor/harness/agents"
     _write(vendored / "standards-reviewer.md", "shared frame")
     h = _harness(".agents/agents", "docs/agents/subagents")
-    assert "stack override frame" in _axis_prompt(tmp_path, h, "standards-reviewer")
-    assert "shared frame" not in _axis_prompt(tmp_path, h, "standards-reviewer")
+    assert "stack override frame" in _axis_prompt(tmp_path, h, "standards-reviewer", "origin/v2")
+    assert "shared frame" not in _axis_prompt(tmp_path, h, "standards-reviewer", "origin/v2")
 
 
 def test_axis_prompt_throws_when_both_halves_are_absent(tmp_path: Path) -> None:
     with pytest.raises(Blocked) as caught:
         _axis_prompt(
-            tmp_path, _harness(".agents/agents", "docs/agents/subagents"), "standards-reviewer"
+            tmp_path,
+            _harness(".agents/agents", "docs/agents/subagents"),
+            "standards-reviewer",
+            "origin/v2",
         )
     assert caught.value.reason == "review-frame-missing"
+
+
+def _ctx_for_argv() -> Any:
+    """`_review_argv` reads exactly one thing off the context: the reviewer role."""
+    role = SimpleNamespace(model="gpt-5.6-sol", effort="high")
+    return SimpleNamespace(routing=SimpleNamespace(role=lambda _name: role))
+
+
+def test_the_review_invocation_never_pairs_base_with_a_prompt() -> None:
+    """codex refuses the combination — `the argument '--base <BRANCH>' cannot be used with
+    '[PROMPT]'` — and the prompt is the axis, so the prompt is what stays. BAC-4's run
+    `1effc543d83a459a` blocked here with `review-schema-invalid` when both were passed."""
+    argv = _review_argv(_ctx_for_argv(), Path("/w/schema.json"), Path("/w/out.json"))
+
+    assert "--base" not in argv
+    assert argv[-1] == "-"  # the prompt still arrives on stdin
+    assert argv[:2] == ["codex", "exec"]
+    assert "review" not in argv  # not the `review` subcommand, which owns `--base`
+    assert "sandbox_mode=read-only" in argv

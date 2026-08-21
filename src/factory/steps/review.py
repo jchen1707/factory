@@ -64,7 +64,7 @@ _SENSITIVE_DIRS: dict[str, tuple[str, ...]] = {
 #: `medium`/`low` finding is recorded and carried in the PR body but does not stop delivery.
 _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 
-#: The vendored layer-A findings schema, passed to `codex exec review --output-schema` and
+#: The vendored layer-A findings schema, passed to `codex exec --output-schema` and
 #: used to validate what comes back. One file, so the Codex path and the workflow path
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
@@ -152,15 +152,16 @@ def _tier1(
 ) -> tuple[list[dict[str, Any]], bool]:
     """Run the two Tier-1 axes. Returns `(findings, has_critical_or_high)`.
 
-    Each axis runs `codex exec review --base <base>` in the read-only review sandbox, with a
-    prompt assembled the way `axisPrompt` does it, writing schema-valid findings to
-    `<review_dir>/review-<axis>.json`.
+    Each axis runs `codex exec` in the read-only review sandbox, with a prompt assembled
+    the way `axisPrompt` does it and the diff named in it, writing schema-valid findings
+    to `<review_dir>/review-<axis>.json`.
     """
     if ctx.dry_run:
         for label, _agent in _TIER1_AXES:
             ctx.would(f"assemble {label} prompt from {harness.review_agent_dir} + vendored frame")
             ctx.would(
-                f"codex exec review --base {ctx.run.base_ref} -c sandbox_mode=read-only (in {ctx.project.review_sandbox})"
+                f"codex exec -c sandbox_mode=read-only (in {ctx.project.review_sandbox}), "
+                f"reviewing git diff {ctx.run.base_ref}...HEAD"
             )
         return [], False
 
@@ -172,11 +173,11 @@ def _tier1(
     findings: list[dict[str, Any]] = []
     has_human = False
     for label, agent in _TIER1_AXES:
-        prompt = _axis_prompt(ctx.worktree, harness, agent)
+        prompt = _axis_prompt(ctx.worktree, harness, agent, base_ref)
         out_path = review_dir / f"review-{label}.json"
         events_path = review_dir / f"review-{label}.events.jsonl"
         stderr_path = review_dir / f"review-{label}.stderr.log"
-        argv = _review_argv(ctx, base_ref, schema_path, out_path)
+        argv = _review_argv(ctx, schema_path, out_path)
         completed = ctx.sandbox.exec_sync(
             ctx.project.review_sandbox,
             argv,
@@ -204,19 +205,25 @@ def _tier1(
     return findings, has_human
 
 
-def _review_argv(ctx: Context, base_ref: str, schema_path: Path, out_path: Path) -> list[str]:
-    """`codex exec review` for one axis. `--dangerously-bypass-hook-trust` is included for the
-    same reason the implement step includes it: the worktree path is untrusted in
-    `~/.codex/config.toml`, and without it Codex appends a project stanza for it. The
-    `:ro` mount and `sandbox_mode=read-only` are what make the review safe; this flag only
-    stops a config-file side effect."""
+def _review_argv(ctx: Context, schema_path: Path, out_path: Path) -> list[str]:
+    """`codex exec` for one axis — the same invocation the implement step uses.
+
+    Not `codex exec review --base <ref>`: codex refuses that flag together with a prompt
+    (`the argument '--base <BRANCH>' cannot be used with '[PROMPT]'`), and the prompt is
+    the axis. An axis-less review would run the same generic pass twice and call it
+    Standards and Spec, which is the failure §15.2 exists to prevent. Layer A's own
+    `full-review.js` reaches the same conclusion from the other side: it names the diff
+    inside the prompt and never uses the `review` subcommand.
+
+    `--dangerously-bypass-hook-trust` is included for the same reason the implement step
+    includes it: the worktree path is untrusted in `~/.codex/config.toml`, and without it
+    Codex appends a project stanza for it. The `:ro` mount and `sandbox_mode=read-only`
+    are what make the review safe; this flag only stops a config-file side effect.
+    """
     role = ctx.routing.role("reviewer")
     return [
         "codex",
         "exec",
-        "review",
-        "--base",
-        base_ref,
         "-m",
         role.model,
         "-c",
@@ -264,7 +271,7 @@ def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
     )
 
 
-def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str) -> str:
+def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str, base_ref: str) -> str:
     """Assemble one axis's prompt the way `full-review.js`'s `axisPrompt()` does.
 
     Frame = a stack override at `<review.agentDir>/<agent>.md`, else the shared vendored
@@ -285,12 +292,31 @@ def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str) -> str:
             "or as a vendored tree; one is missing.",
         )
     if not checklist:
-        return frame  # spec-checker carries its whole review in the frame; no checklist
+        # spec-checker carries its whole review in the frame; no checklist
+        return frame + _target(base_ref)
     return (
         frame + f"\n\n---\n\n## {harness.name}: what to look for, in this repo's terms\n\n"
         "This is the checklist the frame above told you to read. It is reproduced here so "
         "you have it without a file read; it is authoritative for this repository, and where "
-        "it names a source file, that source outranks it.\n\n" + checklist
+        "it names a source file, that source outranks it.\n\n" + checklist + _target(base_ref)
+    )
+
+
+def _target(base_ref: str) -> str:
+    """Which diff this axis reviews.
+
+    The factory holds no review prompt — the frame and the checklist above are read from
+    the vendored layer-A tree and the repository, and this adds no criterion to either.
+    It names the target, which is the factory's own business: it decides what runs and
+    against what. `full-review.js` appends the same two facts for the same reason
+    (`Review the diff: git diff ${BASE}...HEAD`), because a reviewer given a frame and no
+    target reviews whatever it happens to open, and one not told that silence is a valid
+    answer invents findings to look thorough.
+    """
+    return (
+        f"\n\n---\n\nReview the diff: `git diff {base_ref}...HEAD`\n\n"
+        "Report ONLY real defects in this diff. An empty findings list is a valid and "
+        "common result — do not manufacture findings to look thorough."
     )
 
 
