@@ -55,6 +55,26 @@ class SbxError(Exception):
     """An `sbx` command that failed, with its output attached."""
 
 
+def assert_primary_workspace_writable(spec: SandboxSpec) -> None:
+    """`sbx create` refuses a read-only primary workspace, so refuse it here instead.
+
+    Measured: creating the reviewer sandbox with the worktree `:ro` first returned
+    `ERROR: primary workspace must be read/write (remove ':ro' or ':readonly')`, and
+    `sbx create codex --help` says `:ro` applies to the *additional* workspaces. A
+    read-only review sandbox is still exactly buildable — the writable scratch goes
+    first and the code under review comes in beside it — so this is an ordering rule,
+    not a lost guarantee. It lives here because `create_argv` is the one place a
+    creation-time decision is spelled, and a spec that cannot be created should say so
+    on the host rather than 40 seconds into a `sbx create`.
+    """
+    if spec.workspaces and spec.workspaces[0].readonly:
+        raise SbxError(
+            f"{spec.name}: the primary workspace {spec.workspaces[0].path} is `:ro`, and "
+            "`sbx create` requires it to be read/write. Put a writable workspace first and "
+            "mount the read-only one after it."
+        )
+
+
 def create_argv(spec: SandboxSpec) -> list[str]:
     """The exact `sbx create` command line for a spec. Golden-tested.
 
@@ -63,6 +83,7 @@ def create_argv(spec: SandboxSpec) -> list[str]:
     nowhere else, because none of them can be changed afterwards.
     """
     assert_factory_sandbox(spec.name)
+    assert_primary_workspace_writable(spec)
     argv = ["sbx", "create", "codex", "--name", spec.name]
     if spec.template:
         argv += ["-t", spec.template]

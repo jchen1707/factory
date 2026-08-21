@@ -245,9 +245,15 @@ def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
         project=ctx.project.name,
         role="review",
         name=ctx.project.review_sandbox,
+        # The rw scratch is *first*, and that is not a style choice: `sbx create` refuses
+        # a read-only primary workspace outright — "primary workspace must be read/write
+        # (remove ':ro' or ':readonly')" — and its own help says `:ro` applies to the
+        # additional workspaces. So the reviewer's writable ground is the scratch it writes
+        # findings to, and the code under review comes in beside it, read-only, at the
+        # identical path. The boundary §15.2 asks for is unchanged; only the order is.
         workspaces=(
-            Workspace(ctx.worktree, readonly=True),
             Workspace(review_dir),
+            Workspace(ctx.worktree, readonly=True),
         ),
         template=ctx.project.template or None,
         kits=(),
