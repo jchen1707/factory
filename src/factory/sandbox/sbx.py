@@ -34,6 +34,15 @@ __all__ = ["SbxAdapter", "SbxError", "create_argv", "exec_argv"]
 #: The wrapper beats every 20 s, so three missed beats plus slack.
 ORPHAN_AFTER_SECONDS = 90
 
+#: Where `sbx exec`'s own stderr lands. Not `stderr.log` — that one is the agent's, and
+#: mixing the transport's complaints into the agent's output is how evidence gets lost.
+SBX_EXEC_STDERR = "sbx-exec.stderr"
+
+#: How long `exec_detached` waits for the wrapper's first heartbeat before calling the
+#: start a failure. Generous because it covers `sbx exec` starting a stopped sandbox,
+#: and cheap because the common case returns as soon as the file appears.
+START_TIMEOUT_SECONDS = 120
+
 
 class SbxError(Exception):
     """An `sbx` command that failed, with its output attached."""
@@ -94,8 +103,13 @@ def exec_argv(
 class SbxAdapter:
     """Create-or-attach, detached execution, and polling by filesystem."""
 
+    #: Live `sbx exec -d` processes, by sandbox. Held open on purpose: the exec dies
+    #: with its host process, so dropping the handle would kill the run it started.
+    _detached: dict[str, subprocess.Popen[str]]
+
     def __init__(self, *, timeout: int = 900) -> None:
         self.timeout = timeout
+        self._detached = {}
 
     # -- plumbing -----------------------------------------------------------------
 
@@ -194,10 +208,14 @@ class SbxAdapter:
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
         """The single most important command in the factory (§4.2).
 
-        Long work runs detached **inside** the sandbox and reports through the
-        filesystem, so the host process can die at any moment and the next tick learns
-        what happened by looking at three files. The script writes its exit code to a
-        temp file and `mv`s it, so `exit` appearing is atomic.
+        Long work runs inside the sandbox and reports through the filesystem: the caller
+        learns what happened by looking at three files. The script writes its exit code
+        to a temp file and `mv`s it, so `exit` appearing is atomic.
+
+        §4.2 also says the host process may die at any moment. **On `sbx` v0.38.0 it may
+        not**, and that is a property of the sandbox rather than of this code — see the
+        comment below. Nothing here can restore it; `docs/discovery/p1-2-detached-exec.md`
+        records what would.
         """
         assert_factory_sandbox(handle.sandbox)
         assert_no_skip_verify(env)
@@ -208,12 +226,61 @@ class SbxAdapter:
             env=env,
             detach=True,
         )
-        result = self._run(argv, timeout=120)
-        if not result.ok:
-            raise SbxError(
-                f"detached exec in {handle.sandbox} failed to start:\n"
-                f"{result.stdout}\n{result.stderr}"
+        # Two measured facts about `sbx exec -d` on v0.38.0, both contradicting what the
+        # factory was built to assume. P0 verified the flag was *accepted*, not what it
+        # did.
+        #
+        # 1. `-d` does not detach the call. `sbx exec -d <sandbox> /bin/sh -lc
+        #    'sleep 240'` returned after 4 m 01 s — exactly the command's duration. The
+        #    first implement attempt to clear the preflight therefore died on
+        #    `TimeoutExpired` at 120 s, with `events.jsonl` at 139 KB and the heartbeat
+        #    19 s old.
+        # 2. **The sandbox stops when its last session ends, and a stopping VM kills
+        #    everything inside it.** That, not process parentage, is why the agent died
+        #    when the timed-out `sbx exec` was killed: zero `codex` processes, a frozen
+        #    heartbeat and no `exit` file. A `setsid nohup` wrapper *inside* the VM was
+        #    measured against this and made no difference — the probe returned in 0.26 s
+        #    and its work was gone 82 s later, along with the sandbox.
+        #
+        # So this session is what keeps the VM alive, and the run lives exactly as long
+        # as the handle in `_detached` does. Never wait on it, and never drop it. That
+        # is also why §4.2's "the host process can die at any moment" does not hold here:
+        # it is the sandbox's lifetime that is the constraint, and no code at this layer
+        # can widen it.
+        #
+        # stderr goes to a file rather than a pipe nobody drains: this process outlives
+        # the call by design, and a full 64 KB pipe buffer would block the very exec it
+        # is meant to be diagnosing.
+        handle.attempt_dir.mkdir(parents=True, exist_ok=True)
+        stderr_path = handle.attempt_dir / SBX_EXEC_STDERR
+        with stderr_path.open("w", encoding="utf-8") as stderr_file:
+            process = subprocess.Popen(
+                list(argv),
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_file,
+                text=True,
             )
+        self._detached[handle.sandbox] = process
+
+        # "Started" is the heartbeat appearing, not the call returning — the wrapper
+        # writes its first beat before `codex exec` is reached. A process that has
+        # already exited without one never started, and the file says why.
+        deadline = time.monotonic() + START_TIMEOUT_SECONDS
+        heartbeat = handle.attempt_dir / "heartbeat"
+        while time.monotonic() < deadline:
+            if heartbeat.exists():
+                return
+            if process.poll() is not None:
+                detail = stderr_path.read_text(encoding="utf-8", errors="replace").strip()
+                raise SbxError(
+                    f"detached exec in {handle.sandbox} exited {process.returncode} "
+                    f"before writing a heartbeat:\n{detail}"
+                )
+            time.sleep(0.5)
+        raise SbxError(
+            f"detached exec in {handle.sandbox} wrote no heartbeat within "
+            f"{START_TIMEOUT_SECONDS}s; the wrapper never reached its first beat"
+        )
 
     def kill_agent(self, name: str) -> None:
         """Stop a hung run so the attempt gets a real terminal record.
