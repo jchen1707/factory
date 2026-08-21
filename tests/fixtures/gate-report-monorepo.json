@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "root": "/worktree",
+  "targets": [
+    { "name": "app-a", "dir": "." },
+    { "name": "app-b", "dir": "apps/b" }
+  ],
+  "missingApps": [],
+  "gates": [
+    {
+      "name": "ruff check",
+      "kind": "lint",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 120,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "mypy",
+      "kind": "type",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 340,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "pytest",
+      "kind": "test",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 2100,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "app-b lint",
+      "kind": "lint",
+      "status": "skipped_unchanged",
+      "exit": null,
+      "durationMs": null,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "app-b test",
+      "kind": "test",
+      "status": "skipped_unchanged",
+      "exit": null,
+      "durationMs": null,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    }
+  ],
+  "verdict": "pass"
+}

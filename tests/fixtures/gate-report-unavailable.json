@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "root": "/worktree",
+  "targets": [{ "name": "python-harness", "dir": "." }],
+  "missingApps": [],
+  "gates": [
+    {
+      "name": "ruff check",
+      "kind": "lint",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 120,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "mypy",
+      "kind": "type",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 340,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "pytest",
+      "kind": "test",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 2100,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "playwright smoke",
+      "kind": "e2e",
+      "status": "unavailable",
+      "exit": null,
+      "durationMs": null,
+      "caveat": "binary not on PATH",
+      "when": null,
+      "outputTail": "spawn playwright ENOENT"
+    }
+  ],
+  "verdict": "incomplete"
+}

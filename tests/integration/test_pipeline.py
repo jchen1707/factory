@@ -1,8 +1,8 @@
-"""§21.3 — the whole of Phase 1, in-process, against fakes.
+"""§21.3 — the whole of Phase 1 (and Phase 2's verify step), in-process, against fakes.
 
 `approved -> claimed -> context_loaded -> sandbox_creating -> sandbox_ready ->
-worktree_ready -> implementing -> verifying`, with no `sbx`, no network and no model
-call. This is the suite that runs on every commit.
+worktree_ready -> implementing -> verifying -> reviewing`, with no `sbx`, no network and
+no model call. This is the suite that runs on every commit.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,9 +26,10 @@ from factory.steps import claim as claim_step
 from factory.steps import context as context_step
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
+from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Store
-from tests.integration.conftest import FakeLinear, FakeSandbox, git
+from tests.integration.conftest import GOOD_GATE_REPORT, FakeLinear, FakeSandbox, git
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -108,6 +110,9 @@ def ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> 
     (home / "schemas" / "implement_result.schema.json").write_text(
         (HOME / "schemas" / "implement_result.schema.json").read_text()
     )
+    (home / "schemas" / "gate_report.schema.json").write_text(
+        (HOME / "schemas" / "gate_report.schema.json").read_text()
+    )
     (home / "config").mkdir()
 
     vault = tmp_path / "vault"
@@ -157,11 +162,33 @@ def _drive(ctx: Context) -> None:
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
     implement_step.run(ctx)
+    verify_step.run(ctx)
 
 
-def test_a_clean_run_reaches_verifying(ctx: Context) -> None:
-    _drive(ctx)
+def _to_verifying(ctx: Context) -> None:
+    """Through the implement step only, so a test can shape the gate report before the
+    verify step reads it."""
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+    worktree_step.run(ctx)
+    implement_step.run(ctx)
     assert ctx.run.state is State.VERIFYING
+
+
+def _gates_json(ctx: Context) -> dict[str, Any]:
+    return json.loads(
+        (Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "gates.json").read_text()
+    )
+
+
+def _fixture(name: str) -> dict[str, Any]:
+    return json.loads((HOME / "tests" / "fixtures" / name).read_text())
+
+
+def test_a_clean_run_reaches_reviewing(ctx: Context) -> None:
+    _drive(ctx)
+    assert ctx.run.state is State.REVIEWING
     assert ctx.run.branch == "feat/BAC-4-application-skeleton-settings-structured"
     assert ctx.run.base_ref == "origin/v2"
 
@@ -178,8 +205,12 @@ def test_a_clean_run_reaches_verifying(ctx: Context) -> None:
         "worktree_ready",
         "implementing",
         "verifying",
+        "reviewing",
     ]
     assert {hop[2] for hop in hops} == {"auto"}
+
+    # The gate report is kept as evidence beside the implement last-message.
+    assert _gates_json(ctx)["verdict"] == "pass"
 
 
 def test_the_worktree_carries_the_context_and_the_run_record(ctx: Context) -> None:
@@ -355,7 +386,7 @@ def test_a_write_inside_the_allowlist_is_fine(
 
     monkeypatch.setattr(ctx.sandbox, "exec_detached", also_distil)
     _drive(ctx)
-    assert ctx.run.state is State.VERIFYING
+    assert ctx.run.state is State.REVIEWING
 
 
 def test_the_factory_refuses_to_reuse_an_existing_remote_branch(ctx: Context) -> None:
@@ -669,3 +700,134 @@ def test_cancel_leaves_another_tickets_branch_alone(
 
     assert neighbour in git(ctx.project.path, "branch", "--list", neighbour)
     assert BRANCH not in git(ctx.project.path, "branch", "--list", BRANCH)
+
+
+# --------------------------------------------------------------------------------
+# Phase 2 — the verify step (§15.1's third signal)
+# --------------------------------------------------------------------------------
+
+
+def test_the_verify_step_invokes_the_report_hook_by_path_not_a_gate_name(
+    ctx: Context,
+) -> None:
+    # The factory holds no gate command. The argv names the vendored report hook and
+    # `--json`; it does not name ruff, mypy, pytest or any other gate.
+    _to_verifying(ctx)
+    verify_step.run(ctx)
+    report_calls = [
+        argv for _name, argv in _fake(ctx).sync_calls if any("gate_report.mjs" in a for a in argv)
+    ]
+    assert len(report_calls) == 1
+    argv = report_calls[0]
+    assert "--json" in argv
+    assert ".agents/vendor/harness/hooks/gate_report.mjs" in argv
+    # No gate name leaks into the invocation.
+    assert not any(token in argv for token in ("ruff", "mypy", "pytest"))
+
+
+def test_a_pass_report_advances_to_reviewing(ctx: Context) -> None:
+    _to_verifying(ctx)
+    # The default fake report is the all-pass one; exercise it explicitly anyway.
+    _fake(ctx).gate_report = dict(GOOD_GATE_REPORT)
+    verify_step.run(ctx)
+    assert ctx.run.state is State.REVIEWING
+    assert _gates_json(ctx)["verdict"] == "pass"
+
+
+def test_a_fail_report_loops_back_to_implementing(ctx: Context) -> None:
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = _fixture("gate-report-fail.json")
+    verify_step.run(ctx)
+    assert ctx.run.state is State.IMPLEMENTING  # loop back for a real failure
+    gates = _gates_json(ctx)
+    assert gates["verdict"] == "fail"
+    assert next(g for g in gates["gates"] if g["name"] == "pytest")["status"] == "fail"
+
+
+def test_an_incomplete_report_blocks_without_evidence_mismatch(ctx: Context) -> None:
+    # A gate whose binary is absent comes back `unavailable` → `verdict: incomplete`. The
+    # agent did not claim that gate, so this is an environment problem (blocked), not a
+    # disagreement with the agent's claim (evidence-mismatch).
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = _fixture("gate-report-unavailable.json")
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "gates-incomplete"
+    assert "evidence-mismatch" not in caught.value.detail
+    assert "playwright smoke" in caught.value.detail  # the unavailable gate is named
+
+
+def test_a_claimed_gate_the_report_omits_is_evidence_mismatch(ctx: Context) -> None:
+    _to_verifying(ctx)
+    report = json.loads(json.dumps(GOOD_GATE_REPORT))
+    # The agent claimed mypy; the report does not show it as pass or fail.
+    report["gates"] = [g for g in report["gates"] if g["name"] != "mypy"]
+    _fake(ctx).gate_report = report
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "evidence-mismatch"
+    assert "mypy" in caught.value.detail
+
+
+def test_a_claimed_gate_the_report_marks_unavailable_is_evidence_mismatch(
+    ctx: Context,
+) -> None:
+    # The absent-binary case, but the agent *claimed* the gate — so the disagreement
+    # outranks the incompleteness. This is the distinction the §15.1 cross-check draws.
+    _to_verifying(ctx)
+    report = json.loads(json.dumps(GOOD_GATE_REPORT))
+    for gate in report["gates"]:
+        if gate["name"] == "mypy":
+            gate.update(
+                {
+                    "status": "unavailable",
+                    "exit": None,
+                    "durationMs": None,
+                    "outputTail": "spawn mypy ENOENT",
+                }
+            )
+    report["verdict"] = "incomplete"
+    _fake(ctx).gate_report = report
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "evidence-mismatch"
+
+
+def test_a_monorepo_report_with_a_skipped_app_advances(ctx: Context) -> None:
+    # Two apps: the turn touched app-a (its gates pass) and not app-b (its gates come back
+    # `skipped_unchanged`). The agent claimed only app-a's gates, so there is no mismatch
+    # and the pass verdict advances the run.
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = _fixture("gate-report-monorepo.json")
+    verify_step.run(ctx)
+    assert ctx.run.state is State.REVIEWING
+    gates = _gates_json(ctx)
+    assert len(gates["targets"]) == 2
+    statuses = {g["status"] for g in gates["gates"]}
+    assert "skipped_unchanged" in statuses
+    assert gates["verdict"] == "pass"
+
+
+def test_the_report_is_validated_before_the_verdict_is_trusted(ctx: Context) -> None:
+    _to_verifying(ctx)
+    # A report that drops a required field on a gate entry is not trusted, even with a
+    # `pass` verdict and a clean exit code.
+    report = json.loads(json.dumps(GOOD_GATE_REPORT))
+    del report["gates"][0]["status"]
+    report["verdict"] = "pass"
+    _fake(ctx).gate_report = report
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "schema-invalid"
+    assert ctx.run.state is State.VERIFYING  # the state did not advance
+
+
+def test_a_non_json_report_blocks(ctx: Context) -> None:
+    _to_verifying(ctx)
+    # A clean exit code and a non-JSON stdout: the verdict is never read, because the
+    # document never parsed. This is the path the schema-invalid guard exists for.
+    _fake(ctx).gate_report_raw_stdout = "not json at all"
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "schema-invalid"
+    assert ctx.run.state is State.VERIFYING
