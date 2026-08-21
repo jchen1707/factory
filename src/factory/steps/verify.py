@@ -50,9 +50,21 @@ _RAN = frozenset({"pass", "fail"})
 
 def run(ctx: Context) -> None:
     worktree = ctx.worktree
+    # The factory commits the agent's work before it verifies, so the working tree is
+    # clean and `gate_report.mjs`'s default `git status --porcelain` "did this app change?"
+    # check sees nothing — every gate would be `skipped_unchanged` regardless of what the
+    # change touched. Against the run's base ref, `git diff --name-only <base>..HEAD` sees
+    # the committed change instead, so the gates actually run. `--base` switches the report
+    # to that check; the Stop hook never passes a base, because its working tree is the
+    # agent's uncommitted edits. See `gatedChangeSince` in the vendored `verify.mjs`.
+    # `run.base_ref` is set at worktree creation; the `project.base_ref` fallback mirrors
+    # `cli._restore`'s spelling so a run row that predates the column still verifies.
+    base_ref = ctx.run.base_ref or ctx.project.base_ref
 
     if ctx.dry_run:
-        ctx.would(f"run node {_REPORT_HOOK} --json in {ctx.project.build_sandbox}")
+        ctx.would(
+            f"run node {_REPORT_HOOK} --json --base {base_ref} in {ctx.project.build_sandbox}"
+        )
         ctx.would(f"  workdir {worktree}")
         ctx.would("write gates.json beside last-message.json; cross-check gates_run")
         ctx.would("advance on pass -> reviewing, fail -> implementing, incomplete -> blocked")
@@ -66,6 +78,8 @@ def run(ctx: Context) -> None:
     argv = ["node", _REPORT_HOOK, "--json"]
     if _claims_opt_in(ctx.harness, gates_run):
         argv.append("--all")
+    if base_ref:
+        argv += ["--base", base_ref]
 
     completed = ctx.sandbox.exec_sync(
         ctx.project.build_sandbox,

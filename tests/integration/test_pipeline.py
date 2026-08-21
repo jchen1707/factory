@@ -725,6 +725,29 @@ def test_the_verify_step_invokes_the_report_hook_by_path_not_a_gate_name(
     assert not any(token in argv for token in ("ruff", "mypy", "pytest"))
 
 
+def test_the_verify_step_passes_the_run_base_ref_so_post_commit_gates_run(
+    ctx: Context,
+) -> None:
+    # The factory commits the agent's work before it verifies, so the working tree is
+    # clean: `gate_report.mjs`'s default `git status --porcelain` "did this app change?"
+    # check sees nothing and every gate would come back `skipped_unchanged` regardless of
+    # what the change touched. The factory passes `--base <run.base_ref>` so the report's
+    # `gatedChangeSince` reads `git diff <base>..HEAD` against the committed change instead.
+    # On the unfixed code `--base` is absent and the assertion below fails — which is how
+    # the BAC-5 real run blocked on evidence-mismatch even though its gates had passed.
+    _to_verifying(ctx)
+    assert ctx.run.base_ref == "origin/v2"  # set at worktree creation
+    verify_step.run(ctx)
+    report_calls = [
+        argv for _name, argv in _fake(ctx).sync_calls if any("gate_report.mjs" in a for a in argv)
+    ]
+    assert len(report_calls) == 1
+    argv = report_calls[0]
+    assert "--base" in argv
+    # The base ref follows the flag as its value, not glued with `=`.
+    assert argv[argv.index("--base") + 1] == "origin/v2"
+
+
 def test_a_pass_report_advances_to_reviewing(ctx: Context) -> None:
     _to_verifying(ctx)
     # The default fake report is the all-pass one; exercise it explicitly anyway.
