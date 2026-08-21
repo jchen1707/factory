@@ -39,8 +39,10 @@ from factory.steps import Context
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
+from factory.steps import deliver as deliver_step
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
+from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
@@ -145,7 +147,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if ctx.run.state is not State.APPROVED:
         print(
             f"\n{ticket} is already at `{ctx.run.state}` (attempt {ctx.run.attempt}). "
-            "Phase 1 runs a ticket once and has no resume command yet: "
+            "The factory drives a ticket once and has no resume command yet: "
             f"`factory status {ticket} --evidence` shows what happened, and "
             f"`factory cancel {ticket}` clears the worktree, the branch and the "
             "tracker state so it can be run again."
@@ -186,18 +188,34 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"  {line}")
         print("\nNothing was written: no Linear call, no git write, no sandbox, no model call.")
     else:
-        print(
-            "\nVerification ran and the gates are recorded. Review and the pull request "
-            "arrive in Phase 3; nothing has been pushed and no PR exists."
-        )
+        ctx.refresh()
+        if ctx.run.pr_url:
+            print(
+                f"\nReview ran and a draft pull request is open: {ctx.run.pr_url}\n"
+                "Nothing has been merged — merge is a human's. "
+                "`factory status <TICKET> --evidence` reads the run back."
+            )
+        elif ctx.state is State.AWAITING_HUMAN:
+            print(
+                f"\nThe run stopped at `{ctx.state}` for a human to look. No pull request "
+                "was opened. `factory status <TICKET> --evidence` shows why."
+            )
+        else:
+            print(
+                f"\nThe run came to rest at `{ctx.state}`. "
+                "`factory status <TICKET> --evidence` reads it back."
+            )
     return 0
 
 
 def _drive(ctx: Context, *, force_plan: bool) -> None:
-    """The fixed per-ticket shape, as far as Phase 1 goes.
+    """The fixed per-ticket shape. Python decides control flow; the model decides only what
+    to write inside one step. No agent chooses the next state.
 
-    Python decides control flow; the model decides only what to write inside one step.
-    No agent chooses the next state.
+    Phase 3 extends the chain past `verifying`: the review step (which runs the red-phase
+    replay and the two-tier review) advances to `pr_ready` on a clean review or
+    `awaiting_human` on a finding/escalation, and the deliver step opens the draft PR. A
+    `Blocked` from either propagates to `cmd_run`, which records it and announces.
     """
     claim_step.run(ctx)
     context_step.run(ctx)
@@ -207,6 +225,9 @@ def _drive(ctx: Context, *, force_plan: bool) -> None:
         plan_step.run(ctx)
     implement_step.run(ctx)
     verify_step.run(ctx)
+    review_step.run(ctx)
+    if ctx.state is State.PR_READY:
+        deliver_step.run(ctx)
 
 
 def _block(ctx: Context, reason: str, detail: str) -> None:

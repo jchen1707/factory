@@ -23,10 +23,12 @@ taken the label off. The comment says why; the label stops the machine.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from factory.intake.linear import LinearError
 from factory.steps import Context, effect_marker, record_effect
 
-__all__ = ["NEEDS_INFO", "announce"]
+__all__ = ["IN_REVIEW", "NEEDS_INFO", "announce", "announce_awaiting_human"]
 
 STEP = "block"
 
@@ -115,4 +117,95 @@ def _label(ctx: Context) -> None:
             NEEDS_INFO if NEEDS_INFO in ctx.linear.issue_labels(ctx.run.linear_id)[2] else None
         ),
         perform=perform,
+    )
+
+
+#: §13.1's `awaiting_human` row. The run has reached the human gate: move the issue to In
+#: Review and comment with the evidence a human needs to decide. Distinct from `blocked`
+#: (which adds `needs-info` and stops re-claim): awaiting_human is "a human should look",
+#: not "the machine is stuck", so it does not add the blocking label.
+IN_REVIEW = "In Review"
+_AWAITING_STEP = "await"
+
+
+def announce_awaiting_human(ctx: Context, *, pr_url: str | None, sections: Sequence[str]) -> None:
+    """Move the issue to In Review and comment with the PR link + evidence sections.
+
+    Called after the transition to `awaiting_human` is recorded, so the comment names the
+    state the run came to rest in. Best-effort, like `announce`: a Linear outage degrades the
+    announcement but never masks the transition. Idempotent through the ledger — a re-entry
+    reconciles by the marker rather than re-commenting.
+
+    `sections` are the body blocks (gate report, review summary, cost, …). `pr_url` is None
+    when the run reached `awaiting_human` without opening a PR (a review finding, a weakened
+    assertion); the comment says so rather than inventing a link.
+    """
+    if ctx.dry_run:
+        ctx.would(f"linear: move {ctx.run.linear_id} to {IN_REVIEW}")
+        ctx.would(
+            f"linear: comment on {ctx.run.linear_id} (awaiting_human; marker {effect_marker(ctx, _AWAITING_STEP)})"
+        )
+        return
+
+    try:
+        _move_in_review(ctx)
+        _awaiting_comment(ctx, pr_url, sections)
+    except LinearError as exc:
+        ctx.log(
+            "awaiting_human.announce_failed",
+            level="error",
+            detail=str(exc)[:500],
+        )
+
+
+def _move_in_review(ctx: Context) -> None:
+    if ctx.issue is None:
+        ctx.log("awaiting_human.move_skipped", reason="no issue loaded")
+        return
+    team_id = ctx.issue.team_id
+
+    def perform() -> str | None:
+        issue_uuid, current = ctx.linear.issue_uuid(ctx.run.linear_id)
+        if current == IN_REVIEW:
+            return IN_REVIEW
+        ctx.linear.move_state(issue_uuid, ctx.linear.workflow_state_id(team_id, IN_REVIEW))
+        return IN_REVIEW
+
+    record_effect(
+        ctx,
+        step=_AWAITING_STEP,
+        system="linear",
+        key="state:in-review",
+        reconcile=lambda: (
+            IN_REVIEW if ctx.linear.issue_uuid(ctx.run.linear_id)[1] == IN_REVIEW else None
+        ),
+        perform=perform,
+    )
+
+
+def _awaiting_comment(ctx: Context, pr_url: str | None, sections: Sequence[str]) -> None:
+    marker = effect_marker(ctx, _AWAITING_STEP)
+    issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
+    link = (
+        f"**Pull request (draft):** {pr_url}\n\n"
+        if pr_url
+        else "No pull request was opened: the run stopped at review before delivery.\n\n"
+    )
+    body = (
+        f"<!-- {marker} -->\n"
+        f"The factory reached **awaiting_human** — your move.\n\n"
+        f"{link}"
+        + "\n\n".join(sections)
+        + f"\n\nEvidence: `{ctx.state_dir}` — `factory status {ctx.run.linear_id}`. "
+        f"Run `{ctx.run.id}`, attempt {ctx.run.attempt}, state `{ctx.state}`.\n"
+    )
+    record_effect(
+        ctx,
+        step=_AWAITING_STEP,
+        system="linear",
+        key="comment:awaiting_human",
+        reconcile=lambda: (
+            "found" if ctx.linear.comment_marker_present(ctx.run.linear_id, marker) else None
+        ),
+        perform=lambda: ctx.linear.add_comment(issue_uuid, body),
     )
