@@ -13,6 +13,7 @@ the caller. A guard the caller can forget to call is not a guard.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -28,7 +29,7 @@ from factory.sandbox.base import (
     SandboxSpec,
 )
 
-__all__ = ["SbxAdapter", "SbxError", "create_argv", "exec_argv"]
+__all__ = ["SbxAdapter", "SbxError", "create_argv", "exec_argv", "holder_pid", "pid_alive"]
 
 #: How long after the last heartbeat a run with no `exit` file is presumed orphaned.
 #: The wrapper beats every 20 s, so three missed beats plus slack.
@@ -37,6 +38,12 @@ ORPHAN_AFTER_SECONDS = 90
 #: Where `sbx exec`'s own stderr lands. Not `stderr.log` — that one is the agent's, and
 #: mixing the transport's complaints into the agent's output is how evidence gets lost.
 SBX_EXEC_STDERR = "sbx-exec.stderr"
+
+#: The pid of the `sbx exec` process holding the sandbox's session open. Written to the
+#: attempt directory because the process that has to ask "is this run still alive?" is
+#: usually **not** the process that started it — that is the whole point of §4.2, and
+#: `_detached` only knows about runs this object started.
+SBX_EXEC_PID = "sbx-exec.pid"
 
 #: How long `exec_detached` waits for the wrapper's first heartbeat before calling the
 #: start a failure. Generous because it covers `sbx exec` starting a stopped sandbox,
@@ -100,11 +107,39 @@ def exec_argv(
     return out
 
 
+def holder_pid(attempt_dir: Path) -> int | None:
+    """The pid of the `sbx exec` process holding this attempt's session open."""
+    try:
+        return int((attempt_dir / SBX_EXEC_PID).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a host process is still running.
+
+    A pid is a weak identifier — the number can be reused once its process is reaped —
+    so this is only ever used to declare a run **dead**, never alive on its own. A
+    false "still running" costs one more poll; every other signal (`exit`, the
+    heartbeat, the sandbox's own state) is checked alongside it. `PermissionError`
+    means the pid exists and belongs to somebody else, which is still a live pid.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 class SbxAdapter:
     """Create-or-attach, detached execution, and polling by filesystem."""
 
-    #: Live `sbx exec -d` processes, by sandbox. Held open on purpose: the exec dies
-    #: with its host process, so dropping the handle would kill the run it started.
+    #: Live `sbx exec -d` processes started by *this* object, by sandbox. Held open on
+    #: purpose: the session this process opened is what keeps the sandbox up, so
+    #: dropping the handle would kill the run it started. It is not the source of truth
+    #: for liveness — `SBX_EXEC_PID` is, because it outlives this object.
     _detached: dict[str, subprocess.Popen[str]]
 
     def __init__(self, *, timeout: int = 900) -> None:
@@ -226,7 +261,7 @@ class SbxAdapter:
             env=env,
             detach=True,
         )
-        # Two measured facts about `sbx exec -d` on v0.38.0, both contradicting what the
+        # Three measured facts about `sbx exec -d` on v0.38.0, none of them what the
         # factory was built to assume. P0 verified the flag was *accepted*, not what it
         # did.
         #
@@ -237,16 +272,30 @@ class SbxAdapter:
         #    19 s old.
         # 2. **The sandbox stops when its last session ends, and a stopping VM kills
         #    everything inside it.** That, not process parentage, is why the agent died
-        #    when the timed-out `sbx exec` was killed: zero `codex` processes, a frozen
-        #    heartbeat and no `exit` file. A `setsid nohup` wrapper *inside* the VM was
-        #    measured against this and made no difference — the probe returned in 0.26 s
-        #    and its work was gone 82 s later, along with the sandbox.
+        #    when the timed-out `sbx exec` was killed. A `setsid nohup` wrapper *inside*
+        #    the VM was measured against this and made no difference — the probe
+        #    returned in 0.26 s and its work was gone 82 s later, along with the sandbox.
+        # 3. The rule is **sessions, not idleness**, and it has a 30-second grace period.
+        #    sandboxd logs it: `session disconnected, deferring auto-stop … delay:
+        #    30000000000` → `auto-stop grace period expired, stopping runtime` →
+        #    `auto-stopped runtime after last session disconnected`. No traffic keeps a
+        #    sessionless sandbox up and no flag changes the timer, so the only keep-alive
+        #    that exists is an open session.
         #
-        # So this session is what keeps the VM alive, and the run lives exactly as long
-        # as the handle in `_detached` does. Never wait on it, and never drop it. That
-        # is also why §4.2's "the host process can die at any moment" does not hold here:
-        # it is the sandbox's lifetime that is the constraint, and no code at this layer
-        # can widen it.
+        # `start_new_session=True` is what turns that into §4.2's guarantee rather than
+        # away from it. The session belongs to this `sbx exec` **process**, which is an
+        # ordinary host process and not this one: made a session leader it is reparented
+        # to pid 1, and it survives both this process exiting and a SIGINT or SIGHUP
+        # delivered to this process's group — a Ctrl-C in the terminal that started the
+        # factory. Measured on 2026-08-21: parent `os._exit(0)` immediately after spawn,
+        # and 115 s later — long past the 30 s grace — the sandbox was still `running`
+        # and the in-VM loop's output file was one second old. Kill this process's
+        # holder, however, and the sandbox stops 30 s later with the run inside it, which
+        # is what `poll` reads `SBX_EXEC_PID` to notice.
+        #
+        # So the host *process* is out of the run's TCB and the *machine* is still in it:
+        # a reboot, a logout, `sbx stop` or Docker Desktop quitting takes the run with
+        # it. §4.2 says so in those words.
         #
         # stderr goes to a file rather than a pipe nobody drains: this process outlives
         # the call by design, and a full 64 KB pipe buffer would block the very exec it
@@ -259,8 +308,10 @@ class SbxAdapter:
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_file,
                 text=True,
+                start_new_session=True,
             )
         self._detached[handle.sandbox] = process
+        (handle.attempt_dir / SBX_EXEC_PID).write_text(f"{process.pid}\n", encoding="utf-8")
 
         # "Started" is the heartbeat appearing, not the call returning — the wrapper
         # writes its first beat before `codex exec` is reached. A process that has
@@ -302,6 +353,14 @@ class SbxAdapter:
         attempt_dir = handle.attempt_dir
         if (attempt_dir / "exit").exists():
             return RunStatus.EXITED
+        # The session holder is gone, so the sandbox has either stopped already or will
+        # in under 30 s, and nothing inside it survives that. Saying so now rather than
+        # after `ORPHAN_AFTER_SECONDS` of stale heartbeat is the difference between the
+        # next tick recovering the run and it waiting out a minute and a half for a
+        # verdict that is already decided.
+        holder = holder_pid(attempt_dir)
+        if holder is not None and not pid_alive(holder):
+            return RunStatus.ORPHANED
         beat = attempt_dir / "heartbeat"
         try:
             age = time.time() - int(beat.read_text().strip())

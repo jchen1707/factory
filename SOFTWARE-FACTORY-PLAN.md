@@ -207,6 +207,20 @@ strings. `exit` is written by `mv` from a temp file so its appearance is atomic.
 If the host process dies at any moment, nothing is lost: the next `factory tick` reads
 SQLite, finds the attempt, and looks at the filesystem to learn what happened.
 
+That holds, but not for free, and the reason bounds what Phase 4 can promise. On `sbx`
+v0.38.0 a sandbox stops **30 seconds after its last session disconnects** — measured
+from sandboxd's log in `docs/discovery/p1-2-detached-exec.md` — and a stopping microVM
+takes every process inside it, `setsid` included. No flag, no in-VM supervisor and no
+amount of traffic changes that; an open session is the only thing that keeps a sandbox
+up. So `exec_detached` starts `sbx exec` with `start_new_session=True`: the session is
+held by a host process that is a session leader, reparented to pid 1 and outside the
+factory's process group, and it therefore survives the factory exiting, crashing, or
+taking a Ctrl-C. **The factory process is not in the run's TCB; the machine is.** A
+reboot, a logout, Docker Desktop quitting or an `sbx stop` ends the run, and the attempt
+directory — a heartbeat that stops advancing and no `exit` file — is what says so. The
+holder's pid is written to `<attempt>/sbx-exec.pid` for exactly that reading, because
+the tick that has to ask is never the tick that started it.
+
 ### 4.3 Components
 
 | Component | Module | Responsibility |

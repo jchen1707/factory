@@ -69,21 +69,29 @@ than reconciling a previous run's away.
 
 ## What is still open
 
-Phase 1 is validated. These are not Phase 1 gaps, and two are James's:
+Phase 1 is validated. These are not Phase 1 gaps. Items 1 and 3 were resolved later the
+same day and are kept here struck through, because what they say about how the sandbox
+and the rollback actually behave is still the reason the code looks the way it does:
 
-1. **§4.2's durability does not hold** — `p1-2-detached-exec.md`. The host process is
-   part of the run's TCB on `sbx` v0.38.0. Phase 4's daemon, `resume` and `recovery.py`
-   all assume otherwise. **James's decision.**
+1. ~~**§4.2's durability does not hold**~~ — **resolved**, `p1-2-detached-exec.md` §3.
+   The rule is sessions, not idleness: sandboxd stops a sandbox 30 s after its last
+   session disconnects, and there is no keep-alive knob. But the session is held by an
+   ordinary host process, so `start_new_session=True` on `exec_detached`'s `Popen` puts
+   it outside the factory's process group and pid 1 adopts it. Measured: the run kept
+   working 115 s after its spawning process exited. The factory process is out of the
+   run's TCB; the machine is still in it, and §4.2 now says that. Phase 4's daemon,
+   `resume` and `recovery.py` should be written against the three cases tabulated in
+   P1-2 §3.
 2. **The poisoned sandbox name** — `p1-1-in-image-codex.md`. Worked around by renaming to
    `factory-build-python-harness-2`; the stale binding under the old name is still there
    and `sbx secret ls`/`rm` cannot see it. **James's, or Docker's.**
-3. **`cancel` cannot clean what a run did not record** (defect 6). `cmd_cancel` guards
-   cleanup with `if run.worktree:` / `if run.branch:`, but `worktree.py` sets those only
-   *after* `git worktree add` returns — so a run that dies inside that window leaves an
-   orphan directory and an empty branch that block every later run. Both were cleared by
-   hand during this session. **The worked-out fix is `docs/defect-6-cancel-orphan-cleanup.md`** —
-   derive both paths from the ticket, and delete only an empty worktree directory and a
-   branch with no commits beyond the base ref. Unfixed.
+3. ~~**`cancel` cannot clean what a run did not record**~~ (defect 6) — **fixed**.
+   `cmd_cancel` derives the worktree path from the ticket and scans local branches for
+   the identifier, so it no longer depends on fields a run that dies inside
+   `git worktree add` never writes. It removes an unregistered directory only when it
+   holds nothing but `.factory/`, and deletes a branch only when it is unpushed *and*
+   carries no commits beyond the base ref; anything it refuses to touch, it names.
+   `docs/defect-6-cancel-orphan-cleanup.md` records what shipped and why.
 4. **The `--deny-network mcp.linear.app` rule is installed but still unmeasured.** No run
    has generated gateway traffic to test it against.
 5. **Nothing pins the in-image Codex CLI.** The parser and 0.146.0 agree today; a
