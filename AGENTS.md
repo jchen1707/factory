@@ -148,6 +148,10 @@ Getting there cost nine defects across five real runs. Three are worth carrying:
   inherited-secret assumption both failed that way. A verification that never observed the
   effect is a note, not a measurement.
 
+**Phase 2 is next, and `docs/handoff-phase-2.md` is the order of work** — it starts in
+`harness` with `gate_report.mjs`, not in this repository, and it names the one egress
+chore §8.7 asks for before Phase 2 begins.
+
 Phase 1 deliberately contains no verification, no review, no push and no PR. Do not add
 them here: `gate_report.mjs` is a **layer-A** change that lands on `harness@v2` first
 (§12.1), and Phase 2 is where the factory learns to read its output. Phase 3 adds the
