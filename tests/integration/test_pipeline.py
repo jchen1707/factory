@@ -29,7 +29,7 @@ from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Store
-from tests.integration.conftest import GOOD_GATE_REPORT, FakeLinear, FakeSandbox, git
+from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeLinear, FakeSandbox, git
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -806,6 +806,72 @@ def test_a_monorepo_report_with_a_skipped_app_advances(ctx: Context) -> None:
     statuses = {g["status"] for g in gates["gates"]}
     assert "skipped_unchanged" in statuses
     assert gates["verdict"] == "pass"
+
+
+def test_a_command_string_gate_claim_cross_checks_by_name(ctx: Context) -> None:
+    # The real agent reports `gates_run` as the commands it ran with the outcome appended
+    # ("uv run ruff check . — passed"), not the bare gate names the report uses
+    # ("ruff check"). The cross-check must resolve a claim to the report gate whose name
+    # it contains, or every real run blocks on evidence-mismatch regardless of whether
+    # the gates passed. This is the bug the BAC-3 real run surfaced: the fakes all used
+    # bare names that matched exactly, so it was invisible to the suite. On the unfixed
+    # exact-match cross-check this raises evidence-mismatch and never reaches reviewing.
+    _fake(ctx).result = {
+        **GOOD_RESULT,
+        "gates_run": [
+            "uv run ruff check . — passed",
+            "uv run mypy — passed",
+            "uv run pytest — 158 passed, 3 deselected",
+        ],
+    }
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = dict(GOOD_GATE_REPORT)  # ruff check, mypy, pytest — all pass
+    verify_step.run(ctx)
+    assert ctx.run.state is State.REVIEWING
+
+
+def test_an_integration_command_claim_matches_the_longer_gate_name(ctx: Context) -> None:
+    # "uv run pytest -m integration — 3 passed" contains both "pytest" and
+    # "pytest -m integration". Longest-name-first must pair it with the integration gate,
+    # not the bare pytest gate — otherwise a claim for a skipped integration gate would
+    # silently cross-check against the passing pytest gate and the over-claim would be
+    # missed. Here the integration gate is `skipped_unchanged`, so the claim is an
+    # over-claim and must block as evidence-mismatch.
+    _fake(ctx).result = {**GOOD_RESULT, "gates_run": ["uv run pytest -m integration — 3 passed"]}
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = {
+        "schemaVersion": 1,
+        "root": "/worktree",
+        "targets": [{"name": "python-harness", "dir": "."}],
+        "missingApps": [],
+        "gates": [
+            {
+                "name": "pytest",
+                "kind": "test",
+                "status": "pass",
+                "exit": 0,
+                "durationMs": 100,
+                "caveat": None,
+                "when": None,
+                "outputTail": "",
+            },
+            {
+                "name": "pytest -m integration",
+                "kind": "integration",
+                "status": "skipped_unchanged",
+                "exit": None,
+                "durationMs": None,
+                "caveat": None,
+                "when": None,
+                "outputTail": "",
+            },
+        ],
+        "verdict": "pass",
+    }
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "evidence-mismatch"
+    assert "pytest -m integration" in caught.value.detail
 
 
 def test_the_report_is_validated_before_the_verdict_is_trusted(ctx: Context) -> None:

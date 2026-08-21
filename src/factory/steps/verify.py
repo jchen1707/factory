@@ -168,9 +168,34 @@ def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]])
     """The §15.1 cross-check. Every gate the agent claimed must appear in the report with
     a status of `pass` or `fail`. A claimed gate that is `unavailable`, `not_applicable`,
     `skipped_unchanged`, or absent is a disagreement — the agent said it ran something the
-    toolchain could not prove ran. Returns the disagreeing gate names, in claim order."""
-    by_name = {gate["name"]: gate["status"] for gate in report_gates}
-    return [name for name in gates_run if by_name.get(name) not in _RAN]
+    toolchain could not prove ran. Returns the disagreeing gate names, in claim order.
+
+    The agent's `gates_run` entries are free-form strings — the schema is `array of string`
+    and the prompt fixes no format — so the real agent writes the commands it ran with the
+    outcome appended (`"uv run ruff check . — passed"`), not the bare gate name the report
+    uses (`"ruff check"`). A claim is matched to a report gate by **longest-name
+    containment**: the report gate whose `name` sits inside the claim. Longest-first is
+    what stops `"uv run pytest -m integration — 3 passed"` matching the bare `pytest` gate
+    before the `pytest -m integration` gate. A claim no report gate name sits inside is
+    absent from the report — the same disagreement. The gate's *status* comes from the
+    report, never the claim's text: this check proves the gate ran, and the verdict (not
+    the claim) decides pass-vs-fail. An honest `fail` in a claim is accepted here."""
+    # Longest gate name first, so `pytest -m integration` is tried before `pytest`.
+    ordered = sorted(report_gates, key=lambda gate: len(gate["name"]), reverse=True)
+    mismatched: list[str] = []
+    for claim in gates_run:
+        status: str | None = None
+        matched: str | None = None
+        for gate in ordered:
+            if gate["name"] and gate["name"] in claim:
+                status = gate["status"]
+                matched = gate["name"]
+                break
+        if status not in _RAN:
+            # The report gate name when one matched (clearer in the block message than the
+            # agent's command string); the raw claim only when nothing matched.
+            mismatched.append(matched if matched is not None else claim)
+    return mismatched
 
 
 def _validated_report(ctx: Context, completed: Completed, attempt: int) -> dict[str, Any]:

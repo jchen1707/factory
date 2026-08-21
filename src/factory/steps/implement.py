@@ -405,9 +405,16 @@ def build_prompt(ctx: Context) -> tuple[str, str]:
         "  nothing about the new behaviour and blocks the run.",
         "- `seam_confirmed` — true if the seams you needed were already in place.",
         "",
-        "`gates_run` is cross-checked against an independent gate report. Claiming a gate",
-        "that did not run is `evidence-mismatch`, which blocks — an honest `gates_run` with",
-        "a failure in it is a better outcome than an optimistic one.",
+        "`gates_run` is cross-checked against an independent gate report that runs each gate",
+        "only on the files your change touched. List a gate there only when you ran it",
+        "against files your change actually exercised — a gate you ran against unchanged code",
+        "comes back `skipped_unchanged` in the report and claiming it blocks as",
+        "`evidence-mismatch`, so for a change no gate covers the honest `gates_run` is an",
+        "empty list. A gate name is the declared `name` from `harness.config.json` (e.g.",
+        "`ruff check`, `pytest -m integration`); the claim may include the command and its",
+        "outcome, because the report is matched by name and the verdict — not your text —",
+        "decides pass or fail. An honest `gates_run` with a failure in it is a better",
+        "outcome than an optimistic one.",
     ]
     return "\n".join(sections) + "\n", skill_sha
 
