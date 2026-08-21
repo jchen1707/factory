@@ -36,6 +36,7 @@ from factory.repo import GitError
 from factory.routing import MODEL_CACHE, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
 from factory.steps import Context
+from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
 from factory.steps import implement as implement_step
@@ -145,8 +146,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"\n{ticket} is already at `{ctx.run.state}` (attempt {ctx.run.attempt}). "
             "Phase 1 runs a ticket once and has no resume command yet: "
             f"`factory status {ticket} --evidence` shows what happened, and "
-            f"`factory cancel {ticket}` clears the worktree and the branch so it can "
-            "be run again."
+            f"`factory cancel {ticket}` clears the worktree, the branch and the "
+            "tracker state so it can be run again."
         )
         ctx.store.release_lease(ctx.run.id)
         return 1
@@ -207,9 +208,15 @@ def _drive(ctx: Context, *, force_plan: bool) -> None:
 
 
 def _block(ctx: Context, reason: str, detail: str) -> None:
+    """The one place a block is recorded, so §13.1's tracker write cannot be forgotten.
+
+    The transition is recorded before the announcement, so the comment can name the
+    state the run came to rest in rather than the one it was leaving.
+    """
     print(f"\nBLOCKED: {reason}\n  {detail}")
     if ctx.dry_run:
         ctx.would(f"block: {reason} ({detail})")
+        block_step.announce(ctx, reason, detail)
         return
     ctx.store.update_run(ctx.run.id, blocked_reason=reason)
     if machine.can(ctx.state, State.BLOCKED):
@@ -223,6 +230,7 @@ def _block(ctx: Context, reason: str, detail: str) -> None:
         )
         ctx.refresh()
     ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
+    block_step.announce(ctx, reason, detail)
 
 
 def _report(ctx: Context) -> None:
@@ -281,6 +289,44 @@ def cmd_status(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------------
 
 
+#: Where `cancel` puts a ticket back to. Eligibility condition 2 requires exactly this
+#: state, so anything else means the rollback did not actually roll the tracker back.
+TODO = "Todo"
+
+
+def _restore_tracker_for_rerun(linear: LinearClient, ticket: str) -> list[str]:
+    """Undo the tracker half of a run, so `factory run` can claim the ticket again.
+
+    Without this, `cancel` cleans the worktree, the branch and the lease and leaves the
+    ticket In Progress with `needs-info` on it — a shape eligibility conditions 2 and 7
+    both refuse, which made `cmd_run`'s advice to "cancel so it can be run again" false.
+
+    Guarded rather than unconditional: only a ticket sitting in the state the factory
+    itself set is moved. If James has since moved it to In Review or Done by hand,
+    cancel leaves it alone, because a rollback that overwrites a human's deliberate edit
+    is not a rollback. Returns what it did, for printing.
+
+    This is the one Linear write in the factory that §13.1's table does not list. It is
+    here because §19's rollback contract promises it in prose, and the alternative —
+    deleting the promise instead — leaves every blocked ticket needing a hand edit.
+    """
+    done: list[str] = []
+    issue_uuid, current = linear.issue_uuid(ticket)
+    if current == claim_step.IN_PROGRESS:
+        team_id = linear.issue(ticket).team_id
+        linear.move_state(issue_uuid, linear.workflow_state_id(team_id, TODO))
+        done.append(f"moved {ticket} back to {TODO}")
+    else:
+        done.append(f"left {ticket} at {current!r} (not the state the factory set)")
+
+    labelled_uuid, ids, names = linear.issue_labels(ticket)
+    if block_step.NEEDS_INFO in names:
+        keep = [i for i, n in zip(ids, names, strict=True) if n != block_step.NEEDS_INFO]
+        linear.set_labels(labelled_uuid, keep)
+        done.append(f"removed the {block_step.NEEDS_INFO!r} label")
+    return done
+
+
 def cmd_cancel(args: argparse.Namespace) -> int:
     """Phase 1's rollback. Removes the worktree, deletes the *unpushed* branch, releases
     the lease, and leaves the sandbox stopped. A pushed branch is never deleted."""
@@ -326,6 +372,15 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         )
     store.release_lease(run.id)
     SbxAdapter().stop(project.build_sandbox)
+
+    # Last, and never fatal: the local cleanup above has already happened, and a Linear
+    # outage must not turn a completed rollback into a failed command.
+    try:
+        for line in _restore_tracker_for_rerun(LinearClient(), ticket):
+            print(line)
+    except LinearError as exc:
+        print(f"could not restore {ticket} in Linear ({exc}); move it back to {TODO} by hand")
+
     print(f"{ticket} cancelled; sandbox {project.build_sandbox} stopped")
     return 0
 

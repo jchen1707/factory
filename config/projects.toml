@@ -24,6 +24,14 @@ max_total_attempts = 5
 disk_min_free_gb = 20
 # Per-project write concurrency (§11.3). Raising it above 1 is a deliberate act.
 concurrency_per_project = 1
+# §8.7's per-sandbox deny mechanism — the same one the plan assigns to `factory-review-*`
+# — applied to every factory sandbox at creation. This is the compensating control for
+# the one secret that cannot be kept out of the VM: `sbx` uploads `mcpgateway` into every
+# sandbox whenever any MCP server is registered on the host, and has no per-sandbox
+# opt-out. The static MCP set is empty (§13.1), so the gateway should serve nothing; this
+# denies the endpoint as well, so the claim is enforced rather than merely intended.
+# Measured 2026-08-21 on a factory-created sandbox — see p0-5's correction.
+deny_network = ["mcp.linear.app"]
 
 [defaults.planning]
 # `worktree_ready -> planning` when the ticket is "large or ambiguous" (§5.2).

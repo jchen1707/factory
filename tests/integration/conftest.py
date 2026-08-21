@@ -67,12 +67,20 @@ class FakeSandbox:
     created: list[SandboxSpec] = field(default_factory=list)
     sync_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     canary_exit: int = 2
+    #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
+    #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
+    secrets: list[dict[str, str]] = field(default_factory=list)
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
 
     def inspect(self, name: str) -> dict[str, Any]:
-        return {"name": name, "state": "running", "secrets": [], "workspace": ""}
+        return {
+            "name": name,
+            "state": "running",
+            "secrets": list(self.secrets),
+            "workspace": "",
+        }
 
     def ensure(self, spec: SandboxSpec) -> None:
         if not self.exists(spec.name):
@@ -129,6 +137,20 @@ class FakeSandbox:
         return None
 
 
+#: The BAC team's real label set, read from Linear on 2026-08-21. `needs-info` is in it,
+#: which is why the blocked path can rely on the label existing — and why the "team
+#: defines no such label" branch needs a fake that can drop it.
+TEAM_LABELS: dict[str, str] = {
+    "wontfix": "lbl-wontfix",
+    "ready-for-human": "lbl-ready-for-human",
+    "ready-for-agent": "lbl-ready-for-agent",
+    "needs-info": "lbl-needs-info",
+    "needs-triage": "lbl-needs-triage",
+    "Bug": "lbl-bug",
+    "Feature": "lbl-feature",
+}
+
+
 @dataclass
 class FakeLinear:
     """Records the writes instead of making them, so idempotency is observable."""
@@ -137,11 +159,27 @@ class FakeLinear:
     state: str = "Todo"
     comments: list[str] = field(default_factory=list)
     state_changes: list[str] = field(default_factory=list)
+    #: Label *names* currently on the issue. Seeded from the issue so the fake starts
+    #: where Linear would.
+    labels: list[str] | None = None
+    available_labels: dict[str, str] = field(default_factory=lambda: dict(TEAM_LABELS))
+    #: Set to raise from every write, to prove an announcement failure cannot mask the
+    #: block that caused it.
+    fail_with: Exception | None = None
+
+    def __post_init__(self) -> None:
+        if self.labels is None:
+            self.labels = list(self.issue_data.labels)
+
+    def _check(self) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
 
     def issue(self, identifier: str) -> Issue:
         return self.issue_data
 
     def issue_uuid(self, identifier: str) -> tuple[str, str]:
+        self._check()
         return "issue-uuid", self.state
 
     def workflow_state_id(self, team_id: str, name: str) -> str:
@@ -151,13 +189,36 @@ class FakeLinear:
         return any(marker in body for body in self.comments)
 
     def add_comment(self, issue_uuid: str, body: str) -> str:
+        self._check()
         self.comments.append(body)
         return f"comment-{len(self.comments)}"
 
     def move_state(self, issue_uuid: str, state_id: str) -> str:
-        self.state = "In Progress"
+        self._check()
+        # Derived from the id rather than hardcoded: `cancel` moves a ticket *back*, so
+        # a fake that always answers "In Progress" would report success either way.
+        self.state = state_id.removeprefix("state-").replace("-", " ").title()
         self.state_changes.append(state_id)
         return self.state
+
+    # -- labels -------------------------------------------------------------------
+
+    def team_labels(self, team_id: str) -> dict[str, str]:
+        self._check()
+        return dict(self.available_labels)
+
+    def issue_labels(self, identifier: str) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+        self._check()
+        names = tuple(self.labels or ())
+        return "issue-uuid", tuple(f"lbl-{n.lower()}" for n in names), names
+
+    def set_labels(self, issue_uuid: str, label_ids: Sequence[str]) -> tuple[str, ...]:
+        self._check()
+        by_id = {v: k for k, v in self.available_labels.items()}
+        # Ids the team table does not know are the ones `issue_labels` synthesised from
+        # a name, so fall back to un-slugging rather than dropping the label.
+        self.labels = [by_id.get(i, i.removeprefix("lbl-")) for i in label_ids]
+        return tuple(self.labels)
 
 
 def git(cwd: Path, *args: str) -> str:

@@ -11,6 +11,7 @@ from factory.policy import (
     VaultChange,
     assert_factory_sandbox,
     assert_no_skip_verify,
+    capability_secrets,
     diff_vault,
     host_execution_verdict,
     sandbox_is_factory_owned,
@@ -127,3 +128,40 @@ def test_a_deletion_inside_the_allowlist_is_still_reported(tmp_path: Path) -> No
         diff_vault(before, snapshot_vault(vault)), ["Project Learnings/**"]
     )
     assert [c.kind for c in offending] == ["deleted"]
+
+
+# --------------------------------------------------------------------------------
+# §8.7 — which injected secrets are a capability
+# --------------------------------------------------------------------------------
+
+#: Verbatim from `sbx inspect factory-build-python-harness --json` on 2026-08-21, taken
+#: seconds after the factory created the sandbox itself. P0-5 predicted an empty array.
+MEASURED_SECRETS = [
+    {"name": "github", "source": "uploaded"},
+    {"name": "mcpgateway", "source": "uploaded"},
+]
+
+
+def test_a_service_secret_is_a_capability_even_beside_the_gateway() -> None:
+    assert capability_secrets(MEASURED_SECRETS) == ["github"]
+
+
+def test_the_gateway_credential_alone_is_not_a_capability() -> None:
+    # It cannot be removed per-sandbox, so treating it as a violation makes the check
+    # unsatisfiable rather than strict. `Defaults.deny_network` is what compensates.
+    assert capability_secrets([{"name": "mcpgateway", "source": "uploaded"}]) == []
+
+
+def test_an_empty_secret_set_is_clean() -> None:
+    assert capability_secrets([]) == []
+
+
+def test_every_other_service_secret_is_reported_sorted() -> None:
+    secrets = [{"name": "openai"}, {"name": "mcpgateway"}, {"name": "anthropic"}]
+    assert capability_secrets(secrets) == ["anthropic", "openai"]
+
+
+def test_malformed_entries_are_ignored_rather_than_crashing_the_preflight() -> None:
+    # `sbx` is not ours and its JSON shape is not a contract we control. A preflight
+    # that raises on an unexpected entry fails the run for the wrong reason.
+    assert capability_secrets([None, "github", {}, {"name": ""}, {"name": "gh"}]) == ["gh"]

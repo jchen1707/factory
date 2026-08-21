@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from factory.sandbox.base import SandboxSpec, Workspace
-from factory.sandbox.sbx import SbxAdapter, create_argv, exec_argv
+from factory.sandbox.sbx import SbxAdapter, SbxError, create_argv, exec_argv
 
 
 def _spec(**overrides: object) -> SandboxSpec:
@@ -95,3 +95,49 @@ def test_lifecycle_operations_refuse_an_operator_owned_sandbox(operation: str) -
     adapter = SbxAdapter()
     with pytest.raises(PermissionError):
         getattr(adapter, operation)("codex-python-harness")
+
+
+# --------------------------------------------------------------------------------
+# §8.7 — the secret set, and the deny rule that compensates for the one that stays
+# --------------------------------------------------------------------------------
+
+#: Verbatim from `sbx inspect factory-build-python-harness --json`, 2026-08-21, taken
+#: seconds after the factory created that sandbox itself.
+MEASURED_SECRETS = [
+    {"name": "github", "source": "uploaded"},
+    {"name": "mcpgateway", "source": "uploaded"},
+]
+
+
+def test_create_argv_carries_a_deny_rule_per_host() -> None:
+    argv = create_argv(_spec(deny_network=("mcp.linear.app", "example.invalid")))
+    assert argv.count("--deny-network") == 2
+    assert argv[argv.index("--deny-network") + 1] == "mcp.linear.app"
+    # Creation-time decisions must precede the workspaces, which `sbx` reads positionally.
+    assert argv.index("--deny-network") < argv.index("/Users/james/python-harness")
+
+
+def _adapter_seeing(secrets: list[dict[str, str]]) -> SbxAdapter:
+    adapter = SbxAdapter()
+    adapter.exists = lambda name: True  # type: ignore[method-assign]
+    adapter.inspect = lambda name: {  # type: ignore[method-assign]
+        "name": name,
+        "workspace": "/Users/james/python-harness",
+        "secrets": secrets,
+    }
+    return adapter
+
+
+def test_ensure_refuses_a_sandbox_still_carrying_a_service_secret() -> None:
+    # The real case: the sandbox was created while `github` was still global, and `sbx`
+    # fixes the secret set at creation, so re-scoping the secret does not retire it.
+    with pytest.raises(SbxError) as caught:
+        _adapter_seeing(MEASURED_SECRETS).ensure(_spec())
+    assert "github" in str(caught.value)
+    assert "mcpgateway" not in str(caught.value)
+
+
+def test_ensure_accepts_a_sandbox_carrying_only_the_gateway_credential() -> None:
+    # Unsatisfiable otherwise: `sbx` uploads it into every sandbox whenever any MCP
+    # server is registered, and offers no per-sandbox opt-out.
+    _adapter_seeing([{"name": "mcpgateway", "source": "uploaded"}]).ensure(_spec())

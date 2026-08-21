@@ -86,3 +86,21 @@ def test_python_project_carries_the_measured_uv_environment_fix() -> None:
     # venv. This env var is the measured mitigation, so its absence is a regression.
     project = load_registry(HOME / "config" / "projects.toml").projects["python-harness"]
     assert project.env["UV_PROJECT_ENVIRONMENT"].startswith("/home/agent/")
+
+
+def test_the_shipped_registry_denies_the_mcp_gateway_endpoint() -> None:
+    # §8.7's compensating control for `mcpgateway`, which `sbx` uploads into every
+    # sandbox and which no per-sandbox flag can remove. Losing this row would leave the
+    # narrowed secret check with nothing behind it.
+    registry = load_registry(HOME / "config" / "projects.toml")
+    assert "mcp.linear.app" in registry.defaults.deny_network
+
+
+def test_deny_network_defaults_to_nothing_rather_than_to_a_guess(tmp_path: Path) -> None:
+    # A registry that invented deny rules on its own would be a registry whose sandbox
+    # specification does not match what is written down.
+    path = tmp_path / "projects.toml"
+    path.write_text(
+        TWO_TEAMS.replace('team = "BAC"\npath = "/tmp/two"', 'team = "FRO"\npath = "/tmp/two"')
+    )
+    assert load_registry(path).defaults.deny_network == ()

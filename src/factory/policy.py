@@ -15,14 +15,17 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from factory.machine import State, requires_human_rule
 
 __all__ = [
+    "GATEWAY_CREDENTIAL",
     "HOST_EXECUTION_DENY",
     "VaultChange",
     "assert_factory_sandbox",
     "assert_no_skip_verify",
+    "capability_secrets",
     "diff_vault",
     "host_execution_verdict",
     "requires_human",
@@ -144,6 +147,55 @@ def assert_no_skip_verify(env: Mapping[str, str]) -> None:
             "HARNESS_SKIP_VERIFY is set in the run environment; the Stop gate would "
             "not fire and a green run would prove nothing (enforcement-disabled)"
         )
+
+
+# --------------------------------------------------------------------------------
+# §8.7 — what counts as a credential inside the VM
+# --------------------------------------------------------------------------------
+
+#: The MCP gateway's own credential. `sbx` uploads it into every sandbox whenever any
+#: MCP server is registered on the host, and offers no per-sandbox opt-out — so an
+#: assertion that the `secrets` array is *empty* can never pass while `sbx mcp ls`
+#: lists anything, and removing the registration would break the interactive
+#: `--static-mcp linear` flow that §13.1 preserves on purpose.
+#:
+#: It is not a service credential. It authenticates the sandbox to the gateway, and the
+#: gateway serves only the **static MCP set**, which `build_spec` fixes at `()` at
+#: creation and which `sbx` cannot widen afterwards. §13.1 grounds the safety in
+#: exactly that — *"with no Linear MCP in the static set, there is nothing to leak and
+#: nothing to misuse"* — not in this token's absence.
+#:
+#: Measured 2026-08-21: `factory-build-python-harness`, created seconds earlier by the
+#: factory itself, carried `github` and `mcpgateway`. P0-5 had guessed that a
+#: factory-created sandbox inherits neither; it inherits both. `github` was the real
+#: violation and was re-scoped out of global. This one cannot be, so it is named here
+#: and `Defaults.deny_network` is the compensating control.
+#:
+#: Named for the thing rather than spelled `..._SECRET`: this is the secret's
+#: *name*, and ruff's S105 reads any constant whose name contains "secret" as a
+#: hardcoded credential value.
+GATEWAY_CREDENTIAL = "mcpgateway"
+
+
+def capability_secrets(secrets: Iterable[Any]) -> list[str]:
+    """The injected secrets that hand the VM a capability it must not have (§8.7).
+
+    `sbx` secrets are **proxy-managed**: the token never lands on the sandbox
+    filesystem, and the proxy authenticates the agent's egress on its way out. So the
+    hazard is not a readable file — it is that the agent can act as James without ever
+    holding a credential, which is what §13.2 ("GitHub writes: host only") forbids. An
+    env-var scan inside the VM finds nothing and looks green; only `sbx inspect` sees
+    this, which is why the preflight reads it from the sandbox.
+
+    Everything is a capability except `GATEWAY_CREDENTIAL`, whose exclusion is argued in
+    full at its definition. Returned sorted so a failure message is stable.
+    """
+    names = [
+        str(entry.get("name"))
+        for entry in secrets
+        if isinstance(entry, Mapping) and entry.get("name")
+    ]
+    return sorted(name for name in names if name != GATEWAY_CREDENTIAL)
 
 
 # --------------------------------------------------------------------------------

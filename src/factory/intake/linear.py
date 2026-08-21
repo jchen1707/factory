@@ -159,6 +159,25 @@ _ISSUE_ID_QUERY = """
 query($id: String!) { issue(id: $id) { id state { name } } }
 """
 
+_ISSUE_LABELS_QUERY = """
+query($id: String!) { issue(id: $id) { id labels { nodes { id name } } } }
+"""
+
+_TEAM_LABELS_QUERY = """
+query($teamId: String!) { team(id: $teamId) { labels { nodes { id name } } } }
+"""
+
+#: The same `issueUpdate` the state move uses, so the boundary test that pins the
+#: mutation set to exactly two names stays true. Linear replaces the whole label set
+#: rather than appending, which is why every caller reads the current ids first.
+_LABELS_MUTATION = """
+mutation($issueId: String!, $labelIds: [String!]!) {
+  issueUpdate(id: $issueId, input: { labelIds: $labelIds }) {
+    success issue { id labels { nodes { name } } }
+  }
+}
+"""
+
 
 class LinearClient:
     """Every Linear call the factory makes. Nothing here creates an issue.
@@ -251,6 +270,30 @@ class LinearClient:
             f"team has no workflow state named {name!r}; it has {[n['name'] for n in nodes]}"
         )
 
+    def team_labels(self, team_id: str) -> dict[str, str]:
+        """`name -> id` for the team's labels, so a name in the plan can become an id.
+
+        §13.1 names `needs-info` by name, and Linear mutates by id. A label the team
+        does not define simply will not appear here; the caller decides whether that is
+        fatal, and for a blocked run it is not.
+        """
+        data = self._call(_TEAM_LABELS_QUERY, {"teamId": team_id})
+        nodes = ((data.get("team") or {}).get("labels") or {}).get("nodes", [])
+        return {node["name"]: node["id"] for node in nodes}
+
+    def issue_labels(self, identifier: str) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+        """`(uuid, label ids, label names)` — everything a label edit needs, in one call."""
+        data = self._call(_ISSUE_LABELS_QUERY, {"id": identifier})
+        node = data.get("issue")
+        if not node:
+            raise Blocked("no-such-ticket", identifier)
+        nodes = (node.get("labels") or {}).get("nodes", [])
+        return (
+            node["id"],
+            tuple(label["id"] for label in nodes),
+            tuple(label["name"] for label in nodes),
+        )
+
     def comment_marker_present(self, identifier: str, marker: str) -> bool:
         """Reconciliation for a comment effect — §16.2 step 4.
 
@@ -275,6 +318,20 @@ class LinearClient:
         if not result.get("success"):
             raise LinearError(f"issueUpdate failed: {data}")
         return ((result.get("issue") or {}).get("state") or {}).get("name", "")
+
+    def set_labels(self, issue_uuid: str, label_ids: Sequence[str]) -> tuple[str, ...]:
+        """Replace the issue's label set, returning the names that resulted.
+
+        Whole-set replacement is Linear's semantics, not a choice: pass the current ids
+        plus or minus the one being changed. §13.1 sanctions this write — *"update issue
+        state and labels"* — and nothing here can create a label.
+        """
+        data = self._call(_LABELS_MUTATION, {"issueId": issue_uuid, "labelIds": list(label_ids)})
+        result = data.get("issueUpdate") or {}
+        if not result.get("success"):
+            raise LinearError(f"issueUpdate failed: {data}")
+        nodes = ((result.get("issue") or {}).get("labels") or {}).get("nodes", [])
+        return tuple(node["name"] for node in nodes)
 
 
 # --------------------------------------------------------------------------------

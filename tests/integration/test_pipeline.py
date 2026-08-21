@@ -14,7 +14,7 @@ import pytest
 
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config
-from factory.intake.linear import Issue
+from factory.intake.linear import Issue, LinearError
 from factory.machine import Blocked, Resumable, State
 from factory.registry import load_registry
 from factory.routing import load_routing
@@ -75,6 +75,7 @@ snapshot_exclude = [".obsidian"]
 [defaults]
 worktree_subdir = ".factory/worktrees"
 disk_min_free_gb = 0
+deny_network = ["mcp.linear.app"]
 
 [defaults.planning]
 auto = false
@@ -397,3 +398,128 @@ def test_a_run_that_lost_its_lease_cannot_advance(ctx: Context) -> None:
     with pytest.raises(Blocked) as caught:
         claim_step.run(ctx)
     assert caught.value.reason == "lease-lost"
+
+
+# --------------------------------------------------------------------------------
+# §13.1's `blocked` row — the write the first real run did not make
+# --------------------------------------------------------------------------------
+
+#: Verbatim from `sbx inspect factory-build-python-harness --json`, 2026-08-21, seconds
+#: after the factory created that sandbox itself. P0-5 predicted an empty array.
+MEASURED_SECRETS = [
+    {"name": "github", "source": "uploaded"},
+    {"name": "mcpgateway", "source": "uploaded"},
+]
+
+
+def _block(ctx: Context, reason: str, detail: str) -> None:
+    """`cli._block`, which is the only place a block is recorded."""
+    from factory import cli
+
+    cli._block(ctx, reason, detail)
+
+
+def test_a_service_secret_in_the_vm_still_blocks_the_preflight(ctx: Context) -> None:
+    _fake(ctx).secrets = MEASURED_SECRETS
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    with pytest.raises(Blocked) as caught:
+        sandbox_step.run(ctx)
+    assert caught.value.reason == "enforcement-disabled"
+    assert "github" in caught.value.detail
+
+
+def test_the_gateway_credential_alone_does_not_block_the_preflight(ctx: Context) -> None:
+    # The measured shape once `github` is re-scoped out of global scope. Asserting an
+    # empty `secrets` array here would make the preflight unsatisfiable on this host.
+    _fake(ctx).secrets = [{"name": "mcpgateway", "source": "uploaded"}]
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+    assert ctx.run.state is State.SANDBOX_READY
+
+
+def test_the_build_sandbox_denies_the_mcp_gateway_endpoint(ctx: Context) -> None:
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+    assert _fake(ctx).created[0].deny_network == ("mcp.linear.app",)
+
+
+def test_a_block_comments_the_reason_and_labels_the_ticket(ctx: Context) -> None:
+    claim_step.run(ctx)
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    _block(ctx, "enforcement-disabled", "preflight could not prove the run was enforced")
+
+    assert ctx.run.state is State.BLOCKED
+    assert len(linear.comments) == 2  # the claim, then the block
+    body = linear.comments[-1]
+    assert "enforcement-disabled" in body
+    assert "preflight could not prove" in body
+    assert str(ctx.state_dir) in body  # §13.1: "reason and evidence path"
+    assert "needs-info" in (linear.labels or [])
+    # The label is not decorative: it is in BLOCKING_LABELS, so eligibility condition 7
+    # now refuses to re-claim the ticket until a human takes it off.
+    assert "ready-for-agent" in (linear.labels or [])  # and nothing else was clobbered
+
+
+def test_a_repeated_block_does_not_comment_twice(ctx: Context) -> None:
+    claim_step.run(ctx)
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    _block(ctx, "enforcement-disabled", "same reason, second pass")
+    _block(ctx, "enforcement-disabled", "same reason, second pass")
+    assert len(linear.comments) == 2
+    assert (linear.labels or []).count("needs-info") == 1
+
+
+def test_a_linear_outage_while_announcing_does_not_mask_the_block(ctx: Context) -> None:
+    # The reason a run stopped is the most useful thing it produced. Replacing it with
+    # a transport error would be the worst possible trade.
+    claim_step.run(ctx)
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    linear.fail_with = LinearError("linear unreachable: timed out")
+    _block(ctx, "enforcement-disabled", "the block still has to be recorded")
+    assert ctx.run.state is State.BLOCKED
+    assert ctx.run.blocked_reason == "enforcement-disabled"
+
+
+def test_a_block_is_announced_even_where_the_team_has_no_such_label(ctx: Context) -> None:
+    claim_step.run(ctx)
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    linear.available_labels = {"Feature": "lbl-feature"}
+    _block(ctx, "enforcement-disabled", "no needs-info label exists on this team")
+    assert "enforcement-disabled" in linear.comments[-1]
+    assert "needs-info" not in (linear.labels or [])
+
+
+# --------------------------------------------------------------------------------
+# `cancel` — the rollback `cmd_run` promises
+# --------------------------------------------------------------------------------
+
+
+def test_cancel_puts_the_ticket_back_where_the_factory_found_it(ctx: Context) -> None:
+    from factory import cli
+
+    claim_step.run(ctx)
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    _block(ctx, "enforcement-disabled", "so the ticket carries needs-info too")
+    assert linear.state == "In Progress"
+    assert "needs-info" in (linear.labels or [])
+
+    cli._restore_tracker_for_rerun(linear, "BAC-4")  # type: ignore[arg-type]
+
+    # Eligibility conditions 2 and 7, which is the whole point: without both halves,
+    # `factory run BAC-4` refuses the ticket it was just told it could retry.
+    assert linear.state == "Todo"
+    assert "needs-info" not in (linear.labels or [])
+    assert "ready-for-agent" in (linear.labels or [])
+
+
+def test_cancel_does_not_overwrite_a_state_a_human_set(ctx: Context) -> None:
+    from factory import cli
+
+    linear: FakeLinear = ctx.linear  # type: ignore[assignment]
+    linear.state = "In Review"
+    cli._restore_tracker_for_rerun(linear, "BAC-4")  # type: ignore[arg-type]
+    assert linear.state == "In Review"
+    assert linear.state_changes == []

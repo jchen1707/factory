@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from factory.policy import assert_factory_sandbox, assert_no_skip_verify
+from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
     Completed,
     RunHandle,
@@ -155,15 +155,16 @@ class SbxAdapter:
                 f"not include {wanted}. The workspace set is fixed at creation: use a "
                 "new sandbox name rather than expecting this one to change."
             )
-        # §8.7: no credential of any kind inside a factory sandbox. P0-5 found the
-        # operator's own sandboxes carrying uploaded `github` and `mcpgateway` secrets,
-        # so this is read from the sandbox rather than assumed from how it was made.
-        secrets = info.get("secrets") or []
-        if secrets:
-            names = [s.get("name") for s in secrets if isinstance(s, dict)]
+        # §8.7: no capability-granting credential inside a factory sandbox. Read from
+        # the sandbox rather than assumed from how it was made — a sandbox created
+        # while a secret was still global keeps it, because `sbx` fixes the secret set
+        # at creation. Recreating is the only fix, which is what the message says.
+        offending = capability_secrets(info.get("secrets") or [])
+        if offending:
             raise SbxError(
-                f"sandbox {spec.name} has injected secrets {names}; factory sandboxes "
-                "carry none (§8.7). Remove it and let the factory recreate it."
+                f"sandbox {spec.name} has injected secrets {offending}; factory "
+                "sandboxes carry none (§8.7). Remove it and let the factory recreate "
+                "it: the secret set is fixed at creation and cannot be narrowed later."
             )
 
     def stop(self, name: str) -> None:

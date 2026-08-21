@@ -14,6 +14,7 @@ from pathlib import Path
 
 from factory.harness import vendor_check
 from factory.machine import Blocked, State
+from factory.policy import capability_secrets
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.sandbox.sbx import create_argv
 from factory.steps import Context, advance
@@ -78,6 +79,7 @@ def build_spec(ctx: Context) -> SandboxSpec:
         template=ctx.project.template or None,
         kits=ctx.project.kits,
         static_mcp=ctx.project.static_mcp,
+        deny_network=ctx.registry.defaults.deny_network,
         env=dict(ctx.project.env),
     )
 
@@ -111,12 +113,15 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
         ("harness-skip-verify-unset", env_probe.stdout.strip() == "", env_probe.stdout.strip())
     )
 
-    # 3. No credential of any kind inside the VM. §8.7. Read from the sandbox rather
-    #    than assumed from how it was made: P0-5 found the operator's own sandboxes
-    #    carrying uploaded secrets.
+    # 3. No credential inside the VM that grants the agent a capability. §8.7. Read
+    #    from the sandbox rather than assumed from how it was made — P0-5 assumed a
+    #    factory-created sandbox inherits nothing and was wrong on both names it
+    #    listed. `capability_secrets` argues the one exclusion; the deny rules below
+    #    are what make that exclusion safe rather than merely convenient.
     info = ctx.sandbox.inspect(spec.name)
     secrets = info.get("secrets") or []
-    checks.append(("no-secrets-in-vm", not secrets, json.dumps(secrets)))
+    offending = capability_secrets(secrets)
+    checks.append(("no-secrets-in-vm", not offending, json.dumps(secrets)))
 
     # 4. The vendored layer-A tree is intact. F9. Run on the host, against the repo
     #    the sandbox has mounted, because `vendor_sync.py` is a host script and reading

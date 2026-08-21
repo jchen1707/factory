@@ -88,3 +88,59 @@ def test_the_happy_path_is_automatic() -> None:
     for source, target in pairwise(path):
         assert can(source, target), f"{source} -> {target}"
         assert requires_human_rule(source, target) is None, f"{source} -> {target}"
+
+
+# --------------------------------------------------------------------------------
+# Every state a step can raise `Blocked` from must be able to reach `blocked`
+# --------------------------------------------------------------------------------
+
+#: A state absent from `TRANSITIONS[s]` cannot be transitioned to at all, so a step
+#: raising `Blocked` from a state with no `blocked` edge leaves the run wearing a
+#: `blocked_reason` at whatever state it was passing through, and `factory status`
+#: reports the journey instead of the stop.
+#:
+#: Measured 2026-08-21: `factory run BAC-4` blocked in the preflight and came to rest at
+#: `sandbox_creating`, with three transitions recorded and no `blocked` among them.
+BLOCKING_STATES: list[tuple[State, str]] = [
+    # `cmd_run` blocks an ineligible ticket here, and `claim._refuse_second_writer`
+    # raises `project-busy` before the hop to `claimed`.
+    (State.APPROVED, "eligibility and project-busy"),
+    # `sandbox.build_spec` raises `clone-not-implemented` before the hop.
+    (State.CONTEXT_LOADED, "clone-not-implemented"),
+    # `sandbox.preflight` runs *inside* this state and raises `enforcement-disabled`.
+    (State.SANDBOX_CREATING, "enforcement-disabled"),
+    # `context.run` raises `vault-unresolved` and `no-issue-loaded`.
+    (State.CLAIMED, "vault-unresolved"),
+    # `worktree.run` raises on a branch collision.
+    (State.SANDBOX_READY, "branch-exists"),
+    # `plan.run` raises `no-issue-loaded`.
+    (State.WORKTREE_READY, "no-issue-loaded"),
+    # `implement.run` raises `schema-invalid` and the vault-allowlist block.
+    (State.IMPLEMENTING, "schema-invalid and vault-write-outside-allowlist"),
+]
+
+
+@pytest.mark.parametrize(("state", "why"), BLOCKING_STATES, ids=lambda v: str(v))
+def test_a_state_a_step_can_block_from_can_reach_blocked(state: State, why: str) -> None:
+    assert can(state, State.BLOCKED), f"{state} raises Blocked ({why}) but cannot record it"
+
+
+def test_blocked_is_reachable_from_every_non_terminal_state() -> None:
+    """The general form of the case above.
+
+    `lease-lost`, `run-vanished` and `no-worktree` are raised by helpers in
+    `steps/__init__.py`, which any step calls from whatever state the run is in — so
+    enumerating the states that can block is enumerating every state that is still
+    running. `blocked` is a stop, not a step, exactly like `cancelled`.
+    """
+    for state in State:
+        if state in TERMINAL or state is State.BLOCKED:
+            continue
+        assert can(state, State.BLOCKED), f"a run at {state} could not record a block"
+
+
+def test_leaving_blocked_is_still_a_human_decision() -> None:
+    # Widening the way *in* must not widen the way out: an automatic unblock would turn
+    # every stop into a retry loop.
+    for target in TRANSITIONS[State.BLOCKED] - {State.CANCELLED}:
+        assert requires_human_rule(State.BLOCKED, target) == "unblock-is-a-judgement"

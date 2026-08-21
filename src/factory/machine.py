@@ -56,10 +56,12 @@ class State(StrEnum):
 #: `failed -> resumable`, and that edge is James re-authorising spend.
 TERMINAL: frozenset[State] = frozenset({State.COMPLETED, State.CANCELLED})
 
-#: §5.2, verbatim. A hop absent from this table cannot be performed at all — there is
-#: no "unknown transition" fallback, because a fallback is how a state machine quietly
-#: becomes a suggestion.
-TRANSITIONS: dict[State, frozenset[State]] = {
+#: §5.2's workflow hops, verbatim. A hop absent from the final table cannot be performed
+#: at all — there is no "unknown transition" fallback, because a fallback is how a state
+#: machine quietly becomes a suggestion.
+#:
+#: `blocked` is added to every row below rather than written out here; see `TRANSITIONS`.
+_WORKFLOW: dict[State, frozenset[State]] = {
     State.APPROVED: frozenset({State.CLAIMED, State.CANCELLED}),
     State.CLAIMED: frozenset({State.CONTEXT_LOADED, State.RESUMABLE, State.CANCELLED}),
     State.CONTEXT_LOADED: frozenset({State.SANDBOX_CREATING, State.BLOCKED, State.CANCELLED}),
@@ -109,6 +111,23 @@ TRANSITIONS: dict[State, frozenset[State]] = {
     State.FAILED: frozenset({State.RESUMABLE, State.CANCELLED}),
     State.COMPLETED: frozenset(),
     State.CANCELLED: frozenset(),
+}
+
+#: `blocked` is reachable from every non-terminal state, for the same reason `cancelled`
+#: is: it is not a step in the workflow, it is the workflow stopping. Any step can raise
+#: `Blocked`, and three of the raise sites are in `steps/__init__.py` — `lease-lost`,
+#: `run-vanished`, `no-worktree` — which fire from whatever state the run is in.
+#:
+#: Enumerating the reachable subset by hand is what §5.2's diagram does, and it was
+#: wrong: measured 2026-08-21, `factory run BAC-4` raised `enforcement-disabled` from the
+#: preflight, and because `sandbox_creating` had no `blocked` edge the run recorded a
+#: `blocked_reason` with no transition and came to rest reporting `sandbox_creating`.
+#: A state machine that cannot record a stop it just performed is not describing the run.
+#:
+#: Leaving `blocked` stays governed: `HUMAN_ONLY` reserves both exits from it.
+TRANSITIONS: dict[State, frozenset[State]] = {
+    state: targets if state in TERMINAL or state is State.BLOCKED else targets | {State.BLOCKED}
+    for state, targets in _WORKFLOW.items()
 }
 
 #: §5.3 — the hops the factory must physically stop at, mapped to the rule that fires.

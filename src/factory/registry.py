@@ -47,6 +47,10 @@ class Defaults:
     planning: Planning
     redphase: RedPhase
     timeouts_seconds: Mapping[str, int]
+    #: §8.7 — per-sandbox egress denials applied to **every** factory sandbox at
+    #: creation. `sbx` fixes these at `create`, so this is a creation-time decision
+    #: like the template and the static MCP set.
+    deny_network: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,7 @@ def _defaults(raw: Mapping[str, Any]) -> Defaults:
             inconclusive_alarm_pct=int(redphase_raw.get("inconclusive_alarm_pct", 30)),
         ),
         timeouts_seconds={str(k): int(v) for k, v in dict(raw.get("timeouts_seconds", {})).items()},
+        deny_network=tuple(str(h) for h in raw.get("deny_network", ())),
     )
 
 
