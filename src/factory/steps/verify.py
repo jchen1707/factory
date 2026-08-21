@@ -88,6 +88,12 @@ def run(ctx: Context) -> None:
         env=dict(ctx.project.env),
         timeout=ctx.timeout_for(State.VERIFYING),
     )
+    # Written before the parse, because `schema-invalid` was the one failure mode that
+    # destroyed its own evidence: `_validated_report` raises, `gates.json` below never
+    # gets written, and the only record left is the exception text in the `checks` row.
+    # A report the parser rejects is exactly the one someone has to read by hand.
+    _write_raw(attempt_dir, completed)
+
     report = _validated_report(ctx, completed, attempt)
 
     # Beside `last-message.json`, so one attempt directory holds the claim and its proof.
@@ -212,10 +218,29 @@ def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]])
     return mismatched
 
 
+def _write_raw(attempt_dir: AttemptDir, completed: Completed) -> None:
+    """The two streams of the report hook, exactly as the sandbox produced them.
+
+    Split the way `implement.py` splits them (`AttemptDir.stderr`) and for the same
+    reason: one is the data the state machine advances on, the other is evidence about
+    the run that produced it. `gates.json` is the parsed document and only exists when
+    the parse succeeded; these two always exist, so a `schema-invalid` block leaves
+    something to read. Best-effort — a report that cannot be filed is not a reason to
+    lose the verdict."""
+    try:
+        attempt_dir.path("gates.stdout.txt").write_text(completed.stdout, encoding="utf-8")
+        attempt_dir.path("gates.stderr.txt").write_text(completed.stderr, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _validated_report(ctx: Context, completed: Completed, attempt: int) -> dict[str, Any]:
     """The report is schema-valid or the state does not advance. The JSON `verdict` field
     is authoritative — the exit code only mirrors it — so a malformed document blocks
-    rather than rounding to green. The raw stdout is kept in `gates.json` either way."""
+    rather than rounding to green. Deliberately strict: taking the first document out of a
+    stream with trailing bytes on it (`raw_decode`) would round an unaccounted-for exec
+    path to green, which is the failure this check exists to prevent. The raw streams are
+    already on disk by here (`_write_raw`), so a rejected document is still readable."""
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:

@@ -805,3 +805,22 @@ def test_a_non_json_report_blocks(ctx: Context) -> None:
         verify_step.run(ctx)
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.VERIFYING
+
+
+def test_a_rejected_report_leaves_its_raw_streams_on_disk(ctx: Context) -> None:
+    _to_verifying(ctx)
+    # The shape a real run produced (BAC-4, run 6e2681471d4c485c): one complete report
+    # followed by a line of something else, which `json.loads` rejects as `Extra data`.
+    # Nobody can say what that trailing line was, because the block discarded the stream
+    # it arrived on — so the evidence is what this test is about, not the block.
+    _fake(ctx).gate_report_raw_stdout = '{"schemaVersion": 1, "verdict": "pass"}\ntrailing\n'
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "schema-invalid"
+
+    attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"
+    assert not (attempt / "gates.json").exists()  # the parsed document never existed
+    assert (attempt / "gates.stdout.txt").read_text() == (
+        '{"schemaVersion": 1, "verdict": "pass"}\ntrailing\n'
+    )
+    assert (attempt / "gates.stderr.txt").exists()
