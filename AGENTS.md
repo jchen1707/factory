@@ -69,8 +69,8 @@ fired.
 
 ## Waiting on James — read this first
 
-Three things are parked on a decision, as of 2026-08-21. None blocks Phase 2. The first
-one blocks **Phase 4** and is much cheaper to answer now than to discover then.
+Two things are parked on a decision, as of 2026-08-21. Neither blocks Phase 2. The first
+blocks **Phase 4** and is much cheaper to answer now than to discover then.
 
 1. **§4.2's durability guarantee does not hold, and Phase 4 is built on it.**
    `sbx exec -d` blocks for the command's whole duration, and the sandbox stops when its
@@ -82,16 +82,7 @@ one blocks **Phase 4** and is much cheaper to answer now than to discover then.
    amending §4.2 to admit the host is part of the run's TCB — are laid out in
    `docs/discovery/p1-2-detached-exec.md`. **Answer before starting Phase 4.**
 
-2. **A sandbox name carries an invisible `github` credential binding.**
-   `factory-build-python-harness` gets `GH_TOKEN` every time it is created; the factory's
-   exact `sbx create` argv under any other name does not. `sbx secret ls` cannot see the
-   binding and `sbx secret rm` cannot clear it. Worked around by renaming the registry
-   value to `factory-build-python-harness-2`, which costs nothing and is documented where
-   it is set. Inert while nothing creates the old name. Evidence in
-   `docs/discovery/p1-1-in-image-codex.md`. Only worth acting on if it spreads — and the
-   cheap check for that is below.
-
-3. **`cancel` cannot clean what a run never recorded (defect 6, unfixed).**
+2. **`cancel` cannot clean what a run never recorded (defect 6, unfixed).**
    `cmd_cancel` guards its cleanup with `if run.worktree:` / `if run.branch:`, but
    `worktree.py` sets those fields only *after* `git worktree add` returns. A run that
    dies inside that window leaves an orphan directory and an empty branch, and both block
@@ -100,12 +91,15 @@ one blocks **Phase 4** and is much cheaper to answer now than to discover then.
    the row, then delete a worktree directory that is empty and a branch with no commits
    beyond the base ref. `docs/discovery/p1-3-phase-1-validated.md` has the detail.
 
-**One cheap measurement nobody has taken**, and it settles item 2 and de-risks Phase 3:
-create `factory-build-frontend-harness` — a `factory-build-*` name with no history — and
-check `sbx inspect <name> --json` reports `secrets` holding `mcpgateway` alone. If it is
-clean, the binding is local to the one poisoned name and neither the naming scheme nor
-`factory-review-*` is at risk. If it is not, the problem is broader than one name and item
-2 stops being cosmetic.
+**One thing that is settled, so nobody re-opens it.** A sandbox name carries an invisible
+`github` credential binding: `factory-build-python-harness` gets `GH_TOKEN` every time it
+is created, `sbx secret ls` cannot see the binding and `sbx secret rm` cannot clear it.
+The registry says `factory-build-python-harness-2` now, and the old name is inert because
+nothing creates it. Measured 2026-08-21 that two fresh `factory-*` names —
+`factory-build-frontend-harness` and `factory-review-python-harness` — come up clean, so
+the binding is local to that one name and **neither the naming scheme nor Phase 3's
+reviewer sandboxes are at risk**. Tables in `docs/discovery/p1-1-in-image-codex.md`. No
+action needed.
 
 ## How the code is shaped
 

@@ -82,9 +82,18 @@ still global. A per-name credential binding was recorded then, it survives `sbx 
 `sbx secret ls` / `sbx secret rm` cannot see or clear it. Every recreation under that name
 picks it up again.
 
-**Untested, and it would settle it:** create `factory-build-frontend-harness` — a
-`factory-build-*` name that has never existed. If it comes up clean, the binding is local
-to the one poisoned name and nothing about the factory's naming scheme is at fault.
+**Settled 2026-08-21.** Two `factory-*` names with no history, created with the same argv
+and removed again:
+
+| Sandbox name | `secrets` |
+| --- | --- |
+| `factory-build-frontend-harness` | `mcpgateway` |
+| `factory-review-python-harness` | `mcpgateway` |
+
+Both clean. The binding is **local to the one name that already carried it**, so neither
+the `factory-build-*` / `factory-review-*` scheme nor Phase 3's reviewer sandboxes are at
+risk. `factory-build-python-harness` is the only poisoned name on this machine, and it is
+inert because the registry no longer names it.
 
 The preflight is right either way, and `policy.capability_secrets()` must not be widened
 to get past it — that is the boundary change `AGENTS.md` names, not a fix.
@@ -93,5 +102,6 @@ to get past it — that is the boundary change `AGENTS.md` names, not a fix.
 
 `--deny-network mcp.linear.app` reaches `sbx create` and the sandbox reports
 `"network_policy": {"scope": "sandbox"}`, but whether the rule actually stops gateway
-traffic is still untested — the run never got far enough to generate any. Hazard 2 of the
-handoff stands.
+traffic is still untested. The validating run had an empty static MCP set and generated
+no gateway traffic to test it against, so the rule remains installed and unproven — it is
+item 4 of `p1-3-phase-1-validated.md`'s open list.
