@@ -34,7 +34,14 @@ in `src/` is a review failure; `uv` and `pnpm` appear only as *expectations to c
   system James runs on `mattpocock-skills`. There is no create-issue code path, and the
   same grep test proves that too.
 - **The control plane owns every tracker and GitHub write**, from the host, through the
-  effects ledger. The agent writes neither. No credential of any kind enters a sandbox.
+  effects ledger. The agent writes neither. **No credential that grants the agent a
+  capability enters a sandbox** — `policy.capability_secrets()` is the one place that
+  judgement is made, and the preflight reads it from `sbx inspect`, because `sbx` secrets
+  are proxy-managed and an env scan inside the VM would find nothing and look green. The
+  single exclusion is the MCP gateway's own token, which `sbx` uploads unconditionally and
+  no flag removes; it is argued in full at `GATEWAY_CREDENTIAL` and compensated by
+  `deny_network`. Widening that exclusion is not a simplification, it is a boundary
+  change.
 - **Sandboxes are `factory-build-*` and `factory-review-*`.** Never attach to, stop or
   remove a `codex-*` sandbox — that is James's live `csbx` session, and an unattended
   writer inside a live human session is the failure this rule exists to prevent.
