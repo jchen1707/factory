@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Loop on a goal'
+  short_description: 'Drive a standing goal until its stop condition holds'
+  default_prompt: 'Use $loop-goal with a measurable stop condition to drive this work to completion.'

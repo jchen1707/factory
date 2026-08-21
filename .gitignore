@@ -1,0 +1,18 @@
+# Control-plane runtime state. §14.1 puts all three under the repository root, so
+# the repo directory is the factory's home as well as its source. None of it is
+# ever committed: the database is rebuildable from Linear, git and the artifacts,
+# and the artifacts are evidence for one machine, not for a remote.
+state/
+artifacts/
+logs/
+
+# The factory's own worktrees never live here (they live under the target repo),
+# but a stray one would carry a whole checkout into the diff.
+.factory/
+
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

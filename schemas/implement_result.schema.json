@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jchen1707/factory/schemas/implement_result.schema.json",
+  "title": "implement_result",
+  "description": "The structured answer the implementer returns. Handed to `codex exec --output-schema`, validated before any state advances, and kept in the attempt directory as evidence. `behaviour_changed` and `seam_confirmed` are what let the control plane decide, without guessing, whether the red-phase replay is required.",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "files_changed",
+    "tests_added",
+    "out_of_scope",
+    "behaviour_changed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "enum": ["implemented", "blocked", "no_change_needed"]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tests_added": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "behaviour_changed": {
+      "type": "boolean",
+      "description": "Required, not optional. P0-14 measured what happens when it is absent: the replay has no trigger, so a behaviour change with no test is indistinguishable from a docs edit and the check rounds itself to green. A missing value blocks."
+    },
+    "seam_confirmed": { "type": "boolean" },
+    "tdd_used": { "type": "boolean" },
+    "gates_run": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked_reason": { "type": ["string", "null"] },
+    "docs_updated": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

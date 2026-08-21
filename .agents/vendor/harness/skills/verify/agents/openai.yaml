@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Verify'
+  short_description: 'Run the Definition of Done gates and paste the evidence'
+  default_prompt: "Use $verify to run this repository's gates and report the real output."

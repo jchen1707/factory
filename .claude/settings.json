@@ -1,0 +1,104 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|NotebookEdit|Bash|mcp__.*(edit|write|create|apply|read).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/protect_paths.mjs"
+            ],
+            "timeout": 30,
+            "statusMessage": "Checking protected paths\u2026"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|mcp__.*(edit|write|create|apply).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/format_edited.mjs"
+            ],
+            "timeout": 120,
+            "statusMessage": "Formatting\u2026"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/verify.mjs"
+            ],
+            "timeout": 600,
+            "statusMessage": "Verifying Definition of Done\u2026"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/session_learnings.mjs"
+            ],
+            "timeout": 300,
+            "statusMessage": "Distilling session learnings\u2026"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(uv sync)",
+      "Bash(uv sync:*)",
+      "Bash(uv lock)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run factory:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [
+      "Bash(git reset --hard:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr review:*)",
+      "Bash(security find-generic-password:*)",
+      "Bash(security add-generic-password:*)",
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Bash(cat .env:*)",
+      "Bash(source .env:*)",
+      "Bash(env)",
+      "Bash(printenv:*)",
+      "Bash(export -p:*)",
+      "Bash(echo $LINEAR_API_KEY:*)",
+      "Bash(echo ${LINEAR_API_KEY}:*)",
+      "Bash(echo $GH_TOKEN:*)",
+      "Bash(echo ${GH_TOKEN}:*)"
+    ]
+  },
+  "plansDirectory": ".agents/plans"
+}

@@ -1,0 +1,109 @@
+# Model and effort routing — §4.5. Hot-reloaded on every tick; validated on every
+# read. A failing validation refuses to start rather than falling back to a default,
+# because a factory silently running every role on one model looks identical to one
+# routing correctly.
+
+[defaults]
+provider = "codex"
+
+[roles.planner]
+model  = "gpt-5.6-sol"
+effort = "max"                     # the plan is copied into every later step
+
+[roles.builder]
+model  = "gpt-5.6-sol"
+effort = "xhigh"                   # NEVER "ultra" — the validation refuses it
+
+[roles.reviewer]
+model  = "gpt-5.5"                 # MUST differ from roles.builder.model
+effort = "high"
+
+[roles.synthesiser]
+model  = "gpt-5.6-luna"
+effort = "medium"                  # merges findings; it does not read the diff
+
+[roles.documenter]
+model  = "gpt-5.4-mini"
+effort = "low"
+
+[budget]
+usd_per_run = 20.0                 # hard ceiling; the run blocks, never mid-write
+usd_warn_at = 12.0
+
+# The measured catalogue, seeded from ~/.codex/models_cache.json
+# (client_version 0.147.0, fetched 2026-08-20T23:00:06Z) — p0-12-models.md.
+#
+# It is here for two reasons. The console's context denominator is
+# `context_window × effective_percent / 100`, and P0-7 proved the event stream
+# carries neither number: `thread.started` holds `thread_id` and nothing else, so
+# the denominator can only come from a table. And routing validation needs the list
+# of models that exist; reading it from the live cache is authoritative, but a table
+# that omitted a model the validation would accept is a table that has drifted, so
+# both are kept and `factory doctor` reports the difference.
+#
+# `hidden = true` marks a model the cache lists with `visibility: hide`. It exists,
+# so validation accepts it; it is not a routing target and the console says so.
+
+[models."gpt-5.6-sol"]
+display = "GPT-5.6-Sol"
+default_effort = "low"
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."gpt-5.6-terra"]
+display = "GPT-5.6-Terra"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."gpt-5.6-luna"]
+display = "GPT-5.6-Luna"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."gpt-reserve"]
+display = "GPT-Reserve"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+context_window = 272000
+effective_percent = 95
+hidden = true
+
+[models."gpt-5.5"]
+display = "GPT-5.5"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."gpt-5.4"]
+display = "GPT-5.4"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."gpt-5.4-mini"]
+display = "GPT-5.4-Mini"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh"]
+context_window = 272000
+effective_percent = 95
+hidden = false
+
+[models."codex-auto-review"]
+display = "Codex Auto Review"
+default_effort = "medium"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+context_window = 272000
+effective_percent = 95
+hidden = true

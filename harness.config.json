@@ -1,0 +1,71 @@
+{
+  "$schema": "./.agents/vendor/harness/schema/harness.config.schema.json",
+  "name": "factory",
+  "install": ["uv", "sync"],
+  "gates": [
+    {
+      "name": "ruff check",
+      "kind": "lint",
+      "run": ["uv", "run", "ruff", "check", "."]
+    },
+    {
+      "name": "ruff format --check",
+      "kind": "format",
+      "run": ["uv", "run", "ruff", "format", "--check", "."]
+    },
+    {
+      "name": "mypy",
+      "kind": "types",
+      "run": ["uv", "run", "mypy"],
+      "caveat": "mypy reads only the paths in pyproject.toml's `files` and skips dot-directories during discovery. A new top-level directory is silently unchecked while this stays green — add it to `files` in the same change that creates it."
+    },
+    {
+      "name": "pytest",
+      "kind": "test",
+      "run": ["uv", "run", "pytest"],
+      "caveat": "Every test here runs against a fake sandbox and fixture transcripts. A green suite proves the control plane's logic, never that `sbx`, `codex`, `gh` or Linear behave the way the fakes say they do — that is what `factory doctor` and a real run are for."
+    }
+  ],
+  "hooks": {
+    "gatedPaths": ["src", "tests", "schemas", "config"],
+    "gatedFiles": ["pyproject.toml", "harness.config.json", ".codex/config.toml", ".codex/hooks.json", ".claude/settings.json"],
+    "gatedExtensions": [".py", ".mjs", ".json", ".toml"],
+    "protected": [
+      {
+        "glob": ".agents/vendor/**",
+        "why": "layer A is generated and pinned by sha; edit it in the harness repo and re-sync"
+      },
+      {
+        "glob": "uv.lock",
+        "why": "regenerate with `uv lock`, never hand-edit"
+      },
+      {
+        "glob": "SOFTWARE-FACTORY-PLAN.md",
+        "why": "the specification this repository implements; a change to it is a re-plan, which is James's decision — raise the disagreement instead"
+      },
+      {
+        "glob": "docs/discovery/**",
+        "why": "Phase 0's measured evidence, dated and closed; a later run that disagrees writes its own file rather than editing the record"
+      },
+      {
+        "glob": "state/**",
+        "why": "the control plane's own database; it is written through src/factory/store.py, never by hand"
+      }
+    ],
+    "secretVars": ["LINEAR_API_KEY", "GH_TOKEN"],
+    "formatters": [
+      {
+        "match": [".py"],
+        "run": [
+          ["uv", "run", "ruff", "format"],
+          ["uv", "run", "ruff", "check", "--fix", "--unfixable", "F401"]
+        ]
+      }
+    ]
+  },
+  "review": {
+    "agentDir": ".agents/agents",
+    "checklistDir": "docs/agents/subagents",
+    "styleEnforcedBy": "ruff or mypy"
+  }
+}

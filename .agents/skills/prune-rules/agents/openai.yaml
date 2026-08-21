@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Prune rules'
+  short_description: 'Audit the rule files for drift, duplication and dead rules'
+  default_prompt: "Use $prune-rules to audit this repository's rule files and propose repairs."

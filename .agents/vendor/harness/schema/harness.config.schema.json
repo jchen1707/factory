@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jchen1707/harness/blob/v2/plugins/harness/schema/harness.config.schema.json",
+  "title": "harness.config.json",
+  "description": "What layer A needs to know about one consuming repository. Layer A is authored once and identical everywhere; every stack fact it depends on is declared here, so the shared half never has to name a toolchain, a directory or a team key. One file per repository, at its root \u2014 a scaffolded product repo with two apps declares one per app.",
+  "type": "object",
+  "required": ["name"],
+  "allOf": [
+    {
+      "$comment": "A router config in a monorepo names its apps and runs nothing itself; every other config has to declare a Definition of Done, because a repository whose gates are undeclared is one where nothing is checked and nothing says so.",
+      "if": {
+        "required": ["apps"]
+      },
+      "then": true,
+      "else": {
+        "required": ["gates"]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "This repository's name, as it appears in prose and in review output.",
+      "minLength": 1
+    },
+    "apps": {
+      "type": "array",
+      "description": "The apps of a monorepo, as repo-relative directories, each holding a harness.config.json of its own. Present only in the root config of a multi-app repository, where it is what makes the gates dispatch: a turn runs the gates of the apps whose gatedPaths its changed files matched, in those apps' directories, rather than every gate in the tree. An app named here with no config of its own is reported, not skipped -- the config search walks upward, so it would otherwise silently run the root's gates from the wrong directory. A path a change puts both apps in scope for -- a shared contract package -- needs no key here: each app names it in its own gatedPaths.",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "tracker": {
+      "type": "object",
+      "description": "Issue-tracker facts. The doctrine is in docs/agents/issue-tracker.md; only the keys that identify this repo's project belong here.",
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "string",
+          "description": "Team key, as it appears in issue ids and in branch names (`<type>/<TEAM>-<num>-<slug>`).",
+          "minLength": 1
+        }
+      }
+    },
+    "install": {
+      "$ref": "#/$defs/argv",
+      "description": "Bring dependencies up to date. Run before a gate when the lockfile or manifest changed."
+    },
+    "dev": {
+      "type": "object",
+      "description": "The development server, for /run. Omit in a repo that has none.",
+      "additionalProperties": false,
+      "required": ["run"],
+      "properties": {
+        "run": {
+          "$ref": "#/$defs/argv"
+        },
+        "url": {
+          "type": "string",
+          "description": "Where it serves once up."
+        },
+        "readyCheck": {
+          "type": "string",
+          "description": "One sentence naming what to confirm before reporting success \u2014 a route that must respond, a page that must render."
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "description": "The Definition of Done, as commands. This is the single declaration of what must be green: /lint, /test, the verify hook and the meta-repo's cross-stack job all read it, so a gate added here is added everywhere at once.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "run"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "How the gate is named in output. Usually the tool.",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": ["lint", "format", "types", "build", "test", "e2e", "integration"],
+            "description": "What the gate checks. /lint runs lint, format and types \u2014 the fast ones a turn can afford. /test runs test. /verify runs all of those plus build, because a build is the only gate that sees the deployment target and is too slow for the inner loop. e2e and integration are opt-in: they need a browser or a container, and their `when` clause says when they stop being optional."
+          },
+          "run": {
+            "$ref": "#/$defs/argv"
+          },
+          "when": {
+            "type": "string",
+            "description": "One sentence naming when this gate is required, for the kinds that are not always run. Omit for a gate that always applies."
+          },
+          "caveat": {
+            "type": "string",
+            "description": "One sentence naming how this gate can pass without having checked anything \u2014 a linter rule that fails open on an unclassified file, a metric the runner could not measure, a suite that silently collected nothing. /verify prints it beside the green result. A gate whose vacuous pass is undocumented is worse than a missing gate, because it is trusted."
+          }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "What the shared hooks need from this repository. Layer A ships one implementation of the write guard, the secret guard, the formatter and the Stop gate; every path, extension and command they act on is declared here. Omit a key and that hook does nothing rather than guessing -- with one exception: protect_paths keeps a built-in floor of secret rules that no config can lower, because a guard that silently protects nothing when its config goes missing is worse than no guard at all.",
+      "additionalProperties": false,
+      "properties": {
+        "gatedPaths": {
+          "type": "array",
+          "description": "Directories the Stop gate watches, as a git pathspec. The application and its tests, plus this repo's own harness wiring -- a broken edit to the thing that enforces the gates is the one change the walk-away gate would otherwise never catch. Prose, plans and docs stay out: they are what sessions churn on, and gating them burns the 8-consecutive-block override budget on writing work.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gatedFiles": {
+          "type": "array",
+          "description": "Individual files that configure the gates themselves. A change to one can break every gate at once while touching no application code, so it is gated for the same reason the source is.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gatedExtensions": {
+          "type": "array",
+          "description": "Extensions the gates read, including the dot. A path under gatedPaths only triggers the gates when its extension is listed here or its exact path is in gatedFiles.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "protected": {
+          "type": "array",
+          "description": "Paths an agent must not touch, as globs against the repo-relative forward-slashed path. `**` crosses directory separators and `*` does not, which is what lets `dist/**` cover a tree while `.env.*` stays inside one segment. The .env rules are built in; these are this repo's additions.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["glob", "why"],
+            "properties": {
+              "glob": {
+                "type": "string",
+                "minLength": 1
+              },
+              "why": {
+                "type": "string",
+                "description": "One clause completing \"Refusing to edit <path> - ...\". It is the whole message the agent gets, so it has to name the alternative: \"regenerate with `uv lock`, never hand-edit\" ends the attempt, \"protected\" invites a retry.",
+                "minLength": 1
+              },
+              "scope": {
+                "enum": ["write", "secret"],
+                "default": "write",
+                "description": "`write` refuses writes and leaves reads alone -- a write to a generated file is a mistake the author can undo. `secret` refuses both: the value enters the context window, the transcript on disk and the API request in one step, and only rotation undoes that."
+              }
+            }
+          }
+        },
+        "allowed": {
+          "type": "array",
+          "description": "Filenames exempt from every protected rule, matched on the basename. This is the exception a permission deny rule cannot express: `Read(./.env.*)` would also hide `.env.example`, the committed file that documents the env contract. `.env.example` is exempt by default; list anything else here.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "secretVars": {
+          "type": "array",
+          "description": "Environment variables whose name appearing in a shell command is enough to refuse it. The whole-environment dumps and the inline interpreters are recognised by their own spelling and need no config; a single-variable expansion can only be recognised from the variable's name. Read docs/agents/secrets.md first: prefix and name matching stop an accident, not an intent, and removing the value from the environment is the only complete fix.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "formatters": {
+          "type": "array",
+          "description": "What to run after an edit, per extension, in order. The edited path is appended to each command. Advisory: failures are ignored, because formatting is a fixup and the gate is the Stop hook. List every extension the format gate checks, not only the ones gatedExtensions names -- otherwise a doc edit skips formatting now and fails the gate later in a session that never touched it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["match", "run"],
+            "properties": {
+              "match": {
+                "type": "array",
+                "description": "Extensions this entry formats, including the dot. An empty list matches nothing.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "run": {
+                "type": "array",
+                "description": "Commands to run in order, each as argv without the file path. An autofix entry must not be able to remove an unused import: this hook fires after every single edit, so in a batch it runs between the edit that adds an import and the edit that adds its first use, and a fix at that moment deletes the import while the next edit references it. Spell the exclusion the way your linter does -- ruff's is `--unfixable F401`.",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/argv"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "description": "What /full-review needs that layer A cannot know. The reviewer frames are shared; the checklists they read are this repo's.",
+      "additionalProperties": false,
+      "properties": {
+        "agentDir": {
+          "type": "string",
+          "description": "Where this repo keeps its own subagent definitions. Searched after the plugin's, so a stack definition \u2014 the ninth axis \u2014 resolves, and a stack may override a shared frame deliberately.",
+          "default": ".agents/agents"
+        },
+        "checklistDir": {
+          "type": "string",
+          "description": "Where this repo keeps the stack half of each shared subagent, one file per agent name.",
+          "default": "docs/agents/subagents"
+        },
+        "ninthAxis": {
+          "type": "object",
+          "description": "The axis that is this stack's alone. Eight axes are shared; the ninth is the one the other stack has no equivalent for, and it is a whole definition rather than a frame plus a checklist.",
+          "additionalProperties": false,
+          "required": ["label", "agent"],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "agent": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "styleEnforcedBy": {
+          "type": "string",
+          "description": "The tools that already own style, named as prose. The synthesiser is told to drop any finding these enforce, because a reviewer repeating the linter is noise.",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "argv": {
+      "type": "array",
+      "description": "A command as argv, never as a shell string. A string would have to be parsed by a shell, and the one thing a config file must not do is decide how its own values get quoted.",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

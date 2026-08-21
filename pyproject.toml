@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "factory"
+version = "0.1.0"
+description = "Layer D — the control plane. Drives one approved Linear ticket through a sandboxed agent and stops at the boundary a human owns."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "jchen" }]
+# Stdlib only, deliberately, for everything Phase 1 does. The control plane shells
+# out to `git`, `gh`, `sbx` and `security`, reads TOML with `tomllib` and speaks
+# Linear's GraphQL over `urllib`. Adding a dependency here is a decision to review,
+# not a convenience: this process holds the keychain credential and runs unattended.
+# FastAPI/uvicorn arrive with `factory serve` in Phase 4 (§18.5) and not before.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+]
+
+[project.scripts]
+factory = "factory.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/factory"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# `docs/` is not source. `SOFTWARE-FACTORY-PLAN.md` is the specification and
+# `docs/discovery/` is Phase 0's dated evidence, both marked protected in
+# harness.config.json — and ruff formats Python fenced in Markdown as well as Python
+# files, so without this a `ruff format .` silently rewrites the record it is meant to
+# be checked against.
+extend-exclude = ["docs", "SOFTWARE-FACTORY-PLAN.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "C4", "PIE", "PT", "S"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603", "S607"]
+# The control plane's whole job is to drive other programs. Every argv in these
+# modules is a fixed list built from validated config — never a shell string, never
+# user text — which is the property `harness.config.schema.json`'s `$defs.argv`
+# exists to enforce and the reason `shell=True` appears nowhere in this repository.
+"src/factory/sandbox/sbx.py" = ["S603", "S607"]
+"src/factory/repo.py" = ["S603", "S607"]
+"src/factory/harness.py" = ["S603", "S607"]
+"src/factory/agent/codex.py" = ["S603", "S607"]
+"src/factory/intake/linear.py" = ["S603", "S607"]
+"src/factory/steps/sandbox.py" = ["S603", "S607"]
+"src/factory/cli.py" = ["S603", "S607"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = false
+ignore_missing_imports = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.uv]
+package = true

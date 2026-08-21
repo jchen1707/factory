@@ -1,0 +1,7 @@
+Reading additional input from stdin...
+2026-08-20T21:39:12.050320Z ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: Refusing to edit uv.lock - regenerate with `uv lock`, never hand-edit.
+Ask the user to make this change, or explain why it is required.. Command: *** Begin Patch
+*** Update File: /Users/james/python-harness/.factory/worktrees/p0-6-probe/uv.lock
+@@
++# probe
+*** End Patch

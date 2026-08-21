@@ -1,0 +1,56 @@
+{
+  "description": "The shared enforcement layer: one implementation of the write guard, the read-and-command secret guard, the formatter, the Definition-of-Done Stop gate and the second-brain distiller. Every stack fact each one needs comes from the consuming repository's harness.config.json, so this file names no toolchain and no directory. Addressed through ${CLAUDE_PLUGIN_ROOT}, which resolves identically in a main checkout, a git worktree and a sandbox — the property a repo-relative path does not have.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "note": "One matcher over the whole surface. The write guard needs every tool that can put bytes on disk, including NotebookEdit and any MCP write; the secret guard needs Read and Bash. These were two matchers in two scripts because both shelled out to an interpreter and firing them on every search was a real cost. This hook shells out to nothing, so the cost is gone and the split with it.",
+        "matcher": "Read|Edit|Write|NotebookEdit|Bash|mcp__.*(edit|write|create|apply|read).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/protect_paths.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Checking protected paths…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|mcp__.*(edit|write|create|apply).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/format_edited.mjs\"",
+            "timeout": 120,
+            "statusMessage": "Formatting…"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/verify.mjs\"",
+            "timeout": 600,
+            "statusMessage": "Verifying Definition of Done…"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session_learnings.mjs\"",
+            "timeout": 300,
+            "statusMessage": "Distilling session learnings…"
+          }
+        ]
+      }
+    ]
+  }
+}

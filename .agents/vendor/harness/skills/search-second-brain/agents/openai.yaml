@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Search second brain'
+  short_description: 'Find what past sessions already learned about a topic'
+  default_prompt: 'Use $search-second-brain to check the vault for prior learnings before deciding.'

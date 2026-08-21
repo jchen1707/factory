@@ -1,0 +1,11 @@
+# Codex, configured for this project. The harness half of this file is the `hooks` feature
+# and nothing else: what the hooks do is `harness.config.json`'s business, and where they
+# live is `.codex/hooks.json`'s.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[features]
+hooks = true
+
+[agents]
+max_concurrent_threads_per_session = 8

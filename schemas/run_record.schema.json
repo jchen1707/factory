@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jchen1707/factory/schemas/run_record.schema.json",
+  "title": "run_record",
+  "description": "The factory's own audit row for one run, rendered from SQLite. It is what makes an artifact directory readable without the database, and it is the shape `factory status --evidence` prints.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "run_id",
+    "ticket",
+    "project",
+    "state",
+    "attempt",
+    "transitions",
+    "effects"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "run_id": { "type": "string" },
+    "ticket": { "type": "string" },
+    "project": { "type": "string" },
+    "team": { "type": "string" },
+    "branch": { "type": ["string", "null"] },
+    "base_ref": { "type": ["string", "null"] },
+    "worktree": { "type": ["string", "null"] },
+    "state": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "blocked_reason": { "type": ["string", "null"] },
+    "pr_url": { "type": ["string", "null"] },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["to_state", "actor", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "from_state": { "type": ["string", "null"] },
+          "to_state": { "type": "string" },
+          "actor": { "enum": ["auto", "human"] },
+          "rule": { "type": ["string", "null"] },
+          "detail": { "type": ["string", "null"] },
+          "at": { "type": "integer" }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["attempt", "step", "system", "key", "status", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "attempt": { "type": "integer" },
+          "step": { "type": "string" },
+          "system": { "enum": ["linear", "github", "git", "sbx"] },
+          "key": { "type": "string" },
+          "status": { "enum": ["intended", "confirmed", "abandoned"] },
+          "external_id": { "type": ["string", "null"] },
+          "at": { "type": "integer" }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["attempt", "check_name", "status", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "attempt": { "type": "integer" },
+          "check_name": { "type": "string" },
+          "status": {
+            "enum": ["pass", "fail", "inconclusive", "unavailable", "not_applicable"]
+          },
+          "reason": { "type": ["string", "null"] },
+          "detail": { "type": ["string", "null"] },
+          "artifact": { "type": ["string", "null"] },
+          "at": { "type": "integer" }
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["input_tokens", "output_tokens", "usd"],
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": { "type": "integer" },
+        "cached_input_tokens": { "type": "integer" },
+        "output_tokens": { "type": "integer" },
+        "reasoning_output_tokens": { "type": "integer" },
+        "usd": {
+          "type": ["number", "null"],
+          "description": "Null when no price row covers the model that ran. Never 0 — a zero would read as a free run rather than an unpriced one."
+        }
+      }
+    },
+    "artifact_dir": { "type": ["string", "null"] }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Full Review'
+  short_description: 'Fan out every review axis and consolidate'
+  default_prompt: 'Use $full-review to review this branch against the default branch on every axis.'
