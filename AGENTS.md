@@ -108,8 +108,13 @@ reviewer sandboxes are at risk**. Tables in `docs/discovery/p1-1-in-image-codex.
 action needed.
 
 **Still James's**, and neither blocks a phase: the stale credential binding above (it is
-Docker's bug, and the workaround holds), and the `needs-info` label group that makes
-eligibility condition 7 inert.
+Docker's bug, and the workaround holds). The `needs-info` label group is no longer a
+problem: measured again on the BAC-3 runs (2026-08-21), the block step's `needs-info` write
+succeeds — the effects ledger records `label:needs-info` as `confirmed` for both blocks — so
+eligibility condition 7 is not inert. A blocked ticket carries `needs-info` (a blocking
+label) and is held at intake until a human removes it, which is the design the comment in
+`block.py` describes. The earlier BAC-4 measurement of a 400 (same label group as
+`ready-for-agent`) no longer reproduces; most likely `needs-info` was moved to its own group.
 
 ## How the code is shaped
 
