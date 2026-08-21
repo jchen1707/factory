@@ -166,20 +166,53 @@ def test_the_validator_refuses_a_keyword_it_does_not_implement() -> None:
         validate_against_schema({"a": 1}, {"type": "object", "patternProperties": {}})
 
 
-def test_behaviour_changed_is_required() -> None:
+def _implement_schema() -> dict:
     import json
 
-    schema = json.loads((HOME / "schemas" / "implement_result.schema.json").read_text())
-    result = {
-        "status": "implemented",
-        "summary": "did the thing",
-        "files_changed": ["src/app/main.py"],
-        "tests_added": ["tests/test_main.py"],
-        "out_of_scope": [],
-    }
+    return json.loads((HOME / "schemas" / "implement_result.schema.json").read_text())
+
+
+#: A complete `implement_result`, every required key present.
+_COMPLETE_RESULT = {
+    "status": "implemented",
+    "summary": "did the thing",
+    "files_changed": ["src/app/main.py"],
+    "tests_added": ["tests/test_main.py"],
+    "out_of_scope": [],
+    "behaviour_changed": True,
+    "seam_confirmed": True,
+    "tdd_used": True,
+    "gates_run": ["ruff check"],
+    "blocked_reason": None,
+    "docs_updated": [],
+}
+
+
+def test_behaviour_changed_is_required() -> None:
+    schema = _implement_schema()
+    without = {k: v for k, v in _COMPLETE_RESULT.items() if k != "behaviour_changed"}
     with pytest.raises(SchemaInvalid, match="behaviour_changed"):
-        validate_against_schema(result, schema)
-    validate_against_schema({**result, "behaviour_changed": True}, schema)
+        validate_against_schema(without, schema)
+    validate_against_schema(_COMPLETE_RESULT, schema)
+
+
+def test_every_property_is_required_because_openai_rejects_otherwise() -> None:
+    """OpenAI structured outputs reject a schema whose `required` omits any key of
+    `properties`, and the rejection happens *inside the sandbox*, after the run has
+    spent a sandbox, a worktree and a detached exec on it.
+
+    Measured 2026-08-21, the first time a run reached `implementing` — `codex exec`
+    exited 1 with:
+
+        Invalid schema for response_format 'codex_output_schema': In context=(),
+        'required' is required to be supplied and to be an array including every key
+        in properties. Missing 'seam_confirmed'.
+
+    A field with nothing to say uses an empty array or an explicit null instead of
+    being absent, so nothing is lost by requiring all of them.
+    """
+    schema = _implement_schema()
+    assert set(schema["required"]) == set(schema["properties"])
 
 
 def test_a_boolean_is_not_accepted_where_a_number_is_wanted() -> None:

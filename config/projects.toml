@@ -78,7 +78,15 @@ stack          = "python"
 template       = ""
 kits           = []
 static_mcp     = []
-build_sandbox  = "factory-build-python-harness"
+# Not `factory-build-python-harness`. That name carries a `github` credential
+# binding that `sbx secret ls` does not show and `sbx secret rm` cannot clear —
+# almost certainly recorded when the first run created it while the secret was
+# still global, and it survives `sbx rm`. The factory's exact `sbx create` argv
+# produces a clean sandbox under any other name, so the suffix is the whole fix.
+# Measured one variable at a time in `docs/discovery/p1-1-in-image-codex.md`.
+# Do not "tidy" this back: `preflight:no-secrets-in-vm` blocks every run under
+# the old name, correctly.
+build_sandbox  = "factory-build-python-harness-2"
 review_sandbox = "factory-review-python-harness"
 vault_mount    = "rw"
 network_allow  = ["pypi.org", "*.pythonhosted.org", "astral.sh", "github.com"]

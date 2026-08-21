@@ -90,9 +90,9 @@ That list is the actual remaining scope of Phase 1 validation.
 
 ## What is on the branch
 
-Five defects the two runs exposed. Four are fixed, each with tests proven to fail
-against the unfixed code; the fifth needs a decision before it can be. Full reasoning is
-in the commit messages and in the code comments.
+Six defects the runs exposed. Four are fixed, each with tests proven to fail against the
+unfixed code; the fifth is resolved outside the code and the sixth is recorded but not
+fixed. Full reasoning is in the commit messages and in the code comments.
 
 1. **`_block` made no Linear write** though §13.1's table specifies one. New
    `src/factory/steps/block.py` comments the reason and evidence path and adds
@@ -121,6 +121,26 @@ in the commit messages and in the code comments.
    The migration rebuilds `runs` with foreign keys off and `foreign_key_check` after —
    dropping the table with enforcement on would have taken the audit history with it.
    It has been run on the real `state/factory.db`; both runs' rows survived.
+6. **`cancel` cleans only what the run row recorded**, so a run that dies *during*
+   worktree creation leaves debris that blocks every later run. Found on 2026-08-21 once
+   the preflight finally went green: `git worktree add -b` failed twice in a row, first
+   on `fatal: '<worktree>' already exists` and then on `fatal: a branch named '<branch>'
+   already exists`. Both were cleared by hand and the run proceeded.
+
+   `cmd_cancel` guards its cleanup with `if run.worktree:` and `if run.branch:`, and
+   `worktree.py` records those fields only *after* `git worktree add` returns. So the
+   window where the command can fail is exactly the window where cancel cannot clean up
+   after it — the rollback is blindest at the moment it is most needed. The orphan
+   directory here was not even a registered worktree (`git worktree list` did not show
+   it), so `git worktree remove` would not have helped; it needs a path check, not a
+   git one.
+
+   *Not fixed.* It is a genuine Phase 1 defect and it will recur, but it was found with
+   a run in flight and fixing it would have meant restarting the first run ever to get
+   past the preflight. Worth doing before the next block: derive the two paths from the
+   ticket rather than the row, and delete an *empty* worktree directory and a branch
+   with no commits beyond the base ref.
+
 5. **`needs-info` cannot be applied while `ready-for-agent` is on the ticket.** *Not
    fixed — it needs a decision.* Defect 1's comment landed, but the label half came back
    400 from Linear:

@@ -71,6 +71,23 @@ def test_cancel_and_suspend_are_human_from_anywhere() -> None:
     assert requires_human_rule(State.SUSPENDED, State.IMPLEMENTING) == "resume-is-james"
 
 
+@pytest.mark.parametrize("state", [s for s in State if s not in TERMINAL])
+def test_every_non_terminal_state_can_be_cancelled(state: State) -> None:
+    """§5.3 writes the edge as `* -> cancelled`, so "anywhere" has to mean anywhere.
+
+    `_WORKFLOW` listed it by hand and missed `resumable`, and the two halves of the
+    machine then disagreed in the most misleading possible way: `requires_human_rule`
+    answered `abandon-is-james` — governance saying "this is James's call" — while
+    `can()` answered False, saying the hop did not exist. `cmd_cancel` guards its
+    transition with `can()` and does its cleanup unguarded, so on 2026-08-21 it
+    archived the attempt, removed the worktree, deleted the branch, moved Linear back
+    to `Todo`, printed success, and left the row at `resumable` for the next
+    `factory run` to refuse.
+    """
+    assert can(state, State.CANCELLED)
+    assert requires_human_rule(state, State.CANCELLED) == "abandon-is-james"
+
+
 def test_the_happy_path_is_automatic() -> None:
     path = [
         State.APPROVED,

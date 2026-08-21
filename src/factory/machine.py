@@ -113,6 +113,7 @@ _WORKFLOW: dict[State, frozenset[State]] = {
     State.CANCELLED: frozenset(),
 }
 
+
 #: `blocked` is reachable from every non-terminal state, for the same reason `cancelled`
 #: is: it is not a step in the workflow, it is the workflow stopping. Any step can raise
 #: `Blocked`, and three of the raise sites are in `steps/__init__.py` — `lease-lost`,
@@ -125,9 +126,26 @@ _WORKFLOW: dict[State, frozenset[State]] = {
 #: A state machine that cannot record a stop it just performed is not describing the run.
 #:
 #: Leaving `blocked` stays governed: `HUMAN_ONLY` reserves both exits from it.
+#:
+#: `cancelled` is derived the same way, and for the same reason twice over. §5.3's table
+#: gives the edge as `* -> cancelled`, "abandoning work" — a wildcard, not a list — but
+#: `_WORKFLOW` above spelled the list out by hand and missed `resumable`. Measured
+#: 2026-08-21: `codex exec` failed inside the VM, the run came to rest at `resumable`,
+#: and `factory cancel BAC-4` then archived the attempt, removed the worktree, deleted
+#: the branch and moved Linear back to `Todo` — while `cmd_cancel`'s
+#: `if machine.can(...)` guard silently skipped the transition, leaving the row at
+#: `resumable`. The next `factory run` refused a ticket that cancel had reported
+#: cancelling. Deriving the edge is what stops the list drifting from the wildcard a
+#: third time.
+def _stops(state: State) -> frozenset[State]:
+    """The two ways a run stops rather than steps, minus a self-edge."""
+    if state in TERMINAL:
+        return frozenset()
+    return frozenset({State.BLOCKED, State.CANCELLED}) - {state}
+
+
 TRANSITIONS: dict[State, frozenset[State]] = {
-    state: targets if state in TERMINAL or state is State.BLOCKED else targets | {State.BLOCKED}
-    for state, targets in _WORKFLOW.items()
+    state: targets | _stops(state) for state, targets in _WORKFLOW.items()
 }
 
 #: §5.3 — the hops the factory must physically stop at, mapped to the rule that fires.

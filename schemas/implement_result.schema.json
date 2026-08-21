@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jchen1707/factory/schemas/implement_result.schema.json",
   "title": "implement_result",
-  "description": "The structured answer the implementer returns. Handed to `codex exec --output-schema`, validated before any state advances, and kept in the attempt directory as evidence. `behaviour_changed` and `seam_confirmed` are what let the control plane decide, without guessing, whether the red-phase replay is required.",
+  "description": "The structured answer the implementer returns. Handed to `codex exec --output-schema`, validated before any state advances, and kept in the attempt directory as evidence. `behaviour_changed` and `seam_confirmed` are what let the control plane decide, without guessing, whether the red-phase replay is required. Every key in `properties` also appears in `required`, because OpenAI structured outputs reject a response format where it does not; a field that may legitimately have no value says so with an empty array or an explicit null, never by being absent.",
   "type": "object",
   "required": [
     "status",
@@ -10,7 +10,12 @@
     "files_changed",
     "tests_added",
     "out_of_scope",
-    "behaviour_changed"
+    "behaviour_changed",
+    "seam_confirmed",
+    "tdd_used",
+    "gates_run",
+    "blocked_reason",
+    "docs_updated"
   ],
   "additionalProperties": false,
   "properties": {

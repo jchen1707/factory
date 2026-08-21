@@ -48,6 +48,9 @@ GOOD_RESULT: dict[str, Any] = {
     "tdd_used": True,
     "gates_run": ["ruff check", "mypy", "pytest"],
     "out_of_scope": ["BAC-3's dependency approval"],
+    # Required like every other key — see test_every_property_is_required_*.
+    "blocked_reason": None,
+    "docs_updated": [],
 }
 
 
