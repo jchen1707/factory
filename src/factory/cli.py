@@ -216,18 +216,29 @@ def _drive(ctx: Context, *, force_plan: bool) -> None:
     replay and the two-tier review) advances to `pr_ready` on a clean review or
     `awaiting_human` on a finding/escalation, and the deliver step opens the draft PR. A
     `Blocked` from either propagates to `cmd_run`, which records it and announces.
+
+    An adapter failure inside a step becomes a `Blocked` on the way out, so it takes that
+    same path. Before this, a `GitError` reached `main`'s catch-all instead: the process
+    exited 2, but the run row kept whatever state it had reached, `blocked_reason` stayed
+    empty and the tracker was never told — a stopped run that looks live to everything
+    that reads state. BAC-4's `1effc543d83a459a` sat at `reviewing` that way after the
+    red-phase replay's `git apply` failed. The slug names the state it died in, because
+    that is the part a human needs before reading anything else.
     """
-    claim_step.run(ctx)
-    context_step.run(ctx)
-    sandbox_step.run(ctx)
-    worktree_step.run(ctx)
-    if plan_step.should_plan(ctx, forced=force_plan):
-        plan_step.run(ctx)
-    implement_step.run(ctx)
-    verify_step.run(ctx)
-    review_step.run(ctx)
-    if ctx.state is State.PR_READY:
-        deliver_step.run(ctx)
+    try:
+        claim_step.run(ctx)
+        context_step.run(ctx)
+        sandbox_step.run(ctx)
+        worktree_step.run(ctx)
+        if plan_step.should_plan(ctx, forced=force_plan):
+            plan_step.run(ctx)
+        implement_step.run(ctx)
+        verify_step.run(ctx)
+        review_step.run(ctx)
+        if ctx.state is State.PR_READY:
+            deliver_step.run(ctx)
+    except (GitError, SbxError, LinearError) as exc:
+        raise Blocked(f"{ctx.state}-step-failed", str(exc)) from exc
 
 
 def _block(ctx: Context, reason: str, detail: str) -> None:

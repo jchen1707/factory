@@ -53,13 +53,22 @@ class GitError(Exception):
     """A git command that failed, with its stderr attached."""
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git_raw(repo: Path, *args: str) -> str:
+    """git's stdout, byte for byte. The right helper whenever the output is a *document*
+    rather than a value: a patch's trailing newline is part of the patch, and `git apply`
+    rejects one that lost it as `corrupt patch at line <last>`."""
     proc = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
     )
     if proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed in {repo}:\n{proc.stderr.strip()}")
-    return proc.stdout.strip()
+    return proc.stdout
+
+
+def _git(repo: Path, *args: str) -> str:
+    """git's stdout, stripped. The right helper when the output is a value or a list of
+    them — a ref, a sha, a path, lines to split. Never for a patch: see `_git_raw`."""
+    return _git_raw(repo, *args).strip()
 
 
 def _git_ok(repo: Path, *args: str) -> bool:
@@ -341,8 +350,12 @@ def diff_pathspec(worktree: Path, base_ref: str, pathspecs: Sequence[str]) -> st
 
     The red-phase replay applies only the test half, so this is `git diff` narrowed by
     `harness.config.json`'s `tests` pathspecs. An empty result means the change touched no
-    test file in the declared set."""
-    return _git(worktree, "diff", f"{base_ref}...HEAD", "--", *pathspecs)
+    test file in the declared set.
+
+    Raw, not stripped: `git apply` needs the patch's final newline, and BAC-4's run
+    `1effc543d83a459a` died on exactly that — `corrupt patch at line 387`, 387 being the
+    last line of a 12296-byte patch that `strip()` had made 12295."""
+    return _git_raw(worktree, "diff", f"{base_ref}...HEAD", "--", *pathspecs)
 
 
 def added_modified_paths(worktree: Path, base_ref: str, pathspecs: Sequence[str]) -> list[str]:

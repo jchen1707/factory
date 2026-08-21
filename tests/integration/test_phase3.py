@@ -9,15 +9,17 @@ assembly, PR-body layout) have their own unit tests.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from factory import cli
+from factory import cli, repo
 from factory.machine import Blocked, State
 from factory.steps import Context
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
-from tests.integration.conftest import FakeLinear, FakeSandbox
+from tests.integration.conftest import FakeLinear, FakeSandbox, git
 from tests.integration.test_pipeline import _to_verifying
 
 # --------------------------------------------------------------------------------
@@ -248,3 +250,68 @@ def test_a_secret_in_the_pr_body_blocks_before_any_push(
     assert caught.value.reason == "secret-in-artifact"
     assert pushed == []  # never pushed
     assert ctx.state is State.PR_READY  # did not advance
+
+
+# --------------------------------------------------------------------------------
+# the red-phase replay's patch round trip — against real git, not a fake
+# --------------------------------------------------------------------------------
+
+
+def test_the_test_half_of_a_diff_applies_to_a_scratch_worktree(project_repo: Path) -> None:
+    """`diff_pathspec` -> `apply_patch` is the replay's load-bearing seam, and both ends are
+    git. Faking either would fake the thing that broke: BAC-4's run `1effc543d83a459a` died
+    here with `corrupt patch at line 387`, because the patch reached `git apply` one byte
+    short of what git wrote — `_git`'s `strip()` had taken its final newline.
+
+    The assertion is the round trip, not the newline: a patch that applies is the property
+    the replay needs, and it holds for any future helper that keeps the document intact.
+    """
+    tests_dir = project_repo / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_search.py").write_text("def test_scores_are_sorted() -> None:\n    pass\n")
+    git(project_repo, "add", "-A")
+    git(project_repo, "commit", "-m", "tests: the existing suite")
+    git(project_repo, "push", "origin", "v2")
+
+    git(project_repo, "checkout", "-b", "feat/BAC-9-scores")
+    (tests_dir / "test_search.py").write_text(
+        "def test_scores_are_sorted() -> None:\n    pass\n\n\n"
+        "def test_internal_documents_are_excluded() -> None:\n"
+        "    assert exclude_internal(['a', '_internal']) == ['a']\n"
+    )
+    (project_repo / "engine.py").write_text("def exclude_internal(names):\n    return names\n")
+    git(project_repo, "add", "-A")
+    git(project_repo, "commit", "-m", "feat: exclude internal documents")
+
+    patch = repo.diff_pathspec(project_repo, "origin/v2", ["tests"])
+    assert "engine.py" not in patch  # the test half only
+
+    scratch = project_repo.parent / "scratch-replay"
+    repo.add_detached_worktree(project_repo, scratch, "origin/v2")
+    repo.apply_patch(scratch, patch)  # raised GitError("corrupt patch at line …") before
+
+    landed = (scratch / "tests" / "test_search.py").read_text()
+    assert "test_internal_documents_are_excluded" in landed
+    assert not (scratch / "engine.py").exists()  # the implementation half stayed behind
+
+
+def test_a_step_that_dies_of_a_git_failure_blocks_the_run(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter failure is still a run that stopped, and a stopped run says so.
+
+    The replay's `git apply` is the live case: a `GitError` used to reach `main`'s
+    catch-all, so the process exited 2 while the run row sat at `reviewing` with an empty
+    `blocked_reason` — indistinguishable, to anything reading state, from a run still in
+    flight."""
+    monkeypatch.setattr(
+        review_step,
+        "run",
+        lambda _ctx: (_ for _ in ()).throw(repo.GitError("git apply failed: corrupt patch")),
+    )
+
+    with pytest.raises(Blocked) as caught:
+        cli._drive(ctx, force_plan=False)
+
+    assert caught.value.reason == "reviewing-step-failed"
+    assert "corrupt patch" in caught.value.detail
