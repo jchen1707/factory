@@ -7,11 +7,13 @@ call. This is the suite that runs on every commit.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 import pytest
 
+from factory import repo
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config
 from factory.intake.linear import Issue, LinearError
@@ -556,3 +558,114 @@ def test_cancel_does_not_overwrite_a_state_a_human_set(ctx: Context) -> None:
     cli._restore_tracker_for_rerun(linear, "BAC-4")  # type: ignore[arg-type]
     assert linear.state == "In Review"
     assert linear.state_changes == []
+
+
+# --------------------------------------------------------------------------------
+# defect 6 — the debris a run dies before recording
+# --------------------------------------------------------------------------------
+
+#: What `plan_branch` produces for `TICKET`. Spelled out rather than derived, because a
+#: test that computes the name the way the code does cannot catch the code computing it
+#: wrongly.
+BRANCH = "feat/BAC-4-application-skeleton-settings-structured"
+
+
+def _cancel(ctx: Context, monkeypatch: pytest.MonkeyPatch, ticket: str = "BAC-4") -> int:
+    """`factory cancel <ticket>`, with only the two adapters that leave this machine
+    faked. The registry on disk, the store the fixture wrote and git are all real."""
+    from factory import cli
+
+    monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
+    monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
+    monkeypatch.setattr(cli, "LinearClient", lambda: FakeLinear(TICKET))
+    return cli.cmd_cancel(argparse.Namespace(ticket=ticket, reason="testing the rollback"))
+
+
+def _debris(ctx: Context) -> Path:
+    """Exactly what a run that dies inside `git worktree add` leaves behind: an
+    unregistered directory holding nothing but `.factory/run/1/`, and an empty branch."""
+    path = ctx.project.worktree_path(ctx.registry.defaults.worktree_subdir, "BAC-4")
+    (path / ".factory" / "run" / "1").mkdir(parents=True)
+    git(ctx.project.path, "branch", BRANCH, "origin/v2")
+    return path
+
+
+def test_cancel_clears_the_debris_a_run_never_recorded(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defect 6. The run row is empty because `worktree.py` writes `worktree` and
+    `branch` only after `git worktree add` returns — so the window in which the command
+    can fail is exactly the window in which cancel is blind to its own debris.
+
+    The assertion that matters is the last one: against the unfixed code `add_worktree`
+    raises `fatal: ... already exists`, which is how this arrived twice on 2026-08-21.
+    """
+    path = _debris(ctx)
+    assert not ctx.run.worktree
+    assert not ctx.run.branch
+
+    assert _cancel(ctx, monkeypatch) == 0
+
+    assert not path.exists()
+    repo.add_worktree(ctx.project.path, path, BRANCH, "origin/v2")
+
+
+def test_cancel_keeps_a_branch_that_carries_commits(
+    ctx: Context,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 2, and the half that makes this fix safe rather than worse than the gap.
+
+    A local branch naming the ticket is not necessarily the factory's: this one is the
+    human's own attempt, with a commit on it. Deleting it would turn a rollback gap into
+    a way to lose an implementation.
+    """
+    human = "fix/BAC-4-james-had-a-go"
+    scratch = tmp_path / "scratch"
+    git(ctx.project.path, "worktree", "add", "-b", human, str(scratch), "origin/v2")
+    (scratch / "notes.md").write_text("half a fix\n")
+    git(scratch, "add", "-A")
+    git(scratch, "commit", "-m", "BAC-4: half a fix")
+    git(ctx.project.path, "worktree", "remove", str(scratch))
+    _debris(ctx)
+
+    assert _cancel(ctx, monkeypatch) == 0
+
+    assert human in git(ctx.project.path, "branch", "--list", human)
+    assert git(ctx.project.path, "rev-list", "--count", f"origin/v2..{human}") == "1"
+    assert human in capsys.readouterr().out
+
+
+def test_cancel_keeps_a_worktree_directory_holding_work(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rule 1. An unregistered directory is removed only when it holds nothing but the
+    factory's own scaffolding. Anything else is somebody's work, and `rm -rf` on an
+    arbitrary tree is F15."""
+    path = _debris(ctx)
+    (path / "src").mkdir()
+    (path / "src" / "main.py").write_text("the agent got this far\n")
+
+    assert _cancel(ctx, monkeypatch) == 0
+
+    assert (path / "src" / "main.py").read_text() == "the agent got this far\n"
+    assert str(path) in capsys.readouterr().out
+
+
+def test_cancel_leaves_another_tickets_branch_alone(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deriving a branch from a ticket means matching names, and `feat/BAC-40-...`
+    contains `BAC-4`. An empty, unpushed branch is exactly the shape this cleanup
+    deletes, so the identifier match has to be a word boundary rather than a substring
+    or cancelling one ticket would quietly remove another's branch."""
+    neighbour = "feat/BAC-40-a-different-ticket"
+    git(ctx.project.path, "branch", neighbour, "origin/v2")
+    _debris(ctx)
+
+    assert _cancel(ctx, monkeypatch) == 0
+
+    assert neighbour in git(ctx.project.path, "branch", "--list", neighbour)
+    assert BRANCH not in git(ctx.project.path, "branch", "--list", BRANCH)
