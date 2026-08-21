@@ -15,12 +15,8 @@ from typing import Any
 import pytest
 
 from factory import repo
-from factory.agent.codex import CodexAdapter
-from factory.harness import load_harness_config
-from factory.intake.linear import Issue, LinearError
+from factory.intake.linear import LinearError
 from factory.machine import Blocked, Resumable, State
-from factory.registry import load_registry
-from factory.routing import load_routing
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
@@ -28,132 +24,21 @@ from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
-from factory.store import Store
-from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeLinear, FakeSandbox, git
+from tests.integration.conftest import (
+    GOOD_GATE_REPORT,
+    GOOD_RESULT,
+    HOME,
+    TICKET,
+    FakeLinear,
+    FakeSandbox,
+    git,
+)
 
 
 def _fake(ctx: Context) -> FakeSandbox:
     """The context types its adapter as the protocol; the tests need the fake's knobs."""
     assert isinstance(ctx.sandbox, FakeSandbox)
     return ctx.sandbox
-
-
-HOME = Path(__file__).resolve().parents[2]
-
-SPEC = (
-    "A search API over a corpus of support documents. A support agent sends a query and "
-    "receives passages, each with a citation of file name and page number, and a relevance "
-    "score. The system returns passages; it does not write an answer. Internal documents "
-    "are excluded from every search by default."
-)
-
-TICKET = Issue(
-    identifier="BAC-4",
-    title="Application skeleton: Settings, structured logging, app factory",
-    description=(
-        "## What to build\n\nAn app that reads config in one place.\n\n"
-        "## Acceptance criteria\n\n- [ ] Settings is the only reader of the environment\n"
-        "- [ ] The health endpoint returns 200\n"
-    ),
-    url="https://linear.app/development-jchen/issue/BAC-4",
-    state_name="Todo",
-    state_type="unstarted",
-    team_key="BAC",
-    team_id="team-uuid",
-    labels=("ready-for-agent", "Feature"),
-    parent_identifier="BAC-2",
-    parent_title="Search internal support documents and return cited passages",
-    parent_description=SPEC,
-    comments=(("James", "2026-08-20", "start with the health endpoint"),),
-    siblings=(("BAC-3", "Todo", "Approve the dependency set"),),
-)
-
-
-def _registry_toml(project: Path, vault: Path) -> str:
-    return f"""
-[vault]
-path = "{vault}"
-write_allowlist = ["Project Learnings/**", "_VAULT_INDEX.md"]
-snapshot_exclude = [".obsidian"]
-
-[defaults]
-worktree_subdir = ".factory/worktrees"
-disk_min_free_gb = 0
-deny_network = ["mcp.linear.app"]
-
-[defaults.planning]
-auto = false
-
-[defaults.timeouts_seconds]
-implementing = 30
-
-[projects.python-harness]
-team = "BAC"
-path = "{project}"
-remote = "{project}"
-base_branch = "v2"
-stack = "python"
-template = ""
-build_sandbox = "factory-build-python-harness"
-review_sandbox = "factory-review-python-harness"
-vault_mount = "rw"
-
-[projects.python-harness.env]
-UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/python-harness"
-"""
-
-
-@pytest.fixture
-def ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Context:
-    home = tmp_path / "factory-home"
-    (home / "schemas").mkdir(parents=True)
-    (home / "schemas" / "implement_result.schema.json").write_text(
-        (HOME / "schemas" / "implement_result.schema.json").read_text()
-    )
-    (home / "schemas" / "gate_report.schema.json").write_text(
-        (HOME / "schemas" / "gate_report.schema.json").read_text()
-    )
-    (home / "config").mkdir()
-
-    vault = tmp_path / "vault"
-    (vault / "Project Learnings").mkdir(parents=True)
-    (vault / "_VAULT_INDEX.md").write_text("index\n")
-
-    registry_path = home / "config" / "projects.toml"
-    registry_path.write_text(_registry_toml(project_repo, vault))
-
-    skill = tmp_path / "implement" / "SKILL.md"
-    skill.parent.mkdir()
-    skill.write_text(
-        "---\nname: implement\ndisable-model-invocation: true\n---\n\n"
-        "Implement the work described by the user in the spec or tickets.\n"
-    )
-    monkeypatch.setattr(implement_step, "IMPLEMENT_SKILL", skill)
-    monkeypatch.setattr(
-        sandbox_step, "_vendor_sync_path", lambda: Path("/nonexistent/vendor_sync.py")
-    )
-    # `vendor_check` returns False for a missing script, which would fail preflight for
-    # a reason unrelated to what this test is about. The real check has its own test.
-    monkeypatch.setattr(sandbox_step, "vendor_check", lambda target, script: (True, "OK (stubbed)"))
-
-    store = Store(home / "state" / "factory.db")
-    run = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
-    store.acquire_lease(run.id, ttl_seconds=600)
-
-    registry = load_registry(registry_path)
-    return Context(
-        home=home,
-        registry=registry,
-        routing=load_routing(HOME / "config" / "models.toml"),
-        store=store,
-        linear=FakeLinear(TICKET),  # type: ignore[arg-type]
-        sandbox=FakeSandbox(),
-        agent=CodexAdapter(),
-        project=registry.projects["python-harness"],
-        run=store.run_by_id(run.id),  # type: ignore[arg-type]
-        issue=TICKET,
-        harness=load_harness_config(project_repo),
-    )
 
 
 def _drive(ctx: Context) -> None:

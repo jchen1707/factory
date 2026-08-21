@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,11 +18,16 @@ from factory.machine import Blocked
 
 __all__ = [
     "GitError",
+    "add_detached_worktree",
     "add_worktree",
+    "added_modified_paths",
+    "apply_patch",
     "branch_name",
     "branch_type_for_labels",
+    "changed_lines",
     "changed_paths",
     "commits_beyond",
+    "diff_pathspec",
     "fetch",
     "holds_only_factory_scaffolding",
     "identifier_on_base",
@@ -282,6 +288,23 @@ def changed_paths(worktree: Path, base_ref: str) -> list[str]:
     return [line for line in listing.splitlines() if line]
 
 
+def changed_lines(worktree: Path, base_ref: str) -> int:
+    """Total added + deleted lines across the diff — `git diff --numstat`, summed.
+
+    The Tier-2 trigger (§15.2) fans out the full review when a diff is large (≥ 400 changed
+    lines), so this is the count that decides it. Binary files report `-\t-` and are
+    skipped, which is correct: a binary cannot be read by a reviewer and its churn is not
+    line churn.
+    """
+    listing = _git(worktree, "diff", "--numstat", f"{base_ref}...HEAD")
+    total = 0
+    for line in listing.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            total += int(parts[0]) + int(parts[1])
+    return total
+
+
 def diff_stat(worktree: Path, base_ref: str) -> str:
     return _git(worktree, "diff", "--stat", f"{base_ref}...HEAD")
 
@@ -292,3 +315,75 @@ def head_sha(repo: Path, ref: str = "HEAD") -> str:
 
 def is_clean(worktree: Path) -> bool:
     return not _git(worktree, "status", "--porcelain")
+
+
+# --------------------------------------------------------------------------------
+# §15.3 — the red-phase replay's git half
+# --------------------------------------------------------------------------------
+
+
+def add_detached_worktree(repo: Path, path: Path, ref: str) -> None:
+    """`git worktree add --detach <path> <ref>` — a scratch checkout at the base ref.
+
+    Used by the red-phase replay to land only the test half of a diff on a clean tree
+    at the base ref, so the test gate can be run against it. The path must sit inside a
+    mounted workspace or the VM cannot see it — the caller picks the path the same way
+    `worktree.py` does.
+    """
+    if worktree_exists(repo, path):
+        raise Blocked("worktree-exists", f"{path} is already a worktree of {repo}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "worktree", "add", "--detach", str(path), ref)
+
+
+def diff_pathspec(worktree: Path, base_ref: str, pathspecs: Sequence[str]) -> str:
+    """`git diff <base>...HEAD -- <pathspecs>` — the patch for one slice of the diff.
+
+    The red-phase replay applies only the test half, so this is `git diff` narrowed by
+    `harness.config.json`'s `tests` pathspecs. An empty result means the change touched no
+    test file in the declared set."""
+    return _git(worktree, "diff", f"{base_ref}...HEAD", "--", *pathspecs)
+
+
+def added_modified_paths(worktree: Path, base_ref: str, pathspecs: Sequence[str]) -> list[str]:
+    """The test files the diff added or modified — `--diff-filter=AM`.
+
+    The replay's "fails naming a new/changed test" check looks for one of these in the
+    gate's output. Deleted test files are excluded: a deleted test cannot be the new
+    behaviour's red phase, and the test-weakening guard handles deletions separately.
+    """
+    listing = _git(
+        worktree,
+        "diff",
+        "--name-only",
+        "--diff-filter=AM",
+        f"{base_ref}...HEAD",
+        "--",
+        *pathspecs,
+    )
+    return [line for line in listing.splitlines() if line]
+
+
+def apply_patch(worktree: Path, patch: str) -> None:
+    """Apply a patch to a worktree on stdin. Used by the red-phase replay to land the
+    test half of the diff on the scratch worktree at the base ref."""
+    proc = subprocess.run(
+        ["git", "-C", str(worktree), "apply", "-"],
+        input=patch,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GitError(f"git apply failed in {worktree}:\n{proc.stderr.strip()}")
+
+
+def paths_at_ref(repo: Path, ref: str, pathspecs: Sequence[str]) -> list[str]:
+    """`git ls-tree --name-only <ref> -- <pathspecs>` — the paths that existed at `ref`.
+
+    The red-phase test-weakening guard scopes itself to test files the base ref already
+    knew about: a new test file has no prior assertions to weaken, and the replay already
+    covers whether a new test catches the regression.
+    """
+    listing = _git(repo, "ls-tree", "--name-only", ref, "--", *pathspecs)
+    return [line for line in listing.splitlines() if line]

@@ -84,6 +84,18 @@ class HarnessConfig:
         literal = [p for p in self.protected if "*" not in p.glob and p.scope == "write"]
         return literal[0] if literal else (self.protected[0] if self.protected else None)
 
+    def protected_hits(self, paths: Sequence[str]) -> list[str]:
+        """The protected globs a diff touches — for the Tier-2 trigger (§15.2) and the
+        host-execution guard's read of the same config. Empty when nothing protected moved."""
+        from factory.policy import _matches  # local import: avoid a cycle at module load
+
+        hits: list[str] = []
+        for path in paths:
+            for protected in self.protected:
+                if protected.glob not in hits and _matches(path, (protected.glob,)):
+                    hits.append(protected.glob)
+        return hits
+
 
 def load_harness_config(root: Path) -> HarnessConfig:
     """Read `<root>/harness.config.json`.

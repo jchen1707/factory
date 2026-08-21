@@ -56,6 +56,7 @@ ignore = ["E501"]
 "src/factory/agent/codex.py" = ["S603", "S607"]
 "src/factory/intake/linear.py" = ["S603", "S607"]
 "src/factory/steps/sandbox.py" = ["S603", "S607"]
+"src/factory/delivery/github.py" = ["S603", "S607"]
 "src/factory/cli.py" = ["S603", "S607"]
 
 [tool.ruff.format]
