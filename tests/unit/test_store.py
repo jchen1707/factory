@@ -1,14 +1,15 @@
-"""§21.1 — the UNIQUE claim, the lease, and the effects ledger."""
+"""§21.1 — the claim's uniqueness, the lease, and the effects ledger."""
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from pathlib import Path
 
 import pytest
 
-from factory.machine import State
-from factory.store import Store, marker
+from factory.machine import TERMINAL, State
+from factory.store import _SCHEMA, SCHEMA_VERSION, Store, marker
 
 
 @pytest.fixture
@@ -21,6 +22,80 @@ def test_duplicate_linear_id_cannot_create_a_second_run(store: Store) -> None:
     second = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
     assert first.id == second.id
     assert len(store.all_runs()) == 1
+
+
+def _move(store: Store, run_id: str, to_state: State) -> None:
+    """`update_run` refuses `state` on purpose, so tests move a run the way the factory
+    does: by recording the transition."""
+    store.record_transition(run_id, from_state=None, to_state=to_state, actor="test")
+
+
+# --------------------------------------------------------------------------------
+# One *live* run per ticket — the narrowing that makes `cancel` + `run` work
+# --------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("live", [State.APPROVED, State.IMPLEMENTING, State.BLOCKED])
+def test_a_live_run_still_blocks_a_second_one(store: Store, live: State) -> None:
+    """§7.2 unchanged: while a run is live, its ticket cannot start another.
+
+    `blocked` is in the list on purpose. It is a stop, not an end, so a blocked run
+    keeps its ticket until a human cancels it — which is the whole reason `cmd_run`
+    tells you to cancel rather than just re-running.
+    """
+    first = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    _move(store, first.id, live)
+    second = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    assert second.id == first.id
+    assert len(store.all_runs()) == 1
+
+
+@pytest.mark.parametrize("terminal", sorted(TERMINAL))
+def test_a_terminal_run_does_not_block_the_next_one(store: Store, terminal: State) -> None:
+    """The defect this index exists for: a cancelled row used to own its ticket forever,
+    so `factory cancel BAC-4 && factory run BAC-4` — the rollback `cmd_run` advertises
+    and the only retry Phase 1 has — refused at `already at cancelled`."""
+    first = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    _move(store, first.id, terminal)
+    second = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+
+    assert second.id != first.id
+    assert second.state is State.APPROVED
+    # Attempt 0, so the next attempt directory is `run/1` exactly as §19 expects.
+    assert second.attempt == 0
+    assert len(store.all_runs()) == 2
+
+
+def test_the_abandoned_run_keeps_its_own_ledger(store: Store) -> None:
+    """A successor must not inherit or erase its predecessor's evidence: the effects
+    ledger is keyed by run id, and reconciliation would skip a real Linear write if the
+    new run could see the old run's confirmed rows."""
+    first = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    store.intend_effect(first.id, 0, "claim", "linear", "state:in-progress")
+    store.confirm_effect(first.id, 0, "claim", "linear", "state:in-progress", "In Progress")
+    _move(store, first.id, State.CANCELLED)
+
+    second = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+
+    assert len(store.effects(first.id)) == 1
+    assert store.effects(second.id) == []
+    assert store.find_effect(second.id, 0, "claim", "linear", "state:in-progress") is None
+
+
+def test_run_by_ticket_returns_the_newest_run(store: Store) -> None:
+    first = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    _move(store, first.id, State.CANCELLED)
+    second = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    # Same wall-clock second as `first`, so only the tiebreak distinguishes them.
+    assert store.run_by_ticket("BAC-4").id == second.id  # type: ignore[union-attr]
+
+
+def test_terminal_states_are_pinned_to_the_live_run_index() -> None:
+    """`_LIVE_RUN_INDEX` is derived from `TERMINAL` at import, but a database keeps the
+    index it was built with. Changing this set therefore needs SCHEMA_VERSION 3 and a
+    rebuild, and this test is the tripwire that says so."""
+    assert frozenset({State.COMPLETED, State.CANCELLED}) == TERMINAL
+    assert SCHEMA_VERSION == 2
 
 
 def test_lease_is_exclusive_until_it_expires(store: Store) -> None:
@@ -137,3 +212,89 @@ def test_session_id_round_trips(store: Store) -> None:
     store.finish_attempt(run.id, 1, State.IMPLEMENTING, exit_code=0, outcome="implemented")
     assert store.session_id(run.id, 1, State.IMPLEMENTING) == "01a0-thread"
     assert time.time() > 0
+
+
+# --------------------------------------------------------------------------------
+# The 1 -> 2 migration
+# --------------------------------------------------------------------------------
+
+
+#: `runs` as SCHEMA_VERSION 1 wrote it: the column-level UNIQUE this migration removes.
+_V1_RUNS = """
+CREATE TABLE runs (
+  id TEXT PRIMARY KEY, linear_id TEXT NOT NULL UNIQUE,
+  project TEXT NOT NULL, team TEXT NOT NULL,
+  branch TEXT, base_ref TEXT, worktree TEXT,
+  state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+  lease_owner TEXT, lease_expires_at INTEGER,
+  blocked_reason TEXT, pr_url TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+"""
+
+
+def _v1_database(path: Path) -> str:
+    """A version 1 database holding one cancelled run and its ledger — the exact shape
+    `state/factory.db` was in when BAC-4's first run stopped."""
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.executescript(_V1_RUNS + _SCHEMA[_SCHEMA.index("CREATE TABLE transitions") :])
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO runs (id, linear_id, project, team, state, attempt, created_at, updated_at) "
+        "VALUES ('03cda9bfebe644d7','BAC-4','python-harness','BAC','cancelled',0,?,?)",
+        (now, now),
+    )
+    conn.execute(
+        "INSERT INTO transitions (run_id, from_state, to_state, actor, rule, at) "
+        "VALUES ('03cda9bfebe644d7','approved','claimed','auto',NULL,?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO effects (run_id, attempt, step, system, key, status, external_id, at) "
+        "VALUES ('03cda9bfebe644d7',0,'claim','linear','state:in-progress','confirmed','x',?)",
+        (now,),
+    )
+    conn.execute("PRAGMA user_version=1")
+    conn.close()
+    return "03cda9bfebe644d7"
+
+
+def test_migration_1_to_2_keeps_the_history_it_migrates(tmp_path: Path) -> None:
+    """Dropping a table with `foreign_keys=ON` would take the ledger with it. The audit
+    history surviving is the property that makes this migration safe to run on the real
+    database rather than a reason to start a fresh one."""
+    path = tmp_path / "factory.db"
+    old_id = _v1_database(path)
+
+    store = Store(path)
+
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert store.run_by_id(old_id) is not None
+    assert [r["to_state"] for r in store.transitions(old_id)] == ["claimed"]
+    assert len(store.effects(old_id)) == 1
+    assert store.integrity_ok()[0]
+    assert store._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    # Foreign keys are restored after the rebuild, not left off.
+    assert store._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_migration_1_to_2_unblocks_the_rerun_that_v1_refused(tmp_path: Path) -> None:
+    """The end-to-end point of the migration: against v1 this returned the cancelled row
+    and `cmd_run` printed `already at cancelled`."""
+    path = tmp_path / "factory.db"
+    old_id = _v1_database(path)
+
+    store = Store(path)
+    fresh = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+
+    assert fresh.id != old_id
+    assert fresh.state is State.APPROVED
+    assert store.run_by_ticket("BAC-4").id == fresh.id  # type: ignore[union-attr]
+
+
+def test_migration_is_not_rerun_on_an_already_current_database(tmp_path: Path) -> None:
+    path = tmp_path / "factory.db"
+    _v1_database(path)
+    Store(path).close()
+    store = Store(path)  # second open must be a no-op, not a second rebuild
+    assert len(store.all_runs()) == 1

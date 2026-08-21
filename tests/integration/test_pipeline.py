@@ -515,6 +515,39 @@ def test_cancel_puts_the_ticket_back_where_the_factory_found_it(ctx: Context) ->
     assert "ready-for-agent" in (linear.labels or [])
 
 
+def test_cancel_frees_the_ticket_locally_and_not_only_in_linear(ctx: Context) -> None:
+    """The other half of the rollback, and the half that was missing.
+
+    `test_cancel_puts_the_ticket_back_where_the_factory_found_it` covers eligibility
+    conditions 2 and 7 — the Linear side — but `factory run` also refuses a ticket whose
+    run row is not `approved`. Against a v1 database that row was `cancelled` forever,
+    so a real `factory cancel BAC-4 && factory run BAC-4` got all the way past all ten
+    eligibility conditions and then stopped at `already at cancelled (attempt 0)`.
+
+    Asserting `APPROVED` here is asserting exactly `cmd_run`'s guard.
+    """
+    claim_step.run(ctx)
+    _block(ctx, "enforcement-disabled", "the block that made a rerun necessary")
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=ctx.store.run_by_id(ctx.run.id).state,  # type: ignore[union-attr]
+        to_state=State.CANCELLED,
+        actor="human",
+        rule="abandon-is-james",
+    )
+    ctx.store.release_lease(ctx.run.id)
+
+    rerun = ctx.store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+
+    assert rerun.id != ctx.run.id
+    assert rerun.state is State.APPROVED
+    assert ctx.store.acquire_lease(rerun.id, ttl_seconds=600)
+    # The abandoned run keeps its evidence; the rerun starts with a clean ledger, so the
+    # claim's Linear writes are performed again rather than reconciled away.
+    assert ctx.store.effects(ctx.run.id) != []
+    assert ctx.store.effects(rerun.id) == []
+
+
 def test_cancel_does_not_overwrite_a_state_a_human_set(ctx: Context) -> None:
     from factory import cli
 

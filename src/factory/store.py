@@ -22,15 +22,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory.machine import State
+from factory.machine import TERMINAL, State
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-_SCHEMA = """
-CREATE TABLE runs (
-  id TEXT PRIMARY KEY, linear_id TEXT NOT NULL UNIQUE,
+
+def _runs_ddl(table: str) -> str:
+    """The `runs` DDL, parameterised by table name because the 1 -> 2 migration rebuilds
+    it under a temporary one and the two shapes must not drift.
+
+    `linear_id` carries no column-level `UNIQUE`; `_LIVE_RUN_INDEX` states the real
+    constraint instead.
+    """
+    return f"""
+CREATE TABLE {table} (
+  id TEXT PRIMARY KEY, linear_id TEXT NOT NULL,
   project TEXT NOT NULL, team TEXT NOT NULL,
   branch TEXT, base_ref TEXT, worktree TEXT,
   state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
@@ -38,6 +46,41 @@ CREATE TABLE runs (
   blocked_reason TEXT, pr_url TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
+"""
+
+
+#: Named so `INSERT INTO ... SELECT` never relies on column order surviving a rebuild.
+_RUNS_COLUMNS = (
+    "id, linear_id, project, team, branch, base_ref, worktree, state, attempt, "
+    "lease_owner, lease_expires_at, blocked_reason, pr_url, created_at, updated_at"
+)
+
+#: §7.2's race protection, narrowed to what it actually guarantees: **one live run per
+#: ticket**, not one run per ticket for all time.
+#:
+#: A column-level `UNIQUE` said both, and the second half broke the rollback contract:
+#: `factory cancel` releases the lease and puts the ticket back to `Todo`, but the
+#: cancelled row sat in `runs` forever, so `factory run` refused the very rerun
+#: `cmd_run` advises. Restricting the index to the live states keeps "a second poller
+#: or a second tick cannot create a second run" exactly as §7.2 words it, while letting
+#: a terminal run be *succeeded* rather than resurrected — which is what keeps
+#: `cancelled` terminal (§5.1) and the next attempt directory at `run/1` (§19).
+#:
+#: `blocked` is deliberately live: it is a stop, not an end, so a blocked run still
+#: holds its ticket until someone cancels it. That is the contract, not an oversight.
+#:
+#: Derived from `machine.TERMINAL` rather than spelled out, so the index and the state
+#: machine cannot disagree — but note that an existing database keeps the index it was
+#: built with, so adding a terminal state needs SCHEMA_VERSION 3 and a rebuild.
+#: `test_terminal_states_are_pinned_to_the_live_run_index` fails if that is forgotten.
+_LIVE_RUN_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS runs_one_live_per_ticket ON runs(linear_id) "
+    f"WHERE state NOT IN ({', '.join(chr(39) + str(s) + chr(39) for s in sorted(TERMINAL))})"
+)
+
+_SCHEMA = (
+    _runs_ddl("runs")
+    + """
 CREATE TABLE transitions (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
   from_state TEXT, to_state TEXT NOT NULL, actor TEXT NOT NULL,
@@ -72,6 +115,7 @@ CREATE TABLE costs (
   cached_tokens INTEGER, usd REAL, at INTEGER NOT NULL
 );
 """
+)
 
 
 def new_run_id() -> str:
@@ -167,7 +211,41 @@ class Store:
             return
         if current == 0:
             self._conn.executescript(_SCHEMA)
+            self._conn.execute(_LIVE_RUN_INDEX)
+        elif current == 1:
+            self._upgrade_1_to_2()
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+    def _upgrade_1_to_2(self) -> None:
+        """Replace the column-level `UNIQUE` on `runs.linear_id` with `_LIVE_RUN_INDEX`.
+
+        SQLite cannot drop a column constraint in place, so this is the documented
+        twelve-step table rebuild (https://sqlite.org/lang_altertable.html#otheralter),
+        reduced to what applies here. Foreign keys go **off** around the swap: the
+        ledger tables reference `runs(id)`, and dropping the old table with enforcement
+        on would take the audit history with it — the one thing a migration here must
+        never do. `foreign_key_check` afterwards proves it did not.
+        """
+        self._conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            with self.transaction():
+                self._conn.execute(_runs_ddl("runs_migrating"))
+                self._conn.execute(
+                    f"INSERT INTO runs_migrating ({_RUNS_COLUMNS}) "  # noqa: S608 - names above
+                    f"SELECT {_RUNS_COLUMNS} FROM runs"
+                )
+                self._conn.execute("DROP TABLE runs")
+                self._conn.execute("ALTER TABLE runs_migrating RENAME TO runs")
+                self._conn.execute(_LIVE_RUN_INDEX)
+            orphans = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+            if orphans:
+                raise RuntimeError(
+                    f"migration 1 -> 2 left {len(orphans)} orphaned ledger rows; "
+                    "the database was not modified beyond this point and the backup "
+                    "SQLite keeps in the WAL is the recovery path"
+                )
+        finally:
+            self._conn.execute("PRAGMA foreign_keys=ON")
 
     def integrity_ok(self) -> tuple[bool, str]:
         result = self._conn.execute("PRAGMA integrity_check").fetchone()[0]
@@ -188,25 +266,44 @@ class Store:
     def insert_run(
         self, *, linear_id: str, project: str, team: str, state: State = State.APPROVED
     ) -> Run:
-        """`INSERT OR IGNORE` on a UNIQUE `linear_id` — §7.2 phase one.
+        """`INSERT OR IGNORE` against `_LIVE_RUN_INDEX` — §7.2 phase one.
 
-        Two ticks racing the same ticket cannot create two runs. The loser reads the
-        existing row and finds it leased, which is where F12 ends.
+        Two ticks racing the same ticket cannot create two runs: the index makes the
+        second insert a no-op, so the loser reads the existing row and finds it leased,
+        which is where F12 ends.
+
+        A ticket whose previous run reached a terminal state gets a **new** row rather
+        than the old one back, because the index only covers the live states. That is
+        what makes `factory cancel` followed by `factory run` work, and it keeps the
+        ledger for the abandoned run intact and separately addressable by its own id.
         """
         now = int(time.time())
         run_id = new_run_id()
-        self._conn.execute(
+        inserted = self._conn.execute(
             "INSERT OR IGNORE INTO runs "
             "(id, linear_id, project, team, state, attempt, created_at, updated_at) "
             "VALUES (?,?,?,?,?,0,?,?)",
             (run_id, linear_id, project, team, str(state), now, now),
-        )
-        got = self.run_by_ticket(linear_id)
+        ).rowcount
+        # Ask for the row by the id just written rather than by ticket: a terminal run
+        # and this fresh one can share a `created_at` second, and picking the wrong one
+        # here would hand the caller a run it must not touch.
+        got = self.run_by_id(run_id) if inserted else self.run_by_ticket(linear_id)
         assert got is not None  # noqa: S101 - the INSERT above guarantees a row
         return got
 
     def run_by_ticket(self, linear_id: str) -> Run | None:
-        row = self._conn.execute("SELECT * FROM runs WHERE linear_id = ?", (linear_id,)).fetchone()
+        """The ticket's current run — the live one if there is one, else the most recent.
+
+        A ticket can now own several rows over its life (see `insert_run`), and every
+        caller wants the newest: `cancel` rolls back what just happened, `status`
+        reports where the ticket stands. `rowid` breaks a same-second tie in insert
+        order, which is the order they happened in.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM runs WHERE linear_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (linear_id,),
+        ).fetchone()
         return Run.from_row(row) if row else None
 
     def run_by_id(self, run_id: str) -> Run | None:
