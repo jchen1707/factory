@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -155,6 +158,7 @@ class _FakePopen:
     def __init__(self, argv: list[str], *, heartbeat: Path | None, rc: int | None, err: str = ""):
         self.argv = argv
         self._rc = rc
+        self.pid = 4242
         if heartbeat is not None:
             heartbeat.parent.mkdir(parents=True, exist_ok=True)
             heartbeat.write_text("1787285036")
@@ -254,3 +258,65 @@ def test_sbx_exec_stderr_is_kept_apart_from_the_agents(
     SbxAdapter().exec_detached(_handle(tmp_path), "codex exec ...", {})
     assert (tmp_path / sbx_module.SBX_EXEC_STDERR).exists()
     assert sbx_module.SBX_EXEC_STDERR != "stderr.log"
+
+
+def test_the_session_holder_outlives_the_process_that_started_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one keyword argument that makes §4.2's guarantee true on `sbx` v0.38.0.
+
+    sandboxd stops a sandbox 30 s after its **last session** disconnects — measured
+    2026-08-21 from its own log: `session disconnected, deferring auto-stop … delay:
+    30000000000`, then `auto-stop grace period expired`, then `auto-stopped runtime
+    after last session disconnected`, 30.0 s apart. Nothing else keeps a sandbox up:
+    no flag, no in-VM process, no traffic. So the run lives exactly as long as the
+    `sbx exec` process holding that session, and §4.2 promises the factory may die at
+    any moment — which is only true if that process is not tied to this one.
+
+    `start_new_session=True` makes it a session leader, reparented to pid 1 and out of
+    this process's group, so neither this process exiting nor a Ctrl-C at the terminal
+    that started the factory takes it down. Measured the same day: parent `os._exit(0)`
+    immediately after spawn, and 115 s later — long past the grace period — the sandbox
+    was still `running` with its in-VM output file one second old.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return _FakePopen(argv, heartbeat=tmp_path / "heartbeat", rc=None)
+
+    monkeypatch.setattr(sbx_module.subprocess, "Popen", fake_popen)
+    SbxAdapter().exec_detached(_handle(tmp_path), "codex exec ...", {})
+
+    assert captured.get("start_new_session") is True
+    # And it has to be findable afterwards, by a process that did not start it.
+    assert sbx_module.holder_pid(tmp_path) == 4242
+
+
+def test_poll_calls_a_run_orphaned_the_moment_its_holder_dies(tmp_path: Path) -> None:
+    """A dead holder is terminal even with a heartbeat seconds old.
+
+    The sandbox has either stopped already or will within 30 s, and a stopping microVM
+    takes every process inside it. Waiting out `ORPHAN_AFTER_SECONDS` of stale
+    heartbeat first would spend 90 s reaching a verdict that is already decided.
+    """
+    dead = subprocess.Popen(["/usr/bin/true"])
+    dead.wait()
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{dead.pid}\n")
+    (tmp_path / "heartbeat").write_text(str(int(time.time())))
+
+    assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.ORPHANED
+
+
+def test_poll_still_reports_a_live_holder_as_running(tmp_path: Path) -> None:
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    (tmp_path / "heartbeat").write_text(str(int(time.time())))
+
+    assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
+
+
+def test_poll_without_a_pid_file_falls_back_to_the_heartbeat(tmp_path: Path) -> None:
+    """An attempt written before the pid file existed still polls correctly."""
+    (tmp_path / "heartbeat").write_text(str(int(time.time())))
+
+    assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING

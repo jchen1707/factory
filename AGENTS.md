@@ -67,31 +67,35 @@ over-engineering bait.
 before every transition and its verdict is written to the audit log with the rule that
 fired.
 
-## Waiting on James — read this first
+## Two things that were parked, and are not any more
 
-Two things are parked on a decision, as of 2026-08-21. Neither blocks Phase 2. The first
-blocks **Phase 4** and is much cheaper to answer now than to discover then.
+Both were resolved on 2026-08-21. They are recorded here rather than deleted, because
+each one is a fact about the machine that explains why the code is shaped as it is.
 
-1. **§4.2's durability guarantee does not hold, and Phase 4 is built on it.**
-   `sbx exec -d` blocks for the command's whole duration, and the sandbox stops when its
-   last session ends — taking every process inside with it, `setsid` included. Phase 1
-   works because `exec_detached` holds the session open for the run's lifetime. But §4.2
-   promises "the host process can die at any moment and the next tick learns what happened
-   by looking at three files", and Phase 4's daemon, `resume` and `recovery.py` all assume
-   exactly that. Three ways forward — a keep-alive if one exists, an in-VM supervisor, or
-   amending §4.2 to admit the host is part of the run's TCB — are laid out in
-   `docs/discovery/p1-2-detached-exec.md`. **Answer before starting Phase 4.**
+1. **§4.2's durability guarantee holds, and the cost is one keyword argument.**
+   `sbx exec -d` blocks for the command's whole duration, and a sandbox stops **30
+   seconds after its last session disconnects** — sandboxd's own log names the mechanism,
+   and it is sessions rather than idleness, with no keep-alive flag anywhere on v0.38.0.
+   But a session is held by an ordinary host process: `exec_detached` starts it with
+   `start_new_session=True`, so pid 1 adopts it and it survives the factory exiting,
+   crashing, or taking a Ctrl-C at the terminal. Measured: the run was still working 115 s
+   after its spawning process called `os._exit(0)`. **The factory process is out of the
+   run's TCB; the machine is still in it** — a reboot, a logout, Docker Desktop quitting
+   or an `sbx stop` ends the run, and the attempt directory says so. `<attempt>/sbx-exec.pid`
+   is the holder, `poll` reads it, and §4.2 and `docs/discovery/p1-2-detached-exec.md` §3
+   both state the boundary in those words. Phase 4's daemon, `resume` and `recovery.py`
+   have three cases to handle and P1-2 §3 tabulates them.
 
-2. **`cancel` cannot clean what a run never recorded (defect 6, unfixed).**
-   `cmd_cancel` guards its cleanup with `if run.worktree:` / `if run.branch:`, but
-   `worktree.py` sets those fields only *after* `git worktree add` returns. A run that
-   dies inside that window leaves an orphan directory and an empty branch, and both block
-   every later run with a `fatal:` from `git worktree add`. Hit twice on 2026-08-21 and
-   cleared by hand. The fix is to derive the two paths from the ticket rather than from
-   the row, then delete a worktree directory that is empty and a branch with no commits
-   beyond the base ref, and never a branch carrying commits.
-   **`docs/defect-6-cancel-orphan-cleanup.md` is the worked-out fix**, with the two safety
-   rules and the regression test that has to fail first.
+2. **`cancel` cleans what a run never recorded (defect 6, fixed).**
+   `cmd_cancel` derives the worktree path from the ticket and the registry and finds the
+   branch by scanning local branches for the identifier, so it no longer depends on fields
+   that `worktree.py` writes only *after* `git worktree add` returns — the window in which
+   the command can fail was exactly the window in which the rollback was blind. Two
+   refusals bound it and they are the design: an unregistered directory is removed only
+   when it holds nothing but `.factory/`, and a branch is deleted only when it is unpushed
+   **and** carries no commits beyond the base ref. Whatever it refuses to remove, it names,
+   because the next run fails on precisely that debris.
+   `docs/defect-6-cancel-orphan-cleanup.md` is the design and what shipped.
 
 **One thing that is settled, so nobody re-opens it.** A sandbox name carries an invisible
 `github` credential binding: `factory-build-python-harness` gets `GH_TOKEN` every time it
@@ -102,6 +106,10 @@ nothing creates it. Measured 2026-08-21 that two fresh `factory-*` names —
 the binding is local to that one name and **neither the naming scheme nor Phase 3's
 reviewer sandboxes are at risk**. Tables in `docs/discovery/p1-1-in-image-codex.md`. No
 action needed.
+
+**Still James's**, and neither blocks a phase: the stale credential binding above (it is
+Docker's bug, and the workaround holds), and the `needs-info` label group that makes
+eligibility condition 7 inert.
 
 ## How the code is shaped
 
@@ -124,10 +132,7 @@ The validating run — `factory run BAC-4`, 2026-08-21 — went
 `approved → claimed → context_loaded → sandbox_creating → sandbox_ready → worktree_ready
 → implementing → verifying`, exit 0, with a schema-valid `last-message.json` and eleven
 files committed in the worktree. `docs/discovery/p1-3-phase-1-validated.md` is the
-evidence and the list of what is still open; read it before touching this. Two of those
-open items are decisions reserved for James, and one — **§4.2's durability guarantee does
-not hold on `sbx` v0.38.0** (`p1-2-detached-exec.md`) — invalidates an assumption Phase 4
-is built on, so it wants answering before Phase 4 rather than during it.
+evidence and the list of what is still open; read it before touching this.
 
 Getting there cost nine defects across five real runs. Three are worth carrying:
 
@@ -143,12 +148,16 @@ Getting there cost nine defects across five real runs. Three are worth carrying:
   inherited-secret assumption both failed that way. A verification that never observed the
   effect is a note, not a measurement.
 
+**Phase 2 is next, and `docs/handoff-phase-2.md` is the order of work** — it starts in
+`harness` with `gate_report.mjs`, not in this repository, and it names the one egress
+chore §8.7 asks for before Phase 2 begins.
+
 Phase 1 deliberately contains no verification, no review, no push and no PR. Do not add
 them here: `gate_report.mjs` is a **layer-A** change that lands on `harness@v2` first
 (§12.1), and Phase 2 is where the factory learns to read its output. Phase 3 adds the
 reviewer sandbox and delivery; Phase 4 adds the poller, `gc` and the console.
 
-Three findings from Phase 0 are load-bearing in the code and must not be "simplified":
+Four measured findings are load-bearing in the code and must not be "simplified":
 
 - `--dangerously-bypass-hook-trust` on every `codex exec`. Without it, at a worktree
   path, the enforcement layer is not merely inert — it is invisible. A protected-path
@@ -157,6 +166,10 @@ Three findings from Phase 0 are load-bearing in the code and must not be "simpli
   `allow_implicit_invocation: false` from the catalog entirely, so no prompt reaches it
   and `codex exec` does not expand a leading `/skill` either
   (`docs/discovery/p0-15-skills.md`).
+- `start_new_session=True` on `exec_detached`'s `Popen`. It reads like tidiness and it
+  is the entire durability guarantee: the sandbox lives as long as that session, and
+  without its own session the holder dies with the factory's process group
+  (`docs/discovery/p1-2-detached-exec.md` §3).
 - `UV_PROJECT_ENVIRONMENT` on every python sandbox command. A bind-mounted workspace
   cannot share a dependency tree with the host: a sandbox `uv sync` wrote a Linux venv
   over the host's `.venv` (`docs/discovery/p0-10-gate-timing.md`). The frontend has no

@@ -21,9 +21,14 @@ __all__ = [
     "branch_name",
     "branch_type_for_labels",
     "changed_paths",
+    "commits_beyond",
     "fetch",
+    "holds_only_factory_scaffolding",
     "identifier_on_base",
+    "local_branches_matching",
+    "orphan_worktree_dir",
     "prune_worktrees",
+    "reason_to_keep_branch",
     "remote_branch_exists",
     "remote_branches_matching",
     "remove_worktree",
@@ -103,6 +108,45 @@ def remote_branches_matching(repo: Path, identifier: str) -> list[str]:
     return [line.strip() for line in listing.splitlines() if line.strip()]
 
 
+def local_branches_matching(repo: Path, identifier: str) -> list[str]:
+    """Local branches whose name mentions the identifier — the remote scan's other half.
+
+    This one decides deletions, so the match is `\bBAC-4\b` rather than the substring
+    `remote_branches_matching` gets away with for a warning: `feat/BAC-40-...` contains
+    `BAC-4` and is a different ticket's work.
+    """
+    listing = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    pattern = rf"\b{re.escape(identifier)}\b"
+    return [line for line in listing.splitlines() if line and re.search(pattern, line)]
+
+
+def commits_beyond(repo: Path, branch: str, base_ref: str) -> int | None:
+    """`git rev-list --count <base>..<branch>`, or None when git cannot answer."""
+    try:
+        return int(_git(repo, "rev-list", "--count", f"{base_ref}..{branch}"))
+    except (GitError, ValueError):
+        return None
+
+
+def reason_to_keep_branch(repo: Path, branch: str, base_ref: str) -> str | None:
+    """Why cancel must not delete this branch, or None when it is safe to delete.
+
+    Two conditions, and the second is the one that makes deriving a branch name from a
+    ticket safe at all. A pushed branch is visible to other people. A branch carrying
+    commits beyond the base ref is an implementation — the factory's or a human's — and
+    a rollback that removes it silently is worse than the orphan it was cleaning up.
+    An unreadable relation counts as a reason: cancel refuses when it cannot tell.
+    """
+    if remote_branch_exists(repo, branch):
+        return "it has been pushed"
+    ahead = commits_beyond(repo, branch, base_ref)
+    if ahead is None:
+        return f"its relation to {base_ref} cannot be read"
+    if ahead:
+        return f"it carries {ahead} commit{'' if ahead == 1 else 's'} beyond {base_ref}"
+    return None
+
+
 def identifier_on_base(repo: Path, identifier: str, base_ref: str) -> list[str]:
     """Commits on the base ref whose **subject** names the identifier.
 
@@ -120,6 +164,29 @@ def identifier_on_base(repo: Path, identifier: str, base_ref: str) -> list[str]:
 def worktree_exists(repo: Path, path: Path) -> bool:
     listing = _git(repo, "worktree", "list", "--porcelain")
     return any(line == f"worktree {path}" for line in listing.splitlines())
+
+
+def orphan_worktree_dir(repo: Path, path: Path) -> Path | None:
+    """A directory at `path` that exists on disk and that git does not know about.
+
+    `remove_worktree` returns early for exactly this case — it checks `worktree_exists`
+    first — so a rollback built only on it cleans nothing here. This is what a run that
+    died inside `git worktree add` leaves behind, and it blocks every later run with
+    `fatal: '<path>' already exists`.
+    """
+    if not path.is_dir() or worktree_exists(repo, path):
+        return None
+    return path
+
+
+def holds_only_factory_scaffolding(path: Path) -> bool:
+    """True when the directory holds nothing but the factory's own `.factory/` tree.
+
+    The one condition under which cancel may remove a directory git does not know
+    about. Anything else in there is somebody's work, and `rm -rf` on an arbitrary tree
+    is F15 — the rule the rest of this module already respects.
+    """
+    return all(entry.name == ".factory" for entry in path.iterdir())
 
 
 @dataclass(frozen=True)

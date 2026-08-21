@@ -31,7 +31,7 @@ from factory.intake.linear import (
     keychain_secret,
 )
 from factory.machine import Blocked, Resumable, State
-from factory.registry import Registry, RegistryError, load_registry
+from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import MODEL_CACHE, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
@@ -43,7 +43,7 @@ from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from factory.store import Store
+from factory.store import Run, Store
 
 __all__ = ["main"]
 
@@ -327,9 +327,73 @@ def _restore_tracker_for_rerun(linear: LinearClient, ticket: str) -> list[str]:
     return done
 
 
+def _worktree_paths(project: Project, registry: Registry, run: Run, ticket: str) -> list[Path]:
+    """Every directory this ticket's worktree could be at: what the run recorded, and
+    what the registry says it would be.
+
+    The second is the one defect 6 turned on. `worktree.py` records `worktree` only
+    *after* `git worktree add` returns, so a run that dies inside that window leaves
+    debris the row never names — and the path is deterministic, so the row was never
+    needed to find it (`registry.py:80`).
+    """
+    expected = project.worktree_path(registry.defaults.worktree_subdir, ticket)
+    recorded = Path(run.worktree) if run.worktree else None
+    return [expected] if recorded in (None, expected) else [recorded, expected]
+
+
+def _release_local_debris(
+    project: Project, run: Run, ticket: str, paths: Sequence[Path]
+) -> list[str]:
+    """Undo the worktree and the branch, deriving both from the ticket — defect 6.
+
+    Cancel used to guard this with `if run.worktree:` / `if run.branch:`, which made the
+    rollback least capable at the only moment it was needed: the window in which
+    `git worktree add` can fail is exactly the window in which neither field is written.
+    Both survivors — an unregistered directory and an empty branch — then blocked every
+    later run with a `fatal:` that a human had to clear by hand.
+
+    Two refusals bound it, and they are the design. A directory git does not know about
+    is removed only when it holds nothing but the factory's own scaffolding; a branch is
+    deleted only when it is unpushed *and* carries no commits beyond the base ref.
+    Without the second, this fix would convert a rollback gap into a way to lose an
+    implementation. Refusals are printed, because the next run will fail on what is left
+    and the reason has to be visible before that happens.
+    """
+    done: list[str] = []
+    for path in paths:
+        if repo.worktree_exists(project.path, path):
+            repo.remove_worktree(project.path, path, force=True)
+            done.append(f"removed worktree {path}")
+        elif (orphan := repo.orphan_worktree_dir(project.path, path)) is not None:
+            if repo.holds_only_factory_scaffolding(orphan):
+                shutil.rmtree(orphan)
+                done.append(f"removed orphaned worktree directory {orphan}")
+            else:
+                done.append(f"left {orphan} in place: it holds files the factory did not write")
+
+    # The recorded branch keeps its own rule — cancel deletes the run's own unpushed
+    # branch, which is §19's rollback contract and what makes a rerun possible at all.
+    if run.branch:
+        repo.delete_local_branch(project.path, run.branch)
+        done.append(f"deleted local branch {run.branch} (kept if it had been pushed)")
+
+    base_ref = run.base_ref or project.base_ref
+    for branch in repo.local_branches_matching(project.path, ticket):
+        if (reason := repo.reason_to_keep_branch(project.path, branch, base_ref)) is not None:
+            done.append(f"left local branch {branch} in place: {reason}")
+        else:
+            repo.delete_local_branch(project.path, branch)
+            done.append(f"deleted local branch {branch} (empty, and never pushed)")
+    return done
+
+
 def cmd_cancel(args: argparse.Namespace) -> int:
     """Phase 1's rollback. Removes the worktree, deletes the *unpushed* branch, releases
-    the lease, and leaves the sandbox stopped. A pushed branch is never deleted."""
+    the lease, and leaves the sandbox stopped. A pushed branch is never deleted.
+
+    Both the directory and the branch are derived from the ticket rather than read from
+    the run row, so a run that died before recording either one is still cleaned up —
+    see `_release_local_debris`."""
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     store = _open_store(home, dry_run=False)
@@ -340,10 +404,12 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         return 1
 
     project = registry.projects[run.project]
-    if run.worktree:
+    paths = _worktree_paths(project, registry, run, ticket)
+
+    for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
         # needed rolling back is not a rollback, it is a cover-up.
-        attempts = Path(run.worktree) / ".factory" / "run"
+        attempts = path / ".factory" / "run"
         if attempts.is_dir():
             harness = load_harness_config(project.path)
             for directory in sorted(attempts.iterdir()):
@@ -354,12 +420,9 @@ def cmd_cancel(args: argparse.Namespace) -> int:
                         extra_names=harness.secret_vars,
                     )
                     print(f"archived {directory.name} to {kept}")
-    if run.worktree:
-        repo.remove_worktree(project.path, Path(run.worktree), force=True)
-        print(f"removed worktree {run.worktree}")
-    if run.branch:
-        repo.delete_local_branch(project.path, run.branch)
-        print(f"deleted local branch {run.branch} (kept if it had been pushed)")
+
+    for line in _release_local_debris(project, run, ticket, paths):
+        print(line)
 
     if machine.can(run.state, State.CANCELLED):
         store.record_transition(

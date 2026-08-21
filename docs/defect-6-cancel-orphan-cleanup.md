@@ -1,8 +1,43 @@
 # Defect 6 — `cancel` cannot clean what a run never recorded
 
-**Status: unfixed, ready to pick up.** Found 2026-08-21 during Phase 1's validation and
-worked around by hand twice. Everything below is design and evidence; no code has been
-written. `AGENTS.md` → "Waiting on James" item 2 points here.
+**Status: fixed 2026-08-21.** Found during Phase 1's validation and worked around by
+hand twice before that. The rest of this note is the design and the evidence it was
+built from; what shipped is below.
+
+## What shipped
+
+`cmd_cancel` no longer reads the two fields. `_worktree_paths` derives the directory
+from the ticket and the registry, and `_release_local_debris` does the work
+(`src/factory/cli.py`), on top of four new primitives in `repo.py`:
+
+| | |
+| --- | --- |
+| `orphan_worktree_dir` | a directory git does not know as a worktree |
+| `holds_only_factory_scaffolding` | rule 1's refusal — nothing but `.factory/` inside |
+| `local_branches_matching` | the remote scan's other half, on a word boundary |
+| `reason_to_keep_branch` | rule 2's refusal — pushed, or carrying commits |
+
+Three things came out differently from the sketch below, and all three are improvements
+the writing did not see:
+
+- **The archive step derives its paths too.** It was guarded by `if run.worktree:` like
+  everything else, so an unrecorded worktree holding a half-finished attempt would have
+  been removed with its evidence unarchived — the cover-up the archive exists to
+  prevent. It now walks the same derived list.
+- **A refusal is printed.** Both rules leave debris behind on purpose, and the next run
+  fails on exactly that debris. Saying *left `<branch>` in place: it carries 1 commit
+  beyond origin/v2* is what turns a mystifying `fatal:` into a decision someone already
+  made.
+- **The identifier match is `\bBAC-4\b`, not a substring.** `feat/BAC-40-…` contains
+  `BAC-4`, and an empty unpushed branch is precisely the shape this deletes. Cancelling
+  one ticket would have quietly deleted another's branch.
+  `test_cancel_leaves_another_tickets_branch_alone` is that case.
+
+Four tests in `tests/integration/test_pipeline.py`, each run against code that does not
+have the rule it guards: the regression fails on the `fatal:` below, and removing either
+safety rule deletes the human's commit-carrying branch and `rm -rf`s a directory holding
+work. `run.branch`'s own deletion is unchanged — deleting the run's own unpushed branch
+is §19's rollback contract and what makes a rerun possible.
 
 ## The symptom
 
@@ -87,14 +122,14 @@ Cancel must never destroy work, so each helper refuses unless it is certain:
 Rule 2's second half is the one that matters. Without it this fix turns a rollback gap
 into a way to lose an implementation.
 
-## The test that has to fail first
+## The test that had to fail first
 
 The gap survived because nothing exercised cancel against a run that never recorded
 anything. `test_cancel_puts_the_ticket_back_where_the_factory_found_it` covers the Linear
 halves; `test_cancel_frees_the_ticket_locally_and_not_only_in_linear` covers the run row.
 Neither creates debris.
 
-Add, in `tests/integration/test_pipeline.py` beside those two:
+Added, in `tests/integration/test_pipeline.py` beside those two:
 
 - Create the worktree directory and the branch by hand, leave `run.worktree` and
   `run.branch` empty, run `cmd_cancel`, then assert `repo.add_worktree` **succeeds**.
