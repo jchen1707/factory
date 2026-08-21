@@ -73,9 +73,18 @@ Argv lists, never shell strings. `shell=True` appears nowhere and must not.
 
 ## Where the work is
 
-**Phase 1 is built.** `factory run <TICKET>` drives one ticket from `approved` to
-`implementing` and stops at `verifying`. Everything in §19 Phase 1's file list exists,
-the four gates are green, and `factory doctor` reports the machine's real state.
+**Phase 1 is built and half validated.** `factory run <TICKET>` drives one ticket from
+`approved` to `implementing` and stops at `verifying`. Everything in §19 Phase 1's file
+list exists, the four gates are green, and `factory doctor` reports the machine's real
+state.
+
+The first real run — `factory run BAC-4`, 2026-08-21 — reached `sandbox_creating` and
+stopped at `enforcement-disabled`, correctly, on a credential the host had put in the VM.
+Nothing past the preflight has ever executed. **Read
+`docs/handoff-phase-1-validation.md` before touching this**: it records what that run
+proved, the three defects it exposed and how they were fixed, and the hazards waiting for
+the next one — starting with the fact that the Codex binary inside the sandbox image is
+not the one P0-7 measured the event shape on.
 
 Phase 1 deliberately contains no verification, no review, no push and no PR. Do not add
 them here: `gate_report.mjs` is a **layer-A** change that lands on `harness@v2` first
