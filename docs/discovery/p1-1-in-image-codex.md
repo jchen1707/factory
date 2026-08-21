@@ -20,51 +20,58 @@ prediction stands as written: if `parse_events` returns an empty or partial tran
 is the first thing to suspect, and the fix is to re-capture the fixture from inside the VM
 or pin the in-image CLI — not to bend the parser around unlabelled output.
 
-## 2. A fresh factory sandbox is still given `github`, after the secret was re-scoped
+## 2. One sandbox *name* attracts `github`; nothing else does
 
 `p0-5-sandboxes.md` assumed a factory-created sandbox inherits no secrets. It inherited
 `github` and `mcpgateway`, so James re-scoped `github` to the four `csbx` sandboxes by
-hand. The store now agrees:
+hand — and a sandbox created *after* that still got it. The obvious reading was that
+re-scoping does not work in sbx v0.38.0. **That reading is wrong.** Measured by creating
+sandboxes and varying one thing at a time:
+
+| Sandbox name | Workspaces | `secrets` from `sbx inspect` |
+| --- | --- | --- |
+| `secret-probe` | a scratch directory | `mcpgateway` |
+| `secret-probe` | scratch dir, `git init` + GitHub `origin` | `mcpgateway` |
+| `secret-probe` | `/Users/james/python-harness` | `mcpgateway` |
+| `probe-python-harness` | a scratch directory | `mcpgateway` |
+| `secret-probe` | **the factory's exact `create` argv** — `python-harness`, the vault, `--deny-network mcp.linear.app` | `mcpgateway` |
+| **`factory-build-python-harness`** | **the same exact argv** | **`github`, `mcpgateway`** |
+| `zzz-factory-zzz` | a scratch directory | `mcpgateway` |
+
+The last two rows differ **only in the sandbox name**. Scoping works; the workspace is
+irrelevant; a GitHub remote is irrelevant; the word "factory" in the name is irrelevant.
+The name `factory-build-python-harness` reproducibly gets a live `GH_TOKEN` in the VM,
+across `sbx rm` and re-create.
+
+Nothing in the secret store admits to it:
 
 ```console
-$ sbx secret ls
-SCOPE                    TYPE      NAME     SECRET
-codex-dotfiles           service   github   (stored)
-codex-factory            service   github   (stored)
-codex-frontend-harness   service   github   (stored)
-codex-python-harness     service   github   (stored)
-(global)                 service   openai   (oauth configured)
-
 $ sbx secret ls --sandbox factory-build-python-harness
 No secrets found for scope "factory-build-python-harness".
+
+$ sbx secret rm github --sandbox factory-build-python-harness
+No secret found for service "github" in scope "factory-build-python-harness"
 ```
 
-**The sandbox gets it anyway.** `sbx inspect` on the sandbox this run created:
+But the daemon knows. The only `github` line in `sandboxd/daemon.log` is a per-VM
+credential record under exactly that name, from the moment the re-scope took effect:
 
 ```json
-"secrets": [
-  { "name": "github",     "source": "uploaded" },
-  { "name": "mcpgateway", "source": "uploaded" }
-]
+{"level":"WARN","msg":"secrets: credential revoked",
+ "vm_id":"factory-build-python-harness","service":"github"}
 ```
 
-and inside the VM, `GH_TOKEN` is set in the agent's environment (alongside
-`MCP_SENTINEL_TOKEN_NAME`, which is the shape of a proxy sentinel rather than a bearer
-token — the value was not read, and whether it authenticates was not tested).
+**Most likely cause:** the first run created this sandbox on 2026-08-20 while `github` was
+still global. A per-name credential binding was recorded then, it survives `sbx rm`, and
+`sbx secret ls` / `sbx secret rm` cannot see or clear it. Every recreation under that name
+picks it up again.
 
-So **re-scoping a service secret does not stop `sbx create` uploading it** in v0.38.0. The
-scope list and the sandbox disagree, and the sandbox wins. `sbx create` has no
-`--no-secrets` flag; `--profile` is the only creation-time governance lever and is
-unexplored.
+**Untested, and it would settle it:** create `factory-build-frontend-harness` — a
+`factory-build-*` name that has never existed. If it comes up clean, the binding is local
+to the one poisoned name and nothing about the factory's naming scheme is at fault.
 
-This is the §8.7 failure the preflight exists to catch, and it caught it twice — once on a
-sandbox created while `github` was global, and once on one created after it was not.
-`policy.capability_secrets()` is unchanged and must stay that way: the exclusion list holds
-`GATEWAY_CREDENTIAL` alone, and adding `github` to it would be the boundary change
-`AGENTS.md` names, not a fix.
-
-**Consequence: Phase 1 cannot reach `implementing` on this machine until a factory sandbox
-can be created without `github`.** That is a credential-scoping decision, which is James's.
+The preflight is right either way, and `policy.capability_secrets()` must not be widened
+to get past it — that is the boundary change `AGENTS.md` names, not a fix.
 
 ## What was not measured
 

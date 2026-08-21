@@ -48,14 +48,16 @@ What the second run did prove, all of it new:
 
 ### The two things that now block Phase 1, both James's
 
-1. **A fresh factory sandbox is still given the `github` secret**, even though the secret
-   is now scoped to the four `csbx` sandboxes and nothing is scoped to this one.
-   Measured in full in `docs/discovery/p1-1-in-image-codex.md`. The preflight is right to
-   refuse it and `policy.capability_secrets()` must not be widened, so **Phase 1 cannot
-   reach `implementing` on this machine until a factory sandbox can be created without
-   it.** `sbx create` has no `--no-secrets`; `--profile` is unexplored.
+1. **The name `factory-build-python-harness` carries an invisible `github` binding.**
+   Re-scoping the secret worked; this one name did not stop picking it up. The factory's
+   exact `sbx create` argv under any other name gives a clean sandbox — full table in
+   `docs/discovery/p1-1-in-image-codex.md`. `sbx secret ls`/`rm` cannot see or clear the
+   binding, so the cheapest unblock is to stop reusing the name. The preflight is right
+   and `policy.capability_secrets()` must not be widened.
 2. **`needs-info` and `ready-for-agent` are in the same Linear label group**, so defect 5
    has no correct fix the factory can choose by itself.
+   **Resolved 2026-08-21** — James moved `needs-info` into a new group, `signal`. The
+   label write should now succeed; it has not yet been re-run against real Linear.
 
 ---
 
@@ -155,14 +157,26 @@ it inherited `github` and `mcpgateway`. James re-scoped `github` per-sandbox by 
 
 ### 0. First: make a factory sandbox that has no `github` secret
 
-**Nothing below can run until this is done**, and it is not a code change. Re-scoping the
-secret was not enough — `sbx create` uploaded `github` into a sandbox nothing was scoped
-to (`docs/discovery/p1-1-in-image-codex.md`). Until `sbx inspect
-factory-build-python-harness --json` shows `secrets` holding `mcpgateway` alone, the
-preflight will refuse every run, correctly.
+**Nothing below can run until this is done.** The cause is isolated: the *name*
+`factory-build-python-harness` picks up a `github` binding that `sbx secret ls` and
+`sbx secret rm` cannot see, while the factory's exact `sbx create` argv under any other
+name produces a clean sandbox. The evidence table is in
+`docs/discovery/p1-1-in-image-codex.md`.
 
-`sbx rm factory-build-python-harness` first whatever the fix turns out to be: the secret
-set is fixed at creation, so the existing sandbox stays contaminated regardless.
+Two ways out, and the first needs no credential work at all:
+
+- **Give the build sandbox a name that has never been used** — still `factory-build-*`,
+  which `assert_factory_sandbox` and `AGENTS.md` both require. One value in the project
+  registry. Worth confirming first by creating `factory-build-frontend-harness` (a
+  `factory-build-*` name with no history) and checking `sbx inspect` shows `mcpgateway`
+  alone; that also settles whether anything about the naming scheme is at fault.
+- **Purge the stale binding.** `sbx reset` would, but it clears *all* sandbox state
+  including James's `csbx` ones. Otherwise it is a question for Docker: a credential
+  binding surviving `sbx rm` and invisible to `sbx secret ls` looks like a v0.38.0 bug.
+
+Either way `sbx rm factory-build-python-harness` first — the secret set is fixed at
+creation, so an existing sandbox stays contaminated. (It was removed at the end of the
+2026-08-21 session; `sbx ls` should show only the three `codex-*` sandboxes.)
 
 **Do not** widen `policy.capability_secrets()` to get past this. That exclusion list holds
 `GATEWAY_CREDENTIAL` alone and `AGENTS.md` calls widening it a boundary change.
