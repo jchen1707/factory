@@ -89,7 +89,9 @@ blocks **Phase 4** and is much cheaper to answer now than to discover then.
    every later run with a `fatal:` from `git worktree add`. Hit twice on 2026-08-21 and
    cleared by hand. The fix is to derive the two paths from the ticket rather than from
    the row, then delete a worktree directory that is empty and a branch with no commits
-   beyond the base ref. `docs/discovery/p1-3-phase-1-validated.md` has the detail.
+   beyond the base ref, and never a branch carrying commits.
+   **`docs/defect-6-cancel-orphan-cleanup.md` is the worked-out fix**, with the two safety
+   rules and the regression test that has to fail first.
 
 **One thing that is settled, so nobody re-opens it.** A sandbox name carries an invisible
 `github` credential binding: `factory-build-python-harness` gets `GH_TOKEN` every time it

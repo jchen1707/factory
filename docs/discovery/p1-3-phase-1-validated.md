@@ -81,9 +81,9 @@ Phase 1 is validated. These are not Phase 1 gaps, and two are James's:
    cleanup with `if run.worktree:` / `if run.branch:`, but `worktree.py` sets those only
    *after* `git worktree add` returns — so a run that dies inside that window leaves an
    orphan directory and an empty branch that block every later run. Both were cleared by
-   hand during this session. The fix is to derive the two paths from the ticket rather
-   than the row, and to delete an empty worktree directory and a branch with no commits
-   beyond the base ref. Unfixed.
+   hand during this session. **The worked-out fix is `docs/defect-6-cancel-orphan-cleanup.md`** —
+   derive both paths from the ticket, and delete only an empty worktree directory and a
+   branch with no commits beyond the base ref. Unfixed.
 4. **The `--deny-network mcp.linear.app` rule is installed but still unmeasured.** No run
    has generated gateway traffic to test it against.
 5. **Nothing pins the in-image Codex CLI.** The parser and 0.146.0 agree today; a
