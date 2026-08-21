@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "root": "/worktree",
+  "targets": [{ "name": "python-harness", "dir": "." }],
+  "missingApps": [],
+  "gates": [
+    {
+      "name": "ruff check",
+      "kind": "lint",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 120,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "mypy",
+      "kind": "type",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 340,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "pytest",
+      "kind": "test",
+      "status": "fail",
+      "exit": 1,
+      "durationMs": 2100,
+      "caveat": null,
+      "when": null,
+      "outputTail": "FAILED tests/test_health.py::test_health - assert 500 == 200"
+    }
+  ],
+  "verdict": "fail"
+}

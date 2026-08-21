@@ -42,6 +42,7 @@ from factory.steps import context as context_step
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import sandbox as sandbox_step
+from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Run, Store
 
@@ -186,8 +187,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("\nNothing was written: no Linear call, no git write, no sandbox, no model call.")
     else:
         print(
-            "\nPhase 1 stops here. Verification, review and the pull request arrive in "
-            "Phases 2 and 3; nothing has been pushed and no PR exists."
+            "\nVerification ran and the gates are recorded. Review and the pull request "
+            "arrive in Phase 3; nothing has been pushed and no PR exists."
         )
     return 0
 
@@ -205,6 +206,7 @@ def _drive(ctx: Context, *, force_plan: bool) -> None:
     if plan_step.should_plan(ctx, forced=force_plan):
         plan_step.run(ctx)
     implement_step.run(ctx)
+    verify_step.run(ctx)
 
 
 def _block(ctx: Context, reason: str, detail: str) -> None:

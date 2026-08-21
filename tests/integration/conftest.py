@@ -53,6 +53,50 @@ GOOD_RESULT: dict[str, Any] = {
     "docs_updated": [],
 }
 
+#: The canned gate report `FakeSandbox` returns for the verify step. Its gate names are
+#: exactly the three `GOOD_RESULT` claims, all `pass` — so a clean run cross-checks
+#: cleanly and reaches `reviewing`. Tests that want a different verdict set
+#: `fake.gate_report` (often from a `tests/fixtures/gate-report-*.json` file).
+GOOD_GATE_REPORT: dict[str, Any] = {
+    "schemaVersion": 1,
+    "root": "/worktree",
+    "targets": [{"name": "python-harness", "dir": "."}],
+    "missingApps": [],
+    "gates": [
+        {
+            "name": "ruff check",
+            "kind": "lint",
+            "status": "pass",
+            "exit": 0,
+            "durationMs": 120,
+            "caveat": None,
+            "when": None,
+            "outputTail": "",
+        },
+        {
+            "name": "mypy",
+            "kind": "type",
+            "status": "pass",
+            "exit": 0,
+            "durationMs": 340,
+            "caveat": None,
+            "when": None,
+            "outputTail": "",
+        },
+        {
+            "name": "pytest",
+            "kind": "test",
+            "status": "pass",
+            "exit": 0,
+            "durationMs": 2100,
+            "caveat": None,
+            "when": None,
+            "outputTail": "",
+        },
+    ],
+    "verdict": "pass",
+}
+
 
 @dataclass
 class FakeSandbox:
@@ -70,6 +114,12 @@ class FakeSandbox:
     created: list[SandboxSpec] = field(default_factory=list)
     sync_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     canary_exit: int = 2
+    #: The canned `gate_report.mjs --json` document the verify step reads back. Tests
+    #: override this to exercise the fail / incomplete / mismatch transitions.
+    gate_report: dict[str, Any] = field(default_factory=lambda: dict(GOOD_GATE_REPORT))
+    #: When set, returned verbatim as the report call's stdout instead of serialising
+    #: `gate_report` — the one way to make the verify step see a non-JSON document.
+    gate_report_raw_stdout: str | None = None
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -100,6 +150,19 @@ class FakeSandbox:
         stdin: str | None = None,
     ) -> Completed:
         self.sync_calls.append((name, tuple(argv)))
+        if any("gate_report.mjs" in str(arg) for arg in argv):
+            # The verify step: return the canned report, with the exit code that mirrors
+            # its verdict (0/1/3 for pass/fail/incomplete). The step trusts the JSON
+            # `verdict` field over the exit code, so this only has to be consistent.
+            if self.gate_report_raw_stdout is not None:
+                return Completed(tuple(argv), 0, self.gate_report_raw_stdout, "")
+            exit_for = {"pass": 0, "fail": 1, "incomplete": 3}
+            return Completed(
+                tuple(argv),
+                exit_for.get(self.gate_report.get("verdict", "incomplete"), 3),
+                json.dumps(self.gate_report, indent=2),
+                "",
+            )
         if argv and argv[-1].endswith("protect_paths.mjs"):
             return Completed(
                 tuple(argv), self.canary_exit, "", "Refusing to edit uv.lock - regenerate it."
