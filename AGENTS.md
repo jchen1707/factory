@@ -80,18 +80,32 @@ Argv lists, never shell strings. `shell=True` appears nowhere and must not.
 
 ## Where the work is
 
-**Phase 1 is built and half validated.** `factory run <TICKET>` drives one ticket from
-`approved` to `implementing` and stops at `verifying`. Everything in §19 Phase 1's file
-list exists, the four gates are green, and `factory doctor` reports the machine's real
-state.
+**Phase 1 is built and validated.** `factory run <TICKET>` drives one ticket from
+`approved` to `verifying` and stops. Everything in §19 Phase 1's file list exists, the four
+gates are green, and `factory doctor` reports the machine's real state.
 
-The first real run — `factory run BAC-4`, 2026-08-21 — reached `sandbox_creating` and
-stopped at `enforcement-disabled`, correctly, on a credential the host had put in the VM.
-Nothing past the preflight has ever executed. **Read
-`docs/handoff-phase-1-validation.md` before touching this**: it records what that run
-proved, the three defects it exposed and how they were fixed, and the hazards waiting for
-the next one — starting with the fact that the Codex binary inside the sandbox image is
-not the one P0-7 measured the event shape on.
+The validating run — `factory run BAC-4`, 2026-08-21 — went
+`approved → claimed → context_loaded → sandbox_creating → sandbox_ready → worktree_ready
+→ implementing → verifying`, exit 0, with a schema-valid `last-message.json` and eleven
+files committed in the worktree. `docs/discovery/p1-3-phase-1-validated.md` is the
+evidence and the list of what is still open; read it before touching this. Two of those
+open items are decisions reserved for James, and one — **§4.2's durability guarantee does
+not hold on `sbx` v0.38.0** (`p1-2-detached-exec.md`) — invalidates an assumption Phase 4
+is built on, so it wants answering before Phase 4 rather than during it.
+
+Getting there cost nine defects across five real runs. Three are worth carrying:
+
+- **A green suite proved nothing about the things that actually broke.** The defects that
+  stopped runs were an in-image binary, an `sbx` flag that does not do what its help says,
+  a Linear label group, and an OpenAI schema rule — none reachable from a fake. Every fix
+  in `fix/blocked-tracker-writes-and-secret-scope` carries a test that was run against the
+  unfixed code first.
+- **A hand-written list drifts from the wildcard it came from.** §5.3 says
+  `* -> cancelled`; `_WORKFLOW` spelled it out and missed `resumable`, exactly as it had
+  earlier missed `blocked`. Both are derived now. Prefer deriving to enumerating.
+- **P0 verified that flags were accepted, not what they did.** `sbx exec -d` and the
+  inherited-secret assumption both failed that way. A verification that never observed the
+  effect is a note, not a measurement.
 
 Phase 1 deliberately contains no verification, no review, no push and no PR. Do not add
 them here: `gate_report.mjs` is a **layer-A** change that lands on `harness@v2` first
