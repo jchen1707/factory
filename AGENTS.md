@@ -148,13 +148,29 @@ Getting there cost nine defects across five real runs. Three are worth carrying:
   inherited-secret assumption both failed that way. A verification that never observed the
   effect is a note, not a measurement.
 
-**Phase 2 is next, and `docs/handoff-phase-2.md` is the order of work** — it starts in
-`harness` with `gate_report.mjs`, not in this repository, and it names the one egress
-chore §8.7 asks for before Phase 2 begins.
+**Phase 2 is underway.** Layers A and the factory's verify step are built and merged:
+`gate_report.mjs` landed on `harness@v2` (plugin 0.6.0, `3621178`) and is vendored into
+both consumers (`python-harness`, `frontend-harness`, pin `36211780f`); `src/factory/steps/verify.py`
+(PRD #3, `feat/verify-step`) runs the vendored `gate_report.mjs --json` in the build sandbox,
+writes `gates.json`, and transitions `verifying`: `pass→reviewing`, `fail→implementing`,
+`incomplete→blocked("gates-incomplete")`, evidence-mismatch→`blocked("evidence-mismatch")`.
+`docs/handoff-phase-2.md` was the order of work for steps 1–3; all three are merged.
 
-Phase 1 deliberately contains no verification, no review, no push and no PR. Do not add
-them here: `gate_report.mjs` is a **layer-A** change that lands on `harness@v2` first
-(§12.1), and Phase 2 is where the factory learns to read its output. Phase 3 adds the
+**Step 4 — the last Phase 2 step — is a real `factory run <TICKET>` reaching
+`verifying → reviewing` (or looping back to `implementing`) with a `gates.json` carrying a
+verdict.** Nothing short of a real run demonstrates Phase 2: step 2's tests used fakes and
+never exercised the vendored hook, so a real run against `python-harness` (the registered
+project, `base_branch=v2`, `stack=python`) is the demonstration. `frontend-harness` has
+`requires_clone = true` and won't claim until the `--clone` path is built — not this step.
+Preconditions (all resolved 2026-08-21): python-harness vendor-synced (pin `36211780f`);
+a ticket at `Todo` + `ready-for-agent` with a parent spec and acceptance criteria; the §8.7
+egress posture narrowed on the build sandbox (a per-sandbox deny mirrors
+`default-cloud-infrastructure`, leaving the global policy and live `codex-*` untouched); and
+the Codex event shape verified against the in-image 0.146.0 binary (the parser's
+`item_type`/`type` fallback is what makes it compatible). The current state is in
+`factory-plan-and-next-step` in memory; do not re-derive it.
+
+Phase 1 deliberately contains no verification, no review, no push and no PR. Phase 3 adds the
 reviewer sandbox and delivery; Phase 4 adds the poller, `gc` and the console.
 
 Four measured findings are load-bearing in the code and must not be "simplified":
