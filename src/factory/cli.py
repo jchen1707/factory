@@ -1362,9 +1362,7 @@ def dispatch_control(
     if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
         return 1, f"{run.linear_id} is leased by another process ({run.lease_owner})"
 
-    build = context_factory or (
-        lambda r: _context_for(home, registry, routing, store, linear, r)
-    )
+    build = context_factory or (lambda r: _context_for(home, registry, routing, store, linear, r))
     ctx = build(run)
     try:
         if action == "suspend":
@@ -1437,8 +1435,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         from factory.console.app import create_app
     except ImportError as exc:  # pragma: no cover - depends on the install
         print(
-            f"factory serve needs the console dependencies ({exc}). "
-            "Run `uv sync` and try again.",
+            f"factory serve needs the console dependencies ({exc}). Run `uv sync` and try again.",
             file=sys.stderr,
         )
         return 2

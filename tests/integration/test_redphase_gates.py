@@ -75,9 +75,7 @@ def test_f27_a_test_that_passes_at_the_base_ref_blocks_the_run(
     _declare_tests(ctx)
     _commit_a_test(ctx)
     _stub_scratch(ctx, monkeypatch)
-    monkeypatch.setattr(
-        redphase_step, "_classify", lambda completed, files: ("green", "1 passed")
-    )
+    monkeypatch.setattr(redphase_step, "_classify", lambda completed, files: ("green", "1 passed"))
 
     with pytest.raises(Blocked) as caught:
         redphase_step.replay(ctx)
@@ -96,9 +94,7 @@ def test_f27_is_not_reachable_from_any_configuration_file(
     _declare_tests(ctx)
     _commit_a_test(ctx)
     _stub_scratch(ctx, monkeypatch)
-    monkeypatch.setattr(
-        redphase_step, "_classify", lambda completed, files: ("green", "1 passed")
-    )
+    monkeypatch.setattr(redphase_step, "_classify", lambda completed, files: ("green", "1 passed"))
     loosest = replace(
         ctx.registry.defaults,
         redphase=RedPhase(inconclusive="report", inconclusive_alarm_pct=100),
