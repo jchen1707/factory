@@ -1,0 +1,37 @@
+
+:root { color-scheme: light dark; --fg:#111; --muted:#666; --line:#d8d8d8; --bg:#fff;
+        --chip:#eee; --pass:#0a7f3f; --fail:#b3261e; --warn:#8a6100; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#e8e8e8; --muted:#9a9a9a; --line:#333; --bg:#151515; --chip:#262626;
+          --pass:#4ade80; --fail:#f87171; --warn:#fbbf24; }
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:1.5rem; background:var(--bg); color:var(--fg);
+       font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+h1 { font-size:1.1rem; margin:0 0 .25rem; }
+h2 { font-size:.95rem; margin:1.5rem 0 .5rem; }
+nav { margin-bottom:1.25rem; border-bottom:1px solid var(--line); padding-bottom:.5rem; }
+nav a { color:var(--fg); margin-right:1rem; text-decoration:none; }
+nav a:hover { text-decoration:underline; }
+.sub { color:var(--muted); margin:0 0 1rem; font-size:.85rem; }
+table { border-collapse:collapse; width:100%; }
+th, td { text-align:left; padding:.35rem .6rem; border-bottom:1px solid var(--line);
+         vertical-align:top; white-space:nowrap; }
+th { color:var(--muted); font-weight:normal; font-size:.8rem; }
+td.wrap, th.wrap { white-space:normal; }
+.scroll { overflow-x:auto; }
+.chip { background:var(--chip); border-radius:3px; padding:.05rem .4rem; font-size:.8rem; }
+.pass { color:var(--pass); } .fail { color:var(--fail); } .warn { color:var(--warn); }
+.muted { color:var(--muted); }
+.bar { display:inline-block; width:70px; height:6px; background:var(--chip);
+       border-radius:3px; overflow:hidden; vertical-align:middle; }
+.bar > i { display:block; height:100%; background:var(--fg); }
+form.control { display:inline; }
+button { font:inherit; background:var(--chip); color:var(--fg); border:1px solid var(--line);
+         border-radius:3px; padding:.15rem .5rem; cursor:pointer; }
+button:hover { border-color:var(--fg); }
+pre { background:var(--chip); padding:.6rem; overflow-x:auto; border-radius:3px;
+      white-space:pre-wrap; word-break:break-word; }
+.note { border-left:2px solid var(--line); padding-left:.6rem; color:var(--muted); }
+"""
+

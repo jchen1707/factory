@@ -23,7 +23,9 @@ import sqlite3
 import threading
 import time
 import tomllib
+from functools import cache
 from pathlib import Path
+from string import Template
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -58,51 +60,32 @@ def _e(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-_STYLE = """
-:root { color-scheme: light dark; --fg:#111; --muted:#666; --line:#d8d8d8; --bg:#fff;
-        --chip:#eee; --pass:#0a7f3f; --fail:#b3261e; --warn:#8a6100; }
-@media (prefers-color-scheme: dark) {
-  :root { --fg:#e8e8e8; --muted:#9a9a9a; --line:#333; --bg:#151515; --chip:#262626;
-          --pass:#4ade80; --fail:#f87171; --warn:#fbbf24; }
-}
-* { box-sizing: border-box; }
-body { margin:0; padding:1.5rem; background:var(--bg); color:var(--fg);
-       font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-h1 { font-size:1.1rem; margin:0 0 .25rem; }
-h2 { font-size:.95rem; margin:1.5rem 0 .5rem; }
-nav { margin-bottom:1.25rem; border-bottom:1px solid var(--line); padding-bottom:.5rem; }
-nav a { color:var(--fg); margin-right:1rem; text-decoration:none; }
-nav a:hover { text-decoration:underline; }
-.sub { color:var(--muted); margin:0 0 1rem; font-size:.85rem; }
-table { border-collapse:collapse; width:100%; }
-th, td { text-align:left; padding:.35rem .6rem; border-bottom:1px solid var(--line);
-         vertical-align:top; white-space:nowrap; }
-th { color:var(--muted); font-weight:normal; font-size:.8rem; }
-td.wrap, th.wrap { white-space:normal; }
-.scroll { overflow-x:auto; }
-.chip { background:var(--chip); border-radius:3px; padding:.05rem .4rem; font-size:.8rem; }
-.pass { color:var(--pass); } .fail { color:var(--fail); } .warn { color:var(--warn); }
-.muted { color:var(--muted); }
-.bar { display:inline-block; width:70px; height:6px; background:var(--chip);
-       border-radius:3px; overflow:hidden; vertical-align:middle; }
-.bar > i { display:block; height:100%; background:var(--fg); }
-form.control { display:inline; }
-button { font:inherit; background:var(--chip); color:var(--fg); border:1px solid var(--line);
-         border-radius:3px; padding:.15rem .5rem; cursor:pointer; }
-button:hover { border-color:var(--fg); }
-pre { background:var(--chip); padding:.6rem; overflow-x:auto; border-radius:3px;
-      white-space:pre-wrap; word-break:break-word; }
-.note { border-left:2px solid var(--line); padding-left:.6rem; color:var(--muted); }
-"""
+#: Where the server-rendered pages live — §19 names `console/templates/*.html`, one page
+#: per view. They are `string.Template` files rather than a Jinja environment: the console
+#: renders half a dozen static shells, and a template engine is a dependency (and a
+#: sandbox-escape surface) bought for nothing. `$name` is substituted; `$$` is a literal.
+TEMPLATES = Path(__file__).parent / "templates"
+
+
+@cache
+def _template(name: str) -> Template:
+    """One template, read once and cached. Cached because a served page should not hit the
+    filesystem per request, and these files never change while the process is alive."""
+    return Template((TEMPLATES / name).read_text(encoding="utf-8"))
+
+
+def _render(name: str, /, **fields: str) -> str:
+    return _template(name).substitute(**fields)
 
 
 def _page(title: str, body: str) -> str:
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>{_e(title)} — factory</title>
-<style>{_STYLE}</style></head><body>
-<nav><a href="/">runs</a><a href="/runtimes">runtimes</a><a href="/config">configuration</a></nav>
-{body}
-</body></html>"""
+    """The shell every view shares: head, stylesheet, nav, body."""
+    return _render(
+        "page.html",
+        title=_e(title),
+        style=(TEMPLATES / "console.css").read_text(encoding="utf-8"),
+        body=body,
+    )
 
 
 def _pct_cell(pct: float | None, reason: str | None) -> str:
@@ -195,17 +178,12 @@ _CONTROL_BUTTONS: tuple[tuple[str, str], ...] = (
 
 
 def _controls(ticket: str) -> str:
-    forms = "".join(
+    buttons = "".join(
         f'<form class="control" method="post" action="/runs/{_e(ticket)}/{slug}">'
         f"<button type=submit>{_e(label)}</button></form> "
         for slug, label in _CONTROL_BUTTONS
     )
-    return (
-        f"<h2>controls</h2>{forms}"
-        '<p class="note">Every control writes an <code>actor="human"</code> transition and '
-        "goes through the same policy gate as the state machine. Merging is not a control: "
-        "it happens on GitHub, by James.</p>"
-    )
+    return _render("controls.html", buttons=buttons)
 
 
 def create_app(
@@ -252,15 +230,7 @@ def create_app(
     def board() -> HTMLResponse:
         reg, rt, st, _ = _cfg()
         rows = console_views.runs_board(home, reg, rt, st)
-        body = (
-            "<h1>runs</h1>"
-            '<p class="sub">Live from the state database. Updates without a reload.</p>'
-            f'<div id="board">{_board_table(rows)}</div>'
-            "<script>"
-            "const es=new EventSource('/sse/board');"
-            "es.onmessage=e=>{document.getElementById('board').innerHTML=JSON.parse(e.data).html;};"
-            "</script>"
-        )
+        body = _render("board.html", table=_board_table(rows))
         return HTMLResponse(_page("runs", body))
 
     @app.get("/sse/board")
@@ -388,8 +358,16 @@ def create_app(
                 "</script>"
             )
 
-        body = head + _controls(r.ticket) + timeline_html + gates_html + review_html
-        body += artifacts_html + tail_html
+        body = _render(
+            "run_detail.html",
+            head=head,
+            controls=_controls(r.ticket),
+            timeline=timeline_html,
+            gates=gates_html,
+            review=review_html,
+            artifacts=artifacts_html,
+            tail=tail_html,
+        )
         return HTMLResponse(_page(r.ticket, body))
 
     @app.get("/sse/tail/{ticket}")
@@ -472,13 +450,7 @@ def create_app(
                 "<th>workspace</th><th>ports</th><th>template</th><th>runs</th>"
                 "<th>last denial</th></tr></thead><tbody>" + body_rows + "</tbody></table></div>"
             )
-        body = (
-            "<h1>runtimes</h1>"
-            '<p class="sub">Sandboxes joined to the runs using them. A sandbox outside the '
-            "<code>factory-(build|review)-*</code> namespace is operator-owned — that is "
-            "<code>csbx</code>'s session, and the console offers no control over it.</p>" + table
-        )
-        return HTMLResponse(_page("runtimes", body))
+        return HTMLResponse(_page("runtimes", _render("runtimes.html", table=table)))
 
     @app.get("/config", response_class=HTMLResponse)
     def config_view(request: Request) -> HTMLResponse:
@@ -501,24 +473,13 @@ def create_app(
         elif saved:
             banner = '<p class="pass">models.toml written.</p>'
 
-        body = (
-            "<h1>configuration</h1>"
-            '<p class="sub">Editing <code>models.toml</code>. The §4.5 rules are applied '
-            "before the write, so a configuration that puts the reviewer on the builder's "
-            "model is rejected here rather than at the next daemon start.</p>"
-            + banner
-            + '<form method="post" action="/config/models">'
-            '<div class="scroll"><table><thead><tr><th>role</th><th>model</th><th>effort</th>'
-            "</tr></thead><tbody>" + role_rows + "</tbody></table></div>"
-            "<h2>budget</h2>"
-            f'<p>per-run ceiling $<input name="usd_per_run" value="{view.usd_per_run}" size="8"> '
-            f'· warn at $<input name="usd_warn_at" value="{view.usd_warn_at}" size="8"></p>'
-            "<p><button type=submit>Save</button></p></form>"
-            "<h2>projects <span class='muted'>(read-only)</span></h2>"
-            '<p class="note">A project\'s template, mount set and static MCP set are part of a '
-            "sandbox specification fixed at creation. Changing one here would silently do "
-            "nothing: edit <code>projects.toml</code> deliberately and rename the sandbox.</p>"
-            "<ul>" + "".join(f"<li>{_e(name)}</li>" for name in view.projects_read_only) + "</ul>"
+        body = _render(
+            "config.html",
+            banner=banner,
+            role_rows=role_rows,
+            usd_per_run=str(view.usd_per_run),
+            usd_warn_at=str(view.usd_warn_at),
+            project_rows="".join(f"<li>{_e(name)}</li>" for name in view.projects_read_only),
         )
         return HTMLResponse(_page("configuration", body))
 

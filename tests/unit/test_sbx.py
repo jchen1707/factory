@@ -119,6 +119,8 @@ MEASURED_SECRETS = [
 
 
 def test_create_argv_carries_a_deny_rule_per_host() -> None:
+    # §22 F19 — the denied hosts reach the sandbox spec, so egress to one is blocked
+    # by the proxy rather than by anything the agent could talk its way past.
     argv = create_argv(_spec(deny_network=("mcp.linear.app", "example.invalid")))
     assert argv.count("--deny-network") == 2
     assert argv[argv.index("--deny-network") + 1] == "mcp.linear.app"
