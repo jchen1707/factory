@@ -166,6 +166,17 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
             detail=", ".join(known),
         )
 
+    # 3c. For a clone project: the clone is actually in effect. `ensure` attaches to an
+    #     existing sandbox by name and `_assert_spec_matches` compares the workspace set —
+    #     which is *identical* either way, because the clone sits at the project's own
+    #     path. So a sandbox created before this project needed `--clone` would be
+    #     attached to in silence, the agent would work on the bind-mounted host tree, and
+    #     the first sign of it would be a `pnpm install` overwriting the host's
+    #     node_modules. Asserted the way §9.3 asks: by producing the observable.
+    if ctx.project.requires_clone:
+        isolated, detail = _clone_isolation(ctx, spec)
+        checks.append(("clone-isolates-the-workspace", isolated, detail))
+
     # 4. The vendored layer-A tree is intact. F9. Run on the host, against the repo
     #    the sandbox has mounted, because `vendor_sync.py` is a host script and reading
     #    files is one of the three things the factory does on the host.
@@ -234,4 +245,37 @@ def _protect_paths_canary(ctx: Context, spec: SandboxSpec) -> tuple[bool, str]:
     return False, (
         f"writing {protected.glob!r} exited {result.returncode}, expected {_BLOCKING_EXIT}. "
         f"stdout={result.stdout.strip()[:200]} stderr={result.stderr.strip()[:200]}"
+    )
+
+
+def _clone_isolation(ctx: Context, spec: SandboxSpec) -> tuple[bool, str]:
+    """Prove the VM is on a private clone and not on the host's directory.
+
+    The host writes a marker into the project's own `.factory/` and asks the VM whether it
+    can see it. A bind mount shares writes immediately, so *visible* means the clone is
+    not in effect; a clone carries only the tracked content it was made from, so *absent*
+    is the proof. The direction matters: writing from the host keeps the whole test on
+    ground the factory already owns, and cleanup is a local `unlink` that cannot fail
+    halfway inside a VM.
+    """
+    marker = ctx.project.path / ".factory" / f"clone-canary-{ctx.run.id}"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("If the sandbox can read this, it is not on a clone.\n", encoding="utf-8")
+    try:
+        seen = ctx.sandbox.exec_sync(
+            spec.name,
+            ["/bin/sh", "-c", f'[ -e "{marker}" ] && echo visible || echo absent'],
+            timeout=120,
+        )
+    finally:
+        marker.unlink(missing_ok=True)
+
+    if seen.stdout.strip() == "absent":
+        return True, f"{marker.name} written on the host is not visible in {spec.name}"
+    return False, (
+        f"{spec.name} can see {marker}, so it is bind-mounted on the host checkout rather "
+        f"than running on a clone. {ctx.project.name} requires a clone: a `pnpm install` in "
+        "there would overwrite the host's node_modules (p0-10). The sandbox almost "
+        "certainly predates `requires_clone` — `sbx rm` it and let the factory recreate it, "
+        "because the workspace set is fixed at creation."
     )

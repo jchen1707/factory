@@ -93,6 +93,59 @@ def test_the_clone_mount_is_project_stable_not_per_run(clone_ctx: Context) -> No
     assert clone_ctx.run.linear_id in str(clone_ctx.factory_dir)
 
 
+def test_the_preflight_proves_the_clone_is_actually_in_effect(clone_ctx: Context) -> None:
+    """`ensure` attaches to an existing sandbox by name, and `_assert_spec_matches` compares
+    the workspace set — which is *identical* whether or not `--clone` was passed, because
+    the clone sits at the project's own path. A sandbox created before this project needed
+    a clone would therefore be attached to in silence. This is the assertion that notices."""
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+
+    checks = {c["check_name"]: c["status"] for c in clone_ctx.store.checks(clone_ctx.run.id)}
+    assert checks["preflight:clone-isolates-the-workspace"] == "pass"
+    # And it left nothing behind in the repository it wrote into.
+    assert not list((clone_ctx.project.path / ".factory").glob("clone-canary-*"))
+
+
+def test_the_isolation_canary_fails_when_the_sandbox_is_bind_mounted(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canary that cannot fail proves nothing — §9.3's whole point. Here the sandbox is
+    made without its clone, which is exactly the silent-attach case, and the preflight has
+    to refuse the run rather than let a `pnpm install` reach the host's node_modules."""
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    monkeypatch.setattr(
+        sandbox_step,
+        "build_spec",
+        lambda ctx: replace(_clone_spec(ctx), clone=False),
+    )
+
+    with pytest.raises(Blocked) as caught:
+        sandbox_step.run(clone_ctx)
+
+    assert caught.value.reason == "enforcement-disabled"
+    assert "clone-isolates-the-workspace" in caught.value.detail
+    assert not list((clone_ctx.project.path / ".factory").glob("clone-canary-*"))
+
+
+def _clone_spec(ctx: Context):
+    """`build_spec` before the monkeypatch replaces it."""
+    return sandbox_step.SandboxSpec(
+        project=ctx.project.name,
+        role="build",
+        name=ctx.project.build_sandbox,
+        workspaces=(
+            sandbox_step.Workspace(ctx.project.path),
+            sandbox_step.Workspace(ctx.clone_mount),
+        ),
+        template=ctx.project.template or None,
+        env=dict(ctx.project.env),
+        clone=True,
+    )
+
+
 # --------------------------------------------------------------------------------
 # worktree_ready — the branch is cut inside the VM
 # --------------------------------------------------------------------------------

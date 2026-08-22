@@ -8,6 +8,7 @@ real thing, that step has too much of the real thing in it.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -255,6 +256,16 @@ class FakeSandbox:
                 input=stdin,
             )
             return Completed(tuple(argv), proc.returncode, proc.stdout, proc.stderr)
+        probe = re.search(r'\[ -e "([^"]+)" \]', " ".join(str(a) for a in argv))
+        if probe is not None:
+            # The clone-isolation canary: the host wrote a marker into the project tree and
+            # is asking whether the VM can see it. `_vm_path` is the whole answer — identity
+            # for a bind mount (visible, correctly) and a redirect into the private clone
+            # for a `--clone` sandbox (absent, correctly). Modelled rather than canned,
+            # because a canary that cannot fail proves nothing, which is the exact mistake
+            # §9.3 exists to prevent.
+            target = Path(self._vm_path(name, probe.group(1)))
+            return Completed(tuple(argv), 0, "visible" if target.exists() else "absent", "")
         if any("gate_report.mjs" in str(arg) for arg in argv):
             # The verify step: return the canned report, with the exit code that mirrors
             # its verdict (0/1/3 for pass/fail/incomplete). The step trusts the JSON
