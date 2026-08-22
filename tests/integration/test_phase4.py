@@ -31,8 +31,8 @@ from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
-from factory.store import Run
-from tests.integration.conftest import GOOD_RESULT, FakeSandbox
+from factory.store import Effect, Run
+from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeSandbox
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -677,6 +677,39 @@ def test_resume_a_blocked_at_verifying_run_re_enters_verifying(ctx: Context) -> 
     assert ctx.state is State.REVIEWING
 
 
+def test_a_verifying_resume_re_runs_the_gates_rather_than_reading_a_stale_report(
+    ctx: Context,
+) -> None:
+    # The handoff's open question 1. A `--from verifying` resume re-runs the gate report;
+    # `collect` never trusts a `gates.json` a prior run left behind. That is the decision
+    # that surfaced FRO-6's hidden lighthouse failure, and `env-gate-failed` makes a re-run
+    # safe. Here a stale report says `fail` and the fresh reality is `pass`; the run must
+    # reach `reviewing` on the fresh verdict, not the stale one.
+    _to_verifying(ctx)
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
+
+    # A prior run's output, sitting on disk where the re-run would write its own.
+    stale = dict(GOOD_GATE_REPORT)
+    stale["verdict"] = "fail"
+    for gate in stale["gates"]:
+        gate["status"] = "fail"
+    (attempt_dir / "gates.stdout.txt").write_text(json.dumps(stale, indent=2), encoding="utf-8")
+    (attempt_dir / "gates.json").write_text(json.dumps(stale, indent=2), encoding="utf-8")
+
+    _block_at(ctx, State.VERIFYING, "env-gate-failed")
+    recovery.resume(ctx)  # re-enters verifying (no --from: reads the recorded origin)
+    assert ctx.state is State.VERIFYING
+
+    # `fake.gate_report` is still the default pass — the fresh reality.
+    detached_before = len(_fake(ctx).detached)
+    verify_step.run(ctx)  # start spawns a fresh gate report, collect reads it back
+
+    assert ctx.state is State.REVIEWING  # the fresh pass won, not the stale fail
+    assert len(_fake(ctx).detached) > detached_before  # a gate report actually re-ran
+    # And the stale report was overwritten by the re-run, not preserved as the verdict.
+    assert json.loads((attempt_dir / "gates.json").read_text())["verdict"] == "pass"
+
+
 def test_resume_a_suspended_implementing_run_resumes_the_session_by_id(ctx: Context) -> None:
     _start_an_attempt(ctx, finish=False)
     ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
@@ -901,7 +934,7 @@ def test_a_fourth_gate_failure_parks_at_resumable_not_a_fifth_implement(ctx: Con
 # --------------------------------------------------------------------------------
 
 
-def _comment_effect(ctx: Context):
+def _comment_effect(ctx: Context) -> Effect:
     return next(e for e in ctx.store.effects(ctx.run.id) if e.key.startswith("comment:blocked"))
 
 

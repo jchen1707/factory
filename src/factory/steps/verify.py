@@ -112,6 +112,17 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     # are left in place.
     attempt_dir.clear_liveness()
 
+    if ctx.project.requires_clone:
+        # The build sandbox is shared across the project's runs, so a second run may have
+        # checked out its own branch in the clone between the implement attempt finishing
+        # and this tick. The gate report runs against the clone's working tree, so put it
+        # back on the run's branch first — or the gates would run against the wrong ticket's
+        # code while the evidence points at this one. No-op on the forward path; the
+        # `exec_sync` it issues starts a stopped sandbox, exactly like `fetch_back` does.
+        from factory.steps import clone as clone_step
+
+        clone_step.ensure_on_branch(ctx)
+
     gates_run = _gates_run(attempt_dir)
     argv = _gate_argv(ctx.harness, gates_run, base_ref)
     body = (
@@ -198,6 +209,14 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     possibly in a different process, after a reboot. Nothing here reads anything `start`
     held in memory: the report is on disk at `gates.stdout.txt`, the claim at
     `last-message.json`, both under the same absolute path on both sides.
+
+    A `--from verifying` resume re-runs the gate report rather than trusting a stale
+    `gates.json`: `recovery.resume` only advances into `verifying`, and the tick's
+    `START_NEEDED` branch calls `start` again, so `collect` reads a freshly written
+    `gates.stdout.txt`. That is deliberate — re-running is what surfaced a hidden
+    environment-gate failure on FRO-6, and `env-gate-failed` (below) makes a re-run safe by
+    blocking instead of looping back. Reading the prior `gates.json` would round a stale
+    answer to green and is never done.
     """
     recorded = _already_recorded(ctx, attempt)
     report = _validated_report(ctx, attempt_dir, attempt, recorded=recorded)

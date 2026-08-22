@@ -49,6 +49,7 @@ from factory.steps import Context
 
 __all__ = [
     "create_branch",
+    "ensure_on_branch",
     "fetch_back",
     "host_worktree_path",
     "remote_name",
@@ -127,6 +128,49 @@ def create_branch(ctx: Context, branch: str) -> None:
         _exec(ctx, ["git", "-C", project_path, "checkout", branch])
         return
     _exec(ctx, ["git", "-C", project_path, "checkout", "-b", branch, ctx.project.base_ref])
+
+
+def ensure_on_branch(ctx: Context) -> None:
+    """Make sure the clone is on the run's branch before a step reads its tree.
+
+    A `--clone` build sandbox is named once per project and shared across the project's
+    runs, and `create_branch` checks out each run's branch inside it at `worktree_ready`.
+    So a second run of the same project leaves the clone on *its* branch, and a
+    `--from verifying` resume long after (or a re-run after another run repointed the clone)
+    would spawn the gate report against the wrong tree — the run's own evidence pointing at
+    one branch, the gates running against another. `--from reviewing` dodges this because
+    `review.start` calls `fetch_back` and rebuilds a host mirror; verify does not, so this
+    is the repair.
+
+    Idempotent: a no-op when the clone is already on the branch (the forward path, where
+    the implementer just committed on it). The `exec_sync` checkout starts a stopped
+    sandbox, the same way `_fetch_with_the_sandbox_running` does.
+
+    If the branch is gone — the sandbox was recreated, or the clone was reset — block as
+    `clone-branch-missing` rather than silently cutting a fresh empty one. A resume that
+    has lost the agent's commits is a human decision, not a re-run; `create_branch`'s
+    `checkout -b <base>` is right for `worktree_ready` and wrong here.
+    """
+    branch = ctx.branch
+    if branch is None:
+        raise Blocked("no-branch", f"run {ctx.run.id} has no branch to check out")
+    project_path = str(ctx.project.path)
+    exists = ctx.sandbox.exec_sync(
+        ctx.project.build_sandbox,
+        ["git", "-C", project_path, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        env=dict(ctx.project.env),
+        timeout=120,
+    ).ok
+    if not exists:
+        raise Blocked(
+            "clone-branch-missing",
+            f"the run's branch {branch} is not in the clone {ctx.project.build_sandbox}. "
+            "The sandbox was recreated or the clone was reset, and the agent's commits are "
+            "gone with it; a resume from here cannot re-run the gates against work that no "
+            "longer exists. Re-run the ticket from the start, or restore the branch in the "
+            "clone by hand.",
+        )
+    _exec(ctx, ["git", "-C", project_path, "checkout", branch])
 
 
 def seed_context(ctx: Context) -> None:
