@@ -126,8 +126,12 @@ def test_the_attempt_directory_is_complete_and_hashed(ctx: Context) -> None:
     assert set(manifest["files"]) >= {"prompt.md", "events.jsonl", "last-message.json"}
 
     request = json.loads((attempt / "request.json").read_text())
-    assert request["model"] == "gpt-5.6-sol"
-    assert request["effort"] == "xhigh"
+    # Against the shipped routing table rather than a copy of it: the property is that
+    # the request carries what `models.toml` routes the builder to, and pinning the
+    # values here means every effort change breaks a test that is not about effort.
+    builder = ctx.routing.role("builder")
+    assert request["model"] == builder.model
+    assert request["effort"] == builder.effort
     assert len(request["implement_skill_sha256"]) == 64
     assert "--dangerously-bypass-hook-trust" in request["argv"]
 

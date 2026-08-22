@@ -20,7 +20,7 @@ model  = "gpt-5.6-sol"
 effort = "high"
 
 [roles.reviewer]
-model  = "gpt-5.5"                 # MUST differ from roles.builder.model
+model  = "gpt-5.6-terra"           # MUST differ from roles.builder.model
 effort = "high"
 
 [roles.synthesiser]

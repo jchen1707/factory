@@ -22,6 +22,11 @@ CACHE = {
     )
     for slug, efforts, hidden in [
         ("gpt-5.6-sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+        # Terra is what the shipped table routes the reviewer at, so the stand-in cache
+        # has to carry it: these two tests load `config/models.toml` itself, and a
+        # fixture missing a model the real cache has fails the shipped table for a fact
+        # about the fixture. `~/.codex/models_cache.json` lists it at low..ultra.
+        ("gpt-5.6-terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
         ("gpt-5.6-luna", ("low", "medium", "high", "xhigh", "max"), False),
         ("gpt-5.5", ("low", "medium", "high", "xhigh"), False),
         ("gpt-5.4-mini", ("low", "medium", "high", "xhigh"), False),
