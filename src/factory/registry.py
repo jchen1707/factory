@@ -70,6 +70,12 @@ class Project:
     network_allow: tuple[str, ...]
     env: Mapping[str, str] = field(default_factory=dict)
     requires_clone: bool = False
+    #: Credential names that `sbx` puts in the sandbox environment, that this project
+    #: has looked at and decided to run with anyway. Every name here is recorded as a
+    #: `warn` on every run rather than passing silently; a name *not* here blocks. The
+    #: list is per project because the judgement is per project — see
+    #: `policy.capability_env_names`.
+    acknowledged_env_credentials: tuple[str, ...] = ()
 
     @property
     def base_ref(self) -> str:
@@ -160,6 +166,9 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
         network_allow=tuple(str(h) for h in raw.get("network_allow", ())),
         env={str(k): str(v) for k, v in dict(raw.get("env", {})).items()},
         requires_clone=bool(raw.get("requires_clone", False)),
+        acknowledged_env_credentials=tuple(
+            str(n) for n in raw.get("acknowledged_env_credentials", ())
+        ),
     )
 
 
