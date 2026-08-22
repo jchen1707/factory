@@ -19,8 +19,8 @@ Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
 | `recovery.py` | **built** — §16.3 resume-vs-restart and §16.3a's ladder, `decide` is pure |
 | `gc.py` + `cli.py: gc` | **built** — §16.5, `--dry-run` is the same code path |
 | `steps/plan.py` rewind | **built** — rung 3 enters `planning`; `plan` records an attempt row now |
-| `cli.py: suspend` / `resume` | **built** — `recovery.suspend`/`recovery.resume` + thin CLI shells; see below |
-| `cli.py: daemon` + `ops/com.jchen.factory.plist` | not built |
+| `cli.py: suspend` / `resume` | **built + validated end-to-end** — `recovery.suspend`/`recovery.resume` + thin CLI shells; drove FRO-6 `blocked → reviewing → pr_ready → awaiting_human` (PR #41). Two bugs found+fixed: the verify-fail loop-back `illegal-transition` (defect 4) and the forced-Tier-2 PR-body misreporting (defect 5). Committed `5a3e400`, `822c11c`. |
+| `cli.py: daemon` + `ops/com.jchen.factory.plist` | not built — blocked on two-phase verify/review/deliver + the `--all`/lighthouse fix (see "What remains") |
 | `src/factory/console/` | not built |
 | `docs/runbook.md` | not built |
 
@@ -113,28 +113,67 @@ clone. `sbx stop` does not destroy it — only `sbx rm` does — but a resume th
 daemon port re-read. `steps/clone.py:_fetch_with_the_sandbox_running` already knows that
 dance; do not reimplement it.
 
-## What remains after `resume`
+## What remains in Phase 4
 
-In the order I would do them:
+`resume` and Tier 2 are **closed** (commits `5a3e400`, `822c11c`, pushed to
+`origin/feat/phase-4-tick-and-recovery`). In the order I would do them:
 
-1. **Make `verify`/`review`/`deliver` two-phase**, closing the gap above. The daemon should
-   not be loaded under a timer while a tick can block for minutes.
-2. **`daemon` + `ops/com.jchen.factory.plist`** — `StartInterval 60`, `RunAtLoad`, stdout
+1. **Make `verify`/`review`/`deliver` two-phase.** This session drove all three
+   synchronously inside one `factory resume` process and confirmed the gap is real: the
+   command blocked for the whole Tier-2 fan-out (~5 min, four codex axes at
+   `model_reasoning_effort=high`). The two-phase split (`start`/`collect`, like
+   `implement`) is the precondition for the daemon — `launchd` does not overlap
+   `StartInterval` instances so a blocking tick stalls reaping. The review fan-out is the
+   long pole; verify's gates and deliver's push are short.
+2. **Fix the `--all`/lighthouse daemon hazard before loading the timer.** `gate_report.mjs`
+   runs *every* opt-in gate under `--all` and does not re-evaluate `when`, so a frontend
+   ticket whose agent claims any e2e/integration gate also forces lighthouse, which fails on
+   missing Chrome and can't pass even with it (its caveat: performance scores null). With
+   the illegal-transition crash now fixed, a daemon that resumes such a ticket into
+   `verifying` will loop back to a fresh ~10 M-token `implement` to "fix" an environment
+   gate — repeatedly, until the attempt budget exhausts to `failed`. Two options: make
+   `gate_report.mjs` respect `when` under `--all` (a layer-A vendored change — out-of-scope
+   opt-in gates become `not_applicable`), or have the poller refuse to auto-advance a ticket
+   whose claimed opt-in gates include one whose `when` is unsatisfiable. Either way this
+   must be settled before the daemon runs unattended; today it only bites a manual resume.
+   (See [[opt-in-gates-all-is-all-or-nothing]] in memory.)
+3. **`daemon` + `ops/com.jchen.factory.plist`** — `StartInterval 60`, `RunAtLoad`, stdout
    and stderr to `~/factory/logs/`. §19's rollback is `launchctl bootout`; the daemon is
-   stateless between ticks so stopping it is safe at any instant.
-3. **`docs/runbook.md`** — what James does when the factory is stuck. Write it after the
-   daemon, from what actually went wrong, not before it from imagination.
-4. **The console** (§18.5, five views, loopback only). The largest item and the least
+   stateless between ticks so stopping it is safe at any instant. Do not load it until 1
+   and 2 are done.
+4. **`docs/runbook.md`** — what James does when the factory is stuck. Write it after the
+   daemon, from what actually went wrong, not before it from imagination. This session
+   already supplies two entries: the `illegal-transition` block (a factory bug — fix the
+   code, don't re-run), and the lighthouse/`--all` block (an env gate — `--from reviewing`
+   to bypass, or fix the claim).
+5. **The console** (§18.5, five views, loopback only). The largest item and the least
    load-bearing: every view has a CLI form and §18.5 says the CLI is built first. The
    context percentage needs `~/.codex/models_cache.json` for the denominator — P0-7 proved
    the event stream carries neither the window nor a percentage.
-5. **The §22 rows Phase 4 owns.** Covered so far: F3, F4, F12, F13, F24 (and F15/F16
-   partly, through `gc`'s refusals). Not covered: **F1/F2** (crash between the effects
+6. **The §22 rows Phase 4 owns.** Covered so far: F3, F4, F12, F13, F24, and now **F22**
+   (suspend then resume — exercised end-to-end this session). **F23** (third consecutive
+   gate failure enters `planning`) is now *reachable* to test: the verify-fail loop-back no
+   longer crashes, so a run that fails a gate three times should climb the ladder to
+   `planning` instead of erroring. Still uncovered: **F1/F2** (crash between the effects
    `INSERT` and the write, via a `FACTORY_CRASH_AT` env hook — the ledger's whole reason
    for existing and still untested under a real crash), **F14** (disk floor), **F17**
-   (Linear unreachable mid-run), **F22** (suspend then resume), **F23** (third consecutive
-   gate failure enters `planning`), **F25** (`models.toml` refusing to start), **F26**
-   (a console control aimed at a `codex-*` sandbox).
+   (Linear unreachable mid-run), **F25** (`models.toml` refusing to start), **F26** (a
+   console control aimed at a `codex-*` sandbox).
+
+### Two open questions a next session will hit
+
+- **Should `verify` re-run the gates at all on a `--from verifying` resume?** It re-ran
+  them this session and surfaced the lighthouse/env failure that the original run's
+  `not_applicable` (defect 3) had hidden. Re-running is more honest but it is also what
+  blocked the resume. The two-phase split (item 1) is where to decide whether `collect`
+  reads the existing report or re-runs.
+- **The clone worktree on a `--from verifying`/`reviewing` resume.** `ctx.worktree` for a
+  `--clone` run is the host project path, and the FRO-6 resume's verify ran the gates
+  against `/Users/james/frontend-harness` — which only had the FRO-6 branch because
+  `clone.fetch_back` had repointed the host mirror during the original run. A resume long
+  after that (or after another run repointed the mirror) would re-run gates against the
+  wrong tree. `--from reviewing` dodged this (review fetches back fresh); `--from verifying`
+  does not. Worth a test before relying on `--from verifying` for clone runs.
 
 ## Where Phase 3 ended
 
