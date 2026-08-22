@@ -17,6 +17,15 @@
   The absolute `/opt/homebrew/bin/uv` path is deliberate: launchd does not inherit the
   user's PATH, so a bare `uv` or `factory` would not resolve. `uv run --project` syncs the
   environment and exposes the `factory` console script declared in pyproject.toml.
+
+  EnvironmentVariables/PATH is the same problem one layer down, and it is the reason the
+  first real load of this timer could not complete a single tick. launchd's default is
+  `/usr/bin:/bin:/usr/sbin:/sbin`, which covers `git` and `security` but not the five
+  other binaries the factory execs by bare name: `gh` and `sbx` in /opt/homebrew/bin,
+  `codex`, `node` and `pnpm` in ~/.local/bin. Fixing only `uv` above got the process
+  started and then died in `_open_pr_heads` with `FileNotFoundError: 'gh'` — and a missing
+  binary raises past `_work_on`'s caught set, so it kills the whole pass, not one run.
+  Keep this list in step with the adapters; `factory doctor` resolves the same names.
 -->
 <plist version="1.0">
 <dict>
@@ -33,6 +42,12 @@
         <string>tick</string>
         <string>--once</string>
     </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/Users/james/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
 
     <key>StartInterval</key>
     <integer>60</integer>
