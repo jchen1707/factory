@@ -12,6 +12,7 @@ pick it up". Returning normally means the state advanced.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -262,12 +263,25 @@ def record_effect(
     else:
         ctx.store.intend_effect(run_id, attempt, step, system, key)
 
+    # F1/F2 — crash injection for the ledger's idempotency test. `pre` exits after the
+    # `intended` row is committed but before the external write; `post` exits after the
+    # write but before `confirmed`. The next call reconciles rather than retries blindly —
+    # the whole reason the ledger exists. No-op in production, where the var is unset.
+    _crash_if_asked(f"{system}:{key}:pre")
     external_id = perform()
+    _crash_if_asked(f"{system}:{key}:post")
     ctx.store.confirm_effect(
         run_id, attempt, step, system, key, str(external_id) if external_id else None
     )
     ctx.log("effect.performed", step=step, system=system)
     return str(external_id) if external_id else None
+
+
+def _crash_if_asked(point: str) -> None:
+    """Raise `SystemExit` when `FACTORY_CRASH_AT` names `point`, so the ledger's
+    reconcile-on-resume path can be tested against a real crash between its two halves."""
+    if os.environ.get("FACTORY_CRASH_AT") == point:
+        raise SystemExit(f"FACTORY_CRASH_AT={point}")
 
 
 def effect_marker(ctx: Context, step: str) -> str:

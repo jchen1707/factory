@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The factory's launchd timer. `factory tick --once` runs in a fresh process every 60 s,
+  which is the whole crash-safety design (§4.2): the tick that asks is never the tick that
+  started the run, so every fact it acts on is read from SQLite or the filesystem at the
+  top of the pass. The daemon is stateless between ticks, so `launchctl bootout` stops it
+  safely at any instant and in-flight leases expire on their own.
+
+  Load:   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist
+  Kick:   launchctl kickstart -k gui/$(id -u)/com.jchen.factory
+  Stop:   launchctl bootout gui/$(id -u)/com.jchen.factory
+
+  James decides when this is loaded (§19 approval boundary). Until then every run is
+  manual via `factory run`, and `factory daemon` is the no-launchd foreground loop.
+
+  The absolute `/opt/homebrew/bin/uv` path is deliberate: launchd does not inherit the
+  user's PATH, so a bare `uv` or `factory` would not resolve. `uv run --project` syncs the
+  environment and exposes the `factory` console script declared in pyproject.toml.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jchen.factory</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>/Users/james/factory</string>
+        <string>factory</string>
+        <string>tick</string>
+        <string>--once</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/james/factory/logs/daemon.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/james/factory/logs/daemon.err.log</string>
+</dict>
+</plist>

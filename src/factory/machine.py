@@ -192,7 +192,7 @@ class Blocked(Exception):
     `empty-spec`, `no-acceptance-criteria`, `duplicate-pr`, `team-repo-mismatch`,
     `stack-mismatch`, `vault-unresolved`, `enforcement-disabled`, `schema-invalid`,
     `evidence-mismatch`, `budget-exceeded`, `vault-write-outside-allowlist`,
-    `already-implemented`, `branch-exists`.
+    `already-implemented`, `branch-exists`, `env-gate-failed`.
     """
 
     def __init__(self, reason: str, detail: str = "") -> None:

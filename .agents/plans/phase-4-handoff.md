@@ -20,9 +20,9 @@ Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
 | `gc.py` + `cli.py: gc` | **built** — §16.5, `--dry-run` is the same code path |
 | `steps/plan.py` rewind | **built** — rung 3 enters `planning`; `plan` records an attempt row now |
 | `cli.py: suspend` / `resume` | **built + validated end-to-end** — `recovery.suspend`/`recovery.resume` + thin CLI shells; drove FRO-6 `blocked → reviewing → pr_ready → awaiting_human` (PR #41). Two bugs found+fixed: the verify-fail loop-back `illegal-transition` (defect 4) and the forced-Tier-2 PR-body misreporting (defect 5). Committed `5a3e400`, `822c11c`. |
-| `cli.py: daemon` + `ops/com.jchen.factory.plist` | not built — blocked on two-phase verify/review/deliver + the `--all`/lighthouse fix (see "What remains") |
-| `src/factory/console/` | not built |
-| `docs/runbook.md` | not built |
+| `cli.py: daemon` + `ops/com.jchen.factory.plist` | **built** — `cmd_daemon` loops a factored `_tick_pass`; the plist runs `factory tick --once` every 60 s via an absolute `/opt/homebrew/bin/uv` path (launchd has no PATH). Not loaded under the timer until James says so (§19). |
+| `src/factory/console/` | not built — **deferred** by the 2026-08-22 scope decision (core path + tests first; the CLI forms exist and §18.5 says the CLI is built first). Adds FastAPI/uvicorn deps to the stdlib-only control plane, so it is its own decision. |
+| `docs/runbook.md` | **built** — `docs/runbook.md`, written from the real defects (env-gate-failed, illegal-transition, lighthouse/`--all`, disk floor, Linear outage, bad PR, stop-now). |
 
 Plus three things §19 does not list, all forced by real runs: `factory run --full-review`
 (§15.2 override), intake **condition 11** (blocking relations), and the poller evaluating
@@ -144,40 +144,53 @@ dance; do not reimplement it.
    `.agents/plans/drifting-sprouting-lantern.md`. Next: item 2 (the `--all`/lighthouse
    hazard) is now the blocker for the daemon — a daemon resuming such a ticket into
    `verifying` will still loop back to a fresh implement on a lighthouse fail.
-2. **Fix the `--all`/lighthouse daemon hazard before loading the timer.** `gate_report.mjs`
-   runs *every* opt-in gate under `--all` and does not re-evaluate `when`, so a frontend
-   ticket whose agent claims any e2e/integration gate also forces lighthouse, which fails on
-   missing Chrome and can't pass even with it (its caveat: performance scores null). With
-   the illegal-transition crash now fixed, a daemon that resumes such a ticket into
-   `verifying` will loop back to a fresh ~10 M-token `implement` to "fix" an environment
-   gate — repeatedly, until the attempt budget exhausts to `failed`. Two options: make
-   `gate_report.mjs` respect `when` under `--all` (a layer-A vendored change — out-of-scope
-   opt-in gates become `not_applicable`), or have the poller refuse to auto-advance a ticket
-   whose claimed opt-in gates include one whose `when` is unsatisfiable. Either way this
-   must be settled before the daemon runs unattended; today it only bites a manual resume.
-   (See [[opt-in-gates-all-is-all-or-nothing]] in memory.)
-3. **`daemon` + `ops/com.jchen.factory.plist`** — `StartInterval 60`, `RunAtLoad`, stdout
-   and stderr to `~/factory/logs/`. §19's rollback is `launchctl bootout`; the daemon is
-   stateless between ticks so stopping it is safe at any instant. Do not load it until 1
-   and 2 are done.
-4. **`docs/runbook.md`** — what James does when the factory is stuck. Write it after the
-   daemon, from what actually went wrong, not before it from imagination. This session
-   already supplies two entries: the `illegal-transition` block (a factory bug — fix the
-   code, don't re-run), and the lighthouse/`--all` block (an env gate — `--from reviewing`
-   to bypass, or fix the claim).
-5. **The console** (§18.5, five views, loopback only). The largest item and the least
-   load-bearing: every view has a CLI form and §18.5 says the CLI is built first. The
-   context percentage needs `~/.codex/models_cache.json` for the denominator — P0-7 proved
-   the event stream carries neither the window nor a percentage.
-6. **The §22 rows Phase 4 owns.** Covered so far: F3, F4, F12, F13, F24, and now **F22**
-   (suspend then resume — exercised end-to-end this session). **F23** (third consecutive
-   gate failure enters `planning`) is now *reachable* to test: the verify-fail loop-back no
-   longer crashes, so a run that fails a gate three times should climb the ladder to
-   `planning` instead of erroring. Still uncovered: **F1/F2** (crash between the effects
-   `INSERT` and the write, via a `FACTORY_CRASH_AT` env hook — the ledger's whole reason
-   for existing and still untested under a real crash), **F14** (disk floor), **F17**
-   (Linear unreachable mid-run), **F25** (`models.toml` refusing to start), **F26** (a
-   console control aimed at a `codex-*` sandbox).
+2. **Fix the `--all`/lighthouse daemon hazard before loading the timer.** — **DONE.**
+   `gate_report.mjs` runs *every* opt-in gate under `--all` and does not re-evaluate
+   `when`, so a frontend ticket whose agent claims any e2e/integration gate also forces
+   lighthouse, which fails on missing Chrome and can't pass even with it (its caveat:
+   performance scores null). The chosen fix is factory-only: in `verify.collect`, when the
+   verdict is `fail` and *every* failing gate carries a non-null `caveat` (the config
+   author's flag that the gate is environmental — lighthouse, a browser gate without the
+   browser), the run blocks with `env-gate-failed` instead of looping back to
+   `implementing`. A real code gate (`ruff`/`pytest`/`mypy`, `caveat: null`) still loops
+   back. `blocked` is a human state: install the tool, or `factory resume <TICKET> --from
+   reviewing` to bypass and report the failure honestly in the PR — the FRO-6 resolution,
+   now the documented unblock rather than a one-off. Tested + mutation-checked in
+   `test_phase4.py`. (See [[opt-in-gates-all-is-all-or-nothing]] in memory.)
+3. **`daemon` + `ops/com.jchen.factory.plist`** — **built.** `cmd_daemon` loops a factored
+   `_tick_pass` (the same body `cmd_tick` uses), reloading `projects.toml`/`models.toml`
+   hot each pass; one bad tick is logged and skipped, never fatal. The plist runs
+   `factory tick --once` with `StartInterval 60` / `RunAtLoad`, stdout+stderr to
+   `~/factory/logs/daemon.{out,err}.log`, via `/opt/homebrew/bin/uv run --project
+   /Users/james/factory factory tick --once` (launchd has no PATH). §19's rollback is
+   `launchctl bootout`; the daemon is stateless between ticks so stopping it is safe at any
+   instant. **Not loaded under the timer until James says so.**
+4. **`docs/runbook.md`** — **built.** Written from the real defects: `env-gate-failed`
+   (install the tool or `--from reviewing`), `illegal-transition` (fix the code, don't
+   re-run), the lighthouse/`--all` block, disk floor, Linear outage, a bad PR, and
+   stop-now (`suspend`/`cancel`/`launchctl bootout`).
+5. **The console** (§18.5, five views, loopback only) — **deferred** by the 2026-08-22
+   scope decision. It is the largest item and the least load-bearing: every view has a CLI
+   form and §18.5 says the CLI is built first. It also adds FastAPI/uvicorn deps to the
+   deliberately stdlib-only control plane that holds the keychain credential, which
+   `pyproject.toml` flags as a decision to review — so it is its own PR, not folded into
+   this one. The context percentage needs `~/.codex/models_cache.json` for the denominator
+   (P0-7 proved the event stream carries neither the window nor a percentage); the
+   `routing.ModelFacts.usable_context` property already exists for it.
+6. **The §22 rows Phase 4 owns.** Covered now: F3, F4, F12, F13, F24, F22, and this slice
+   adds **F1/F2** (the `FACTORY_CRASH_AT` env hook in `record_effect` — a real crash
+   between the `intended` INSERT and the write, and between the write and `confirmed`; the
+   ledger reconciles rather than retrying, mutation-checked), **F14** (disk floor — a run
+   below `disk_min_free_gb` blocks with `disk-below-floor` on the next `advance`,
+   mutation-checked), **F17** (Linear unreachable — the tick catches the adapter error and
+   leaves the run in place, no state advance), **F23** (a third consecutive gate failure
+   climbs the ladder to `planning` — wired into `verify.collect` where the
+   `verifying -> planning` edge lives; rung 4 parks at `resumable`; both mutation-checked),
+   **F25** (a bad `models.toml` refuses the tick and names the rule, no fallback). **F26**
+   (a console control aimed at a `codex-*` sandbox) is **deferred with the console**: the
+   namespace assertion it rests on (`policy.assert_factory_sandbox`) is already covered by
+   `tests/unit/test_sbx.py`, so the safety property holds; the console-control variant
+   belongs in the console PR.
 
 ### Two open questions a next session will hit
 

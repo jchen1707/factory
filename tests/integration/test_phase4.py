@@ -9,16 +9,20 @@ found the way a fresh process finds it, through SQLite and the attempt directory
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from factory import cli, recovery
+from factory.intake.linear import LinearError
 from factory.machine import Blocked, State
 from factory.recovery import Disposition
+from factory.routing import RoutingError
 from factory.sandbox.base import RunStatus
-from factory.steps import Context
+from factory.steps import Context, advance
+from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
 from factory.steps import implement as implement_step
@@ -28,7 +32,13 @@ from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Run
-from tests.integration.conftest import FakeSandbox
+from tests.integration.conftest import GOOD_RESULT, FakeSandbox
+
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+def _fixture(name: str) -> dict[str, object]:
+    return json.loads((_FIXTURES / name).read_text())
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -775,3 +785,244 @@ def test_suspend_comments_once_and_resume_does_not_repeat(ctx: Context) -> None:
 
     recovery.resume(ctx)  # re-enters verifying — no announce
     assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------------
+# The --all / lighthouse daemon hazard — an environment gate failure blocks
+# --------------------------------------------------------------------------------
+
+
+def test_an_environment_gate_failure_blocks_rather_than_looping_back(ctx: Context) -> None:
+    # The lighthouse/`--all` daemon hazard. Under `--all` every opt-in gate runs, so a
+    # ticket claiming `playwright` (in scope) also forces `lighthouse` (out of scope),
+    # which fails on a missing Chrome and cannot pass even with it (its caveat: a null
+    # score is not a pass). Looping back to `implementing` would spend another ~10 M-token
+    # attempt "fixing" a missing tool, repeatedly, until the attempt budget exhausted to
+    # `failed`. A failure where every failing gate carries a `caveat` is environmental, so
+    # the run blocks for a human — install the tool, or `resume --from reviewing` to bypass.
+    fake = _fake(ctx)
+    fake.result = dict(GOOD_RESULT, gates_run=["ruff check", "mypy", "lighthouse"])
+    fake.gate_report = _fixture("gate-report-env-fail.json")
+    _to_verifying(ctx)
+
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+
+    assert caught.value.reason == "env-gate-failed"
+    # It did not loop back to a fresh implement — the exit the daemon hazard exploits.
+    loopbacks = [
+        row
+        for row in ctx.store.transitions(ctx.run.id)
+        if row["from_state"] == str(State.VERIFYING) and row["to_state"] == str(State.IMPLEMENTING)
+    ]
+    assert loopbacks == []
+
+
+def test_a_real_code_gate_failure_still_loops_back(ctx: Context) -> None:
+    # The mirror of the rule. `pytest` is a real code gate (`caveat: null`); an honest
+    # failure of it is exactly what the loop-back is for, and the env-gate guard must not
+    # steal it. `gate-report-fail.json` has pytest failing with no caveat.
+    fake = _fake(ctx)
+    fake.gate_report = _fixture("gate-report-fail.json")
+    _to_verifying(ctx)
+
+    verify_step.run(ctx)
+
+    # verify -> reviewing is gated behind review; the load-bearing claim here is the
+    # loop-back did NOT fire (verdict fail on a code gate routes to implementing, not
+    # blocked), and neither did an env-gate block.
+    assert ctx.state is State.IMPLEMENTING
+    assert ctx.store.run_by_id(ctx.run.id).blocked_reason is None  # type: ignore[union-attr]
+
+
+# --------------------------------------------------------------------------------
+# F23 — a third consecutive gate failure climbs the ladder to planning
+# --------------------------------------------------------------------------------
+
+
+def _finish_implement_and_loop_back(ctx: Context, *, attempt: int) -> None:
+    """Record a finished implement attempt that failed the gate and looped back, the shape
+    `reap` hands to `_drive_from_here`'s NEXT_STEP branch. The two-phase verify dance is
+    skipped because what is under test is the ladder dispatch, not the gate report."""
+    ctx.store.finish_attempt(
+        ctx.run.id, attempt, State.IMPLEMENTING, exit_code=0, outcome="implemented"
+    )
+    advance(ctx, State.VERIFYING)
+    ctx.store.finish_attempt(ctx.run.id, attempt, State.VERIFYING, exit_code=1, outcome="fail")
+    advance(ctx, State.IMPLEMENTING)  # the verify-fail loop-back
+
+
+def test_a_third_gate_failure_rewinds_to_planning_not_a_fourth_implement(ctx: Context) -> None:
+    # F23. Two implement attempts have failed the gate; the third rung of §16.3a's ladder
+    # rewinds to `planning` rather than running the same prompt a third time. The edge is
+    # `verifying -> planning` (in the table), so the rewind is decided in `verify.collect`
+    # before the loop-back advances to `implementing`. Without it the daemon would start
+    # attempt 3, 4, 5… unbounded — the gate-fail loop it must not run unattended.
+    _to_worktree(ctx)
+    implement_step.start(ctx)  # attempt 1
+    _finish_implement_and_loop_back(ctx, attempt=1)  # -> implementing (loop-back, rung 2)
+    cli._start_next_after_gate_fail(ctx)  # rung 2 -> a fresh implement, attempt 2
+    ctx.refresh()
+    assert ctx.run.attempt == 2
+
+    # Finish attempt 2 and bring it to `verifying`, where the rewind edge lives.
+    ctx.store.finish_attempt(ctx.run.id, 2, State.IMPLEMENTING, exit_code=0, outcome="implemented")
+    advance(ctx, State.VERIFYING)
+    _fake(ctx).gate_report = _fixture("gate-report-fail.json")  # a real code-gate failure
+
+    # Rung 3: verify.collect rewinds to planning rather than looping back to a third implement.
+    verify_step.run(ctx)
+    ctx.refresh()
+    assert ctx.state is State.PLANNING
+    assert ctx.run.attempt == 3  # a rewind is one attempt with two phases
+
+
+def test_a_fourth_gate_failure_parks_at_resumable_not_a_fifth_implement(ctx: Context) -> None:
+    # The ladder's exhaustion. Rung 4 is the budget spent, not another attempt. verify.collect
+    # diverts only REWIND (rung 3), so a rung-4 failure loops back to `implementing` and
+    # `_start_next_after_gate_fail` parks it at `resumable` — no `implementing -> failed` edge
+    # exists — for the next tick's `resume_run` to take to `failed` under the same ladder.
+    _to_worktree(ctx)
+    implement_step.start(ctx)  # attempt 1 -> implementing
+    # Place the run at `implementing` for the fourth time (three attempts spent), the shape
+    # the NEXT_STEP branch hands to `_start_next_after_gate_fail` after a rung-4 loop-back.
+    ctx.store.update_run(ctx.run.id, attempt=3)
+    ctx.refresh()
+
+    cli._start_next_after_gate_fail(ctx)
+    ctx.refresh()
+    assert ctx.state is State.RESUMABLE
+    # A park, not a block: `resume_run` takes it the rest of the way to `failed`.
+    assert ctx.store.run_by_id(ctx.run.id).blocked_reason is None  # type: ignore[union-attr]
+
+
+# --------------------------------------------------------------------------------
+# F1/F2 — the effects ledger under a real crash between its two halves
+# --------------------------------------------------------------------------------
+
+
+def _comment_effect(ctx: Context):
+    return next(e for e in ctx.store.effects(ctx.run.id) if e.key.startswith("comment:blocked"))
+
+
+def test_f1_a_crash_before_the_linear_write_leaves_the_effect_intended(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # F1. The process dies between the `intended` INSERT and the comment POST. The ledger
+    # row is committed first, so the next call finds it and reconciles rather than retrying
+    # blindly — the property the whole ledger exists for.
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]  # the claim comment
+    monkeypatch.setenv("FACTORY_CRASH_AT", "linear:comment:blocked:evidence-mismatch:pre")
+
+    with pytest.raises(SystemExit):
+        block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    assert len(ctx.linear.comments) == before  # type: ignore[attr-defined]  # no block comment written
+    assert _comment_effect(ctx).status == "intended"
+
+
+def test_f1_resume_performs_the_write_once_and_confirms(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]
+    monkeypatch.setenv("FACTORY_CRASH_AT", "linear:comment:blocked:evidence-mismatch:pre")
+    with pytest.raises(SystemExit):
+        block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    monkeypatch.delenv("FACTORY_CRASH_AT", raising=False)
+    block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]
+    assert _comment_effect(ctx).status == "confirmed"
+
+
+def test_f2_a_crash_after_the_linear_write_leaves_the_comment_but_effect_intended(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # F2. The process dies after the comment landed but before `confirmed`. The write
+    # happened; the ledger does not know it did. The next call must find the marker and
+    # confirm, not comment again.
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]
+    monkeypatch.setenv("FACTORY_CRASH_AT", "linear:comment:blocked:evidence-mismatch:post")
+
+    with pytest.raises(SystemExit):
+        block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]  # written before crash
+    assert _comment_effect(ctx).status == "intended"  # not confirmed
+
+
+def test_f2_resume_confirms_without_repeating_the_write(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]
+    monkeypatch.setenv("FACTORY_CRASH_AT", "linear:comment:blocked:evidence-mismatch:post")
+    with pytest.raises(SystemExit):
+        block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    monkeypatch.delenv("FACTORY_CRASH_AT", raising=False)
+    block_step.announce(ctx, "evidence-mismatch", "the detail")
+
+    assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]  # reconcile, no dup
+    assert _comment_effect(ctx).status == "confirmed"
+
+
+# --------------------------------------------------------------------------------
+# F14 / F17 / F25 — the daemon's environment-failure rows
+# --------------------------------------------------------------------------------
+
+
+def test_f14_a_run_below_the_disk_floor_blocks(ctx: Context) -> None:
+    # F14. `advance` checks free disk before every transition, so a run that hits the floor
+    # mid-pipeline blocks with a named reason rather than writing a worktree it cannot
+    # complete. The first advance (claim) is enough to see it.
+    ctx.registry = replace(
+        ctx.registry, defaults=replace(ctx.registry.defaults, disk_min_free_gb=10_000_000)
+    )
+
+    _tick(ctx)
+
+    run = ctx.store.run_by_id(ctx.run.id)
+    assert run is not None
+    assert run.state is State.BLOCKED
+    assert run.blocked_reason == "disk-below-floor"
+
+
+def test_f17_a_linear_outage_leaves_the_run_in_place(ctx: Context) -> None:
+    # F17. Linear is unreachable mid-run. The tick catches the adapter error and leaves the
+    # run exactly where it was — no state advance on a failed write — so the next tick can
+    # try again. A Linear outage is a pause, not a block and not a state change.
+    ctx.linear.fail_with = LinearError("Linear unreachable (F17)")  # type: ignore[attr-defined]
+
+    lines = _tick(ctx)
+
+    run = ctx.store.run_by_id(ctx.run.id)
+    assert run is not None
+    assert run.state is State.APPROVED  # the claim's write never landed
+    assert run.blocked_reason is None  # paused, not blocked
+    assert any("adapter error" in line for line in lines)
+
+
+def test_f25_a_bad_routing_table_refuses_the_tick(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # F25. An invalid `models.toml` — here, the reviewer sharing the builder's model —
+    # refuses the tick and names the rule. It does not fall back to a default, because a
+    # factory silently running every role on one model looks exactly like one routing
+    # correctly. The daemon (the plist calls `factory tick --once`) inherits this refusal.
+    monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
+
+    def boom(_path: Path) -> None:
+        raise RoutingError(
+            "roles.reviewer.model must differ from roles.builder.model (both are 'gpt-5.6-sol')"
+        )
+
+    monkeypatch.setattr(cli, "load_routing", boom)
+
+    rc = cli.main(["tick", "--once"])
+
+    assert rc == 2  # refused, not fallen back

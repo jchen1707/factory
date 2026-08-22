@@ -31,6 +31,7 @@ __all__ = [
     "continuation_prompt",
     "decide",
     "ladder_rung",
+    "next_attempt_disposition",
     "resume",
     "resume_run",
     "state_before",
@@ -236,6 +237,29 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     )
     implement_step.start(ctx, resume_session=session, continuation=continuation_prompt(ctx))
     return verdict
+
+
+def next_attempt_disposition(ctx: Context) -> Verdict:
+    """The ladder verdict for the implement attempt that follows a gate-fail loop-back.
+
+    The verify-fail loop-back (`verifying -> implementing`) is a normal transition, not a
+    recovery, so it does not pass through `resume_run` — but §16.3a's ladder applies to it
+    just the same: a third consecutive failure rewinds to `planning` rather than running
+    the same prompt a third time, and a fourth is the budget spent, not another attempt.
+    `decide` is the single authority for that ladder, so this is the loop-back's thin way
+    to reach it without re-deriving the session and ceiling logic that `resume_run` carries.
+
+    `attempts_spent` is the attempt that just failed (`ctx.run.attempt`), so the rung being
+    decided is the next one — `ctx.run.attempt + 1` — matching `resume_run`'s convention.
+    """
+    return decide(
+        attempts_spent=ctx.run.attempt,
+        attempts_in_state=ctx.store.attempts_in_state(ctx.run.id, State.IMPLEMENTING),
+        session_id=ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING),
+        interrupted_by=_interrupted_by(ctx),
+        max_attempts=ctx.registry.defaults.max_attempts,
+        max_total_attempts=ctx.registry.defaults.max_total_attempts,
+    )
 
 
 def _rerun_detached(ctx: Context, died_in: State) -> Verdict:

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "root": "/worktree",
+  "targets": [{ "name": "frontend-harness", "dir": "." }],
+  "missingApps": [],
+  "gates": [
+    {
+      "name": "ruff check",
+      "kind": "lint",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 120,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "mypy",
+      "kind": "type",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 340,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "lighthouse",
+      "kind": "e2e",
+      "status": "fail",
+      "exit": 1,
+      "durationMs": 9000,
+      "caveat": "needs a Chrome installation; a category with no score is not a pass",
+      "when": "the change ships a user-facing page and Chrome is installed",
+      "outputTail": "Chrome installation not found"
+    }
+  ],
+  "verdict": "fail"
+}

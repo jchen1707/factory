@@ -43,7 +43,7 @@ from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import MODEL_CACHE, Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
-from factory.steps import Context
+from factory.steps import Context, advance
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
@@ -382,15 +382,24 @@ def cmd_tick(args: argparse.Namespace) -> int:
     design: a machine that claimed first would keep starting runs it had not yet noticed
     were broken.
 
-    Nothing here is held in memory between calls. `launchd` will run this every 60 s in
-    a fresh process, so every fact it acts on is read from SQLite or from the filesystem
-    at the top of the pass.
+    Nothing here is held in memory between calls. `launchd` runs this every 60 s in a
+    fresh process, so every fact it acts on is read from SQLite or from the filesystem
+    at the top of the pass. `factory daemon` is the same pass in a foreground loop, for a
+    machine without launchd; both call `_tick_pass`.
     """
-    home = factory_home()
+    return _tick_pass(factory_home(), claim=not args.no_claim, verbose=args.verbose)
+
+
+def _tick_pass(home: Path, *, claim: bool, verbose: bool) -> int:
+    """One tick: load config hot (re-read every call), check the DB and the disk, run the
+    pass. Separated from `cmd_tick` so `cmd_daemon` can loop it and a test can call it
+    without an argparse namespace.
+
+    F25 lives here: an invalid `models.toml` refuses the pass and names the rule. It never
+    falls back to a default, because a factory silently running every role on one model
+    looks exactly like one routing correctly.
+    """
     registry = load_registry(home / "config" / "projects.toml")
-    # F25: an invalid routing table refuses the tick and names the rule. It never falls
-    # back to a default, because a factory silently running every role on one model
-    # looks exactly like one routing correctly.
     routing = load_routing(home / "config" / "models.toml")
 
     store = _open_store(home, dry_run=False)
@@ -408,20 +417,50 @@ def cmd_tick(args: argparse.Namespace) -> int:
         )
 
     linear = LinearClient()
-    lines = tick_once(
-        home,
-        registry,
-        routing,
-        store,
-        linear,
-        claim=room and not args.no_claim,
-        verbose=args.verbose,
-    )
+    lines = tick_once(home, registry, routing, store, linear, claim=room and claim, verbose=verbose)
     for line in lines:
         print(line)
     if not lines:
         print("nothing to do")
     return 0
+
+
+# --------------------------------------------------------------------------------
+# factory daemon
+# --------------------------------------------------------------------------------
+
+
+#: The launchd plist's `StartInterval`. The daemon default matches it so the foreground
+#: loop and the timer behave the same. §4.2: the tick that asks is never the tick that
+#: started the run, so a 60 s cadence is a poll, not a wait.
+DAEMON_INTERVAL_SECONDS = 60
+
+
+def cmd_daemon(args: argparse.Namespace) -> int:
+    """`factory tick --once` in a foreground loop, for a machine without launchd.
+
+    Each pass reloads `projects.toml` and `models.toml` hot, so a config edit takes effect
+    on the next tick without a restart — the same property the launchd timer has, because
+    it starts a fresh process per pass. A single tick that fails (a transient Linear
+    outage, a bad routing edit) is logged and skipped; the daemon keeps going, because a
+    poller that dies on one bad pass is a poller that stops until a human notices. Ctrl-C
+    stops it; the lease on any in-flight run expires on its own.
+    """
+    home = factory_home()
+    # Refuse to start at all on a routing table that would silently misroute every run,
+    # rather than discovering it on the first tick. A mid-run break is still caught per-tick.
+    load_routing(home / "config" / "models.toml")
+    interval = args.interval
+    print(f"factory daemon: ticking every {interval}s. Ctrl-C to stop.", flush=True)
+    while True:
+        try:
+            _tick_pass(home, claim=not args.no_claim, verbose=args.verbose)
+        except KeyboardInterrupt:
+            print("\nfactory daemon: stopped; in-flight leases expire on their own.")
+            return 0
+        except Exception as exc:  # one bad tick must not kill the daemon
+            print(f"tick failed (will retry next interval): {exc}", file=sys.stderr)
+        time.sleep(interval)
 
 
 #: How a run row becomes a `Context`. Injectable for exactly one reason: §21.3 requires
@@ -528,7 +567,7 @@ def _drive_from_here(ctx: Context) -> str:
                 _start_detached(ctx, before)
                 break
             if verdict.outcome is reap_step.Outcome.NEXT_STEP:
-                implement_step.start(ctx, continuation=recovery.continuation_prompt(ctx))
+                _start_next_after_gate_fail(ctx)
                 break
         elif before is State.RESUMABLE:
             verdict_r = recovery.resume_run(ctx)
@@ -558,6 +597,37 @@ def _start_detached(ctx: Context, state: State) -> None:
         verify_step.start(ctx)
     elif state is State.REVIEWING:
         review_step.start(ctx)
+
+
+def _start_next_after_gate_fail(ctx: Context) -> None:
+    """The implement attempt that follows a gate-fail loop-back, chosen by the ladder.
+
+    The loop-back (`verifying -> implementing`) is a normal transition, not a recovery, so
+    without this the tick would start implement attempts unbounded — exactly the gate-fail
+    loop the daemon must not run unattended. By the time the run reaches `implementing`
+    here it is on rung 2 (a fresh implement) or rung 4 (the budget spent); rung 3 is
+    decided earlier, in `verify.collect`, where the `verifying -> planning` edge exists.
+    `recovery.next_attempt_disposition` routes the decision through `decide`, the same
+    authority `resume_run` uses, so the two paths cannot disagree about when a rung
+    exhausts.
+
+    `FAIL` has no `implementing -> failed` edge, so the run parks at `resumable` and the
+    next tick's `resume_run` records `resumable -> failed` under the same ladder — the
+    same shape a timed-out implement attempt takes.
+    """
+    verdict = recovery.next_attempt_disposition(ctx)
+    if verdict.disposition is recovery.Disposition.FAIL:
+        advance(ctx, State.RESUMABLE, rule=verdict.reason, detail=f"rung {verdict.rung}")
+        return
+    # RESUME or RESTART: a fresh implement against the same worktree, rung 2.
+    session = (
+        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+        if verdict.disposition is recovery.Disposition.RESUME
+        else None
+    )
+    implement_step.start(
+        ctx, resume_session=session, continuation=recovery.continuation_prompt(ctx)
+    )
 
 
 def _perform(ctx: Context, action: str) -> None:
@@ -1348,6 +1418,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-claim", action="store_true", help="advance existing runs, start no new ones"
     )
     tick.set_defaults(func=cmd_tick)
+
+    daemon = sub.add_parser(
+        "daemon",
+        help="tick in a foreground loop (the launchd plist calls `tick --once` instead)",
+    )
+    daemon.add_argument(
+        "--interval",
+        type=int,
+        default=DAEMON_INTERVAL_SECONDS,
+        help=f"seconds between passes (default {DAEMON_INTERVAL_SECONDS})",
+    )
+    daemon.add_argument("--verbose", action="store_true", help="also report what it skipped")
+    daemon.add_argument(
+        "--no-claim", action="store_true", help="advance existing runs, start no new ones"
+    )
+    daemon.set_defaults(func=cmd_daemon)
 
     gc_parser = sub.add_parser("gc", help="reclaim what finished runs left behind")
     gc_parser.add_argument(

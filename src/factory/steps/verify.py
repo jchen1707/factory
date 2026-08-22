@@ -247,6 +247,43 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     if verdict == "pass":
         advance(ctx, State.REVIEWING)
     elif verdict == "fail":
+        failing = [g for g in report["gates"] if g.get("status") == "fail"]
+        if failing and all(g.get("caveat") for g in failing):
+            # An environment gate the agent cannot fix by writing code — lighthouse
+            # without Chrome, a browser gate without the browser — fails, and its
+            # `caveat` is the config author's own flag that the gate is conditional on
+            # something outside the diff. Under `--all` (§12.1) every opt-in gate runs,
+            # so a ticket that claims one in-scope opt-in gate (playwright) also forces
+            # every other (lighthouse), and looping back to `implementing` here would
+            # spend another ~10 M-token attempt "fixing" a missing tool — repeatedly,
+            # until the attempt budget exhausted to `failed`. That is the daemon hazard,
+            # and it bites a manual resume today. A real code gate (ruff, pytest, mypy)
+            # carries `caveat: null`, so an honest code failure still loops back; only a
+            # failure where *every* failing gate is caveated is treated as environmental.
+            # `blocked` is a human-judgement state: install the tool the caveat names, or
+            # `factory resume <TICKET> --from reviewing` to bypass and let the PR open
+            # with the failure reported honestly in its body.
+            raise Blocked(
+                "env-gate-failed",
+                "the gate report failed only on gates the agent cannot fix by writing "
+                "code; their caveats name an environment condition, not a code defect. "
+                "Install the tool the caveat names, or resume with `--from reviewing` "
+                "to bypass and report the failure honestly in the PR: "
+                + ", ".join(f"{g['name']} ({g.get('caveat')})" for g in failing),
+            )
+        if _next_is_rewind(ctx):
+            from factory.steps import plan as plan_step
+
+            plan_step.start(ctx)
+            return
+        # Loop back for a real failure, unless this is the third consecutive one. §16.3a
+        # rung 3 rewinds to `planning` rather than running the same prompt a third time, and
+        # the edge lives here: `verifying -> planning` is in the table and
+        # `implementing -> planning` is not, so the rewind is decided *before* the loop-back
+        # advances the state. `plan.start` advances and spawns in one call, exactly the way
+        # `resume_run`'s REWIND branch does; a rewind is one attempt with two phases (plan,
+        # then implement-from-plan), so `plan.start`'s `attempt = ctx.run.attempt + 1` is
+        # correct here too.
         # Loop back for a real failure. The next `implement` resolves
         # `attempt = ctx.run.attempt + 1`, so this attempt's evidence stays in its own
         # directory and the agent gets a fresh one to fix the failure in. `collect` does
@@ -289,6 +326,18 @@ def _gates_run(attempt_dir: AttemptDir) -> list[str]:
     if not isinstance(claimed, list):
         raise Blocked("schema-invalid", f"gates_run is not a list: {type(claimed).__name__}")
     return [str(gate) for gate in claimed]
+
+
+def _next_is_rewind(ctx: Context) -> bool:
+    """Is the next attempt rung 3 of §16.3a's ladder — the rewind to `planning`?
+
+    Lazy import so `verify` does not pull `recovery` (which talks to the store) at module
+    load. `decide` is the single ladder authority, shared with `resume_run`, so the
+    loop-back and the recovery path cannot disagree about when a rung rewinds.
+    """
+    from factory import recovery
+
+    return recovery.next_attempt_disposition(ctx).disposition is recovery.Disposition.REWIND
 
 
 def _claims_opt_in(harness: HarnessConfig | None, gates_run: list[str]) -> bool:
