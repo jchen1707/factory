@@ -16,6 +16,7 @@ that attempt. Adding one again would point at a directory that does not exist ye
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -181,7 +182,33 @@ def _claims_opt_in(harness: HarnessConfig | None, gates_run: list[str]) -> bool:
     if harness is None:
         return False
     kinds = {gate.name: gate.kind for gate in harness.gates}
-    return any(kinds.get(name) in _OPT_IN_KINDS for name in gates_run)
+    return any(
+        kinds.get(_gate_named_in(claim, kinds) or "") in _OPT_IN_KINDS for claim in gates_run
+    )
+
+
+def _gate_named_in(claim: str, names: Iterable[str]) -> str | None:
+    """The gate name that sits inside a free-form claim, longest candidate first.
+
+    One matcher, two callers, and that is the point. `gates_run` entries are free-form —
+    the schema is `array of string` and the prompt fixes no format — so a real claim reads
+    `"playwright — pnpm test:e2e passed (4 tests)"`, never the bare `"playwright"` the
+    config and the report use. `_evidence_mismatch` knew that and matched by containment;
+    `_claims_opt_in` looked the claim up in a dict by equality, ten lines above it.
+
+    Measured on FRO-6, 2026-08-22: every opt-in lookup missed, so `--all` was never
+    passed, so `playwright` and `lighthouse` came back `not_applicable` — and the very
+    same claims then failed the mismatch check for not being `pass` or `fail`. The agent
+    had run both, honestly, and was blocked for it. Two copies of "how do I match a claim
+    to a gate" is how that happened, so now there is one.
+
+    Longest-first is load-bearing: it stops `"uv run pytest -m integration — 3 passed"`
+    matching the bare `pytest` gate before the `pytest -m integration` gate.
+    """
+    for name in sorted(names, key=len, reverse=True):
+        if name and name in claim:
+            return name
+    return None
 
 
 def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]]) -> list[str]:
@@ -200,17 +227,11 @@ def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]])
     absent from the report — the same disagreement. The gate's *status* comes from the
     report, never the claim's text: this check proves the gate ran, and the verdict (not
     the claim) decides pass-vs-fail. An honest `fail` in a claim is accepted here."""
-    # Longest gate name first, so `pytest -m integration` is tried before `pytest`.
-    ordered = sorted(report_gates, key=lambda gate: len(gate["name"]), reverse=True)
+    by_name = {gate["name"]: gate["status"] for gate in report_gates}
     mismatched: list[str] = []
     for claim in gates_run:
-        status: str | None = None
-        matched: str | None = None
-        for gate in ordered:
-            if gate["name"] and gate["name"] in claim:
-                status = gate["status"]
-                matched = gate["name"]
-                break
+        matched = _gate_named_in(claim, by_name)
+        status = by_name.get(matched) if matched is not None else None
         if status not in _RAN:
             # The report gate name when one matched (clearer in the block message than the
             # agent's command string); the raw claim only when nothing matched.
