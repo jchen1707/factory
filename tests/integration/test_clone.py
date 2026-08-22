@@ -34,6 +34,7 @@ from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
+from factory.store import Run
 from tests.integration.conftest import FakeSandbox, git
 
 
@@ -562,6 +563,22 @@ def test_the_dry_run_prints_the_in_vm_checkout_and_the_fetch_back(clone_ctx: Con
     assert str(clone_ctx.clone_mount) in planned
 
 
+def _rerun_the_same_ticket(ctx: Context) -> Run:
+    """Cancel this run and start a second one for the **same ticket**, as `factory cancel`
+    followed by `factory run` does.
+
+    The same ticket is the whole point: `_LIVE_RUN_INDEX` allows a second row only once
+    the first reaches a terminal state, and that pair — cancel, then re-run — is exactly
+    the sequence that produced the stale-`exit` read on FRO-6.
+    """
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.run.state, to_state=State.CANCELLED, actor="human"
+    )
+    return ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+
+
 def test_two_runs_of_one_ticket_cannot_share_an_attempt_directory(
     clone_ctx: Context, tmp_path: Path
 ) -> None:
@@ -572,8 +589,7 @@ def test_two_runs_of_one_ticket_cannot_share_an_attempt_directory(
     token counts while its own agent was still running in the sandbox.
     """
     first = clone_ctx.factory_dir
-    second_run = clone_ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
-    second = replace(clone_ctx, run=second_run).factory_dir
+    second = replace(clone_ctx, run=_rerun_the_same_ticket(clone_ctx)).factory_dir
 
     assert first != second
     # Both still inside the one mount `sbx` fixed at creation — the mount is what is
@@ -590,8 +606,7 @@ def test_a_second_run_does_not_read_the_first_runs_verdict(clone_ctx: Context) -
     first_attempt.exit_file.write_text("0")
     first_attempt.last_message.write_text('{"status": "blocked"}')
 
-    second_run = clone_ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
-    second_ctx = replace(clone_ctx, run=second_run)
+    second_ctx = replace(clone_ctx, run=_rerun_the_same_ticket(clone_ctx))
     second_attempt = AttemptDir.create(second_ctx.factory_dir, 1)
 
     assert not second_attempt.exit_file.exists()
