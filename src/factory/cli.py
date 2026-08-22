@@ -1333,6 +1333,8 @@ def dispatch_control(
     store: Store,
     linear: LinearClient,
     run: Run,
+    *,
+    context_factory: ContextFactory | None = None,
 ) -> tuple[int, str]:
     """One §18.5 control. Acquires the lease, builds a real `Context`, dispatches through
     `recovery`/`_cancel_run` (every path writes an `actor="human"` transition — the §18.5
@@ -1343,6 +1345,11 @@ def dispatch_control(
     before suspend/cancel stop it, so a misconfigured project pointing at an operator sandbox
     is refused here rather than acted on. The run controls do not take a sandbox argument;
     the run's project determines it, and the assertion is the boundary.
+
+    `context_factory` is the same injection seam `tick_once` carries, and for the same
+    reason: §21.3 requires the whole state machine to run in-process against fakes, and a
+    control that always built the real `sbx` and `codex` adapters could not be tested
+    without a Docker login. Nothing in production passes it.
     """
     if action not in _CONTROLS:
         return 1, f"unknown control {action!r}; one of {sorted(_CONTROLS)}"
@@ -1355,7 +1362,10 @@ def dispatch_control(
     if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
         return 1, f"{run.linear_id} is leased by another process ({run.lease_owner})"
 
-    ctx = _context_for(home, registry, routing, store, linear, run)
+    build = context_factory or (
+        lambda r: _context_for(home, registry, routing, store, linear, r)
+    )
+    ctx = build(run)
     try:
         if action == "suspend":
             if run.state in machine.TERMINAL:

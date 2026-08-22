@@ -23,6 +23,7 @@ import sqlite3
 import threading
 import time
 import tomllib
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 from string import Template
@@ -192,12 +193,15 @@ def create_app(
     routing: Routing | None = None,
     store: Store | None = None,
     linear: LinearClient | None = None,
+    context_factory: Any | None = None,
 ) -> FastAPI:
     """The console app. Config is re-read per request unless injected.
 
     Injection exists for the tests (§21.3: the whole thing runs in-process against fakes);
     production passes nothing and each request re-reads `projects.toml`/`models.toml`, so
     a config edit takes effect without a restart — the same hot-reload property the tick has.
+    `context_factory` threads the same seam into the controls, so a POST can be driven
+    against a `FakeSandbox` rather than needing a Docker login.
     """
     app = FastAPI(title="factory console", docs_url=None, redoc_url=None)
 
@@ -417,7 +421,14 @@ def create_app(
         run = st.run_by_ticket(ticket.upper())
         if run is None:
             return RedirectResponse("/", status_code=303)
-        dispatch_control(action, home, reg, rt, st, ln, run)
+        # The context factory is handed the thread-local store, not the one it closed
+        # over: `_cfg` may have reconnected for this thread, and a `Context` carrying the
+        # other thread's `sqlite3.Connection` raises on its first query.
+        factory = context_factory
+        if factory is not None:
+            inner = factory
+            factory = lambda r: replace(inner(r), store=st)  # noqa: E731
+        dispatch_control(action, home, reg, rt, st, ln, run, context_factory=factory)
         return RedirectResponse(f"/runs/{ticket.upper()}", status_code=303)
 
     @app.get("/runtimes", response_class=HTMLResponse)

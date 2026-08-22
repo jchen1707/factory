@@ -14,6 +14,7 @@ test that called the view functions directly would prove the data and skip the a
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,9 @@ def _client(ctx: Context) -> TestClient:
         routing=ctx.routing,
         store=ctx.store,
         linear=ctx.linear,
+        # The controls get the test's own fakes rather than the real `sbx`/`codex`
+        # adapters, which would need a Docker login to so much as suspend a run.
+        context_factory=lambda run: replace(ctx, run=run),
     )
     return TestClient(app)
 
@@ -272,6 +276,31 @@ def test_a_control_writes_a_human_actor_transition(ctx: Context) -> None:
     row = ctx.store.transitions(ctx.run.id)[-1]
     assert row["actor"] == "human"
     assert row["rule"] == "suspend-is-james"
+
+
+def test_resume_from_planning_works_from_the_browser(ctx: Context) -> None:
+    # §19's expected output names this one specifically: "suspend and resume-from-planning
+    # both work from the browser and from the CLI, and both write an `actor = \"human\"`
+    # transition." Suspend is covered above; this is the other half, and it is the control
+    # that rewinds a stuck run to a fresh plan (§16.3a) without resetting the worktree.
+    _to_implementing(ctx)
+    worktree = Path(ctx.run.worktree or "")
+    (worktree / "the-agents-work.py").write_text("x = 1\n")
+    _client(ctx).post("/runs/BAC-4/suspend", follow_redirects=False)
+    ctx.refresh()
+    assert ctx.state is State.SUSPENDED
+
+    response = _client(ctx).post("/runs/BAC-4/resume-planning", follow_redirects=False)
+
+    assert response.status_code == 303
+    ctx.refresh()
+    hops = [
+        (row["from_state"], row["to_state"], row["actor"])
+        for row in ctx.store.transitions(ctx.run.id)
+    ]
+    assert (str(State.SUSPENDED), str(State.PLANNING), "human") in hops
+    # The worktree is never reset by a rewind — the agent's work is the input to the plan.
+    assert (worktree / "the-agents-work.py").exists()
 
 
 def test_an_unknown_control_is_refused_rather_than_dispatched(ctx: Context) -> None:
