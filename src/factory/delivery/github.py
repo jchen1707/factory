@@ -19,6 +19,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from factory.steps.review import FORCED
+
 __all__ = [
     "GithubError",
     "create_pr",
@@ -204,12 +206,24 @@ def render_pr_body(
         tier2 = review_summary.get("tier2", "no-trigger")
         if tier2 == "ran":
             lines.append("Tier 2 (full nine-axis review) ran.")
+            ran_tier2 = True
+        elif tier2 == FORCED:
+            # `--full-review` asked for the fan-out; no trigger rule fired. Saying "skipped"
+            # here — as the first completed Tier 2 (FRO-6) was reported — misstates that the
+            # review ran, so it is said plainly.
+            lines.append("Tier 2 ran (forced with `--full-review`; no trigger rule fired).")
+            ran_tier2 = True
         else:
             lines.append(f"Tier 2 skipped — rule: `{tier2}`.")
+            ran_tier2 = False
         findings = review_summary.get("findings", [])
+        # When Tier 2 ran, `findings` aggregates both tiers; calling them "Tier-1 findings"
+        # would hide that the fan-out produced any. Only a skipped Tier 2 leaves the
+        # findings as Tier-1 alone.
+        label = "Findings" if ran_tier2 else "Tier-1 findings"
         if findings:
             lines.append("")
-            lines.append("Tier-1 findings:")
+            lines.append(f"{label}:")
             for f in findings:
                 lines.append(
                     f"- [{f.get('severity', '?')}] {f.get('file', '?')}"
@@ -217,7 +231,7 @@ def render_pr_body(
                 )
         else:
             lines.append("")
-            lines.append("Tier-1 found no defects.")
+            lines.append("No findings." if ran_tier2 else "Tier-1 found no defects.")
     else:
         lines.append("_No review summary recorded._")
     lines.append("")

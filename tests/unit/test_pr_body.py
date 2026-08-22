@@ -88,8 +88,40 @@ def test_render_pr_body_names_tier2_ran_when_it_ran() -> None:
         usd=0.42,
     )
     assert "Tier 2 (full nine-axis review) ran." in body
-    assert "Tier-1 found no defects." in body
+    assert "No findings." in body
     assert "$0.42" in body
+
+
+def test_render_pr_body_reports_a_forced_tier2_as_ran_not_skipped() -> None:
+    # `--full-review` forces the Tier 2 fan-out; review-summary records `tier2: "ran:forced"`.
+    # A forced fan-out reported as "Tier 2 skipped" — as FRO-6's first completed Tier 2 was —
+    # misstates what happened: the review ran, it did not skip. It also labels Tier-2
+    # findings as "Tier-1 findings", hiding that the fan-out produced them. The forced value
+    # is distinct from both "ran" (a trigger fired) and any skip rule.
+    body = render_pr_body(
+        ticket="FRO-6",
+        title="Search your Projects by name",
+        restatement="r",
+        gates=[],
+        gate_verdict="fail",
+        review_summary={
+            "tier2": "ran:forced",
+            "findings": [
+                {"severity": "medium", "file": "src/x.tsx", "line": 16, "summary": "a finding"},
+            ],
+        },
+        redphase={"status": "pass", "reason": "red"},
+        out_of_scope=[],
+        artifact_path="/a",
+        tokens_in=0,
+        tokens_out=0,
+        usd=None,
+    )
+    assert "Tier 2 ran (forced with `--full-review`; no trigger rule fired)." in body
+    assert "Tier 2 skipped" not in body
+    assert "Findings:" in body
+    assert "Tier-1 findings:" not in body
+    assert "[medium] src/x.tsx:16: a finding" in body
 
 
 def test_render_pr_body_handles_a_missing_redphase_row() -> None:
