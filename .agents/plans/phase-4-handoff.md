@@ -1,16 +1,34 @@
 # Phase 4 handoff — begun 2026-08-22
 
-Phase 3 is closed and **Phase 4's core path is done** on branch
-`feat/phase-4-tick-and-recovery` (17 commits, pushed, open as
-[factory#19](https://github.com/jchen1707/factory/pull/19) against `main`).
-`SOFTWARE-FACTORY-PLAN.md` §19 "Phase 4 — polling, idempotency, recovery, resume,
-cleanup" (line 2188) is the specification; this file records only what a new session
-cannot read out of the plan or the code.
+**Phase 4's build is done and merged to `main`** (PRs #19, #20, #21). What is left is not
+code: it is the acceptance run Phase 4 specifies and never performed, now written into
+`SOFTWARE-FACTORY-PLAN.md` as **§19 Phase 4.5 — prove the pipeline unattended**.
 
-Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
+**Start there.** Phase 4.5 carries the full step list, the measured blast radius of the one
+cleanup command, and the exit criterion. This file is the archaeology behind it.
 
-**Start here:** "Where Phase 4 stands" below, then "Next session" (the only thing left
-is the §18.5 console, plus James's decision to load the daemon under the timer).
+## Read this first, before believing any status claim
+
+This session reported Phase 4 complete **twice** while it was not, and both times the gap
+was found by re-reading §19 against the code rather than against the previous summary:
+
+- §19 names `console/templates/*.html` as files; the first console commit inlined every
+  page in `app.py`.
+- "Tests: the whole of §22" means all thirty rows. **F27, F28 and F30 had no test at any
+  level** — `test_redphase.py` covered `_classify`, which is a different claim from
+  "`replay` raises". Nine more rows had the behaviour covered but no `F<n>` label, so §22
+  could not be audited at all.
+- Writing §19's "resume-from-planning works from the browser" test found that
+  `dispatch_control` hardcoded the real `sbx`/`codex` adapters, so **no console control
+  could be tested without a Docker login** — against §21.3's whole premise.
+
+All three are fixed. The lesson is the method: **audit §19 and §22 against the code, not
+against a handoff.** That includes this handoff.
+
+A second, cheaper lesson from the same session: the board's real state lives in **three**
+places — Linear, the `runs` table, and the sandbox host — and checking one tells you
+nothing about the other two. A ticket can pass all eleven intake conditions and still never
+be claimed, because the poller checks for a live run row *before* it evaluates intake.
 
 ## Where Phase 4 stands
 
@@ -199,76 +217,42 @@ dance; do not reimplement it.
 
 ## Next session
 
-**Phase 4's build is done; what remains is James's.** Both open questions are resolved
-(PR #20, merged) and the console is built (PR #21).
+**Everything left is §19 Phase 4.5 in the plan.** Read it there; it is the authority. In
+brief, and in order:
 
-Two things the first console commit claimed prematurely, both since fixed and worth
-recording because the same shortcut is easy to repeat:
+1. `uv run factory cancel FRO-7 --reason "stale row; FRO-6 has landed"` — clears the stale
+   run row that stops the poller from ever reaching intake. Measured: no PR, no host
+   worktree, and the branch exists neither locally nor on `origin`, so nothing is lost.
+   Linear is already `Todo` with no `needs-info`, so the tracker half is a no-op.
+2. `uv run factory tick --once --verbose` — FRO-7 should now be claimed rather than skipped.
+3. **James loads the timer** (§19's approval boundary):
+   `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist`.
+4. Watch FRO-7 reach `awaiting_human` **with no keystroke**. That sentence is Phase 4's
+   expected output and the exit criterion for 4.5.
+5. Live `suspend` / `resume` / `resume --from planning`, from both the CLI and the browser —
+   the two §19 validation commands never run against real infrastructure.
 
-- **§19 names `console/templates/*.html` as files.** The first cut inlined every page in
-  `app.py`. Now extracted — `page.html`, `board.html`, `run_detail.html`, `runtimes.html`,
-  `config.html`, `controls.html`, `console.css` — as `string.Template` files, and they ship
-  in the wheel.
-- **"Tests: the whole of §22" means all thirty rows.** An audit found **F27, F28 and F30**
-  (the test-honesty rows) with no test at any level: `test_redphase.py` covered `_classify`,
-  which is a different claim from "`replay` raises". `tests/integration/test_redphase_gates.py`
-  adds seven, including §23's requirement that the two blocking cases be unreachable from
-  any config file. Nine further rows had the behaviour covered but no `F<n>` label, so §22
-  could not be audited at all; they are labelled now, and **all thirty are traceable**.
-  F5 also gained a real assertion — it wrote 60 stderr lines and never checked the 40-line
-  bound, and an unbounded tail in a Linear comment is how a secret reaches the tracker.
+**Preconditions, all verified 2026-08-22:** `sbx login` done; FRO-6 `Done` and #41 merged;
+FRO-7 passes all eleven intake conditions. The daemon is **not** loaded.
 
-Writing §19's "resume-from-planning works from the browser" test then found a third:
-`dispatch_control` hardcoded the real `sbx`/`codex` adapters, so no console control could
-be tested without a Docker login (§21.3 says the whole machine runs against fakes). It
-takes `tick_once`'s `context_factory` seam now.
+**Do not start Phase 5 first.** It flips PRs from draft to ready-for-review (§24.8), so
+starting it before the unattended path is proven means an unproven pipeline opening
+review-ready pull requests.
 
-1. ~~**The §18.5 console**~~ — **built, PR #21.** CLI forms first as §18.5 requires, then
-   `factory serve`: FastAPI, loopback-only (a non-loopback `--host` is refused), five views,
-   SSE for the board and the event tail. The context percentage is
-   `turn.completed.usage.input_tokens / ModelFacts.usable_context` — P0-7 refuted the
-   plan's reading of the stream, so the denominator comes from the model cache — and it is
-   **hidden with the reason named** whenever either half is missing, never estimated. F26
-   lands via `policy.assert_factory_sandbox` on every control. There is no Merge button.
-   Config edits validate through `load_routing` *before* the write, so a
-   reviewer-on-the-builder's-model is refused in the form and `models.toml` is never
-   half-written. 27 tests; the three load-bearing ones mutation-checked.
+**Resolved in this session, do not re-investigate:**
 
-   Three defects found while building it, each fixed against measured evidence:
-   `sbx ls --json` is an **object** with a `sandboxes` array and `{host_port,
-   sandbox_port}` port objects (a list-shaped reader shows an empty runtimes view on a
-   healthy machine); SQLite connections are thread-bound and the SSE readers run on a
-   worker thread; Starlette's form parser would have cost a fifth dependency to read
-   `a=1&b=2`.
+- **Q1 — does `verify` re-run the gates on a `--from verifying` resume?** Yes, and that is
+  the decision. A stale `gates.json` is never read; `env-gate-failed` makes the re-run safe.
+- **Q2 — the clone worktree on such a resume.** Was a real bug: a shared clone left on
+  another run's branch would have run the gates against the wrong ticket's code.
+  `clone.ensure_on_branch` fixes it, or blocks `clone-branch-missing`.
+- **The console** (§18.5) is built: CLI forms, `factory serve`, five views, SSE, templates,
+  27 tests. No Merge button; controls write `actor="human"`; F26 via
+  `policy.assert_factory_sandbox`.
 
-2. **Load the daemon under the timer — James's decision (§19). The only thing left.**
-   The daemon and the plist are built; the env-gate fix, the F23 ladder and the clone-branch
-   fix (below) bound the loops that would otherwise burn the attempt budget unattended, and
-   the §22 crash/idempotency tests pass. When James is ready:
-   `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist`. Rollback is
-   `launchctl bootout`; the daemon is stateless between ticks, so stopping it is safe at
-   any instant.
-
-3. ~~**Two open questions**~~ — **both resolved, PR #20.**
-   - **Does `verify` re-run the gates on a `--from verifying` resume?** **Yes, and that is
-     the decision.** A resume only advances into `verifying`; the tick's `START_NEEDED`
-     branch calls `verify.start` again, and `collect` reads a freshly written
-     `gates.stdout.txt` only after the new `exit` lands. A stale `gates.json` is never
-     read. Re-running is what surfaced FRO-6's hidden lighthouse failure, and
-     `env-gate-failed` makes it safe by blocking instead of looping. Documented in
-     `verify.collect`; pinned by a test that fails if `collect` is pointed at the stale file.
-   - **The clone worktree on a `--from verifying` resume.** **Fixed.** A `--clone` build
-     sandbox is shared across a project's runs, so a second run leaves the clone on *its*
-     branch and a later resume would run the gates against the wrong ticket's code.
-     `verify.start` now calls `clone.ensure_on_branch` for clone runs — idempotent on the
-     forward path, and it blocks `clone-branch-missing` rather than cutting a fresh empty
-     branch if the agent's commits are gone. Two tests, mutation-checked. This was the
-     "worth a test before loading the daemon" hazard, and it is closed.
-
-**Still open, and deliberately not Phase 4's:** the two carry-over defects under "Two
-defects worth knowing about" — `_SENSITIVE_DIRS["frontend"]` matching nothing, and
-`deliver._archive` returning silently on a missing attempt directory. Both are recorded
-defects rather than blockers.
+**Still open, and never Phase 4 blockers:** `_SENSITIVE_DIRS["frontend"]` matches nothing,
+and `deliver._archive` returns silently when the attempt directory is missing. Both are
+recorded under "Two defects worth knowing about" below.
 
 **The board, for context:** FRO-6 is `awaiting_human` at draft
 [frontend-harness#41](https://github.com/jchen1707/frontend-harness/pull/41) (the run that

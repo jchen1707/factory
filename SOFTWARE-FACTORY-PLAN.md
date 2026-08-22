@@ -2230,6 +2230,81 @@ is manual.
 
 ---
 
+### Phase 4.5 — prove the pipeline unattended
+
+**Repository:** none modified. This phase writes no code; it is the acceptance run Phase 4
+specifies and could not perform, plus the two live validations its §19 command list names.
+
+Phase 4's build is complete and merged (PRs #19, #20, #21): the tick, the daemon and its
+plist, recovery, `gc`, the §16.3a ladder, the §18.5 console, and all thirty §22 rows
+traceable to a test. What it never did is the one sentence its **Expected output** leads
+with: *"a ticket labelled `ready-for-agent` reaches `awaiting_human` with no keystroke."*
+Every run to date was started by a human typing `factory run`. Until one is not, the
+poller, the lease, the reap loop and the recovery ladder have been proven against fakes and
+against manual runs, but never against the clock.
+
+This is its own phase because Phase 5 flips PRs from draft to **ready-for-review** (§24.8).
+Doing that while the unattended path is unproven means an unproven pipeline starts opening
+review-ready pull requests, which is the wrong order to discover a defect in.
+
+**Preconditions** (all verified 2026-08-22, none outstanding):
+
+| | |
+| --- | --- |
+| `sbx` authenticated | yes — `sbx login` done |
+| FRO-6 | `Done`; PR frontend-harness#41 merged |
+| FRO-7 intake | **all 11 conditions pass** (condition 11 clears now FRO-6 is completed) |
+| daemon | **not** loaded — §19's approval boundary, James's call |
+
+**The one blocker, and why the intake check does not show it.** `factory tick` skips any
+ticket that already has a live run *before* it evaluates intake, so FRO-7 is passed over
+with `already has a live run at blocked`. The row is FRO-7's own August run — the one that
+correctly refused to invent FRO-6's seams and wrote `needs-info` on itself. Intake says
+eligible, the poller says already-running, and the poller is consulted first.
+
+`factory cancel FRO-7` clears it. Measured blast radius, so the next session need not
+re-derive it: run `0d53f96c918a4d8e`, `blocked`, attempt 1, **no PR**, no host worktree
+(`.factory/worktrees/FRO-7` does not exist), and the branch
+`feat/FRO-7-filter-your-projects-by-status-including` exists **neither locally nor on
+`origin`** — it blocked before implementing, so there is nothing to lose. The tracker
+half is already where cancel would put it (`Todo`, no `needs-info`), so that step is a
+no-op. This is a database cleanup wearing a rollback's name.
+
+**Steps**
+
+| # | Step | Command | Expected |
+| --- | --- | --- | --- |
+| 4.5-1 | Clear the stale row | `uv run factory cancel FRO-7 --reason "stale row; FRO-6 has landed"` | The run row goes `cancelled`; Linear is untouched (already `Todo`, already unlabelled) |
+| 4.5-2 | Confirm the poller now sees it | `uv run factory tick --once --verbose` | FRO-7 is claimed; it no longer prints `already has a live run` |
+| 4.5-3 | **Load the timer** | `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist` | **James's decision (§19).** `launchctl print gui/$(id -u)/com.jchen.factory` shows it loaded |
+| 4.5-4 | Watch it run unattended | `uv run factory serve --port 7717`, or `factory status` | FRO-7 walks `approved → awaiting_human` **with no keystroke**. This is Phase 4's expected output |
+| 4.5-5 | Live suspend / resume | `factory suspend FRO-7 --reason "…"` then `factory resume FRO-7`, and the same two from the browser | Both write an `actor = "human"` transition; the Codex session resumes **by id**; no Linear comment repeats |
+| 4.5-6 | Live resume-from-planning | `factory resume FRO-7 --from planning` | Rewinds to a fresh plan without resetting the worktree |
+
+Steps 4.5-5 and 4.5-6 are the two §19 validation commands never run against real
+infrastructure. They are covered by tests and by the console's POST path, so this is
+confirmation on the real adapters, not first proof.
+
+**A caution the daemon makes sharper.** Under the timer, a mistake is unattended. The three
+loops that could burn the attempt budget are bounded — `env-gate-failed` (a caveated gate
+failure blocks instead of looping), the F23 ladder (a third gate failure rewinds to
+`planning`, a fourth parks at `resumable`), and `clone.ensure_on_branch` (a resume runs the
+gates against the run's own branch). Each was a real defect found by a real run. If a new
+loop appears, `launchctl bootout gui/$(id -u)/com.jchen.factory` stops it at any instant;
+the daemon is stateless between ticks.
+
+**Tests:** none new. This phase runs what is already written against real infrastructure.
+**Rollback:** `launchctl bootout gui/$(id -u)/com.jchen.factory`, and `factory cancel FRO-7`
+if the run needs abandoning.
+**Human approval boundary:** James loads the timer (§19), and James decides whether the
+unattended run's PR is good enough to proceed to Phase 5.
+
+**Exit criterion — the one thing that closes this phase.** A ticket the factory claimed on
+its own reaches `awaiting_human` with a draft PR, and the transition log shows no `actor =
+"human"` hop before it. Anything less and Phase 5 is being built on an unproven poller.
+
+---
+
 ### Phase 5 — Python and frontend stack adapters
 
 **Repositories:** `factory@main`; both consumers `@v2` if a kit is adopted.
@@ -2527,7 +2602,7 @@ so a later reader does not reopen them by accident. **Nothing remains open** —
 | 24.5 | Vault mount | **Read-write, keep the mount**, and work around the risk with before/after snapshots and an allowlist | §8.5 |
 | 24.6 | Commit signing | **Accept unsigned**, stated in every PR body | §17.3 |
 | 24.7 | `frontend-harness`'s `review.agentDir` | **`.agents/agents` on `v2`** — adopt `python-harness`'s layout | §24a below |
-| 24.8 | Draft or ready PRs | **Draft through Phase 4, ready from Phase 5** | §19 Phases 3 and 5 |
+| 24.8 | Draft or ready PRs | **Draft through Phase 4.5, ready from Phase 5** | §19 Phases 3 and 5 |
 | 24.9 | Per-run USD ceiling | **$20**, easy to change | `models.toml` `[budget]`, editable from the console (§18.5 View 4) |
 | 24.10 | Codex model ids and efforts | **Answered from `~/.codex/models_cache.json`** — no model call needed | §4.5 |
 | 24.11 | Install `mattpocock-skills` for Codex | **Yes** — `/implement`, `/tdd` and `/code-review` are mattpocock skills, so the execution workflow needs them. Scoped to the execution set | §24.11 |
