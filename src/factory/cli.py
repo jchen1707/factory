@@ -880,6 +880,113 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------------
+# factory suspend
+# --------------------------------------------------------------------------------
+
+
+def cmd_suspend(args: argparse.Namespace) -> int:
+    """§16.3b — park a run. The machinery (signal, wait for `exit`, stop the sandbox if
+    idle, record `-> suspended`, announce) lives in `recovery.suspend` so it runs against
+    the fakes in the tests; this is the thin shell that owns the lease and the real
+    adapters."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home, dry_run=False)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    if run.state in machine.TERMINAL:
+        print(f"{ticket} is at {run.state}; nothing to suspend")
+        return 1
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        print(
+            f"\n{ticket} is leased by another process ({run.lease_owner}); wait for it to "
+            "finish, or use `factory cancel` to abandon it."
+        )
+        return 1
+
+    ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+    origin = recovery.suspend(ctx, reason=args.reason)
+    store.release_lease(run.id)
+
+    print(
+        f"{ticket} suspended from {origin}; worktree, branch and session kept. "
+        f"`factory resume {ticket}` resumes it."
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------------
+# factory resume
+# --------------------------------------------------------------------------------
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """§16.3b — resume a parked run. Re-enters the state it left (or `--from`), then drives
+    forward through the synchronous states. An agent state starts the agent and hands the
+    rest to the tick, the same way `resume_run` does; `verifying`/`reviewing` run through
+    to `awaiting_human`/`pr_ready` in this command. `--authorise` re-authorises a `failed`
+    run's spend (§16.4)."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home, dry_run=False)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        print(f"\n{ticket} is leased by another process ({run.lease_owner}); nothing to do.")
+        return 0
+
+    if run.state is State.FAILED and not args.authorise:
+        store.release_lease(run.id)
+        print(f"{ticket} is `failed`; pass --authorise to re-authorise spend (§16.4).")
+        return 2
+
+    linear = LinearClient()
+    ctx = _context_for(home, registry, routing, store, linear, run)
+
+    try:
+        recovery.resume(ctx, from_state=args.from_state, authorise=args.authorise)
+        _drive_from_here(ctx)
+    except Blocked as exc:
+        _block(ctx, exc.reason, exc.detail)
+        _report(ctx)
+        return 2
+    except Resumable as exc:
+        print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
+        if not ctx.dry_run:
+            ctx.store.record_transition(
+                ctx.run.id,
+                from_state=ctx.state,
+                to_state=State.RESUMABLE,
+                actor="auto",
+                rule=exc.reason,
+                detail=exc.detail[:2000],
+            )
+        _report(ctx)
+        return 3
+    finally:
+        store.release_lease(ctx.run.id)
+
+    _report(ctx)
+    if ctx.run.pr_url:
+        print(f"\nReview ran and a draft pull request is open: {ctx.run.pr_url}\n")
+    elif ctx.state is State.AWAITING_HUMAN:
+        print(f"\nThe run stopped at `{ctx.state}` for a human to look.")
+    elif ctx.state in reap_step.AGENT_STATES:
+        print(f"\nThe agent is running at `{ctx.state}`; `factory tick` collects it.")
+    else:
+        print(f"\nThe run came to rest at `{ctx.state}`.")
+    return 0
+
+
+# --------------------------------------------------------------------------------
 # factory doctor
 # --------------------------------------------------------------------------------
 
@@ -1249,6 +1356,25 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("ticket")
     cancel.add_argument("--reason", default="cancelled by hand")
     cancel.set_defaults(func=cmd_cancel)
+
+    suspend = sub.add_parser("suspend", help="park a run; keep its worktree, branch and session")
+    suspend.add_argument("ticket")
+    suspend.add_argument("--reason", default="suspended by hand")
+    suspend.set_defaults(func=cmd_suspend)
+
+    resume = sub.add_parser("resume", help="resume a parked (suspended/blocked/resumable) run")
+    resume.add_argument("ticket")
+    resume.add_argument(
+        "--from",
+        dest="from_state",
+        help="resume into a specific state: implementing, planning, verifying, reviewing",
+    )
+    resume.add_argument(
+        "--authorise",
+        action="store_true",
+        help="re-authorise spend for a `failed` run (§16.4: `failed -> resumable`)",
+    )
+    resume.set_defaults(func=cmd_resume)
 
     return parser
 

@@ -19,7 +19,7 @@ Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
 | `recovery.py` | **built** — §16.3 resume-vs-restart and §16.3a's ladder, `decide` is pure |
 | `gc.py` + `cli.py: gc` | **built** — §16.5, `--dry-run` is the same code path |
 | `steps/plan.py` rewind | **built** — rung 3 enters `planning`; `plan` records an attempt row now |
-| `cli.py: suspend` / `resume` | **not built** — next, and designed below |
+| `cli.py: suspend` / `resume` | **built** — `recovery.suspend`/`recovery.resume` + thin CLI shells; see below |
 | `cli.py: daemon` + `ops/com.jchen.factory.plist` | not built |
 | `src/factory/console/` | not built |
 | `docs/runbook.md` | not built |
@@ -43,6 +43,24 @@ runs. Making those two-phase is its own slice and should come before the daemon 
 under a timer.
 
 ## Build `resume` next
+
+> **Status (2026-08-22): built.** `recovery.suspend`/`recovery.resume` drive the logic;
+> `cmd_suspend`/`cmd_resume` are thin shells that own the lease and the real adapters.
+> The three notes below were each honoured, and a fourth the spec does not name was found
+> while reading the code: `implement.start`/`plan.start` call `advance` with the default
+> automatic actor, but `SUSPENDED → implementing` is `resume-is-james` and `BLOCKED →
+> implementing` is `unblock-is-a-judgement`, so both `start` functions take an `actor` param
+> and `resume` passes `"human"` or the advance refuses. `resume` re-enters
+> `verifying`/`reviewing` **without incrementing** (note 2 — `verify`/`deliver` address
+> `factory_dir / "run" / str(attempt)`), then `cmd_resume` drives forward via the tick's
+> `_drive_from_here`, so the FRO-6 path runs verify→review→deliver in one command; an agent
+> target starts the agent and hands the rest to the tick. `state_that_died` is generalised
+> to `state_before(ctx, target)`. All four cases (suspend, resume-into-verify, blocked-at-
+> verify, session-by-id, `--from planning`, `--authorise`) are tested in
+> `tests/integration/test_phase4.py` and each key test was mutation-checked to fail without
+> its fix. **Run end-to-end against FRO-6 on 2026-08-22** — but via `--from reviewing`,
+> not `--from verifying`, because lighthouse cannot pass (see "CLOSED — Tier 2 executed"
+> below) and the verify-fail loop-back crashed (defect 4). It is the run that closes Tier 2.
 
 §16.3b is the spec. Three notes it does not contain, and each will cost an hour to
 rediscover.
@@ -218,6 +236,41 @@ reached `reviewing`:
 
 This section stays open, and the next thing that closes it is `resume`, not another run.
 
+### CLOSED 2026-08-22 — Tier 2 executed to completion
+
+`factory resume FRO-6 --from reviewing` (after resetting the crash artifacts the first
+resume left behind — see the two defects below) drove `blocked -> reviewing -> pr_ready ->
+awaiting_human [delivered]` and opened draft [frontend-harness#41](https://github.com/jchen1707/frontend-harness/pull/41).
+`review-summary.json` records `tier2: "ran:forced"` with four real, `medium` findings:
+one from the Tier-1 Standards axis (`review-standards.json`, the `q` URL param reaching
+state without Zod) and three from the Tier-2 `review-full.json` axis (search-test coverage
+of case-insensitive matching, focus loss on Clear, and `useDeferredValue` not deferring
+because the select is recreated each render). **This is the first time Tier 2 has run
+against real adapters.** No critical/high finding, so review advanced to `pr_ready`.
+
+Two things made the resume take the `--from reviewing` path rather than the `verify ->
+review` path the spec implies:
+
+1. **Lighthouse cannot pass for this run, and `--all` forces it to run.** The agent
+   claimed `playwright` (opt-in, in scope) and `lighthouse` (opt-in, out of scope for a
+   search-by-name feature). `gate_report.mjs`'s `--all` is all-or-nothing — it runs *every*
+   opt-in gate and does not re-evaluate `when` — so lighthouse runs whenever any opt-in
+   gate is claimed. Lighthouse then fails on `Chrome installation not found`, and its own
+   caveat says performance scores null even with Chrome ("a category with no score is not a
+   pass"), so the verdict is `fail` for a reason no amount of implementing fixes. Verify
+   looping back to `implementing` on that would spend another ~10 M tokens to re-fix an
+   environment gate. The honest unblock is `--from reviewing`: the PR body still reports
+   `lighthouse = fail` (and `Verdict: fail`) for a human to see; it just does not let an
+   out-of-scope, unreliable gate block the unproven review code.
+2. **`--from verifying` crashed on the verify-fail loop-back** (defect 4 below), so even
+   the `verify -> review` path was not open until that was fixed.
+
+The state DB was reset before the resume: the first resume had incremented the attempt to
+2 and written an incomplete `run/2` before crashing, so the run was restored to its
+pre-resume state (`blocked`, attempt 1, the three crash transitions dropped) with a
+backup at `state/factory.db.bak-pre-reviewing-resume`. `--from reviewing` re-enters at
+attempt 1, so review reads `run/1`'s evidence (the real gate report + claim).
+
 ### What the FRO-7 run did prove
 
 Two things Phase 4's refactor had only ever run against fakes, both confirmed on a real
@@ -324,6 +377,27 @@ mutated to prove it fails without the fix.
    disagreement. **The repair tightens rather than relaxes**: one matcher, `_gate_named_in`,
    used by both, so with `--all` the report actually runs those gates and the claim is
    verified instead of unfalsifiable. `skipped_unchanged` still blocks and a test pins it.
+4. **The verify-fail loop-back crashed `implement.start` on `illegal-transition`.** When a
+   gate verdict is `fail`, `verify` advances `verifying -> implementing` and the tick's
+   `_drive_from_here` then calls `implement.start` to begin the next attempt. `start`
+   unconditionally called `advance(ctx, IMPLEMENTING)`, so already in `implementing` it
+   recorded `implementing -> implementing`, which is not in the table, and the run blocked.
+   This is a tick bug, not a resume bug — any gate failure would crash the daemon here. FRO-6
+   hit it because lighthouse (defect-free code, but an env gate) failed the verdict. Fixed:
+   `start` advances into `implementing` only when it is not already there (the hop was
+   recorded by whoever put the run there — `verify` on a loop-back, `start` otherwise). Test
+   mutated to fail without the fix.
+5. **The PR body reported a forced Tier 2 as "skipped", and labelled Tier-2 findings
+   "Tier-1".** `delivery/github.render_pr_body` handled `tier2 == "ran"` and a fallback
+   "skipped" but had no branch for `ran:forced`, so the first completed Tier 2 (FRO-6) said
+   "Tier 2 skipped — rule: `ran:forced`" and listed the fan-out's three findings under
+   "Tier-1 findings". This is exactly the misstatement §13.2 warns against, and it survived
+   because the forced path was never exercised — Tier 2 had never completed. `deliver`
+   its own `_review_summary` (the awaiting-human comment) already handled `ran:forced`
+   correctly; the two disagreed. Fixed: one `ran:forced` branch in `render_pr_body`
+   ("Tier 2 ran (forced with `--full-review`; no trigger rule fired)") and a `Findings` /
+   `Tier-1 findings` label that follows whether Tier 2 ran. PR #41's body was regenerated
+   and re-posted. Test mutated to fail without the fix.
 
 Two more worth recording that were not code defects:
 
@@ -365,15 +439,15 @@ find otherwise.**
 - **BAC** — done and archived. Nothing pending.
 - **FRO-10 / FRO-9** — FRO-10 Done. FRO-9 is the parent spec I filed for it; it is a spec,
   not a work item, and carries no `ready-for-agent` label. Move it to Backlog if it clutters.
-- **FRO-6** — **`blocked: evidence-mismatch` at `verifying`, and this is the live subject
-  for `resume`.** The run (`ab00d69c38844d2c`, 2026-08-22 01:28-01:51) is real work: 22
-  minutes, 10 582 685 in / 34 692 out, four files and four tests written, and a gate report
-  whose **verdict is `pass`** — eslint, prettier, tsc, vitest and vite build all green. It
-  blocked on defect 3 above, which is fixed. The implementation is intact in the build
-  sandbox's clone (`stopped`, not removed) and the evidence is at
-  `state/clone/frontend-harness/FRO-6/ab00d69c38844d2c/.factory/run/1/`. Resuming it into
-  `verifying` is the cheap path to a proven Tier 2; re-running pays for that implement
-  again.
+- **FRO-6** — **`awaiting_human`, draft PR [frontend-harness#41](https://github.com/jchen1707/frontend-harness/pull/41).**
+  Resumed 2026-08-22 via `--from reviewing` (verify bypassed — lighthouse can't pass, see
+  "CLOSED — Tier 2 executed"). The run (`ab00d69c38844d2c`, 2026-08-22 01:28-01:51) is real
+  work: 22 minutes, 10 582 685 in / 34 692 out, four files and four tests written. The gate
+  report's five stop gates + playwright all pass; `lighthouse = fail` (Chrome missing, out
+  of scope, can't pass per its caveat) is reported honestly in the PR body. Tier 2 ran
+  forced and produced four `medium` findings. The `needs-info` label from the original
+  block is still on the Linear ticket — resume bypasses intake, so it never mattered for
+  the resume, but a human merging #41 should clear it.
 - **FRO-5** — Done. Landed by frontend-harness#40, a merge-forward of the long-closed
   `feat/FRO-5-projects-list` across 64 commits of drift, with three conflicts resolved and
   all seven CI checks green. Linear moved it to Done off the `Fixes FRO-5` line. Verified

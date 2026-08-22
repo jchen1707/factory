@@ -31,7 +31,7 @@ from factory.agent.base import (
 )
 from factory.agent.codex import TranscriptError
 from factory.artifacts import AttemptDir
-from factory.machine import Blocked, Resumable, State
+from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
 from factory.steps import Context, advance
@@ -69,6 +69,7 @@ def start(
     *,
     resume_session: str | None = None,
     continuation: str | None = None,
+    actor: str = AUTOMATIC,
 ) -> tuple[AttemptDir, RunHandle] | None:
     """Write the attempt's files and spawn the detached agent. Returns once it is running.
 
@@ -80,6 +81,12 @@ def start(
     `continuation` is the ladder's rung-2 addition: what the previous attempt already
     changed and how it failed, which is the only thing that makes a second attempt
     different from the first.
+
+    `actor` threads through the `advance` into `implementing`. The hop is automatic for the
+    two callers that start an agent mid-pipeline — the tick's forward dispatch and the
+    `resumable` recovery — but `SUSPENDED → implementing` is `resume-is-james` and `BLOCKED →
+    implementing` is `unblock-is-a-judgement`, so a human `factory resume` passes `"human"`
+    here or the advance refuses with `requires-human`.
     """
     # A rewind is one attempt with two phases, so the implement half of an attempt that
     # already planned reuses that attempt's number and its directory. Anywhere else this
@@ -126,7 +133,8 @@ def start(
         ctx.would(" ".join(preview))
         for line in script.strip().splitlines():
             ctx.would(f"    {line}")
-        advance(ctx, State.IMPLEMENTING)
+        if ctx.state is not State.IMPLEMENTING:
+            advance(ctx, State.IMPLEMENTING, actor=actor)
         ctx.would("poll heartbeat/exit; validate last-message.json; diff the vault")
         advance(ctx, State.VERIFYING)
         return None
@@ -161,7 +169,14 @@ def start(
         artifact_dir=str(attempt_dir.root),
     )
     ctx.refresh()
-    advance(ctx, State.IMPLEMENTING)
+    # The hop into `implementing` is recorded once, by whoever put the run here. From
+    # `worktree_ready`/`planning`/`suspended`/`blocked`/`resumable` that is this `start`; from
+    # a verify-fail loop-back it was `verify` (`verifying -> implementing`), and re-recording
+    # `implementing -> implementing` is an illegal transition that blocked FRO-6's resume.
+    # `start` begins a fresh attempt against the existing worktree either way — the attempt
+    # counter (above) is what marks the new attempt, not the state hop.
+    if ctx.state is not State.IMPLEMENTING:
+        advance(ctx, State.IMPLEMENTING, actor=actor)
 
     handle = RunHandle(
         run_id=ctx.run.id,

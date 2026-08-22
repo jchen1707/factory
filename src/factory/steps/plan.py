@@ -23,7 +23,7 @@ from pathlib import Path
 from factory import artifacts
 from factory.agent.base import AgentInvocation
 from factory.artifacts import AttemptDir
-from factory.machine import Blocked, Resumable, State
+from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
 from factory.steps import Context, advance
@@ -86,8 +86,12 @@ def plan_dir(ctx: Context) -> Path:
     return ctx.worktree / ".agents" / "plans" / branch_slug
 
 
-def start(ctx: Context) -> tuple[AttemptDir, RunHandle, Path] | None:
-    """Write the plan prompt and spawn the detached agent. `None` for a dry run."""
+def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle, Path] | None:
+    """Write the plan prompt and spawn the detached agent. `None` for a dry run.
+
+    `actor` threads through the `advance` into `planning`; see `implement.start`. A rewind
+    from `SUSPENDED`/`BLOCKED` is human-gated, a rung-3 rewind from `RESUMABLE` is not.
+    """
     attempt = ctx.run.attempt + 1
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
@@ -131,7 +135,7 @@ def start(ctx: Context) -> tuple[AttemptDir, RunHandle, Path] | None:
             )
         )
         ctx.would(f"require {plans}/plan.md and test-plan.md")
-        advance(ctx, State.PLANNING)
+        advance(ctx, State.PLANNING, actor=actor)
         advance(ctx, State.IMPLEMENTING)
         return None
 
@@ -150,7 +154,7 @@ def start(ctx: Context) -> tuple[AttemptDir, RunHandle, Path] | None:
         artifact_dir=str(attempt_dir.root),
     )
     ctx.refresh()
-    advance(ctx, State.PLANNING)
+    advance(ctx, State.PLANNING, actor=actor)
 
     handle = RunHandle(
         run_id=ctx.run.id,

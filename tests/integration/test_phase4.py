@@ -24,6 +24,7 @@ from factory.steps import context as context_step
 from factory.steps import implement as implement_step
 from factory.steps import reap as reap_step
 from factory.steps import sandbox as sandbox_step
+from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Run
 from tests.integration.conftest import FakeSandbox
@@ -102,6 +103,29 @@ def test_an_attempt_still_running_is_left_alone(ctx: Context) -> None:
 
     assert verdict.outcome is reap_step.Outcome.RUNNING
     assert ctx.state is State.IMPLEMENTING
+
+
+def test_start_after_a_verify_fail_loopback_does_not_illegally_re_enter_implementing(
+    ctx: Context,
+) -> None:
+    # FRO-6's resume crashed here. lighthouse failed the gate report, verify looped back to
+    # `implementing`, and the tick's drive loop called `implement.start` to begin the next
+    # attempt. `start` then recorded `implementing -> implementing`, which is not in the
+    # table, and the run blocked on `illegal-transition`. The hop back to `implementing` was
+    # already recorded by `verify`; `start` must not record it a second time — it begins a
+    # fresh attempt against the same worktree, exactly as from `worktree_ready`.
+    _to_worktree(ctx)  # approved -> worktree_ready
+    implement_step.start(ctx)  # worktree_ready -> implementing, attempt 1
+    assert ctx.state is State.IMPLEMENTING
+    assert ctx.run.attempt == 1
+
+    # verify failed and advanced `verifying -> implementing`; the drive loop calls `start`
+    # again. Before the fix this raised Blocked("illegal-transition").
+    started = implement_step.start(ctx, continuation="previous attempt failed the gate")
+
+    assert started is not None
+    assert ctx.run.attempt == 2  # a fresh attempt, not a re-run of attempt 1
+    assert ctx.state is State.IMPLEMENTING  # no illegal hop was recorded
 
 
 # --------------------------------------------------------------------------------
@@ -386,3 +410,241 @@ def test_a_ticket_whose_blocker_lands_is_picked_up_with_no_intervention(ctx: Con
     assert run.state is State.IMPLEMENTING
     # And no label was ever written on the way through.
     assert "needs-info" not in (ctx.linear.labels or [])  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------------
+# §16.3b — suspend and resume
+# --------------------------------------------------------------------------------
+
+
+def _to_verifying(ctx: Context) -> None:
+    """Drive a run to `verifying` with an implement attempt directory on disk, the way a
+    finished implement step leaves it. `resume` into `verifying` re-runs the gate report
+    against that directory, so it has to exist."""
+    _start_an_attempt(ctx)
+    verdict = reap_step.reap(ctx)
+    assert verdict.outcome is reap_step.Outcome.COLLECTED
+    assert ctx.state is State.VERIFYING
+
+
+def _block_at(ctx: Context, state: State, reason: str) -> None:
+    """Park a run at `blocked` from `state` the way a blocking step does — the FRO-6 shape
+    is `blocked` from `verifying` with a passing gate report."""
+    ctx.store.update_run(ctx.run.id, blocked_reason=reason)
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=state,
+        to_state=State.BLOCKED,
+        actor="auto",
+        rule=reason,
+        detail=reason,
+    )
+    ctx.refresh()
+
+
+def test_suspend_parks_a_running_agent_and_keeps_everything(ctx: Context) -> None:
+    _start_an_attempt(ctx, finish=False)
+    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+    worktree = Path(ctx.run.worktree or "")
+    branch = ctx.run.branch
+    sandbox = ctx.project.build_sandbox
+    assert sandbox in _fake(ctx).running
+
+    origin = recovery.suspend(ctx, reason="checking something")
+
+    assert origin is State.IMPLEMENTING
+    assert ctx.state is State.SUSPENDED
+    # The transition is a human act, under the reserved rule.
+    row = ctx.store.transitions(ctx.run.id)[-1]
+    assert (row["from_state"], row["to_state"], row["actor"], row["rule"]) == (
+        str(State.IMPLEMENTING),
+        str(State.SUSPENDED),
+        "human",
+        "suspend-is-james",
+    )
+    # The attempt got a real terminal record, and the worktree/branch/session survived.
+    attempt = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+    assert attempt is not None
+    assert attempt["outcome"] == "suspended"
+    assert worktree.exists()
+    assert (
+        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == "01a0-fake-thread"
+    )
+    assert branch is not None
+    # Stopped, because no other run shares the sandbox.
+    assert sandbox not in _fake(ctx).running
+    # One suspend comment (the claim step already commented on the way through).
+    assert sum("**suspended**" in c for c in ctx.linear.comments) == 1  # type: ignore[attr-defined]
+
+
+def test_suspend_leaves_the_sandbox_running_when_another_run_shares_it(ctx: Context) -> None:
+    _start_an_attempt(ctx, finish=False)
+    sandbox = ctx.project.build_sandbox
+    # A second run of the same project is mid-implement — it shares the build sandbox. A
+    # different ticket, because `insert_run` no-ops on a live ticket and would hand back the
+    # same run.
+    other = ctx.store.insert_run(linear_id="BAC-9", project=ctx.project.name, team="BAC")
+    assert other.id != ctx.run.id
+    ctx.store.record_transition(
+        other.id, from_state=State.APPROVED, to_state=State.IMPLEMENTING, actor="auto"
+    )
+
+    recovery.suspend(ctx, reason="checking something")
+
+    # Not stopped: the other run still needs it.
+    assert sandbox in _fake(ctx).running
+
+
+def test_resume_into_verifying_does_not_increment_the_attempt(ctx: Context) -> None:
+    # The handoff's note 2. `verify` and `deliver` address `factory_dir / "run" / str(attempt)`,
+    # so a resume that incremented would point at a directory that does not exist and the
+    # gate report would block on the missing last-message.json.
+    _to_verifying(ctx)
+    attempt_before = ctx.run.attempt
+
+    recovery.suspend(ctx, reason="park at verify")
+    assert ctx.state is State.SUSPENDED
+
+    recovery.resume(ctx)  # no --from: re-enter the recorded state (verifying)
+    assert ctx.state is State.VERIFYING
+    assert ctx.run.attempt == attempt_before  # the increment that must not happen
+
+    # And the gate report actually runs against the existing attempt directory — it would
+    # raise `schema-invalid` (no last-message.json) had the attempt been incremented.
+    verify_step.run(ctx)
+    assert ctx.state is State.REVIEWING
+
+
+def test_resume_a_blocked_at_verifying_run_re_enters_verifying(ctx: Context) -> None:
+    # FRO-6's shape: blocked *at* verifying with a passing gate report. The cheap repair is
+    # `blocked -> verifying`, the edge this phase adds — without it `resume` raises
+    # `illegal-transition`.
+    _to_verifying(ctx)
+    _block_at(ctx, State.VERIFYING, "evidence-mismatch")
+    assert ctx.state is State.BLOCKED
+    attempt_before = ctx.run.attempt
+
+    recovery.resume(ctx)
+
+    assert ctx.state is State.VERIFYING
+    assert ctx.run.attempt == attempt_before  # no agent, no increment
+    row = ctx.store.transitions(ctx.run.id)[-1]
+    assert (row["from_state"], row["to_state"], row["actor"], row["rule"]) == (
+        str(State.BLOCKED),
+        str(State.VERIFYING),
+        "human",
+        "unblock-is-a-judgement",
+    )
+    # The gate report re-runs against the evidence the implementer already wrote.
+    verify_step.run(ctx)
+    assert ctx.state is State.REVIEWING
+
+
+def test_resume_a_suspended_implementing_run_resumes_the_session_by_id(ctx: Context) -> None:
+    _start_an_attempt(ctx, finish=False)
+    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+    recovery.suspend(ctx, reason="park mid-implement")
+    attempt_before = ctx.run.attempt
+
+    recovery.resume(ctx)  # no --from: resume the session the suspended attempt captured
+
+    assert ctx.state is State.IMPLEMENTING
+    assert ctx.run.attempt == attempt_before + 1  # an agent starts, so the counter increments
+    script = _fake(ctx).detached[-1][1]
+    assert "01a0-fake-thread" in script  # resumed by id, never `--last`
+    assert "resume --last" not in script
+
+
+def test_resume_from_implementing_forces_a_fresh_attempt_not_a_session_resume(ctx: Context) -> None:
+    _start_an_attempt(ctx, finish=False)
+    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+    recovery.suspend(ctx, reason="park mid-implement")
+
+    recovery.resume(ctx, from_state="implementing")  # §16.3b: "starts a new attempt"
+
+    assert ctx.state is State.IMPLEMENTING
+    script = _fake(ctx).detached[-1][1]
+    assert "01a0-fake-thread" not in script  # fresh attempt, no session resume
+
+
+def test_resume_from_planning_rewinds(ctx: Context) -> None:
+    _start_an_attempt(ctx, finish=False)
+    recovery.suspend(ctx, reason="park mid-implement")
+
+    recovery.resume(ctx, from_state="planning")
+
+    assert ctx.state is State.PLANNING
+    row = ctx.store.transitions(ctx.run.id)[-1]
+    assert (row["from_state"], row["to_state"], row["actor"], row["rule"]) == (
+        str(State.SUSPENDED),
+        str(State.PLANNING),
+        "human",
+        "resume-is-james",
+    )
+
+
+def test_resume_a_failed_run_needs_authorise(ctx: Context) -> None:
+    _to_verifying(ctx)
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.VERIFYING,
+        to_state=State.RESUMABLE,
+        actor="auto",
+        rule="orphaned",
+    )
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.RESUMABLE,
+        to_state=State.FAILED,
+        actor="auto",
+        rule="max-attempts-in-state",
+    )
+    ctx.refresh()
+    assert ctx.state is State.FAILED
+
+    with pytest.raises(Blocked) as caught:
+        recovery.resume(ctx)
+    assert caught.value.reason == "resume-needs-authorise"
+
+
+def test_resume_authorise_reauthorises_a_failed_run(ctx: Context) -> None:
+    _to_verifying(ctx)
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.VERIFYING,
+        to_state=State.RESUMABLE,
+        actor="auto",
+        rule="orphaned",
+    )
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.RESUMABLE,
+        to_state=State.FAILED,
+        actor="auto",
+        rule="max-attempts-in-state",
+    )
+    ctx.refresh()
+
+    recovery.resume(ctx, authorise=True)
+
+    hops = [
+        (row["from_state"], row["to_state"], row["actor"], row["rule"])
+        for row in ctx.store.transitions(ctx.run.id)
+    ]
+    # `failed -> resumable` is James's explicit act, then the ladder takes over.
+    assert (str(State.FAILED), str(State.RESUMABLE), "human", "reauthorise-spend") in hops
+    assert ctx.state is State.IMPLEMENTING  # restart (no session captured) -> a fresh attempt
+
+
+def test_suspend_comments_once_and_resume_does_not_repeat(ctx: Context) -> None:
+    # F22. Suspension comments once; resuming into the re-entered state does not comment
+    # again, so a suspend/resume cycle is one Linear write, not N. (The claim step already
+    # commented on the way through, so count the delta, not the absolute total.)
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]
+
+    recovery.suspend(ctx, reason="park at verify")
+    assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]
+
+    recovery.resume(ctx)  # re-enters verifying — no announce
+    assert len(ctx.linear.comments) == before + 1  # type: ignore[attr-defined]

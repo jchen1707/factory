@@ -19,7 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from factory.machine import AUTOMATIC, Blocked, State
+from factory.machine import AUTOMATIC, Blocked, State, requires_human_rule
 
 if TYPE_CHECKING:
     from factory.steps import Context
@@ -31,8 +31,10 @@ __all__ = [
     "continuation_prompt",
     "decide",
     "ladder_rung",
+    "resume",
     "resume_run",
-    "state_that_died",
+    "state_before",
+    "suspend",
 ]
 
 
@@ -136,25 +138,32 @@ def decide(
 # --------------------------------------------------------------------------------
 
 
-def state_that_died(ctx: Context) -> State:
-    """Which state the run was in when it became `resumable`.
+def state_before(ctx: Context, target: State) -> State:
+    """The state a run was in before it became `target`.
 
-    Read from the transition that recorded the stop rather than inferred, because
-    `resumable` is reachable from four states and the ladder, the session id and the
-    per-state attempt ceiling are all keyed by which one it was.
+    `resumable`, `suspended` and `blocked` all record the state they came from in the
+    `from_state` of the transition that parked them, and `resume` needs exactly that for
+    all three. One lookup rather than three: this file already records one defect that was
+    two functions disagreeing about the same input.
+
+    Read from the transition rather than inferred, because `resumable` is reachable from
+    four states and the ladder, the session id and the per-state attempt ceiling are all
+    keyed by which one it was.
     """
     for row in reversed(ctx.store.transitions(ctx.run.id)):
-        if str(row["to_state"]) == str(State.RESUMABLE) and row["from_state"]:
+        if str(row["to_state"]) == str(target) and row["from_state"]:
             return State(str(row["from_state"]))
     return State.IMPLEMENTING
 
 
-def resume_run(ctx: Context) -> Verdict:
+def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     """Take one `resumable` run to its next attempt, or to `failed`.
 
     Returns without starting anything when the backoff window has not elapsed — a
     verdict of `Disposition.RESTART` with reason `backoff` — so a daemon ticking every
     60 s does not turn §16.4's 0/60/300 s schedule into three immediate retries.
+    `skip_backoff` is for `factory resume`: a human who just typed the command does not
+    mean "try in five minutes", and the ladder's ceilings still bound the attempt.
 
     Everything this reads is durable: the transition log says which state died, the
     attempts table says whether a session id was captured, and git says whether the
@@ -167,14 +176,14 @@ def resume_run(ctx: Context) -> Verdict:
     if ctx.run.state is not State.RESUMABLE:
         raise Blocked("not-resumable", f"{ctx.run.linear_id} is at {ctx.run.state}")
 
-    died_in = state_that_died(ctx)
+    died_in = state_before(ctx, State.RESUMABLE)
     # Before the backoff, not after it: a run that cannot afford another attempt should
     # say so now rather than wait five minutes to say it. Nothing is spent either way.
     _refuse_over_budget(ctx)
 
     waited = _seconds_since_last_transition(ctx)
     wait_for = backoff_seconds(ctx.run.attempt)
-    if waited < wait_for:
+    if not skip_backoff and waited < wait_for:
         return Verdict(Disposition.RESTART, "backoff", ladder_rung(ctx.run.attempt))
 
     verdict = decide(
@@ -216,6 +225,217 @@ def resume_run(ctx: Context) -> Verdict:
     )
     implement_step.start(ctx, resume_session=session, continuation=continuation_prompt(ctx))
     return verdict
+
+
+def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = False) -> State:
+    """§16.3b — James resumes a parked run. Re-enters the state it left, or a forced one.
+
+    Handles `suspended`, `blocked` and (after `--authorise`) `failed`/`resumable`. The
+    attempt counter increments only when the resume starts an agent (§16.3b, and the
+    handoff's note 2): `verify` and `deliver` address `factory_dir / "run" / str(attempt)`,
+    so an increment on a non-agent resume would point at a directory that does not exist
+    and spend budget for a model call that never happens. The tick's forward dispatch
+    drives the re-entered `verifying`/`reviewing` state the rest of the way.
+
+    Every entry the run makes here is a human act, so each `advance` carries
+    `actor="human"`: `SUSPENDED -> *` is `resume-is-james` and `BLOCKED -> *` is
+    `unblock-is-a-judgement`, and the starts inside `implement`/`plan` thread that actor
+    through their own `advance` or it would refuse.
+    """
+    from factory.steps import advance
+    from factory.steps import implement as implement_step
+    from factory.steps import plan as plan_step
+
+    state = ctx.run.state
+    if state is State.FAILED:
+        if not authorise:
+            raise Blocked(
+                "resume-needs-authorise",
+                f"{ctx.run.linear_id} is `failed`; pass --authorise to re-authorise spend "
+                "(§16.4: `failed -> resumable` is James's explicit act)",
+            )
+        advance(ctx, State.RESUMABLE, actor="human", rule="reauthorise-spend")
+        ctx.refresh()
+        state = ctx.run.state
+
+    # A resumable run with no forced target uses the ladder — the existing machinery, with
+    # its ceilings. A human typed this, so the §16.4 backoff does not apply.
+    if state is State.RESUMABLE and not from_state:
+        resume_run(ctx, skip_backoff=True)
+        return state_before(ctx, State.RESUMABLE)
+
+    if state not in (State.RESUMABLE, State.SUSPENDED, State.BLOCKED):
+        raise Blocked(
+            "not-resumable",
+            f"{ctx.run.linear_id} is at {state}; resume works on suspended, blocked or "
+            "resumable runs. Use `factory tick` to advance a run that is already going.",
+        )
+
+    target = State(from_state) if from_state else state_before(ctx, state)
+    if target not in (State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING):
+        raise Blocked(
+            "resume-target-invalid",
+            f"cannot resume {ctx.run.linear_id} into {target}; --from must be one of "
+            "implementing, planning, verifying, reviewing.",
+        )
+
+    _refuse_over_budget(ctx)
+    rule = requires_human_rule(state, target)
+
+    if target in (State.VERIFYING, State.REVIEWING):
+        # No agent, no increment: re-enter and let the forward dispatch re-run the gate
+        # report / review against the attempt directory the implementer already wrote.
+        advance(ctx, target, actor="human", rule=rule)
+        return target
+
+    if target is State.PLANNING:
+        plan_step.start(ctx, actor="human")
+        return target
+
+    implement_step.start(
+        ctx,
+        resume_session=_session_to_resume(ctx, forced=bool(from_state)),
+        continuation=continuation_prompt(ctx),
+        actor="human",
+    )
+    return target
+
+
+def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
+    """The Codex session id to resume into `implementing`, or None for a fresh attempt.
+
+    `--from implementing` forces a fresh attempt (§16.3b: "starts a new attempt against
+    the existing worktree"), so None. Otherwise the session the prior attempt captured is
+    resumed by id — the same decision `resume_run` makes for rung 2 — unless the worktree
+    is stopped mid merge/rebase/cherry-pick, which a resumed session must not be handed
+    because the model did not leave it that way and cannot be told so in a continuation.
+    """
+    if forced:
+        return None
+    session = ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+    if session is None:
+        return None
+    if _interrupted_by(ctx) is not None:
+        return None
+    return session
+
+
+# --------------------------------------------------------------------------------
+# Suspend — §16.3b's other half
+# --------------------------------------------------------------------------------
+
+
+_SUSPEND_STEP = "suspend"
+
+
+def _wait_for_exit_file(attempt_dir: Path, grace_seconds: int) -> int | None:
+    """Poll the wrapper's atomic `exit` file, the way `reap` does after a kill.
+
+    The wrapper writes `exit` last and atomically, so its appearance is the real terminal
+    record; a suspend that parks without it leaves a truncated attempt. Returns the exit
+    code if it landed in time, else None.
+    """
+    exit_path = attempt_dir / "exit"
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        if exit_path.exists():
+            try:
+                return int(exit_path.read_text().strip())
+            except (OSError, ValueError):
+                return None
+        time.sleep(0.05)
+    return None
+
+
+def _stop_sandbox_if_idle(ctx: Context) -> None:
+    """§16.3b step 2: stop the build sandbox only when no other run is using it.
+
+    A project's build sandbox is shared across the project's runs, so stopping it under a
+    second run would kill that run's agent. `active_runs_for_project` is the set of runs
+    that exec into it.
+    """
+    others = [r for r in ctx.store.active_runs_for_project(ctx.project.name) if r.id != ctx.run.id]
+    if others:
+        return
+    ctx.sandbox.stop(ctx.project.build_sandbox)
+
+
+def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
+    """One Linear comment, idempotent by marker. Best-effort: a Linear outage degrades the
+    announcement but never masks the suspend. No `needs-info` label — suspension is a
+    park, not a stop, so the ticket stays In Progress and the poller does not need to be
+    told to leave it alone."""
+    from factory.intake.linear import LinearError
+    from factory.steps import effect_marker, record_effect
+
+    if ctx.dry_run:
+        ctx.would(
+            f"linear: comment on {ctx.run.linear_id} (suspend; marker {effect_marker(ctx, _SUSPEND_STEP)})"
+        )
+        return
+    marker = effect_marker(ctx, _SUSPEND_STEP)
+    issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
+    body = (
+        f"<!-- {marker} -->\n"
+        f"The factory was **suspended** from `{origin}`: {reason}\n\n"
+        f"The worktree, branch and Codex session are kept. "
+        f"`factory resume {ctx.run.linear_id}` resumes it. "
+        f"Run `{ctx.run.id}`, attempt {ctx.run.attempt}.\n"
+    )
+    try:
+        record_effect(
+            ctx,
+            step=_SUSPEND_STEP,
+            system="linear",
+            key="comment:suspended",
+            reconcile=lambda: (
+                "found" if ctx.linear.comment_marker_present(ctx.run.linear_id, marker) else None
+            ),
+            perform=lambda: ctx.linear.add_comment(issue_uuid, body),
+        )
+    except LinearError as exc:
+        ctx.log("suspend.announce_failed", level="error", detail=str(exc)[:500])
+
+
+def suspend(ctx: Context, *, reason: str) -> State:
+    """§16.3b — park the run in `ctx`. Signal the agent, wait for a real `exit` so the
+    attempt has a terminal record, stop the build sandbox if no other run is using it,
+    record `-> suspended` keeping the worktree/branch/attempt/session, and announce once.
+
+    The caller (`cmd_suspend`) owns the lease and the surrounding real adapters; the
+    transition is `actor="human"` under `suspend-is-james`. Returns the state the run was
+    in when parked, which `resume` reads back from the transition's `from_state`.
+    """
+    from factory.steps import reap as reap_step
+
+    origin = ctx.run.state
+    if origin in reap_step.AGENT_STATES:
+        row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
+        if row and row["artifact_dir"]:
+            attempt_dir = Path(str(row["artifact_dir"]))
+            kill = getattr(ctx.sandbox, "kill_agent", None)
+            if kill is not None:
+                kill(str(row["sandbox"] or ctx.project.build_sandbox))
+            exit_code = _wait_for_exit_file(attempt_dir, reap_step.KILL_GRACE_SECONDS)
+            ctx.store.finish_attempt(
+                ctx.run.id, ctx.run.attempt, origin, exit_code=exit_code, outcome="suspended"
+            )
+        # No attempt row: nothing is running (the run was left mid-state by a crash).
+        # Parking it is still the right call; there is no agent to kill.
+
+    _stop_sandbox_if_idle(ctx)
+
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=origin,
+        to_state=State.SUSPENDED,
+        actor="human",
+        rule="suspend-is-james",
+        detail=reason,
+    )
+    ctx.refresh()
+    _suspend_announce(ctx, reason, origin)
+    return origin
 
 
 def continuation_prompt(ctx: Context) -> str:

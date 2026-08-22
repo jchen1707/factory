@@ -168,6 +168,15 @@ class FakeSandbox:
     detach_without_finishing: bool = False
     #: Every detached invocation, so a test can prove a resume passed a session id.
     detached: list[tuple[str, str]] = field(default_factory=list)
+    #: The attempt directory of each detached invocation, parallel to `detached`. The real
+    #: wrapper writes `exit` into the attempt dir it was handed; the fake's `kill_agent` has
+    #: only the sandbox name, so it reads the dir back from here.
+    detached_dirs: list[Path] = field(default_factory=list)
+    #: When true (default), `kill_agent` writes the `exit` file, modelling the wrapper's
+    #: graceful-exit-on-signal — the real `kill_agent` only signals; the wrapper traps it and
+    #: writes `exit` last. This is what gives a suspended attempt a real terminal record
+    #: rather than a truncated one (§16.3b step 1).
+    kill_writes_exit: bool = True
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
@@ -355,6 +364,7 @@ class FakeSandbox:
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
         self._start(handle.sandbox)
         self.detached.append((handle.sandbox, script))
+        self.detached_dirs.append(handle.attempt_dir)
         if self.detach_without_finishing:
             directory = handle.attempt_dir
             directory.mkdir(parents=True, exist_ok=True)
@@ -408,7 +418,12 @@ class FakeSandbox:
         git(clone, "commit", "-m", "feat: the agent's turn")
 
     def kill_agent(self, name: str) -> None:
-        return None
+        # The real `kill_agent` signals `pkill -f "codex exec"`; the wrapper traps it and
+        # writes the `exit` file. The fake models that second step so a suspend gets a real
+        # terminal record. The last detached run in this sandbox is the one to stop.
+        if not self.kill_writes_exit or not self.detached_dirs:
+            return
+        (self.detached_dirs[-1] / "exit").write_text(str(self.exit_code))
 
     def stop(self, name: str) -> None:
         self.stop_sandbox(name)
