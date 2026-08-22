@@ -128,6 +128,9 @@ class FakeSandbox:
     #: When set, returned verbatim as the report call's stdout instead of serialising
     #: `gate_report` — the one way to make the verify step see a non-JSON document.
     gate_report_raw_stdout: str | None = None
+    #: What a reviewer axis writes to its `-o` path when that path is writable from
+    #: inside the sandbox. Tests override it to exercise the finding transitions.
+    review_findings: dict[str, Any] = field(default_factory=lambda: {"findings": []})
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -146,6 +149,16 @@ class FakeSandbox:
     def ensure(self, spec: SandboxSpec) -> None:
         if not self.exists(spec.name):
             self.created.append(spec)
+
+    def _writable_roots(self, name: str) -> list[Path]:
+        """The rw workspaces of a created sandbox — the only host paths a command inside
+        it can write to. Modelled because the real thing enforces it: a reviewer told to
+        write outside its mounts exits 0 and quietly produces nothing, which is how two
+        Tier-2 bugs reached a real run."""
+        for spec in self.created:
+            if spec.name == name:
+                return [w.path for w in spec.workspaces if not w.readonly]
+        return []
 
     def exec_sync(
         self,
@@ -177,6 +190,23 @@ class FakeSandbox:
             )
         if "HARNESS_SKIP_VERIFY" in " ".join(argv):
             return Completed(tuple(argv), 0, "", "")
+        if argv and argv[0] == "codex" and "-o" in argv:
+            # A reviewer axis. It writes its findings to the `-o` path — but only when
+            # that path is inside one of the sandbox's writable workspaces, exactly as
+            # the real one does. Outside, codex exits 0 and says so on stderr, which is
+            # the shape BAC-4's run 2efa19065ce6476e produced.
+            out = Path(argv[argv.index("-o") + 1])
+            roots = self._writable_roots(name)
+            if any(root == out.parent or root in out.parents for root in roots):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(json.dumps(self.review_findings), encoding="utf-8")
+                return Completed(tuple(argv), 0, "", "")
+            return Completed(
+                tuple(argv),
+                0,
+                "",
+                f'Failed to write last message file "{out}": No such file or directory (os error 2)',
+            )
         return Completed(tuple(argv), 0, "/usr/bin/node\n/usr/bin/git\nv22.22.1", "")
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:

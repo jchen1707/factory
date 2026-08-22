@@ -180,8 +180,7 @@ def _tier1(
         # The reviewer writes into the project-stable scratch, because that is what it can
         # reach; the run's own directory is where the evidence lives, so the file moves
         # there the moment the axis returns.
-        scratch_out = scratch / f"review-{label}.json"
-        scratch_out.unlink(missing_ok=True)
+        scratch_out = _sandbox_out(scratch, f"review-{label}.json")
         out_path = review_dir / f"review-{label}.json"
         events_path = review_dir / f"review-{label}.events.jsonl"
         stderr_path = review_dir / f"review-{label}.stderr.log"
@@ -196,8 +195,7 @@ def _tier1(
         )
         events_path.write_text(completed.stdout, encoding="utf-8")
         stderr_path.write_text(completed.stderr, encoding="utf-8")
-        if scratch_out.exists():
-            shutil.move(str(scratch_out), out_path)
+        _land(scratch_out, out_path)
         axis_findings = _validated_findings(ctx, out_path, completed, label)
         artifacts.scan_for_secrets(completed.stdout + completed.stderr, f"review {label} stdout")
         findings += axis_findings
@@ -215,7 +213,9 @@ def _tier1(
     return findings, has_human
 
 
-def _review_argv(ctx: Context, schema_path: Path, out_path: Path) -> list[str]:
+def _review_argv(
+    ctx: Context, schema_path: Path, out_path: Path, workdir: Path | None = None
+) -> list[str]:
     """`codex exec` for one axis — the same invocation the implement step uses.
 
     Not `codex exec review --base <ref>`: codex refuses that flag together with a prompt
@@ -246,8 +246,34 @@ def _review_argv(ctx: Context, schema_path: Path, out_path: Path) -> list[str]:
         str(schema_path),
         "-o",
         str(out_path),
+        # `-C` goes before the positional, never after: `-` is the prompt argument and a
+        # flag trailing it is a flag the parser has already stopped reading.
+        *(["-C", str(workdir)] if workdir else []),
         "-",  # prompt from stdin
     ]
+
+
+def _sandbox_out(scratch: Path, name: str) -> Path:
+    """Where a reviewer is told to write, for every tier.
+
+    The scratch is the reviewer's one writable mount, so it is the only path a `-o`
+    argument may name. Told to write anywhere else, codex exits 0 and produces nothing —
+    `Failed to write last message file …: No such file or directory` on stderr — which
+    reads downstream as a review that returned no findings file. Tier 1 learned this on
+    BAC-4's run 1effc543d83a459a and Tier 2 learned it again on 2efa19065ce6476e, so both
+    now come through here.
+    """
+    path = scratch / name
+    path.unlink(missing_ok=True)
+    return path
+
+
+def _land(scratch_out: Path, out_path: Path) -> None:
+    """Move an axis's findings from the shared scratch into this run's own directory,
+    where the evidence belongs."""
+    if scratch_out.exists():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(scratch_out), out_path)
 
 
 def _review_scratch(ctx: Context) -> Path:
@@ -483,27 +509,12 @@ def _tier2(ctx: Context, review_dir: Path) -> list[dict[str, Any]]:
         "one-sentence failure scenario. Emit the findings as the JSON schema this run was "
         f"given (`{_FINDINGS_SCHEMA}`). Do not push fixes; the sandbox is read-only.\n"
     )
+    scratch_out = _sandbox_out(_review_scratch(ctx), "review-full.json")
     out_path = review_dir / "review-full.json"
     schema_path = ctx.worktree / _FINDINGS_SCHEMA
-    argv = [
-        "codex",
-        "exec",
-        "-m",
-        ctx.routing.role("reviewer").model,
-        "-c",
-        f"model_reasoning_effort={ctx.routing.role('reviewer').effort}",
-        "-c",
-        "sandbox_mode=read-only",
-        "--dangerously-bypass-hook-trust",
-        "--json",
-        "--output-schema",
-        str(schema_path),
-        "-o",
-        str(out_path),
-        "-C",
-        str(ctx.worktree),
-        "-",
-    ]
+    # The same argv Tier 1 builds. Tier 2 had its own copy, and the copy is how the two
+    # drifted: Tier 1 was moved onto the writable scratch and this one was not.
+    argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree)
     completed = ctx.sandbox.exec_sync(
         ctx.project.review_sandbox,
         argv,
@@ -513,7 +524,8 @@ def _tier2(ctx: Context, review_dir: Path) -> list[dict[str, Any]]:
         stdin=prompt,
     )
     # `codex exec` (not `review`) has no `--base`; the prompt carries the range. Reuse the
-    # same validation path as Tier 1.
+    # same landing and validation path as Tier 1.
+    _land(scratch_out, out_path)
     return _validated_findings(ctx, out_path, completed, "full")
 
 

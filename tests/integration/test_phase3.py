@@ -9,6 +9,7 @@ assembly, PR-body layout) have their own unit tests.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
 from tests.integration.conftest import FakeLinear, FakeSandbox, git
-from tests.integration.test_pipeline import _to_verifying
+from tests.integration.test_pipeline import _fake, _to_verifying
 
 # --------------------------------------------------------------------------------
 # wiring — the full chain runs review then deliver
@@ -315,3 +316,54 @@ def test_a_step_that_dies_of_a_git_failure_blocks_the_run(
 
     assert caught.value.reason == "reviewing-step-failed"
     assert "corrupt patch" in caught.value.detail
+
+
+def _seed_vendored_review_tree(worktree: Path) -> None:
+    """The parts of layer A a real review reads out of the worktree: the two Tier-1
+    frames, the findings schema, and the portable Tier-2 skill."""
+    vendor = worktree / ".agents/vendor/harness"
+    for agent in ("standards-reviewer", "spec-checker"):
+        path = vendor / "agents" / f"{agent}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {agent}\n\nreview frame body", encoding="utf-8")
+    schema = vendor / "schema" / "review-findings.schema.json"
+    schema.parent.mkdir(parents=True, exist_ok=True)
+    schema.write_text(
+        json.dumps({"type": "object", "properties": {"findings": {"type": "array"}}}),
+        encoding="utf-8",
+    )
+    skill = vendor / "skills" / "full-review" / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text("# full review\n\nthe portable nine-axis skill", encoding="utf-8")
+
+
+def test_both_tiers_write_where_the_sandbox_can_actually_write(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every `-o` a reviewer is given must sit inside the sandbox's writable mount.
+
+    `FakeSandbox` enforces it the way the real one does — a `-o` outside the mounts is
+    exit 0 with `Failed to write last message file` and no file — so a tier that names
+    the run directory directly fails here exactly as Tier 2 failed on BAC-4's run
+    `2efa19065ce6476e`.
+    """
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    # Force Tier 2 to run, so both tiers are exercised in one drive.
+    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: None)
+
+    review_step.run(ctx)
+
+    scratch = review_step._review_scratch(ctx)
+    outputs = [
+        Path(argv[argv.index("-o") + 1])
+        for _name, argv in _fake(ctx).sync_calls
+        if argv and argv[0] == "codex" and "-o" in argv
+    ]
+    assert len(outputs) == 3  # standards, spec, full
+    assert all(out.parent == scratch for out in outputs), outputs
+    # And each landed in the run's own directory afterwards.
+    for name in ("review-standards.json", "review-spec.json", "review-full.json"):
+        assert (ctx.state_dir / "review" / name).exists(), name
+    assert not list(scratch.glob("review-*.json"))  # moved, not copied
