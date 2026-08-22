@@ -78,7 +78,7 @@ def scan_file(path: Path, *, extra_names: Sequence[str] = ()) -> None:
 
 @dataclass(frozen=True)
 class AttemptDir:
-    """`<worktree>/.factory/run/<attempt>` — where the sandbox and the host meet.
+    """`<factory_dir>/run/<attempt>` — where the sandbox and the host meet.
 
     Both sides address it by the same absolute string, because `sbx` bind-mounts the
     host path at the identical path inside the VM. That property is what lets the
@@ -88,8 +88,16 @@ class AttemptDir:
     root: Path
 
     @classmethod
-    def create(cls, worktree: Path, attempt: int) -> AttemptDir:
-        root = worktree / ".factory" / "run" / str(attempt)
+    def create(cls, factory_dir: Path, attempt: int) -> AttemptDir:
+        """`<factory_dir>/run/<attempt>`, where `factory_dir` is `Context.factory_dir`.
+
+        The argument is the `.factory` directory and not the worktree, because those are
+        the same place only for a bind-mounted project. A `--clone` project's worktree
+        lives inside the VM and its untracked content never reaches the host, so its
+        `.factory` sits on a separate `rw` mount — and the host still addresses it by the
+        identical string the VM does, which is the property the protocol actually needs.
+        """
+        root = factory_dir / "run" / str(attempt)
         root.mkdir(parents=True, exist_ok=True)
         return cls(root)
 

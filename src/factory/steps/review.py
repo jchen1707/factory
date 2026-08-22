@@ -38,6 +38,7 @@ from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
+from factory.steps import clone as clone_step
 
 __all__ = ["run"]
 
@@ -77,6 +78,21 @@ def run(ctx: Context) -> None:
     harness = ctx.harness
     if harness is None:
         raise Blocked("no-harness-config", f"no harness.config.json loaded for {ctx.run.linear_id}")
+
+    # 0. A `--clone` project's branch lives inside the VM until now. Bring it home first:
+    #    the replay's host-side diff, the reviewer sandbox (which mounts the host project
+    #    `:ro` and has no clone of its own) and the host-execution guard all read an
+    #    ordinary host worktree, and after this they get one. Nothing below knows.
+    if ctx.project.requires_clone and not ctx.dry_run:
+        clone_step.fetch_back(ctx)
+    elif ctx.project.requires_clone:
+        ctx.would(
+            f"git -C {ctx.project.path} fetch "
+            f"{clone_step.remote_name(ctx.project.build_sandbox)} {ctx.branch}"
+        )
+        ctx.would(
+            f"git worktree add -b {ctx.branch} {clone_step.host_worktree_path(ctx)} FETCH_HEAD"
+        )
 
     # 1. The red-phase replay (§15.3). May raise Blocked (test-proves-nothing,
     #    behaviour-change-without-test, inconclusive:block) or return "awaiting_human"

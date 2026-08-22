@@ -32,6 +32,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import Completed
 from factory.steps import Context
+from factory.steps import clone as clone_step
 
 __all__ = ["ReplayOutcome", "replay", "weakening_guard"]
 
@@ -128,9 +129,19 @@ def replay(ctx: Context) -> ReplayOutcome:
 
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
-    scratch = _scratch_path(ctx)
+    # The one step of the clone path that cannot follow the branch home. Everything else
+    # from `reviewing` onward reads the host worktree `clone.fetch_back` made, but this
+    # *runs the repository's test command*, and for the project that needs `--clone` at
+    # all that command needs the VM-local `node_modules`. So the scratch checkout stays
+    # inside the clone, where the toolchain is. The patch below is still computed on the
+    # host — the two trees agree, because one was fetched from the other.
+    in_clone = ctx.project.requires_clone
+    scratch = clone_step.scratch_path(ctx) if in_clone else _scratch_path(ctx)
 
-    repo.add_detached_worktree(ctx.project.path, scratch, base_ref)
+    if in_clone:
+        clone_step.scratch_add(ctx, scratch, base_ref)
+    else:
+        repo.add_detached_worktree(ctx.project.path, scratch, base_ref)
     try:
         patch = repo.diff_pathspec(worktree, base_ref, list(harness.tests))
         test_files = repo.added_modified_paths(worktree, base_ref, list(harness.tests))
@@ -151,7 +162,10 @@ def replay(ctx: Context) -> ReplayOutcome:
                 "needs a test that would catch its regression.",
             )
 
-        repo.apply_patch(scratch, patch)
+        if in_clone:
+            clone_step.scratch_apply(ctx, scratch, patch)
+        else:
+            repo.apply_patch(scratch, patch)
         completed = ctx.sandbox.exec_sync(
             ctx.project.build_sandbox,
             list(test_gate.run),
@@ -173,7 +187,10 @@ def replay(ctx: Context) -> ReplayOutcome:
         # inconclusive — the one judgement
         return _inconclusive_outcome(ctx, detail)
     finally:
-        repo.remove_worktree(ctx.project.path, scratch, force=True)
+        if in_clone:
+            clone_step.scratch_remove(ctx, scratch)
+        else:
+            repo.remove_worktree(ctx.project.path, scratch, force=True)
 
 
 def weakening_guard(ctx: Context) -> list[str]:
@@ -282,7 +299,7 @@ def _inconclusive_outcome(ctx: Context, detail: str) -> ReplayOutcome:
 
 def _behaviour_changed(ctx: Context) -> bool:
     """Read `behaviour_changed` from the implement result, the same evidence verify saw."""
-    attempt_dir = AttemptDir(ctx.worktree / ".factory" / "run" / str(ctx.run.attempt))
+    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(ctx.run.attempt))
     if not attempt_dir.last_message.exists():
         # No implement result is a schema-invalid shape verify would already have caught;
         # treat as no behaviour change rather than crashing the review before it starts.

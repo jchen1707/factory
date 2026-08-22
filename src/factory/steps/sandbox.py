@@ -57,15 +57,17 @@ def build_spec(ctx: Context) -> SandboxSpec:
     The static MCP set is empty. That is a decision that cannot be silently widened
     later, because `sbx` fixes it at creation.
     """
-    if ctx.project.requires_clone:
-        raise Blocked(
-            "clone-not-implemented",
-            f"{ctx.project.name} needs `sbx create --clone`: its node_modules cannot be "
-            "shared with a macOS host, and a bind-mounted `pnpm install` would overwrite "
-            "the host's tree (p0-10-gate-timing.md). Phase 2 builds that path.",
-        )
-
     workspaces = [Workspace(ctx.project.path)]
+    if ctx.project.requires_clone:
+        # `--clone` gives the VM a private in-container clone at the project's own path,
+        # so nothing the agent writes under it reaches the host — including `.factory/`,
+        # which §4.2 needs both sides to read. This additional `rw` workspace is the
+        # repair: mounted at its identical path, its writes visible on the host at once.
+        # It is per *project* and not per run, because §9.1 fixes the workspace set at
+        # creation and this sandbox is named once per project (`_review_scratch` records
+        # what the per-run version costs). See `steps/clone.py` for the whole shape.
+        ctx.clone_mount.mkdir(parents=True, exist_ok=True)
+        workspaces.append(Workspace(ctx.clone_mount))
     if ctx.project.vault_mount == "rw":
         workspaces.append(Workspace(ctx.registry.vault.path))
     elif ctx.project.vault_mount == "ro":
@@ -81,6 +83,7 @@ def build_spec(ctx: Context) -> SandboxSpec:
         static_mcp=ctx.project.static_mcp,
         deny_network=ctx.registry.defaults.deny_network,
         env=dict(ctx.project.env),
+        clone=ctx.project.requires_clone,
     )
 
 

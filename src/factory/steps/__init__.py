@@ -97,6 +97,40 @@ class Context:
     def branch(self) -> str | None:
         return self.run.branch or (self.shadow_branch if self.dry_run else None)
 
+    @property
+    def clone_mount(self) -> Path:
+        """The one writable host path a `--clone` project's VM can see.
+
+        `sbx create --clone` replaces the bind mount with a private in-container clone of
+        the repository, so nothing the agent writes under the project path reaches the
+        host — which is exactly the isolation the frontend project needs, and exactly what
+        breaks §4.2's filesystem protocol. This mount is the repair: an *additional* `rw`
+        workspace, mounted at its identical path, whose writes the host sees immediately.
+        The attempt directory and the seeded context live here rather than in the clone.
+
+        Project-stable, not per-run. §9.1 fixes a sandbox's workspace set at creation and
+        the sandbox is named once per project, so a per-run path would make the second run
+        of a project fail `_assert_spec_matches` — the mistake `_review_scratch` already
+        records. Per-ticket subdirectories inside it are free; the *mount* is what is fixed.
+        """
+        return self.home / "state" / "clone" / self.project.name
+
+    @property
+    def factory_dir(self) -> Path:
+        """Where `.factory/` lives for this run — the host side of the protocol.
+
+        For a bind-mounted project that is `<worktree>/.factory`, addressed by the same
+        absolute string on both sides. For a clone project the worktree is inside the VM
+        and its untracked content never reaches the host, so `.factory/` moves onto
+        `clone_mount`, which keeps the identity property that matters: one path, both sides.
+
+        Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host checkout.
+        The evidence stays where it was written.
+        """
+        if self.project.requires_clone:
+            return self.clone_mount / self.run.linear_id / ".factory"
+        return self.worktree / ".factory"
+
     # -- plumbing -----------------------------------------------------------------
 
     @property

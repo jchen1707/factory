@@ -17,6 +17,7 @@ from factory import repo
 from factory.machine import Blocked, State
 from factory.sandbox.sbx import worktree_inside
 from factory.steps import Context, advance
+from factory.steps import clone as clone_step
 
 __all__ = ["plan_branch", "run"]
 
@@ -30,6 +31,9 @@ def plan_branch(ctx: Context) -> str:
 
 def run(ctx: Context) -> None:
     branch = plan_branch(ctx)
+    if ctx.project.requires_clone:
+        _run_clone(ctx, branch)
+        return
     path = ctx.project.worktree_path(ctx.registry.defaults.worktree_subdir, ctx.run.linear_id)
 
     # The worktree has to sit inside a mounted workspace or the VM simply cannot see
@@ -101,3 +105,47 @@ def _seed(ctx: Context, path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _run_clone(ctx: Context, branch: str) -> None:
+    """The same state, reached differently: a `--clone` project has no host worktree.
+
+    The VM runs on a private clone mounted at the project's own path, so the working tree
+    the agent gets is that clone and the branch has to be cut *inside* it. `worktree` is
+    still recorded, and still the path both sides use — it is simply the same string as
+    the project root rather than a directory under it. `steps/clone.py` carries the why.
+
+    The branch comes back to the host once, at the `reviewing` entry (`clone.fetch_back`),
+    and everything from there on works against an ordinary host worktree.
+    """
+    if ctx.dry_run:
+        ctx.shadow_worktree = ctx.project.path
+        ctx.shadow_branch = branch
+        ctx.would(
+            f"sbx exec {ctx.project.build_sandbox} git -C {ctx.project.path} "
+            f"checkout -b {branch} {ctx.project.base_ref}  # inside the clone"
+        )
+        ctx.would(
+            f"copy staged context into {ctx.clone_mount}/{ctx.run.linear_id}/.factory/context/"
+        )
+        advance(ctx, State.WORKTREE_READY)
+        return
+
+    clone_step.create_branch(ctx, branch)
+    ctx.store.update_run(
+        ctx.run.id,
+        branch=branch,
+        base_ref=ctx.project.base_ref,
+        worktree=str(ctx.project.path),
+    )
+    ctx.refresh()
+
+    clone_step.seed_context(ctx)
+    ctx.log(
+        "worktree.created",
+        branch=branch,
+        path=str(ctx.project.path),
+        base=ctx.project.base_ref,
+        clone=True,
+    )
+    advance(ctx, State.WORKTREE_READY)

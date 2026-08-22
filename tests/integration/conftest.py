@@ -25,6 +25,7 @@ from factory.sandbox.base import Completed, RunHandle, RunResult, RunStatus, San
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
+from factory.steps.clone import remote_name
 from factory.store import Store
 
 HELLO_EVENTS: list[dict[str, Any]] = [
@@ -138,9 +139,64 @@ class FakeSandbox:
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
+    #: Where a `--clone` sandbox's private copy of the repository lives on the test's disk.
+    #: The real thing puts the clone at the *identical* host path inside the VM, which no
+    #: in-process fake can do — so this one translates instead: every path under the
+    #: project root is rewritten into here. What that buys is the constraint that actually
+    #: breaks. A write under the project path never reaches the host, only the additional
+    #: `rw` mounts are shared, and `git` inside the sandbox is acting on a different
+    #: repository from the one the host reads. All three are why the clone path exists.
+    clone_root: Path | None = None
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
+
+    # -- clone mode ---------------------------------------------------------------
+
+    def _spec(self, name: str) -> SandboxSpec | None:
+        return next((spec for spec in self.created if spec.name == name), None)
+
+    def clone_dir(self, name: str) -> Path | None:
+        """The VM-side repository of a clone sandbox, or None for a bind-mounted one."""
+        spec = self._spec(name)
+        if spec is None or not spec.clone or self.clone_root is None:
+            return None
+        return self.clone_root / name
+
+    def _make_clone(self, spec: SandboxSpec) -> None:
+        """What `sbx create --clone` does, in the two respects the factory depends on.
+
+        A real `git clone` of the host checkout — so `origin/<base>` resolves inside it
+        with no network, exactly as measured — and a `sandbox-<name>` remote added to the
+        *host* checkout pointing back at it, which is how the branch gets home. The real
+        remote is a git daemon URL rather than a path; plain git reaches both, and the
+        production code fetches by `FETCH_HEAD` rather than by anything daemon-specific.
+        """
+        assert self.clone_root is not None, "a clone spec needs FakeSandbox.clone_root"
+        source = spec.workspaces[0].path
+        target = self.clone_root / spec.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "--quiet", str(source), str(target)], check=True, capture_output=True
+        )
+        git(target, "config", "user.email", "agent@example.invalid")
+        git(target, "config", "user.name", "the agent")
+        git(source, "remote", "add", remote_name(spec.name), str(target))
+
+    def _vm_path(self, name: str, path: str) -> str:
+        """Rewrite a host path under the project root into the clone. A no-op elsewhere —
+        the additional `rw` mounts really are the same directory on both sides."""
+        clone = self.clone_dir(name)
+        if clone is None:
+            return path
+        spec = self._spec(name)
+        assert spec is not None
+        root = str(spec.workspaces[0].path)
+        if path == root:
+            return str(clone)
+        if path.startswith(root + "/"):
+            return str(clone) + path[len(root) :]
+        return path
 
     def inspect(self, name: str) -> dict[str, Any]:
         return {
@@ -151,18 +207,28 @@ class FakeSandbox:
         }
 
     def ensure(self, spec: SandboxSpec) -> None:
-        if not self.exists(spec.name):
-            self.created.append(spec)
+        if self.exists(spec.name):
+            return
+        self.created.append(spec)
+        if spec.clone:
+            self._make_clone(spec)
 
     def _writable_roots(self, name: str) -> list[Path]:
         """The rw workspaces of a created sandbox — the only host paths a command inside
         it can write to. Modelled because the real thing enforces it: a reviewer told to
         write outside its mounts exits 0 and quietly produces nothing, which is how two
         Tier-2 bugs reached a real run."""
-        for spec in self.created:
-            if spec.name == name:
-                return [w.path for w in spec.workspaces if not w.readonly]
-        return []
+        spec = self._spec(name)
+        if spec is None:
+            return []
+        writable = [w for w in spec.workspaces if not w.readonly]
+        if spec.clone:
+            # The primary workspace is writable *inside* the VM and invisible outside it:
+            # `--clone` replaces the bind mount with a private copy. Modelling it as a
+            # shared writable root would hide the whole reason `Context.factory_dir` moves
+            # `.factory/` onto the additional mount.
+            writable = writable[1:]
+        return [w.path for w in writable]
 
     def exec_sync(
         self,
@@ -175,6 +241,20 @@ class FakeSandbox:
         stdin: str | None = None,
     ) -> Completed:
         self.sync_calls.append((name, tuple(argv)))
+        if argv and argv[0] == "git" and self.clone_dir(name) is not None:
+            # Run it, for real, against the clone. Faking git here would fake exactly the
+            # thing the clone path is made of: cutting the branch inside the VM, and the
+            # scratch worktree the red-phase replay lands the test half of the diff on.
+            translated = [self._vm_path(name, str(arg)) for arg in argv]
+            proc = subprocess.run(
+                translated,
+                cwd=self._vm_path(name, workdir) if workdir else None,
+                capture_output=True,
+                text=True,
+                check=False,
+                input=stdin,
+            )
+            return Completed(tuple(argv), proc.returncode, proc.stdout, proc.stderr)
         if any("gate_report.mjs" in str(arg) for arg in argv):
             # The verify step: return the canned report, with the exit code that mirrors
             # its verdict (0/1/3 for pass/fail/incomplete). The step trusts the JSON
@@ -218,6 +298,11 @@ class FakeSandbox:
         return Completed(tuple(argv), 0, "/usr/bin/node\n/usr/bin/git\nv22.22.1", "")
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
+        clone = self.clone_dir(handle.sandbox)
+        if clone is not None:
+            # The agent's commits land in the clone and nowhere else, which is what makes
+            # `clone.fetch_back` a real fetch rather than a formality.
+            self._commit_in_clone(clone)
         directory = handle.attempt_dir
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "events.jsonl").write_text(
@@ -238,6 +323,25 @@ class FakeSandbox:
             stderr_path=handle.attempt_dir / "stderr.log",
             last_message_path=handle.attempt_dir / "last-message.json",
         )
+
+    def _commit_in_clone(self, clone: Path) -> None:
+        """Stand in for the agent's turn: write the files the canned result claims, plus a
+        test that fails at the base ref, and commit them on the branch already checked
+        out. The red-phase replay then has a real diff to replay."""
+        for relative in self.result.get("files_changed", []):
+            path = clone / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("def exclude_internal(names):\n    return [n for n in names]\n")
+        for relative in self.result.get("tests_added", []):
+            path = clone / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "from src.app.main import exclude_internal\n\n\n"
+                "def test_internal_documents_are_excluded() -> None:\n"
+                "    assert exclude_internal(['a']) == ['a']\n"
+            )
+        git(clone, "add", "-A")
+        git(clone, "commit", "-m", "feat: the agent's turn")
 
     def kill_agent(self, name: str) -> None:
         return None
@@ -423,7 +527,7 @@ TICKET = Issue(
 )
 
 
-def _registry_toml(project: Path, vault: Path) -> str:
+def _registry_toml(project: Path, vault: Path, *, clone: bool = False) -> str:
     return f"""
 [vault]
 path = "{vault}"
@@ -451,6 +555,7 @@ template = ""
 build_sandbox = "factory-build-python-harness"
 review_sandbox = "factory-review-python-harness"
 vault_mount = "rw"
+requires_clone = {str(clone).lower()}
 # What `config/projects.toml` carries for this project, for the same measured reason.
 acknowledged_env_credentials = ["GH_TOKEN"]
 
@@ -461,6 +566,22 @@ UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/python-harness"
 
 @pytest.fixture
 def ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Context:
+    return _make_ctx(tmp_path, project_repo, monkeypatch, clone=False)
+
+
+@pytest.fixture
+def clone_ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Context:
+    """The same project, the same ticket, the same fakes — `requires_clone` and nothing else.
+
+    One variable at a time, because that is the only way a clone-path failure is readable:
+    anything the two fixtures did differently would otherwise be a candidate explanation.
+    """
+    return _make_ctx(tmp_path, project_repo, monkeypatch, clone=True)
+
+
+def _make_ctx(
+    tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch, *, clone: bool
+) -> Context:
     home = tmp_path / "factory-home"
     (home / "schemas").mkdir(parents=True)
     (home / "schemas" / "implement_result.schema.json").write_text(
@@ -476,7 +597,7 @@ def ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> 
     (vault / "_VAULT_INDEX.md").write_text("index\n")
 
     registry_path = home / "config" / "projects.toml"
-    registry_path.write_text(_registry_toml(project_repo, vault))
+    registry_path.write_text(_registry_toml(project_repo, vault, clone=clone))
 
     skill = tmp_path / "implement" / "SKILL.md"
     skill.parent.mkdir()
@@ -497,13 +618,14 @@ def ctx(tmp_path: Path, project_repo: Path, monkeypatch: pytest.MonkeyPatch) -> 
     store.acquire_lease(run.id, ttl_seconds=600)
 
     registry = load_registry(registry_path)
+    sandbox = FakeSandbox(clone_root=tmp_path / "vm") if clone else FakeSandbox()
     return Context(
         home=home,
         registry=registry,
         routing=load_routing(HOME / "config" / "models.toml"),
         store=store,
         linear=FakeLinear(TICKET),  # type: ignore[arg-type]
-        sandbox=FakeSandbox(),
+        sandbox=sandbox,
         agent=CodexAdapter(),
         project=registry.projects["python-harness"],
         run=store.run_by_id(run.id),  # type: ignore[arg-type]
