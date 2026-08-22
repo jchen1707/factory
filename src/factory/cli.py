@@ -125,7 +125,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"\n{ticket} is blocked: {block_reason} ({failures})")
 
     store = _open_store(home, dry_run=args.dry_run)
-    run = store.insert_run(linear_id=ticket, project=project.name, team=issue.team_key)
+    run = store.insert_run(
+        linear_id=ticket,
+        project=project.name,
+        team=issue.team_key,
+        full_review=args.full_review,
+    )
+    if args.full_review:
+        print("  NOTE  --full-review: Tier 2 runs whatever the §15.2 trigger rules decide")
 
     if not args.dry_run and not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
         print(f"\n{ticket} is leased by another process ({run.lease_owner}); nothing to do.")
@@ -1094,6 +1101,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("ticket")
     run.add_argument("--dry-run", action="store_true", help="print every command, execute none")
     run.add_argument("--plan", action="store_true", help="force the planning step first")
+    run.add_argument(
+        "--full-review",
+        action="store_true",
+        help="run Tier 2's full fan-out on this run whatever the trigger rules say",
+    )
     run.set_defaults(func=cmd_run)
 
     tick = sub.add_parser("tick", help="one pass: reap, recover, advance, claim")

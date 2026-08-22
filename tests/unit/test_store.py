@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from factory.machine import TERMINAL, State
-from factory.store import _SCHEMA, SCHEMA_VERSION, Store, marker
+from factory.store import _SCHEMA, LIVE_INDEX_SCHEMA_VERSION, SCHEMA_VERSION, Store, marker
 
 
 @pytest.fixture
@@ -92,10 +92,14 @@ def test_run_by_ticket_returns_the_newest_run(store: Store) -> None:
 
 def test_terminal_states_are_pinned_to_the_live_run_index() -> None:
     """`_LIVE_RUN_INDEX` is derived from `TERMINAL` at import, but a database keeps the
-    index it was built with. Changing this set therefore needs SCHEMA_VERSION 3 and a
-    rebuild, and this test is the tripwire that says so."""
+    index it was built with. Changing this set therefore needs a new schema version and a
+    migration that rebuilds the index, and this test is the tripwire that says so.
+
+    Pinned to `LIVE_INDEX_SCHEMA_VERSION` rather than to `SCHEMA_VERSION`, so a column
+    added for an unrelated reason does not silently retire the tripwire by bumping the
+    number this asserts."""
     assert frozenset({State.COMPLETED, State.CANCELLED}) == TERMINAL
-    assert SCHEMA_VERSION == 2
+    assert LIVE_INDEX_SCHEMA_VERSION == 2
 
 
 def test_lease_is_exclusive_until_it_expires(store: Store) -> None:
@@ -274,6 +278,24 @@ def test_migration_1_to_2_keeps_the_history_it_migrates(tmp_path: Path) -> None:
     assert len(store.effects(old_id)) == 1
     assert store.integrity_ok()[0]
     assert store._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_a_database_two_versions_behind_takes_every_step_not_just_the_first(
+    tmp_path: Path,
+) -> None:
+    """The migration walks the whole gap. It used to apply one step and then stamp the
+    version as current, which meant a version-1 database would run the 1 -> 2 rebuild and
+    then claim to be at 3 with none of 3's columns. Nothing had two versions to cross
+    until `full_review` was added, which is the only reason it never fired."""
+    path = tmp_path / "factory.db"
+    _v1_database(path)
+
+    store = Store(path)
+
+    columns = {row["name"] for row in store._conn.execute("PRAGMA table_info(runs)")}
+    assert "full_review" in columns
+    run = store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
+    assert run.full_review is False
     # Foreign keys are restored after the rebuild, not left off.
     assert store._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 

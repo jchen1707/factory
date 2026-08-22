@@ -20,6 +20,7 @@ from factory.steps import Context
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
+from factory.store import Store
 from tests.integration.conftest import FakeLinear, FakeSandbox, git
 from tests.integration.test_pipeline import _fake, _to_verifying
 
@@ -367,3 +368,63 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     for name in ("review-standards.json", "review-spec.json", "review-full.json"):
         assert (ctx.state_dir / "review" / name).exists(), name
     assert not list(scratch.glob("review-*.json"))  # moved, not copied
+
+
+def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The override, end to end, with the real trigger function in place.
+
+    The fixture's diff is two files and a few dozen lines, which every §15.2 rule
+    declines — `test_a_clean_review_opens_no_pr_and_advances` asserts exactly that. So
+    the only thing that can make the fan-out run here is the flag.
+    """
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    ctx.store.update_run(ctx.run.id, full_review=True)
+    ctx.refresh()
+
+    review_step.run(ctx)
+
+    summary = json.loads((ctx.state_dir / "review" / "review-summary.json").read_text())
+    assert summary["tier2"] == review_step.FORCED
+    assert (ctx.state_dir / "review" / "review-full.json").exists()
+
+
+def test_the_override_survives_the_process_that_asked_for_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is on the run row, not on the `Context`, and this is why.
+
+    Under `factory tick` the review happens in a later process than the one that took
+    the flag — usually several ticks later. A flag carried on the command line's context
+    would be an override that worked only while a human was watching, which is the exact
+    shape of unprovenness it exists to fix.
+    """
+    _to_reviewing(ctx)
+    ctx.store.update_run(ctx.run.id, full_review=True)
+
+    # A fresh reader of the same database, holding nothing the first one held.
+    reread = Store(ctx.store.path).run_by_id(ctx.run.id)
+
+    assert reread is not None
+    assert reread.full_review is True
+
+
+def test_a_forced_tier2_says_so_in_the_pull_request_body(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A forced fan-out reported as a triggered one would misstate what the review rules
+    # concluded about this diff, which is the only thing the rules are for.
+    review_dir = ctx.state_dir / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-summary.json").write_text(
+        json.dumps({"tier2": review_step.FORCED, "findings": []})
+    )
+
+    line = deliver_step._review_summary(ctx)
+
+    assert "Tier 2 ran" in line
+    assert "--full-review" in line
+    assert "skipped" not in line

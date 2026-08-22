@@ -52,6 +52,11 @@ _TIER1_AXES: tuple[tuple[str, str], ...] = (
     ("spec", "spec-checker"),
 )
 
+#: What `review-summary.json` records when Tier 2 ran only because `--full-review` asked
+#: for it. `deliver` reads this exact string, so it lives here rather than being spelled
+#: twice.
+FORCED = "ran:forced"
+
 #: §15.2's Tier-2 trigger thresholds.
 _TIER2_FILE_THRESHOLD = 10
 _TIER2_LINE_THRESHOLD = 400
@@ -136,7 +141,11 @@ def run(ctx: Context) -> None:
         # Tier 2 ran; merge its findings. The portable skill produces the same finding shape.
         full = _tier2(ctx, review_dir)
         findings += full
-        tier2_rule = "ran"
+        # "It ran" and "it ran because a human asked" are different facts, and the PR
+        # body says which. A forced fan-out reported as a triggered one would misstate
+        # what the review rules concluded about this diff — which is the only thing the
+        # rules are for.
+        tier2_rule = FORCED if ctx.run.full_review else "ran"
     else:
         tier2_rule = trigger  # the skip rule, named in the PR body
 
@@ -456,6 +465,7 @@ def _tier2_trigger(ctx: Context, harness: HarnessConfig, tier1_has_human: bool) 
         sensitive=sensitive,
         tier1_has_human=tier1_has_human,
         bug_without_test=_bug_without_test(ctx),
+        forced=ctx.run.full_review,
     )
 
 
@@ -467,12 +477,25 @@ def _decide_tier2(
     sensitive: tuple[str, ...],
     tier1_has_human: bool,
     bug_without_test: bool,
+    forced: bool = False,
 ) -> str | None:
     """The pure Tier-2 decision (§15.2). None = run; a string = the skip rule to name.
 
     Separated from `_tier2_trigger` so the whole trigger table is asserted without a context,
     a worktree or git — the rules are the part that must not drift from the spec.
+
+    `forced` is `factory run --full-review`, and it is checked first because it is an
+    override rather than a seventh rule: it does not describe the diff, it says a human
+    wants the fan-out on this run whatever the diff looks like. Four of the six real rules
+    cannot be produced on demand — a protected path is refused by `protect_paths.mjs`
+    before it can reach a diff, the sensitive-directory globs match nothing in either
+    repository today, a Tier-1 critical is not orderable, and the Bug-without-test row is
+    blocked earlier by the red-phase replay — so without an override the fan-out is a code
+    path reachable only by getting lucky with a diff size, and a path like that stays
+    unproven.
     """
+    if forced:
+        return None
     if len(paths) >= _TIER2_FILE_THRESHOLD:
         return None
     if lines >= _TIER2_LINE_THRESHOLD:

@@ -41,6 +41,40 @@ def test_a_small_clean_change_skips_tier2_and_names_the_rule() -> None:
     )
 
 
+def test_the_override_runs_tier2_on_a_diff_no_rule_would_have_triggered() -> None:
+    # The same diff as the case above, which skips. `--full-review` is an override, not
+    # a seventh rule: it does not describe the diff, it says a human wants the fan-out.
+    assert (
+        _decide_tier2(
+            paths=["src/app.py"],
+            lines=40,
+            protected_hits=[],
+            sensitive=("src/app/ai/**",),
+            tier1_has_human=False,
+            bug_without_test=False,
+            forced=True,
+        )
+        is None
+    )
+
+
+def test_the_override_is_off_unless_it_is_asked_for() -> None:
+    # `forced` defaults to False, so every existing caller and every existing case in
+    # this table keeps the verdict it had. An override that crept in by default would
+    # spend the fan-out's model budget on every run.
+    assert (
+        _decide_tier2(
+            paths=["src/app.py"],
+            lines=40,
+            protected_hits=[],
+            sensitive=(),
+            tier1_has_human=False,
+            bug_without_test=False,
+        )
+        == "no-trigger"
+    )
+
+
 def test_ten_or_more_files_triggers_tier2() -> None:
     assert (
         _decide_tier2(
