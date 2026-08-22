@@ -14,6 +14,7 @@ table is in `steps/clone.py`.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
 from factory.steps import context as context_step
 from factory.steps import implement as implement_step
+from factory.steps import redphase as redphase_step
 from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
@@ -337,6 +339,81 @@ def test_the_replay_applies_the_host_patch_inside_the_vm(clone_ctx: Context) -> 
         assert landed.exists()
     finally:
         clone_step.scratch_remove(clone_ctx, scratch)
+
+
+def test_the_replay_chooses_the_in_vm_scratch_for_a_clone_project(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two previous tests prove the in-VM scratch *works*; this one proves `replay`
+    reaches for it. Without it, `in_clone` could be hard-coded false and the suite would
+    stay green while every real clone run made its scratch on a host tree the VM cannot
+    see — a mutation that survived until this test existed.
+    """
+    _to_verifying(clone_ctx)
+    clone_step.fetch_back(clone_ctx)
+    _declare_tests(clone_ctx)
+    chose: list[str] = []
+    monkeypatch.setattr(
+        redphase_step.clone_step,
+        "scratch_add",
+        lambda ctx, scratch, base: chose.append("vm"),
+    )
+    monkeypatch.setattr(
+        redphase_step.repo,
+        "add_detached_worktree",
+        lambda repo, path, ref: chose.append("host"),
+    )
+    monkeypatch.setattr(redphase_step.clone_step, "scratch_apply", lambda ctx, s, p: None)
+    monkeypatch.setattr(redphase_step.clone_step, "scratch_remove", lambda ctx, s: None)
+    monkeypatch.setattr(
+        redphase_step, "_classify", lambda completed, files: ("red", "the test failed")
+    )
+
+    assert redphase_step.replay(clone_ctx) == "proceed"
+    assert chose == ["vm"]
+
+
+def test_the_replay_chooses_the_host_scratch_for_a_bind_mounted_project(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other direction, so the clone branch cannot simply swallow both."""
+    _to_verifying(ctx)
+    _declare_tests(ctx)
+    chose: list[str] = []
+    monkeypatch.setattr(
+        redphase_step.clone_step, "scratch_add", lambda c, scratch, base: chose.append("vm")
+    )
+    monkeypatch.setattr(
+        redphase_step.repo, "add_detached_worktree", lambda r, path, ref: chose.append("host")
+    )
+    monkeypatch.setattr(redphase_step.repo, "apply_patch", lambda wt, patch: None)
+    monkeypatch.setattr(redphase_step.repo, "remove_worktree", lambda r, p, force=False: None)
+    monkeypatch.setattr(
+        redphase_step, "_classify", lambda completed, files: ("red", "the test failed")
+    )
+    _commit_a_test(ctx)
+
+    assert redphase_step.replay(ctx) == "proceed"
+    assert chose == ["host"]
+
+
+def _declare_tests(ctx: Context) -> None:
+    """Declare a `tests` pathspec on the loaded harness config. Without one the replay
+    reports `unavailable` and returns before it picks a scratch at all, which is a
+    different (and already tested) branch from the one these two tests are about."""
+    assert ctx.harness is not None
+    ctx.harness = replace(ctx.harness, tests=("tests",))
+
+
+def _commit_a_test(ctx: Context) -> None:
+    """A bind-mounted run's worktree is empty until something commits into it; the replay
+    needs a diff that touches the declared `tests` pathspecs to get past its first guard."""
+    worktree = ctx.worktree
+    tests_dir = worktree / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    (tests_dir / "test_health.py").write_text("def test_health() -> None:\n    assert True\n")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-m", "test: a health check")
 
 
 # --------------------------------------------------------------------------------
