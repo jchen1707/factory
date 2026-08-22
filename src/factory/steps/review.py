@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +65,7 @@ _SENSITIVE_DIRS: dict[str, tuple[str, ...]] = {
 #: `medium`/`low` finding is recorded and carried in the PR body but does not stop delivery.
 _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 
-#: The vendored layer-A findings schema, passed to `codex exec review --output-schema` and
+#: The vendored layer-A findings schema, passed to `codex exec --output-schema` and
 #: used to validate what comes back. One file, so the Codex path and the workflow path
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
@@ -152,31 +153,39 @@ def _tier1(
 ) -> tuple[list[dict[str, Any]], bool]:
     """Run the two Tier-1 axes. Returns `(findings, has_critical_or_high)`.
 
-    Each axis runs `codex exec review --base <base>` in the read-only review sandbox, with a
-    prompt assembled the way `axisPrompt` does it, writing schema-valid findings to
-    `<review_dir>/review-<axis>.json`.
+    Each axis runs `codex exec` in the read-only review sandbox, with a prompt assembled
+    the way `axisPrompt` does it and the diff named in it, writing schema-valid findings
+    to `<review_dir>/review-<axis>.json`.
     """
     if ctx.dry_run:
         for label, _agent in _TIER1_AXES:
             ctx.would(f"assemble {label} prompt from {harness.review_agent_dir} + vendored frame")
             ctx.would(
-                f"codex exec review --base {ctx.run.base_ref} -c sandbox_mode=read-only (in {ctx.project.review_sandbox})"
+                f"codex exec -c sandbox_mode=read-only (in {ctx.project.review_sandbox}), "
+                f"reviewing git diff {ctx.run.base_ref}...HEAD"
             )
         return [], False
 
-    spec = _review_spec(ctx, review_dir)
+    scratch = _review_scratch(ctx)
+    spec = _review_spec(ctx, scratch)
     ctx.sandbox.ensure(spec)
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     schema_path = ctx.worktree / _FINDINGS_SCHEMA
+    review_dir.mkdir(parents=True, exist_ok=True)
 
     findings: list[dict[str, Any]] = []
     has_human = False
     for label, agent in _TIER1_AXES:
-        prompt = _axis_prompt(ctx.worktree, harness, agent)
+        prompt = _axis_prompt(ctx.worktree, harness, agent, base_ref)
+        # The reviewer writes into the project-stable scratch, because that is what it can
+        # reach; the run's own directory is where the evidence lives, so the file moves
+        # there the moment the axis returns.
+        scratch_out = scratch / f"review-{label}.json"
+        scratch_out.unlink(missing_ok=True)
         out_path = review_dir / f"review-{label}.json"
         events_path = review_dir / f"review-{label}.events.jsonl"
         stderr_path = review_dir / f"review-{label}.stderr.log"
-        argv = _review_argv(ctx, base_ref, schema_path, out_path)
+        argv = _review_argv(ctx, schema_path, scratch_out)
         completed = ctx.sandbox.exec_sync(
             ctx.project.review_sandbox,
             argv,
@@ -187,6 +196,8 @@ def _tier1(
         )
         events_path.write_text(completed.stdout, encoding="utf-8")
         stderr_path.write_text(completed.stderr, encoding="utf-8")
+        if scratch_out.exists():
+            shutil.move(str(scratch_out), out_path)
         axis_findings = _validated_findings(ctx, out_path, completed, label)
         artifacts.scan_for_secrets(completed.stdout + completed.stderr, f"review {label} stdout")
         findings += axis_findings
@@ -204,19 +215,25 @@ def _tier1(
     return findings, has_human
 
 
-def _review_argv(ctx: Context, base_ref: str, schema_path: Path, out_path: Path) -> list[str]:
-    """`codex exec review` for one axis. `--dangerously-bypass-hook-trust` is included for the
-    same reason the implement step includes it: the worktree path is untrusted in
-    `~/.codex/config.toml`, and without it Codex appends a project stanza for it. The
-    `:ro` mount and `sandbox_mode=read-only` are what make the review safe; this flag only
-    stops a config-file side effect."""
+def _review_argv(ctx: Context, schema_path: Path, out_path: Path) -> list[str]:
+    """`codex exec` for one axis — the same invocation the implement step uses.
+
+    Not `codex exec review --base <ref>`: codex refuses that flag together with a prompt
+    (`the argument '--base <BRANCH>' cannot be used with '[PROMPT]'`), and the prompt is
+    the axis. An axis-less review would run the same generic pass twice and call it
+    Standards and Spec, which is the failure §15.2 exists to prevent. Layer A's own
+    `full-review.js` reaches the same conclusion from the other side: it names the diff
+    inside the prompt and never uses the `review` subcommand.
+
+    `--dangerously-bypass-hook-trust` is included for the same reason the implement step
+    includes it: the worktree path is untrusted in `~/.codex/config.toml`, and without it
+    Codex appends a project stanza for it. The `:ro` mount and `sandbox_mode=read-only`
+    are what make the review safe; this flag only stops a config-file side effect.
+    """
     role = ctx.routing.role("reviewer")
     return [
         "codex",
         "exec",
-        "review",
-        "--base",
-        base_ref,
         "-m",
         role.model,
         "-c",
@@ -233,21 +250,48 @@ def _review_argv(ctx: Context, base_ref: str, schema_path: Path, out_path: Path)
     ]
 
 
-def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
-    """The read-only review sandbox: worktree `:ro` + a `rw` scratch for prompts/findings.
+def _review_scratch(ctx: Context) -> Path:
+    """The reviewer's writable ground: one directory per **project**, not per run.
+
+    §9.1 fixes a sandbox's workspace set at creation, and the reviewer sandbox is named
+    once per project, so every path in its spec has to outlive the run that first created
+    it. A per-run directory does not: the second run finds the sandbox mounted on the
+    first run's path and `_assert_spec_matches` refuses it, correctly. BAC-4 measured
+    exactly that. The axis outputs are moved into the run's own directory as soon as they
+    land, so the evidence is still per-run — only the mount is shared.
+    """
+    scratch = ctx.home / "state" / "review" / ctx.project.name
+    scratch.mkdir(parents=True, exist_ok=True)
+    return scratch
+
+
+def _review_spec(ctx: Context, scratch: Path) -> SandboxSpec:
+    """The read-only review sandbox: the project `:ro` + a `rw` scratch for findings.
+
+    The read-only mount is the **project root**, not the worktree, for the same reason the
+    scratch is per-project: a worktree path contains the ticket, and a spec that changes
+    per ticket cannot be satisfied by a sandbox named per project. The build sandbox has
+    always mounted the root for this reason — worktrees live inside it at
+    `.factory/worktrees/<TICKET>`, so mounting the root reaches every one of them, and
+    `exec_sync(workdir=...)` still puts the reviewer in the worktree it is reviewing.
 
     `--no-share-skills` (§19 Phase 3 checklist): the reviewer has no skills store, so the
     portable `full-review` skill is reached by inlining it (Tier 2), not by loading a shared
     store a build sandbox could have polluted (R5).
     """
-    review_dir.mkdir(parents=True, exist_ok=True)
     return SandboxSpec(
         project=ctx.project.name,
         role="review",
         name=ctx.project.review_sandbox,
+        # The rw scratch is *first*, and that is not a style choice: `sbx create` refuses
+        # a read-only primary workspace outright — "primary workspace must be read/write
+        # (remove ':ro' or ':readonly')" — and its own help says `:ro` applies to the
+        # additional workspaces. So the reviewer's writable ground is the scratch it writes
+        # findings to, and the code under review comes in beside it, read-only, at the
+        # identical path. The boundary §15.2 asks for is unchanged; only the order is.
         workspaces=(
-            Workspace(ctx.worktree, readonly=True),
-            Workspace(review_dir),
+            Workspace(scratch),
+            Workspace(ctx.project.path, readonly=True),
         ),
         template=ctx.project.template or None,
         kits=(),
@@ -258,7 +302,7 @@ def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
     )
 
 
-def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str) -> str:
+def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str, base_ref: str) -> str:
     """Assemble one axis's prompt the way `full-review.js`'s `axisPrompt()` does.
 
     Frame = a stack override at `<review.agentDir>/<agent>.md`, else the shared vendored
@@ -279,12 +323,31 @@ def _axis_prompt(worktree: Path, harness: HarnessConfig, agent: str) -> str:
             "or as a vendored tree; one is missing.",
         )
     if not checklist:
-        return frame  # spec-checker carries its whole review in the frame; no checklist
+        # spec-checker carries its whole review in the frame; no checklist
+        return frame + _target(base_ref)
     return (
         frame + f"\n\n---\n\n## {harness.name}: what to look for, in this repo's terms\n\n"
         "This is the checklist the frame above told you to read. It is reproduced here so "
         "you have it without a file read; it is authoritative for this repository, and where "
-        "it names a source file, that source outranks it.\n\n" + checklist
+        "it names a source file, that source outranks it.\n\n" + checklist + _target(base_ref)
+    )
+
+
+def _target(base_ref: str) -> str:
+    """Which diff this axis reviews.
+
+    The factory holds no review prompt — the frame and the checklist above are read from
+    the vendored layer-A tree and the repository, and this adds no criterion to either.
+    It names the target, which is the factory's own business: it decides what runs and
+    against what. `full-review.js` appends the same two facts for the same reason
+    (`Review the diff: git diff ${BASE}...HEAD`), because a reviewer given a frame and no
+    target reviews whatever it happens to open, and one not told that silence is a valid
+    answer invents findings to look thorough.
+    """
+    return (
+        f"\n\n---\n\nReview the diff: `git diff {base_ref}...HEAD`\n\n"
+        "Report ONLY real defects in this diff. An empty findings list is a valid and "
+        "common result — do not manufacture findings to look thorough."
     )
 
 

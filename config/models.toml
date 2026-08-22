@@ -12,7 +12,12 @@ effort = "max"                     # the plan is copied into every later step
 
 [roles.builder]
 model  = "gpt-5.6-sol"
-effort = "xhigh"                   # NEVER "ultra" — the validation refuses it
+# Was "xhigh". Dropped a step after BAC-4's four re-runs exhausted the Codex credit:
+# each implement attempt spent 7-16 M input tokens, and the defects those runs found
+# were all in the factory's own plumbing, not in what the builder wrote. "medium" is
+# the next step down if this is still too expensive; "max" is above, and "ultra" is
+# never routable — the validation refuses it.
+effort = "high"
 
 [roles.reviewer]
 model  = "gpt-5.5"                 # MUST differ from roles.builder.model

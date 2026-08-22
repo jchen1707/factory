@@ -48,10 +48,15 @@ def test_create_argv_carries_the_template_only_when_there_is_one() -> None:
 
 
 def test_a_read_only_workspace_gets_the_ro_suffix() -> None:
+    # The read-only mount is an *additional* workspace: `sbx create` refuses a `:ro`
+    # primary, so the reviewer's writable scratch leads and the code follows.
     spec = _spec(
         name="factory-review-python-harness",
         role="review",
-        workspaces=(Workspace(Path("/Users/james/python-harness"), readonly=True),),
+        workspaces=(
+            Workspace(Path("/Users/james/factory/state/runs/abc/review")),
+            Workspace(Path("/Users/james/python-harness"), readonly=True),
+        ),
         share_skills=False,
     )
     argv = create_argv(spec)
@@ -320,3 +325,36 @@ def test_poll_without_a_pid_file_falls_back_to_the_heartbeat(tmp_path: Path) -> 
     (tmp_path / "heartbeat").write_text(str(int(time.time())))
 
     assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
+
+
+def test_a_read_only_primary_workspace_is_refused_before_sbx_sees_it() -> None:
+    """`sbx create` rejects it — `ERROR: primary workspace must be read/write (remove
+    ':ro' or ':readonly')` — and its own help scopes `:ro` to the *additional*
+    workspaces. The reviewer sandbox was specced the other way round and died on this
+    40 seconds into a real run (BAC-4, `1effc543d83a459a`)."""
+    spec = _spec(
+        role="review",
+        name="factory-review-python-harness",
+        workspaces=(
+            Workspace(Path("/Users/james/python-harness"), readonly=True),
+            Workspace(Path("/Users/james/factory/state/runs/abc/review")),
+        ),
+    )
+    with pytest.raises(SbxError) as caught:
+        create_argv(spec)
+    assert "read/write" in str(caught.value)
+
+
+def test_the_writable_scratch_leads_and_the_code_under_review_follows_read_only() -> None:
+    spec = _spec(
+        role="review",
+        name="factory-review-python-harness",
+        workspaces=(
+            Workspace(Path("/Users/james/factory/state/runs/abc/review")),
+            Workspace(Path("/Users/james/python-harness"), readonly=True),
+        ),
+    )
+    assert create_argv(spec)[-2:] == [
+        "/Users/james/factory/state/runs/abc/review",
+        "/Users/james/python-harness:ro",
+    ]
