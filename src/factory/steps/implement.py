@@ -50,7 +50,7 @@ POLL_INTERVAL_SECONDS = 10
 def run(ctx: Context) -> None:
     attempt = ctx.run.attempt + 1
     worktree = ctx.worktree
-    attempt_dir = AttemptDir.create(worktree, attempt)
+    attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = ctx.routing.role("builder")
 
     prompt, skill_sha = build_prompt(ctx)
@@ -345,6 +345,11 @@ def build_prompt(ctx: Context) -> tuple[str, str]:
 
     skill_body, skill_sha = _skill_text()
     worktree = ctx.worktree
+    # Named absolutely, not as `.factory/context/…`. For a bind-mounted project the two
+    # are the same string; for a `--clone` project the context sits on a separate `rw`
+    # mount, because the clone carries no untracked files (`steps/clone.py`). A relative
+    # path would silently name nothing there, and the agent would start with no ticket.
+    context_dir = ctx.factory_dir / "context"
 
     sections = [
         f"# {ctx.issue.identifier} — {ctx.issue.title}",
@@ -369,10 +374,10 @@ def build_prompt(ctx: Context) -> tuple[str, str]:
         "",
         "## Context, already written for you",
         "",
-        "- `.factory/context/ticket.md` — this ticket, in full",
-        "- `.factory/context/spec.md` — the approved parent spec, verbatim",
-        "- `.factory/context/breakdown.md` — the sibling tickets, so you can see the slice boundary",
-        "- `.factory/context/comments.md` — the ticket's comment thread",
+        f"- `{context_dir}/ticket.md` — this ticket, in full",
+        f"- `{context_dir}/spec.md` — the approved parent spec, verbatim",
+        f"- `{context_dir}/breakdown.md` — the sibling tickets, so you can see the slice boundary",
+        f"- `{context_dir}/comments.md` — the ticket's comment thread",
         "",
         "Read all four before you write anything. Work only inside",
         f"`{worktree}`.",

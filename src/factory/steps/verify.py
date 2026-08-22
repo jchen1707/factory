@@ -72,7 +72,7 @@ def run(ctx: Context) -> None:
         return
 
     attempt = ctx.run.attempt
-    attempt_dir = AttemptDir(worktree / ".factory" / "run" / str(attempt))
+    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt))
 
     gates_run = _gates_run(attempt_dir)
     argv = ["node", _REPORT_HOOK, "--json"]

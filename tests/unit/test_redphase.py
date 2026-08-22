@@ -61,6 +61,43 @@ def test_a_failure_with_no_readable_kind_is_inconclusive() -> None:
     )
 
 
+def test_a_gate_that_never_started_is_inconclusive_not_red() -> None:
+    """The exact output measured on 2026-08-22 in a `--clone` scratch worktree.
+
+    `pnpm test` with no `node_modules` exits 1 and prints "ELIFECYCLE Test failed", which
+    the assertion list matches on the bare word `failed`. Before `_RUNNER_MISSING_SIGNS`
+    this came back `red` — a real red phase claimed for a run in which no test executed at
+    all, which is the worst verdict this module can produce and the one hardest to notice
+    afterwards: it looks exactly like success.
+    """
+    out = (
+        "> frontend-harness@0.0.0 test /Users/james/frontend-harness/.factory/"
+        "worktrees/scratch-probe\n> vitest run\n\n"
+        "sh: 1: vitest: not found\n"
+        " ELIFECYCLE  Test failed. See above for more details.\n"
+        " WARN   Local package.json exists, but node_modules missing, did you mean to install?"
+    )
+    assert _classify(_completed(1, out), ["src/foo.test.ts"])[0] == "inconclusive"
+
+
+def test_a_missing_python_runner_is_inconclusive_too() -> None:
+    out = "/bin/sh: 1: pytest: command not found"
+    assert _classify(_completed(1, out), ["tests/test_foo.py"])[0] == "inconclusive"
+
+
+def test_a_real_assertion_failure_is_still_red_when_the_runner_started() -> None:
+    """The other direction: the new signatures must not swallow a genuine red phase. A
+    vitest assertion failure mentions files that were "not found" by the assertion, never
+    a runner that was."""
+    out = (
+        "FAIL src/search.test.ts > excludes internal documents\n"
+        "AssertionError: expected [ 'internal.md' ] to deep equal []\n"
+        "Tests  1 failed | 4 passed\n"
+        " ELIFECYCLE  Test failed. See above for more details."
+    )
+    assert _classify(_completed(1, out), ["src/search.test.ts"])[0] == "red"
+
+
 def test_a_nonzero_exit_with_a_failed_token_is_red() -> None:
     out = "FAILED tests/test_foo.py::test_new - assert 0 == 1"
     assert _classify(_completed(1, out), ["tests/test_foo.py"])[0] == "red"

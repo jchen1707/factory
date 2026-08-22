@@ -32,6 +32,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import Completed
 from factory.steps import Context
+from factory.steps import clone as clone_step
 
 __all__ = ["ReplayOutcome", "replay", "weakening_guard"]
 
@@ -56,6 +57,23 @@ _COLLECTION_ERROR_SIGNS: tuple[str, ...] = (
     "errors during collection",
     "collection_failure",
     "::error",
+)
+
+#: The gate never started. Measured 2026-08-22 in a `--clone` scratch worktree: `pnpm test`
+#: with no `node_modules` exits 1 and prints "ELIFECYCLE Test failed", which the assertion
+#: list below matches on the bare word `failed` — so a run where **no test executed at all**
+#: was classified as a real red phase, the single worst verdict this module can produce.
+#:
+#: Checked before either list and dominating both, because it is not a competing signal: if
+#: the runner could not start, nothing else in the output is evidence about a test. The
+#: python equivalents live in the collection list; these are the ones a node stack produces.
+_RUNNER_MISSING_SIGNS: tuple[str, ...] = (
+    "node_modules missing",
+    "cannot find module",
+    "err_module_not_found",
+    "command not found",
+    ": not found",
+    "executable not found",
 )
 
 #: The complementary signature — the test *ran* and failed an assertion. That is the red
@@ -128,9 +146,19 @@ def replay(ctx: Context) -> ReplayOutcome:
 
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
-    scratch = _scratch_path(ctx)
+    # The one step of the clone path that cannot follow the branch home. Everything else
+    # from `reviewing` onward reads the host worktree `clone.fetch_back` made, but this
+    # *runs the repository's test command*, and for the project that needs `--clone` at
+    # all that command needs the VM-local `node_modules`. So the scratch checkout stays
+    # inside the clone, where the toolchain is. The patch below is still computed on the
+    # host — the two trees agree, because one was fetched from the other.
+    in_clone = ctx.project.requires_clone
+    scratch = clone_step.scratch_path(ctx) if in_clone else _scratch_path(ctx)
 
-    repo.add_detached_worktree(ctx.project.path, scratch, base_ref)
+    if in_clone:
+        clone_step.scratch_add(ctx, scratch, base_ref)
+    else:
+        repo.add_detached_worktree(ctx.project.path, scratch, base_ref)
     try:
         patch = repo.diff_pathspec(worktree, base_ref, list(harness.tests))
         test_files = repo.added_modified_paths(worktree, base_ref, list(harness.tests))
@@ -151,7 +179,10 @@ def replay(ctx: Context) -> ReplayOutcome:
                 "needs a test that would catch its regression.",
             )
 
-        repo.apply_patch(scratch, patch)
+        if in_clone:
+            clone_step.scratch_apply(ctx, scratch, patch)
+        else:
+            repo.apply_patch(scratch, patch)
         completed = ctx.sandbox.exec_sync(
             ctx.project.build_sandbox,
             list(test_gate.run),
@@ -173,7 +204,10 @@ def replay(ctx: Context) -> ReplayOutcome:
         # inconclusive — the one judgement
         return _inconclusive_outcome(ctx, detail)
     finally:
-        repo.remove_worktree(ctx.project.path, scratch, force=True)
+        if in_clone:
+            clone_step.scratch_remove(ctx, scratch)
+        else:
+            repo.remove_worktree(ctx.project.path, scratch, force=True)
 
 
 def weakening_guard(ctx: Context) -> list[str]:
@@ -215,8 +249,9 @@ def _classify(completed: Completed, test_files: list[str]) -> tuple[str, str]:
 
     - `green`: exit 0. The tests pass at the base ref — proves nothing (test-proves-nothing).
     - `red`: the gate failed on an assertion in a new/changed test. The red phase is real.
-    - `inconclusive`: the gate failed before it could run a test (import / collection error),
-      or the failure kind could not be read. The one judgement; reported, not blocked.
+    - `inconclusive`: the gate never started (the runner is not installed), or it failed
+      before it could run a test (import / collection error), or the failure kind could not
+      be read. The one judgement; reported, not blocked.
 
     This is the layer P0-14 calibrates: the inconclusive default is `report`, so a
     misclassification here is a noisy PR body, not a wrong transition. The two mechanical
@@ -226,6 +261,12 @@ def _classify(completed: Completed, test_files: list[str]) -> tuple[str, str]:
     detail = completed.stdout.strip() or completed.stderr.strip()
     if completed.returncode == 0:
         return "green", detail
+    if any(sign in output for sign in _RUNNER_MISSING_SIGNS):
+        # The runner never started, so there is no test result to read either way. This is
+        # checked ahead of the two lists rather than alongside them: a lifecycle error says
+        # "Test failed", and letting that compete with the assertion signal is how a run
+        # with zero executed tests came back as a real red phase.
+        return "inconclusive", detail
     has_collection = any(sign in output for sign in _COLLECTION_ERROR_SIGNS)
     has_assertion = any(sign in output for sign in _ASSERTION_FAILURE_SIGNS)
     if has_assertion and not has_collection:
@@ -282,7 +323,7 @@ def _inconclusive_outcome(ctx: Context, detail: str) -> ReplayOutcome:
 
 def _behaviour_changed(ctx: Context) -> bool:
     """Read `behaviour_changed` from the implement result, the same evidence verify saw."""
-    attempt_dir = AttemptDir(ctx.worktree / ".factory" / "run" / str(ctx.run.attempt))
+    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(ctx.run.attempt))
     if not attempt_dir.last_message.exists():
         # No implement result is a schema-invalid shape verify would already have caught;
         # treat as no behaviour change rather than crashing the review before it starts.

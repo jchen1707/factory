@@ -89,7 +89,7 @@ def test_log_event_writes_one_object_per_line(tmp_path: Path) -> None:
 
 
 def test_exit_code_is_none_until_the_file_lands(tmp_path: Path) -> None:
-    attempt = AttemptDir.create(tmp_path, 1)
+    attempt = AttemptDir.create(tmp_path / ".factory", 1)
     assert attempt.exit_code() is None
     attempt.exit_file.write_text("0")
     assert attempt.exit_code() == 0
@@ -98,5 +98,5 @@ def test_exit_code_is_none_until_the_file_lands(tmp_path: Path) -> None:
 def test_stderr_is_a_separate_file_from_the_event_stream(tmp_path: Path) -> None:
     # P0-7: hook denials arrive on stderr and never in the JSON stream. Merging them
     # would put non-JSON into a JSONL parser and lose the evidence either way.
-    attempt = AttemptDir.create(tmp_path, 1)
+    attempt = AttemptDir.create(tmp_path / ".factory", 1)
     assert attempt.stderr != attempt.events

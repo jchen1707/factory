@@ -58,7 +58,7 @@ def run(ctx: Context) -> None:
     """Run layer A's `/plan` in a fresh context and require both files to exist."""
     attempt = ctx.run.attempt + 1
     worktree = ctx.worktree
-    attempt_dir = AttemptDir.create(worktree, attempt)
+    attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = ctx.routing.role("planner")
     branch_slug = (ctx.branch or ctx.run.linear_id).replace("/", "-")
     plan_dir = worktree / ".agents" / "plans" / branch_slug

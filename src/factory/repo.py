@@ -108,6 +108,43 @@ def fetch(repo: Path, base_branch: str) -> None:
     _git(repo, "fetch", "origin", base_branch, "--prune")
 
 
+def fetch_from(repo: Path, remote: str, branch: str) -> None:
+    """`git fetch <remote> <branch>` — the clone path's way home.
+
+    `remote` is the `sandbox-<name>` remote `sbx create --clone` adds to the host
+    checkout, and the ref lands in `FETCH_HEAD` (it also creates
+    `refs/sandboxes/<name>/<branch>`, which nothing here relies on: `FETCH_HEAD` is what
+    plain git guarantees, and the fake models plain git).
+    """
+    _git(repo, "fetch", remote, branch)
+
+
+def local_branch_exists(repo: Path, branch: str) -> bool:
+    return _git_ok(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+
+
+def add_worktree_at_fetch_head(repo: Path, path: Path, branch: str) -> None:
+    """Create the host mirror of a branch that was built inside a VM.
+
+    Deliberately *not* `add_worktree`: that one refuses a branch that already exists on
+    `origin`, because reusing a remote branch would put an unattended writer on somebody
+    else's work. Here there is no writer — the branch is already written, inside the VM,
+    and this only lands a copy of it on the host so the reviewer, the replay and the
+    host-execution guard can read it.
+
+    When the local branch already exists this attaches to it rather than re-cutting it,
+    and the caller checks the result actually matches `FETCH_HEAD`. Silently mirroring a
+    stale branch would put the review and the PR body on code the agent did not write.
+    """
+    if worktree_exists(repo, path):
+        raise Blocked("worktree-exists", f"{path} is already a worktree of {repo}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if local_branch_exists(repo, branch):
+        _git(repo, "worktree", "add", str(path), branch)
+        return
+    _git(repo, "worktree", "add", "-b", branch, str(path), "FETCH_HEAD")
+
+
 def remote_branch_exists(repo: Path, branch: str) -> bool:
     return bool(_git(repo, "ls-remote", "--heads", "origin", branch))
 
