@@ -25,8 +25,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import artifacts, gc, machine, recovery, repo
+from factory import artifacts, gc, machine, policy, recovery, repo
 from factory.agent.codex import CodexAdapter
+from factory.console import views as console_views
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import (
     Condition,
@@ -43,7 +44,7 @@ from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import MODEL_CACHE, Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
-from factory.steps import Context, advance
+from factory.steps import Context, advance, factory_dir_for
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
@@ -766,34 +767,250 @@ def cmd_gc(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    """`factory status` — the §18.5 board (View 1) and run detail (View 3), terminal forms.
+
+    With no ticket: the runs board. With `<TICKET> --evidence`: the full run detail —
+    transition timeline, gate report, review findings, artifacts. The CLI is built first
+    (§18.5); `factory serve` renders the same data through `console.views`."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home, dry_run=False)
+
+    if args.ticket:
+        ticket = args.ticket.upper()
+        run = store.live_run_for_ticket(ticket)
+        if run is None:
+            print(f"no run for {ticket}")
+            return 1
+        if args.evidence:
+            _print_run_detail(console_views.run_detail(home, registry, routing, store, run))
+        else:
+            _print_run_detail(console_views.run_detail(home, registry, routing, store, run))
+        return 0
+
+    _print_runs_board(console_views.runs_board(home, registry, routing, store))
+    return 0
+
+
+def _print_runs_board(rows: list[console_views.RunRow]) -> None:
+    if not rows:
+        print("no runs")
+        return
+    for r in rows:
+        badge = f" [{r.badge}]" if r.badge else ""
+        ctx = _fmt_context(r.context_pct, r.context_reason)
+        if r.spend_usd is not None:
+            spend = f"${r.spend_usd:.2f}/${r.spend_ceiling:.0f}"
+        else:
+            spend = f"-/${r.spend_ceiling:.0f}"
+        live = _fmt_duration(r.heartbeat_age) if r.heartbeat_age is not None else "-"
+        print(
+            f"{r.ticket:<8} {r.project:<16} {r.state}{badge}  att {r.attempt}·{r.rung}  "
+            f"ctx {ctx}  tok {r.tokens_in}/{r.tokens_out}  {spend}  live {live}"
+        )
+        if r.blocked_reason:
+            print(f"        blocked: {r.blocked_reason}")
+        elif r.context_reason and r.context_pct is None:
+            print(f"        ctx: {r.context_reason}")
+        if r.activity:
+            print(f"        · {r.activity}")
+
+
+def _print_run_detail(detail: console_views.RunDetail) -> None:
+    r = detail.row
+    print(f"{r.ticket} ({r.project}) — {r.state}  attempt {r.attempt}·{r.rung}")
+    if detail.pr_url:
+        print(f"  PR: {detail.pr_url}")
+    if detail.blocked_reason:
+        print(f"  blocked: {detail.blocked_reason}")
+    ctx = _fmt_context(r.context_pct, r.context_reason)
+    if r.spend_usd is not None:
+        spend = f"${r.spend_usd:.2f}/${r.spend_ceiling:.0f}"
+    else:
+        spend = f"-/${r.spend_ceiling:.0f}"
+    print(
+        f"  ctx {ctx}  tok {r.tokens_in}/{r.tokens_out} (cached {r.tokens_cached})  spend {spend}"
+    )
+    print("\n  transitions:")
+    for t in detail.transitions:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t.at))
+        rule = f"  [{t.rule}]" if t.rule else ""
+        print(f"    {stamp}  {t.from_state} -> {t.to_state}  ({t.actor}){rule}")
+    if detail.gates:
+        print(f"\n  gate report — verdict: {detail.gate_verdict}")
+        for g in detail.gates:
+            caveat = f"  caveat: {g.caveat}" if g.caveat else ""
+            print(f"    {g.status:<14} {g.name}{caveat}")
+    if detail.review_tier2 is not None:
+        # Printed even with no findings: "Tier 2 ran and found nothing" and "Tier 2 never
+        # ran" are different facts, and §13.2 is emphatic that a PR body must not let the
+        # second be read as the first. The same rule applies to the operator's view.
+        print(f"\n  review — tier2: {detail.review_tier2}")
+        if not detail.review_findings:
+            print("    no findings")
+        for f in detail.review_findings:
+            loc = f"{f.file}:{f.line}" if f.file and f.line else (f.file or "")
+            print(f"    [{f.severity or '?'}] {loc}  {f.summary}")
+    if detail.artifacts:
+        print("\n  artifacts:")
+        for a in detail.artifacts:
+            sha = a.sha256[:12] if a.sha256 else "-"
+            print(f"    {sha}  {a.name}")
+    if detail.events_path:
+        print(f"\n  events: {detail.events_path}")
+        print(f"  tail: factory logs {r.ticket} --follow")
+
+
+def _fmt_context(pct: float | None, reason: str | None) -> str:
+    if pct is not None:
+        return f"{pct * 100:.0f}%"
+    return f"— ({reason})" if reason else "—"
+
+
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60}s"
+    return f"{seconds // 3600}h{(seconds % 3600) // 60}m"
+
+
+# --------------------------------------------------------------------------------
+# factory logs — the live tail §18.5 names; the runbook pointed at the file until this
+# existed.
+# --------------------------------------------------------------------------------
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    """`factory logs <TICKET> [--follow]` — tail the active attempt's `events.jsonl`.
+
+    `--follow` blocks on the file growing, polling with a stdlib sleep (no `tail -f`
+    subprocess). The active attempt is the run's current `attempt`; a resume that did not
+    increment keeps reading the same directory the implementer wrote."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    store = _open_store(home, dry_run=False)
+    run = store.live_run_for_ticket(args.ticket.upper())
+    if run is None:
+        print(f"no run for {args.ticket.upper()}")
+        return 1
+    project = registry.projects.get(run.project)
+    if project is None:
+        print(f"no project for run {run.id}")
+        return 1
+    try:
+        events_path = (
+            factory_dir_for(home, project, run) / "run" / str(run.attempt) / "events.jsonl"
+        )
+    except Blocked as exc:
+        print(f"factory: {exc}")
+        return 2
+    if not events_path.exists():
+        print(f"no event stream at {events_path}")
+        return 1
+    return _tail(events_path, follow=args.follow)
+
+
+def _tail(path: Path, *, follow: bool) -> int:
+    """Print new lines from `path` as they appear. Stdlib only: a read offset and a poll."""
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            sys.stdout.write(line)
+        sys.stdout.flush()
+        if not follow:
+            return 0
+        while True:
+            line = handle.readline()
+            if line:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                continue
+            time.sleep(1)
+
+
+# --------------------------------------------------------------------------------
+# factory runtimes — View 2: sandboxes joined to runs
+# --------------------------------------------------------------------------------
+
+
+def cmd_runtimes(args: argparse.Namespace) -> int:
+    """`factory runtimes` — `sbx ls --json` joined to the runs using each sandbox.
+
+    A sandbox not matching `^factory-(build|review)-` is operator-owned (`codex-*`); shown
+    greyed (here, prefixed `*`) and offered no control (§18.5, F26)."""
     home = factory_home()
     store = _open_store(home, dry_run=False)
-    runs = store.all_runs()
-    if args.ticket:
-        runs = [r for r in runs if r.linear_id == args.ticket.upper()]
-        if not runs:
-            print(f"no run for {args.ticket.upper()}")
-            return 1
+    sandboxes = _sbx_ls_json()
+    rows = console_views.runtimes(sandboxes, store)
+    if not rows:
+        print("no sandboxes (is `sbx` installed and authenticated?)")
+        return 0
+    for r in rows:
+        marker = "*" if r.operator_owned else " "
+        ports = ",".join(r.published_ports) if r.published_ports else "-"
+        using = ", ".join(r.runs_using) if r.runs_using else "-"
+        print(f"{marker} {r.name:<32} {r.state:<10} ports {ports}  using {using}")
+        if r.last_denial:
+            print(f"    last denial: {r.last_denial}")
+    return 0
 
-    for run in runs:
-        tokens_in, tokens_out, usd = store.spend(run.id)
-        lease = "held" if run.lease_owner else "free"
-        print(
-            f"{run.linear_id:<10} {run.state!s:<16} attempt {run.attempt}  "
-            f"lease {lease}  tokens {tokens_in}/{tokens_out}  "
-            f"cost {f'${usd:.2f}' if usd is not None else '-'}"
-        )
-        if run.blocked_reason:
-            print(f"           blocked: {run.blocked_reason}")
-        if args.evidence:
-            for row in store.transitions(run.id):
-                stamp = time.strftime("%H:%M:%S", time.localtime(row["at"]))
-                rule = f"  [{row['rule']}]" if row["rule"] else ""
-                print(f"           {stamp}  {row['from_state']} -> {row['to_state']}{rule}")
-            for row in store.checks(run.id):
-                print(f"           check {row['check_name']}: {row['status']}")
-            for effect in store.effects(run.id):
-                print(f"           effect {effect.system}/{effect.key}: {effect.status}")
+
+def _sbx_ls_json() -> list[dict[str, object]]:
+    """`sbx ls --json`, parsed into the sandbox list.
+
+    The document is an **object** with a `sandboxes` array, not a bare array — the shape
+    `SbxAdapter.git_daemon_url` already reads, and the one measured against v0.38.0. A
+    reader that expected a list would show an empty runtimes view on a healthy machine and
+    look like "no sandboxes" rather than "parsed the wrong thing".
+
+    Returns `[]` when `sbx` is missing or refuses (it needs a Docker login), so the console
+    degrades to an empty view instead of failing the page.
+    """
+    if not sbx_available():
+        return []
+    proc = subprocess.run(
+        ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
+    )
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict):
+        listing = data.get("sandboxes", [])
+        return [entry for entry in listing if isinstance(entry, dict)]
+    return [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+
+
+# --------------------------------------------------------------------------------
+# factory config — View 4 (read form): models.toml roles and budget
+# --------------------------------------------------------------------------------
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    """`factory config models` — render `models.toml`'s roles, efforts and budget.
+
+    Read-only here; the editable form lives in `factory serve` (View 4), which validates a
+    change through `routing` before it is written so a config that puts the reviewer on the
+    builder's model is rejected in the form (§18.5). `projects.toml` is read-only in both:
+    its template/mount/MCP set is a sandbox spec fixed at creation."""
+    home = factory_home()
+    routing = load_routing(home / "config" / "models.toml")
+    registry = load_registry(home / "config" / "projects.toml")
+    view = console_views.config_view(routing, registry)
+    print("roles:")
+    for role in view.roles:
+        print(f"  {role.name:<12} {role.model}  effort={role.effort}")
+    print("\nbudget:")
+    print(f"  per-run ceiling ${view.usd_per_run:.2f}  warn at ${view.usd_warn_at:.2f}")
+    print("\nprojects (read-only — sandbox spec fixed at creation):")
+    for name in view.projects_read_only:
+        print(f"  {name}")
     return 0
 
 
@@ -913,7 +1130,8 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
     Both the directory and the branch are derived from the ticket rather than read from
     the run row, so a run that died before recording either one is still cleaned up —
-    see `_release_local_debris`."""
+    see `_release_local_debris`. The work is in `_cancel_run`, shared with the console's
+    Cancel control (§18.5 View 5)."""
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     store = _open_store(home, dry_run=False)
@@ -923,8 +1141,29 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         print(f"no run for {ticket}")
         return 1
 
+    for line in _cancel_run(home, registry, store, LinearClient(), run, args.reason):
+        print(line)
+    return 0
+
+
+def _cancel_run(
+    home: Path,
+    registry: Registry,
+    store: Store,
+    linear: LinearClient,
+    run: Run,
+    reason: str,
+) -> list[str]:
+    """The rollback core, shared by `cmd_cancel` and the console's Cancel control.
+
+    Archives the attempt directories, removes the worktree and the unpushed branch, records
+    `-> cancelled` under `actor="human"` (the §18.5 control contract), stops the build
+    sandbox, and restores the Linear tracker. Returns the lines it would print. A pushed
+    branch is never deleted; a Linear outage does not fail the rollback."""
+    ticket = run.linear_id
     project = registry.projects[run.project]
     paths = _worktree_paths(project, registry, run, ticket)
+    lines: list[str] = []
 
     for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
@@ -939,10 +1178,9 @@ def cmd_cancel(args: argparse.Namespace) -> int:
                         home / "artifacts" / run.linear_id / directory.name,
                         extra_names=harness.secret_vars,
                     )
-                    print(f"archived {directory.name} to {kept}")
+                    lines.append(f"archived {directory.name} to {kept}")
 
-    for line in _release_local_debris(project, run, ticket, paths):
-        print(line)
+    lines += _release_local_debris(project, run, ticket, paths)
 
     if machine.can(run.state, State.CANCELLED):
         store.record_transition(
@@ -951,7 +1189,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
             to_state=State.CANCELLED,
             actor="human",
             rule="abandon-is-james",
-            detail=args.reason,
+            detail=reason,
         )
     store.release_lease(run.id)
     SbxAdapter().stop(project.build_sandbox)
@@ -959,13 +1197,14 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     # Last, and never fatal: the local cleanup above has already happened, and a Linear
     # outage must not turn a completed rollback into a failed command.
     try:
-        for line in _restore_tracker_for_rerun(LinearClient(), ticket):
-            print(line)
+        lines += _restore_tracker_for_rerun(linear, ticket)
     except LinearError as exc:
-        print(f"could not restore {ticket} in Linear ({exc}); move it back to {TODO} by hand")
+        lines.append(
+            f"could not restore {ticket} in Linear ({exc}); move it back to {TODO} by hand"
+        )
 
-    print(f"{ticket} cancelled; sandbox {project.build_sandbox} stopped")
-    return 0
+    lines.append(f"{ticket} cancelled; sandbox {project.build_sandbox} stopped")
+    return lines
 
 
 # --------------------------------------------------------------------------------
@@ -1072,6 +1311,145 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print(f"\nA detached run is in progress at `{ctx.state}`; `factory tick` collects it.")
     else:
         print(f"\nThe run came to rest at `{ctx.state}`.")
+    return 0
+
+
+# --------------------------------------------------------------------------------
+# §18.5 View 5 — operator controls, shared with `factory serve`
+# --------------------------------------------------------------------------------
+
+
+#: The §18.5 controls, by the URL slug the console POSTs. There is deliberately no `merge`:
+#: §18.5 names "no Merge button" — merging happens on GitHub, by James — and its absence is
+#: asserted by a test that greps the templates.
+_CONTROLS: set[str] = {"suspend", "resume", "resume-planning", "cancel", "retry"}
+
+
+def dispatch_control(
+    action: str,
+    home: Path,
+    registry: Registry,
+    routing: Routing,
+    store: Store,
+    linear: LinearClient,
+    run: Run,
+    *,
+    context_factory: ContextFactory | None = None,
+) -> tuple[int, str]:
+    """One §18.5 control. Acquires the lease, builds a real `Context`, dispatches through
+    `recovery`/`_cancel_run` (every path writes an `actor="human"` transition — the §18.5
+    contract), and releases the lease. Returns `(exit_code, message)`.
+
+    F26: the sandbox a control touches is the run's own `factory-build-*`/`factory-review-*`
+    sandbox, never a `codex-*` one. `policy.assert_factory_sandbox` guards the build sandbox
+    before suspend/cancel stop it, so a misconfigured project pointing at an operator sandbox
+    is refused here rather than acted on. The run controls do not take a sandbox argument;
+    the run's project determines it, and the assertion is the boundary.
+
+    `context_factory` is the same injection seam `tick_once` carries, and for the same
+    reason: §21.3 requires the whole state machine to run in-process against fakes, and a
+    control that always built the real `sbx` and `codex` adapters could not be tested
+    without a Docker login. Nothing in production passes it.
+    """
+    if action not in _CONTROLS:
+        return 1, f"unknown control {action!r}; one of {sorted(_CONTROLS)}"
+
+    project = registry.projects.get(run.project)
+    if project is not None:
+        # F26 — refuse before acting if the run's sandbox is not a factory sandbox.
+        policy.assert_factory_sandbox(project.build_sandbox)
+
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        return 1, f"{run.linear_id} is leased by another process ({run.lease_owner})"
+
+    build = context_factory or (
+        lambda r: _context_for(home, registry, routing, store, linear, r)
+    )
+    ctx = build(run)
+    try:
+        if action == "suspend":
+            if run.state in machine.TERMINAL:
+                return 1, f"{run.linear_id} is at {run.state}; nothing to suspend"
+            origin = recovery.suspend(ctx, reason="suspended via console")
+            return 0, f"{run.linear_id} suspended from {origin}"
+        if action == "cancel":
+            lines = _cancel_run(home, registry, store, linear, run, "cancelled via console")
+            return 0, "\n".join(lines)
+        if action == "resume-planning":
+            recovery.resume(ctx, from_state="planning")
+        elif action == "retry":
+            if run.state is not State.RESUMABLE:
+                return 1, f"{run.linear_id} is {run.state}; retry is for a resumable run"
+            recovery.resume_run(ctx, skip_backoff=True)
+        else:  # resume
+            recovery.resume(ctx)
+        _drive_from_here(ctx)
+    except Blocked as exc:
+        _block(ctx, exc.reason, exc.detail)
+        return 2, f"{run.linear_id} blocked: {exc.reason} — {exc.detail}"
+    except Resumable as exc:
+        ctx.store.record_transition(
+            ctx.run.id,
+            from_state=ctx.state,
+            to_state=State.RESUMABLE,
+            actor="auto",
+            rule=exc.reason,
+            detail=exc.detail[:2000],
+        )
+        return 3, f"{run.linear_id} resumable: {exc.reason} — {exc.detail}"
+    finally:
+        store.release_lease(run.id)
+
+    if ctx.run.pr_url:
+        return 0, f"{run.linear_id} drove to {ctx.state}; draft PR: {ctx.run.pr_url}"
+    return 0, f"{run.linear_id} drove to {ctx.state}"
+
+
+# --------------------------------------------------------------------------------
+# factory serve — the §18.5 operator console
+# --------------------------------------------------------------------------------
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """`factory serve` — the §18.5 console, bound to loopback.
+
+    A read-mostly local web view of what the factory is doing and what it is costing.
+    It is not an authenticated multi-user service and it holds no credential of its own:
+    it reads the same SQLite file the daemon writes and shells out to the same `sbx`.
+    Binding it to anything but loopback is refused here rather than left to a flag —
+    §18.5 makes off-machine access a Phase 7 decision with its own auth story.
+
+    The app is built lazily so `factory` stays importable (and every other command stays
+    usable) on a machine where the web dependencies are not installed.
+    """
+    host = args.host
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"factory serve refuses to bind {host!r}: the console is loopback-only "
+            "(§18.5). Off-machine access is a Phase 7 decision with its own auth story.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        import uvicorn
+
+        from factory.console.app import create_app
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        print(
+            f"factory serve needs the console dependencies ({exc}). "
+            "Run `uv sync` and try again.",
+            file=sys.stderr,
+        )
+        return 2
+
+    home = factory_home()
+    # Fail fast on a routing table the console would render wrong, the same way the
+    # daemon refuses to start on one rather than discovering it per request.
+    load_routing(home / "config" / "models.toml")
+
+    print(f"factory console: http://{host}:{args.port}  (loopback only; Ctrl-C to stop)")
+    uvicorn.run(create_app(home), host=host, port=args.port, log_level="warning")
     return 0
 
 
@@ -1445,9 +1823,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="what the factory is doing")
     status.add_argument("ticket", nargs="?")
-    status.add_argument("--evidence", action="store_true", help="transitions, checks and effects")
+    status.add_argument(
+        "--evidence",
+        action="store_true",
+        help="full run detail: transitions, gates, review, artifacts",
+    )
     status.add_argument("--all", action="store_true", help="every run (the default with no ticket)")
     status.set_defaults(func=cmd_status)
+
+    logs = sub.add_parser("logs", help="tail a run's event stream")
+    logs.add_argument("ticket")
+    logs.add_argument("--follow", action="store_true", help="keep tailing as the stream grows")
+    logs.set_defaults(func=cmd_logs)
+
+    runtimes_p = sub.add_parser("runtimes", help="sandboxes joined to the runs using them")
+    runtimes_p.set_defaults(func=cmd_runtimes)
+
+    config = sub.add_parser("config", help="render models.toml / projects.toml")
+    config_sub = config.add_subparsers(dest="config_command", required=False)
+    models = config_sub.add_parser("models", help="roles, efforts and budget (read form)")
+    models.set_defaults(func=cmd_config)
+    config.set_defaults(func=cmd_config)
+
+    serve = sub.add_parser("serve", help="the §18.5 operator console (loopback-only)")
+    serve.add_argument("--port", type=int, default=7717)
+    serve.add_argument("--host", default="127.0.0.1", help="loopback only (§18.5)")
+    serve.set_defaults(func=cmd_serve)
 
     doctor = sub.add_parser("doctor", help="is this machine able to run the factory")
     doctor.add_argument(

@@ -23,7 +23,7 @@ is the §18.5 console, plus James's decision to load the daemon under the timer)
 | `steps/plan.py` rewind | **built** — rung 3 enters `planning`; `plan` records an attempt row now |
 | `cli.py: suspend` / `resume` | **built + validated end-to-end** — `recovery.suspend`/`recovery.resume` + thin CLI shells; drove FRO-6 `blocked → reviewing → pr_ready → awaiting_human` (PR #41). Two bugs found+fixed: the verify-fail loop-back `illegal-transition` (defect 4) and the forced-Tier-2 PR-body misreporting (defect 5). Committed `5a3e400`, `822c11c`. |
 | `cli.py: daemon` + `ops/com.jchen.factory.plist` | **built** — `cmd_daemon` loops a factored `_tick_pass`; the plist runs `factory tick --once` every 60 s via an absolute `/opt/homebrew/bin/uv` path (launchd has no PATH). Not loaded under the timer until James says so (§19). |
-| `src/factory/console/` | not built — **deferred** by the 2026-08-22 scope decision (core path + tests first; the CLI forms exist and §18.5 says the CLI is built first). Adds FastAPI/uvicorn deps to the stdlib-only control plane, so it is its own decision. |
+| `src/factory/console/` | **built** — PR #21. §18.5's five views: CLI forms (`status`, `status --evidence`, `logs --follow`, `runtimes`, `config models`) and `factory serve` (FastAPI, loopback-only, SSE). No Merge button; controls route through `policy` + `actor="human"`. |
 | `docs/runbook.md` | **built** — `docs/runbook.md`, written from the real defects (env-gate-failed, illegal-transition, lighthouse/`--all`, disk floor, Linear outage, bad PR, stop-now). |
 
 Plus three things §19 does not list, all forced by real runs: `factory run --full-review`
@@ -199,49 +199,76 @@ dance; do not reimplement it.
 
 ## Next session
 
-**Phase 4's core path is done and on PR #19.** One build remains, plus one human decision,
-plus two open questions to resolve alongside them. In the order I would do them:
+**Phase 4's build is done; what remains is James's.** Both open questions are resolved
+(PR #20, merged) and the console is built (PR #21).
 
-1. **The §18.5 console — the only remaining build.** `factory serve` (FastAPI + uvicorn,
-   loopback-only), five views (runs board, runtimes, run detail, configuration, controls),
-   SSE for the live tail. This is a new dependency on the deliberately stdlib-only control
-   plane that holds the keychain credential, so `pyproject.toml` flags it for review — add
-   `fastapi`/`uvicorn`/`structlog`/`pydantic` deliberately, with the comment updated. What
-   already exists for it: `routing.ModelFacts.usable_context` (the context-percentage
-   denominator, §18.5 — P0-7 proved the event stream carries neither the window nor a
-   percentage, so the cache is the only source); `store.py`'s query API (`all_runs`,
-   `transitions`, `checks`, `effects`, `spend`, `attempt_row`, `active_runs_for_project`,
-   `runs_in_states`); the structured JSONL log at `~/factory/logs/factory-<date>.jsonl`
-   (`artifacts.log_event`); and `agent/codex.py`'s event parser. **F26** (a console control
-   aimed at a `codex-*` sandbox) lands here — route every control through
-   `policy.assert_factory_sandbox` the way `sbx.py` already does, and through
-   `policy.requires_human` so every control writes an `actor="human"` transition. There is
-   no Merge button. A `factory logs <TICKET> --follow` CLI command is the terminal
-   equivalent §18.5 names; the runbook currently points at the log file directly because it
-   does not exist yet. Build the CLI forms first (§18.5), then the page.
+Two things the first console commit claimed prematurely, both since fixed and worth
+recording because the same shortcut is easy to repeat:
 
-2. **Load the daemon under the timer — James's decision (§19).** The daemon and the plist
-   are built; the env-gate fix and the F23 ladder bound the two loops that would otherwise
-   burn the attempt budget unattended; the §22 crash/idempotency tests pass. When James is
-   ready: `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist`. Nothing else needs
-   to happen first, but resolve open question 2 before relying on it for `--clone` tickets.
+- **§19 names `console/templates/*.html` as files.** The first cut inlined every page in
+  `app.py`. Now extracted — `page.html`, `board.html`, `run_detail.html`, `runtimes.html`,
+  `config.html`, `controls.html`, `console.css` — as `string.Template` files, and they ship
+  in the wheel.
+- **"Tests: the whole of §22" means all thirty rows.** An audit found **F27, F28 and F30**
+  (the test-honesty rows) with no test at any level: `test_redphase.py` covered `_classify`,
+  which is a different claim from "`replay` raises". `tests/integration/test_redphase_gates.py`
+  adds seven, including §23's requirement that the two blocking cases be unreachable from
+  any config file. Nine further rows had the behaviour covered but no `F<n>` label, so §22
+  could not be audited at all; they are labelled now, and **all thirty are traceable**.
+  F5 also gained a real assertion — it wrote 60 stderr lines and never checked the 40-line
+  bound, and an unbounded tail in a Linear comment is how a secret reaches the tracker.
 
-3. **Two open questions, still open — resolve alongside the console/daemon:**
-   - **Should `verify` re-run the gates at all on a `--from verifying` resume?** It re-ran
-     them on 2026-08-22 and surfaced the lighthouse/env failure the original run's
-     `not_applicable` (defect 3) had hidden. Re-running is more honest but it is also what
-     blocked the resume. Now that verify is two-phase, decide whether `collect` reads the
-     existing `gates.json` or re-runs. The env-gate-failed block makes a re-run safe (it
-     blocks instead of looping), so the honest answer is probably "re-run, and let
-     env-gate-failed catch the environment case."
-   - **The clone worktree on a `--from verifying`/`reviewing` resume.** `ctx.worktree` for a
-     `--clone` run is the host project path, and the FRO-6 resume's verify ran the gates
-     against `/Users/james/frontend-harness` — which only had the FRO-6 branch because
-     `clone.fetch_back` had repointed the host mirror during the original run. A resume long
-     after that (or after another run repointed the mirror) would re-run gates against the
-     wrong tree. `--from reviewing` dodged this (review fetches back fresh); `--from
-     verifying` does not. **Worth a test before loading the daemon if any `--clone` project
-     is live under the timer.**
+Writing §19's "resume-from-planning works from the browser" test then found a third:
+`dispatch_control` hardcoded the real `sbx`/`codex` adapters, so no console control could
+be tested without a Docker login (§21.3 says the whole machine runs against fakes). It
+takes `tick_once`'s `context_factory` seam now.
+
+1. ~~**The §18.5 console**~~ — **built, PR #21.** CLI forms first as §18.5 requires, then
+   `factory serve`: FastAPI, loopback-only (a non-loopback `--host` is refused), five views,
+   SSE for the board and the event tail. The context percentage is
+   `turn.completed.usage.input_tokens / ModelFacts.usable_context` — P0-7 refuted the
+   plan's reading of the stream, so the denominator comes from the model cache — and it is
+   **hidden with the reason named** whenever either half is missing, never estimated. F26
+   lands via `policy.assert_factory_sandbox` on every control. There is no Merge button.
+   Config edits validate through `load_routing` *before* the write, so a
+   reviewer-on-the-builder's-model is refused in the form and `models.toml` is never
+   half-written. 27 tests; the three load-bearing ones mutation-checked.
+
+   Three defects found while building it, each fixed against measured evidence:
+   `sbx ls --json` is an **object** with a `sandboxes` array and `{host_port,
+   sandbox_port}` port objects (a list-shaped reader shows an empty runtimes view on a
+   healthy machine); SQLite connections are thread-bound and the SSE readers run on a
+   worker thread; Starlette's form parser would have cost a fifth dependency to read
+   `a=1&b=2`.
+
+2. **Load the daemon under the timer — James's decision (§19). The only thing left.**
+   The daemon and the plist are built; the env-gate fix, the F23 ladder and the clone-branch
+   fix (below) bound the loops that would otherwise burn the attempt budget unattended, and
+   the §22 crash/idempotency tests pass. When James is ready:
+   `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist`. Rollback is
+   `launchctl bootout`; the daemon is stateless between ticks, so stopping it is safe at
+   any instant.
+
+3. ~~**Two open questions**~~ — **both resolved, PR #20.**
+   - **Does `verify` re-run the gates on a `--from verifying` resume?** **Yes, and that is
+     the decision.** A resume only advances into `verifying`; the tick's `START_NEEDED`
+     branch calls `verify.start` again, and `collect` reads a freshly written
+     `gates.stdout.txt` only after the new `exit` lands. A stale `gates.json` is never
+     read. Re-running is what surfaced FRO-6's hidden lighthouse failure, and
+     `env-gate-failed` makes it safe by blocking instead of looping. Documented in
+     `verify.collect`; pinned by a test that fails if `collect` is pointed at the stale file.
+   - **The clone worktree on a `--from verifying` resume.** **Fixed.** A `--clone` build
+     sandbox is shared across a project's runs, so a second run leaves the clone on *its*
+     branch and a later resume would run the gates against the wrong ticket's code.
+     `verify.start` now calls `clone.ensure_on_branch` for clone runs — idempotent on the
+     forward path, and it blocks `clone-branch-missing` rather than cutting a fresh empty
+     branch if the agent's commits are gone. Two tests, mutation-checked. This was the
+     "worth a test before loading the daemon" hazard, and it is closed.
+
+**Still open, and deliberately not Phase 4's:** the two carry-over defects under "Two
+defects worth knowing about" — `_SENSITIVE_DIRS["frontend"]` matching nothing, and
+`deliver._archive` returning silently on a missing attempt directory. Both are recorded
+defects rather than blockers.
 
 **The board, for context:** FRO-6 is `awaiting_human` at draft
 [frontend-harness#41](https://github.com/jchen1707/frontend-harness/pull/41) (the run that

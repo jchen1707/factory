@@ -1,0 +1,17 @@
+<h1>configuration</h1>
+<p class="sub">Editing <code>models.toml</code>. The §4.5 rules are applied before the
+write, so a configuration that puts the reviewer on the builder's model is rejected here
+rather than at the next daemon start.</p>
+$banner
+<form method="post" action="/config/models">
+<div class="scroll"><table><thead><tr><th>role</th><th>model</th><th>effort</th></tr></thead>
+<tbody>$role_rows</tbody></table></div>
+<h2>budget</h2>
+<p>per-run ceiling $$<input name="usd_per_run" value="$usd_per_run" size="8">
+· warn at $$<input name="usd_warn_at" value="$usd_warn_at" size="8"></p>
+<p><button type=submit>Save</button></p></form>
+<h2>projects <span class="muted">(read-only)</span></h2>
+<p class="note">A project's template, mount set and static MCP set are part of a sandbox
+specification fixed at creation. Changing one here would silently do nothing: edit
+<code>projects.toml</code> deliberately and rename the sandbox.</p>
+<ul>$project_rows</ul>

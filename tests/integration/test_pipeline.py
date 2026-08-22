@@ -208,6 +208,7 @@ def test_a_schema_invalid_result_blocks_and_keeps_the_raw_file(ctx: Context) -> 
     worktree_step.run(ctx)
     with pytest.raises(Blocked) as caught:
         implement_step.run(ctx)
+    # §22 F6 — schema-invalid output does not advance the state; the raw file is kept.
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.IMPLEMENTING  # the state did not advance
     raw = Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "last-message.json"
@@ -215,6 +216,9 @@ def test_a_schema_invalid_result_blocks_and_keeps_the_raw_file(ctx: Context) -> 
 
 
 def test_a_non_zero_exit_is_resumable_and_carries_the_stderr_tail(ctx: Context) -> None:
+    # §22 F5 — a non-zero codex exit is `resumable`, and the last 40 lines of stderr reach
+    # the Linear comment. Bounded on purpose: 60 lines in, 40 out. An unbounded tail would
+    # paste a whole traceback into the tracker, which is how a secret reaches a comment.
     _fake(ctx).exit_code = 1
     _fake(ctx).stderr = "traceback line\n" * 60
     claim_step.run(ctx)
@@ -225,11 +229,14 @@ def test_a_non_zero_exit_is_resumable_and_carries_the_stderr_tail(ctx: Context) 
         implement_step.run(ctx)
     assert caught.value.reason == "agent-failed"
     assert "traceback line" in caught.value.detail
+    assert caught.value.detail.count("traceback line") == 40
 
 
 def test_a_preflight_that_cannot_produce_a_refusal_blocks(ctx: Context) -> None:
-    # F20 / R1: everything runs, nothing enforces. The canary returning anything but
-    # exit 2 means the write guard is not live, and a green run would prove nothing.
+    # §22 F20 and F10 / R1: everything runs, nothing enforces. The canary *is* the F10
+    # probe — it asks `protect_paths.mjs` to refuse a write to a protected path, so a
+    # canary that does not come back with exit 2 means the hook is not attached and the
+    # agent's edits to `uv.lock` would go unrefused. A green run would prove nothing.
     _fake(ctx).canary_exit = 0
     claim_step.run(ctx)
     context_step.run(ctx)
@@ -238,6 +245,7 @@ def test_a_preflight_that_cannot_produce_a_refusal_blocks(ctx: Context) -> None:
     assert caught.value.reason == "enforcement-disabled"
 
 
+# §22 F21 — a write outside the vault allowlist blocks; both snapshots kept, no PR.
 def test_a_write_outside_the_vault_allowlist_blocks_the_run(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -658,6 +666,8 @@ def test_a_fail_report_loops_back_to_implementing(ctx: Context) -> None:
 
 
 def test_an_incomplete_report_blocks_without_evidence_mismatch(ctx: Context) -> None:
+    # §22 F7 — an unavailable gate makes the verdict `incomplete`; the run must not reach
+    # `pr_ready` on it.
     # A gate whose binary is absent comes back `unavailable` → `verdict: incomplete`. The
     # agent did not claim that gate, so this is an environment problem (blocked), not a
     # disagreement with the agent's claim (evidence-mismatch).

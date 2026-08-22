@@ -106,6 +106,8 @@ def test_a_nonzero_exit_with_a_failed_token_is_red() -> None:
 # -- the weakening guard's assertion patterns --------------------------------
 
 
+# §22 F29 — an existing assertion deleted from a test file is flagged, and `review`
+# routes the run to `awaiting_human` with the hunk quoted.
 def test_a_removed_assert_line_is_flagged_as_weakening() -> None:
     line = "-        assert result == 42"
     assert any(pat.search(line) for pat in _ASSERTION_PATTERNS)

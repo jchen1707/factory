@@ -1,0 +1,7 @@
+<h1>runs</h1>
+<p class="sub">Live from the state database. Updates without a reload.</p>
+<div id="board">$table</div>
+<script>
+const es = new EventSource('/sse/board');
+es.onmessage = e => { document.getElementById('board').innerHTML = JSON.parse(e.data).html; };
+</script>

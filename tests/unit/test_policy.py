@@ -45,6 +45,8 @@ def test_every_deny_entry_escalates(path: str) -> None:
 def test_vendored_tree_blocks_rather_than_escalating() -> None:
     # protect_paths.mjs should already have refused this write, so a hit means the
     # enforcement layer failed — which is not a thing a human reads a diff about.
+    # §22 F11 — a diff touching a host-executed path routes to `awaiting_human`
+    # BEFORE any push; §22 F9 covers the vendored tree specifically.
     verdict, hits = host_execution_verdict([".agents/vendor/harness/hooks/lib.mjs"])
     assert verdict == "blocked"
     assert hits == [".agents/vendor/harness/hooks/lib.mjs"]
@@ -87,6 +89,8 @@ def test_sandbox_namespace(name: str, owned: bool) -> None:
 
 def test_harness_skip_verify_is_refused() -> None:
     assert_no_skip_verify({"PATH": "/usr/bin"})
+    # §22 F8 — `HARNESS_SKIP_VERIFY=1` leaking into the run env disables layer A's
+    # Stop gate, so the preflight refuses the run rather than reporting a silent green.
     with pytest.raises(PermissionError, match="HARNESS_SKIP_VERIFY"):
         assert_no_skip_verify({"HARNESS_SKIP_VERIFY": "1"})
 

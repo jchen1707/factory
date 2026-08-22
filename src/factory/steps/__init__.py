@@ -28,7 +28,7 @@ from factory.routing import Routing
 from factory.sandbox.base import SandboxAdapter
 from factory.store import Run, Store, marker
 
-__all__ = ["Context", "advance", "record_effect"]
+__all__ = ["Context", "advance", "factory_dir_for", "record_effect"]
 
 LEASE_TTL_SECONDS = 900
 
@@ -120,29 +120,14 @@ class Context:
     def factory_dir(self) -> Path:
         """Where `.factory/` lives for this run — the host side of the protocol.
 
-        For a bind-mounted project that is `<worktree>/.factory`, addressed by the same
-        absolute string on both sides. For a clone project the worktree is inside the VM
-        and its untracked content never reaches the host, so `.factory/` moves onto
-        `clone_mount`, which keeps the identity property that matters: one path, both sides.
-
-        Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host checkout.
-        The evidence stays where it was written.
-
-        Keyed by **run id**, not by ticket. A bind-mounted project gets a fresh tree for
-        free, because `cancel` removes the worktree the evidence lives in — but the clone
-        mount survives every run, so a ticket-keyed path put a second run of the same
-        ticket on top of the first one's attempt directory. Measured on 2026-08-22: the
-        second `factory run FRO-6` found the first run's `exit` file already present,
-        returned from its wait instantly, read the first run's `last-message.json` and
-        reported a four-hour-old verdict — with the first run's token counts, to the
-        digit — while its own agent was still running in the sandbox. That is the exact
-        failure this system exists to catch: it looked like a result and proved nothing.
-        A run id in the path makes two runs of one ticket structurally unable to collide,
-        and keeps the earlier run's evidence intact instead of overwriting it.
+        `factory_dir_for` holds the path logic; this is its `Context`-bound view, and it
+        adds the one thing a bare `Run` cannot know: a dry run has no recorded worktree,
+        only the shadow one it would have created, and every later step still has to be
+        able to print the path it would have used.
         """
-        if self.project.requires_clone:
-            return self.clone_mount / self.run.linear_id / self.run.id / ".factory"
-        return self.worktree / ".factory"
+        if not self.project.requires_clone and not self.run.worktree:
+            return self.worktree / ".factory"  # raises no-worktree, or gives the shadow
+        return factory_dir_for(self.home, self.project, self.run)
 
     # -- plumbing -----------------------------------------------------------------
 
@@ -175,6 +160,42 @@ class Context:
 
     def timeout_for(self, state: State) -> int:
         return self.registry.defaults.timeouts_seconds.get(str(state), 1800)
+
+
+def factory_dir_for(home: Path, project: Project, run: Run) -> Path:
+    """Where `.factory/` lives for a run — the host side of the protocol, without a `Context`.
+
+    The single place the clone-vs-bind path decision lives, so the console (which reads the
+    store without building adapters) and `Context.factory_dir` cannot disagree about it —
+    the same shape of defect that cost FRO-6 a stale verdict when two functions read the
+    same input differently.
+
+    For a bind-mounted project that is `<worktree>/.factory`, addressed by the same absolute
+    string on both sides. For a clone project the worktree is inside the VM and its untracked
+    content never reaches the host, so `.factory/` moves onto the clone mount
+    (`home/state/clone/<project>`), which keeps the identity property that matters: one path,
+    both sides. Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host
+    checkout; the evidence stays where it was written.
+
+    Keyed by **run id**, not by ticket. A bind-mounted project gets a fresh tree for free,
+    because `cancel` removes the worktree the evidence lives in — but the clone mount
+    survives every run, so a ticket-keyed path put a second run of the same ticket on top
+    of the first one's attempt directory. Measured on 2026-08-22: the second
+    `factory run FRO-6` found the first run's `exit` file already present, returned from its
+    wait instantly, read the first run's `last-message.json` and reported a four-hour-old
+    verdict — with the first run's token counts, to the digit — while its own agent was
+    still running in the sandbox. A run id in the path makes two runs of one ticket
+    structurally unable to collide, and keeps the earlier run's evidence intact.
+
+    Raises `Blocked("no-worktree")` for a bind-mounted run that has not reached
+    `worktree_ready` — there is no `.factory` to address yet, and a reader that invented one
+    would look at the wrong place.
+    """
+    if project.requires_clone:
+        return home / "state" / "clone" / project.name / run.linear_id / run.id / ".factory"
+    if not run.worktree:
+        raise Blocked("no-worktree", f"run {run.id} has no worktree recorded")
+    return Path(run.worktree) / ".factory"
 
 
 def advance(
