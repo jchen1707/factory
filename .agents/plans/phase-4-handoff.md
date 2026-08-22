@@ -1,14 +1,16 @@
 # Phase 4 handoff — begun 2026-08-22
 
-Phase 3 is closed and **Phase 4 is under way** on branch
-`feat/phase-4-tick-and-recovery` (12 commits, unpushed, unreviewed).
+Phase 3 is closed and **Phase 4's core path is done** on branch
+`feat/phase-4-tick-and-recovery` (17 commits, pushed, open as
+[factory#19](https://github.com/jchen1707/factory/pull/19) against `main`).
 `SOFTWARE-FACTORY-PLAN.md` §19 "Phase 4 — polling, idempotency, recovery, resume,
 cleanup" (line 2188) is the specification; this file records only what a new session
 cannot read out of the plan or the code.
 
 Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
 
-**Start here:** "Where Phase 4 stands" below, then "Build `resume` next".
+**Start here:** "Where Phase 4 stands" below, then "Next session" (the only thing left
+is the §18.5 console, plus James's decision to load the daemon under the timer).
 
 ## Where Phase 4 stands
 
@@ -30,17 +32,20 @@ intake at all — see "Defects this session".
 
 **The property the whole phase turns on** is §4.2's, and it is now real in code: *the tick
 that asks is never the tick that started the run.* The agent steps are two-phase —
-`implement.start`/`implement.collect`, `plan.start`/`plan.collect` — and `collect` reads
+`implement.start`/`implement.collect`, `plan.start`/`plan.collect`,
+`verify.start`/`verify.collect`, `review.start`/`review.collect` — and `collect` reads
 nothing that `start` held in memory. The vault snapshot moved out of a local variable into
 `vault-before.json` in the attempt directory for exactly that reason, and its absence
 blocks rather than defaulting to an empty `before`. `factory run` still calls
 start + wait + collect; only the tick uses the halves.
 
-**One gap in the tick, known and deliberate.** `verify`, `review` and `deliver` are still
-synchronous inside a pass, so a tick can block for minutes on the review fan-out. `launchd`
-does not overlap `StartInterval` instances so it is safe, but reaping stalls while a review
-runs. Making those two-phase is its own slice and should come before the daemon is loaded
-under a timer.
+**One gap in the tick, known and deliberate.** `deliver` is still synchronous inside a pass
+(host-side push + PR, seconds; `exec_detached` is sandbox-only, so splitting it would need a
+new host-detach mechanism for no gain). `verify` and `review` are two-phase now, so a tick
+no longer blocks on the gate suite or the review fan-out — only the final push+PR is
+in-band, and `launchd` does not overlap `StartInterval` instances anyway. The daemon is safe
+to load under the timer once James decides to (§19); the env-gate fix and the F23 ladder
+bound the two loops that would otherwise burn the attempt budget unattended.
 
 ## Build `resume` next
 
@@ -192,20 +197,57 @@ dance; do not reimplement it.
    `tests/unit/test_sbx.py`, so the safety property holds; the console-control variant
    belongs in the console PR.
 
-### Two open questions a next session will hit
+## Next session
 
-- **Should `verify` re-run the gates at all on a `--from verifying` resume?** It re-ran
-  them this session and surfaced the lighthouse/env failure that the original run's
-  `not_applicable` (defect 3) had hidden. Re-running is more honest but it is also what
-  blocked the resume. The two-phase split (item 1) is where to decide whether `collect`
-  reads the existing report or re-runs.
-- **The clone worktree on a `--from verifying`/`reviewing` resume.** `ctx.worktree` for a
-  `--clone` run is the host project path, and the FRO-6 resume's verify ran the gates
-  against `/Users/james/frontend-harness` — which only had the FRO-6 branch because
-  `clone.fetch_back` had repointed the host mirror during the original run. A resume long
-  after that (or after another run repointed the mirror) would re-run gates against the
-  wrong tree. `--from reviewing` dodged this (review fetches back fresh); `--from verifying`
-  does not. Worth a test before relying on `--from verifying` for clone runs.
+**Phase 4's core path is done and on PR #19.** One build remains, plus one human decision,
+plus two open questions to resolve alongside them. In the order I would do them:
+
+1. **The §18.5 console — the only remaining build.** `factory serve` (FastAPI + uvicorn,
+   loopback-only), five views (runs board, runtimes, run detail, configuration, controls),
+   SSE for the live tail. This is a new dependency on the deliberately stdlib-only control
+   plane that holds the keychain credential, so `pyproject.toml` flags it for review — add
+   `fastapi`/`uvicorn`/`structlog`/`pydantic` deliberately, with the comment updated. What
+   already exists for it: `routing.ModelFacts.usable_context` (the context-percentage
+   denominator, §18.5 — P0-7 proved the event stream carries neither the window nor a
+   percentage, so the cache is the only source); `store.py`'s query API (`all_runs`,
+   `transitions`, `checks`, `effects`, `spend`, `attempt_row`, `active_runs_for_project`,
+   `runs_in_states`); the structured JSONL log at `~/factory/logs/factory-<date>.jsonl`
+   (`artifacts.log_event`); and `agent/codex.py`'s event parser. **F26** (a console control
+   aimed at a `codex-*` sandbox) lands here — route every control through
+   `policy.assert_factory_sandbox` the way `sbx.py` already does, and through
+   `policy.requires_human` so every control writes an `actor="human"` transition. There is
+   no Merge button. A `factory logs <TICKET> --follow` CLI command is the terminal
+   equivalent §18.5 names; the runbook currently points at the log file directly because it
+   does not exist yet. Build the CLI forms first (§18.5), then the page.
+
+2. **Load the daemon under the timer — James's decision (§19).** The daemon and the plist
+   are built; the env-gate fix and the F23 ladder bound the two loops that would otherwise
+   burn the attempt budget unattended; the §22 crash/idempotency tests pass. When James is
+   ready: `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist`. Nothing else needs
+   to happen first, but resolve open question 2 before relying on it for `--clone` tickets.
+
+3. **Two open questions, still open — resolve alongside the console/daemon:**
+   - **Should `verify` re-run the gates at all on a `--from verifying` resume?** It re-ran
+     them on 2026-08-22 and surfaced the lighthouse/env failure the original run's
+     `not_applicable` (defect 3) had hidden. Re-running is more honest but it is also what
+     blocked the resume. Now that verify is two-phase, decide whether `collect` reads the
+     existing `gates.json` or re-runs. The env-gate-failed block makes a re-run safe (it
+     blocks instead of looping), so the honest answer is probably "re-run, and let
+     env-gate-failed catch the environment case."
+   - **The clone worktree on a `--from verifying`/`reviewing` resume.** `ctx.worktree` for a
+     `--clone` run is the host project path, and the FRO-6 resume's verify ran the gates
+     against `/Users/james/frontend-harness` — which only had the FRO-6 branch because
+     `clone.fetch_back` had repointed the host mirror during the original run. A resume long
+     after that (or after another run repointed the mirror) would re-run gates against the
+     wrong tree. `--from reviewing` dodged this (review fetches back fresh); `--from
+     verifying` does not. **Worth a test before loading the daemon if any `--clone` project
+     is live under the timer.**
+
+**The board, for context:** FRO-6 is `awaiting_human` at draft
+[frontend-harness#41](https://github.com/jchen1707/frontend-harness/pull/41) (the run that
+closed Tier 2); a human merging #41 should clear its `needs-info` label. FRO-7 is held at
+intake by condition 11 (blocked by FRO-6). No BAC work pending. See "State of the board"
+below for the full list.
 
 ## Where Phase 3 ended
 
