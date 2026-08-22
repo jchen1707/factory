@@ -17,7 +17,7 @@ import socket
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -324,6 +324,38 @@ class Store:
         ).fetchall()
         return [Run.from_row(r) for r in rows]
 
+    def runs_in_states(self, states: Sequence[State]) -> list[Run]:
+        """Every run currently sitting in one of these states, oldest update first.
+
+        The tick's work list. Ordered by `updated_at` so a run that has been waiting
+        longest is looked at first, which is the only ordering that cannot starve a run
+        when the tick runs out of time.
+        """
+        if not states:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM runs WHERE state IN "  # noqa: S608 - placeholders below
+            f"({','.join('?' * len(states))}) ORDER BY updated_at",
+            tuple(str(s) for s in states),
+        ).fetchall()
+        return [Run.from_row(r) for r in rows]
+
+    def live_run_for_ticket(self, linear_id: str) -> Run | None:
+        """The ticket's run that has not reached a terminal state, if there is one.
+
+        `run_by_ticket` returns the most recent row whatever its state, which is right
+        for `status` and wrong for the poller: a cancelled run must not stop the ticket
+        being picked up again, and that distinction is exactly what `runs_one_live_per_ticket`
+        already encodes in the index.
+        """
+        terminal = tuple(str(s) for s in sorted(TERMINAL))
+        row = self._conn.execute(
+            "SELECT * FROM runs WHERE linear_id = ? AND state NOT IN "  # noqa: S608
+            f"({','.join('?' * len(terminal))}) ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (linear_id, *terminal),
+        ).fetchone()
+        return Run.from_row(row) if row else None
+
     def update_run(self, run_id: str, **fields: object) -> None:
         if not fields:
             return
@@ -516,6 +548,27 @@ class Store:
             "WHERE run_id = ? AND attempt = ? AND state = ?",
             (int(time.time()), exit_code, outcome, session_id, run_id, attempt, str(state)),
         )
+
+    def attempt_row(self, run_id: str, attempt: int, state: State) -> sqlite3.Row | None:
+        """One attempt, by its primary key. `None` when the state never spawned one.
+
+        The tick reads `sandbox` and `artifact_dir` out of this rather than rebuilding
+        them from the registry, because a sandbox can be renamed in `projects.toml`
+        between the attempt starting and the tick that reaps it, and the attempt has to
+        be reaped where it actually ran.
+        """
+        return self._conn.execute(
+            "SELECT * FROM attempts WHERE run_id = ? AND attempt = ? AND state = ?",
+            (run_id, attempt, str(state)),
+        ).fetchone()
+
+    def attempts_in_state(self, run_id: str, state: State) -> int:
+        """How many attempts this run has spent in one state — §16.4's per-state ceiling."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE run_id = ? AND state = ?",
+            (run_id, str(state)),
+        ).fetchone()
+        return int(row["n"]) if row else 0
 
     def set_session_id(self, run_id: str, attempt: int, state: State, session_id: str) -> None:
         """Stored before the run is considered started, so a crash can resume by id.

@@ -26,6 +26,7 @@ from factory import artifacts, policy
 from factory.agent.base import (
     AgentInvocation,
     SchemaInvalid,
+    Transcript,
     validate_against_schema,
 )
 from factory.agent.codex import TranscriptError
@@ -35,7 +36,7 @@ from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
 from factory.steps import Context, advance
 
-__all__ = ["build_prompt", "run"]
+__all__ = ["build_prompt", "collect", "run", "start"]
 
 STEP = "implement"
 
@@ -48,12 +49,47 @@ POLL_INTERVAL_SECONDS = 10
 
 
 def run(ctx: Context) -> None:
-    attempt = ctx.run.attempt + 1
+    """Start the attempt and stay with it until it ends — `factory run`'s path.
+
+    `factory tick` uses `start` and `collect` separately instead, because a tick that
+    blocked for the length of a model run would be a tick that could not reap anything
+    else. The two paths share every line that matters: this one is `start`, a poll loop,
+    and `collect`.
+    """
+    started = start(ctx)
+    if started is None:
+        return
+    attempt_dir, handle = started
+    _await_exit(ctx, attempt_dir, handle)
+    collect(ctx, attempt_dir, handle.attempt)
+
+
+def start(
+    ctx: Context,
+    *,
+    resume_session: str | None = None,
+    continuation: str | None = None,
+) -> tuple[AttemptDir, RunHandle] | None:
+    """Write the attempt's files and spawn the detached agent. Returns once it is running.
+
+    `None` means a dry run, which walks the states and executes nothing.
+
+    `resume_session` is §16.3's resume branch: the same worktree, the same attempt
+    directory shape, and `codex exec resume <id>` instead of a fresh `codex exec`. Never
+    `--last` — on a machine running several tickets that picks a session at random.
+    `continuation` is the ladder's rung-2 addition: what the previous attempt already
+    changed and how it failed, which is the only thing that makes a second attempt
+    different from the first.
+    """
+    # A rewind is one attempt with two phases, so the implement half of an attempt that
+    # already planned reuses that attempt's number and its directory. Anywhere else this
+    # is a new attempt.
+    attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = ctx.routing.role("builder")
 
-    prompt, skill_sha = build_prompt(ctx)
+    prompt, skill_sha = build_prompt(ctx, continuation=continuation)
     schema_source = _schema_path(ctx)
 
     invocation = AgentInvocation(
@@ -69,6 +105,7 @@ def run(ctx: Context) -> None:
         heartbeat_path=attempt_dir.heartbeat,
         vault_directory=str(ctx.registry.vault.path),
         env=dict(ctx.project.env),
+        resume_session=resume_session,
     )
     script = ctx.agent.wrapper_script(invocation)
 
@@ -92,7 +129,7 @@ def run(ctx: Context) -> None:
         advance(ctx, State.IMPLEMENTING)
         ctx.would("poll heartbeat/exit; validate last-message.json; diff the vault")
         advance(ctx, State.VERIFYING)
-        return
+        return None
 
     attempt_dir.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(schema_source, attempt_dir.schema)
@@ -114,9 +151,7 @@ def run(ctx: Context) -> None:
         },
     )
 
-    before = policy.snapshot_vault(
-        ctx.registry.vault.path, exclude=ctx.registry.vault.snapshot_exclude
-    )
+    _write_vault_snapshot(ctx, attempt_dir)
 
     ctx.store.start_attempt(
         ctx.run.id,
@@ -136,14 +171,54 @@ def run(ctx: Context) -> None:
         attempt_dir=attempt_dir.root,
     )
     ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
-    ctx.log("implement.started", sandbox=handle.sandbox, model=role.model, effort=role.effort)
-
-    _await_exit(ctx, attempt_dir, handle)
-    _collect(ctx, attempt_dir, attempt, before)
+    ctx.log(
+        "implement.started",
+        sandbox=handle.sandbox,
+        model=role.model,
+        effort=role.effort,
+        resumed=bool(resume_session),
+    )
+    return attempt_dir, handle
 
 
 def _schema_path(ctx: Context) -> Path:
     return ctx.home / "schemas" / "implement_result.schema.json"
+
+
+#: The before-half of the §8.5 vault check, written to disk rather than held in a local.
+#: `start` and `collect` can be two different processes on two different days, so a
+#: snapshot that lived only in memory would make the check silently unavailable on
+#: exactly the runs recovery exists for.
+VAULT_SNAPSHOT = "vault-before.json"
+
+
+def _write_vault_snapshot(ctx: Context, attempt_dir: AttemptDir) -> None:
+    snapshot = policy.snapshot_vault(
+        ctx.registry.vault.path, exclude=ctx.registry.vault.snapshot_exclude
+    )
+    artifacts.write_json(
+        attempt_dir.path(VAULT_SNAPSHOT),
+        {"schemaVersion": 1, "root": str(ctx.registry.vault.path), "files": snapshot},
+    )
+
+
+def _read_vault_snapshot(ctx: Context, attempt_dir: AttemptDir) -> dict[str, tuple[int, int, str]]:
+    """The snapshot `start` wrote. Its absence blocks rather than defaulting to empty.
+
+    An empty `before` would make every file in the vault look newly added, so the
+    allowlist check would fire on a run that touched nothing — and a check that fails
+    for the wrong reason teaches people to ignore it. Missing means the attempt
+    directory is not the one `start` wrote, which is a fact worth stopping on.
+    """
+    path = attempt_dir.path(VAULT_SNAPSHOT)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Blocked("vault-snapshot-missing", f"{path}: {exc}") from exc
+    return {
+        name: (int(meta[0]), int(meta[1]), str(meta[2]))
+        for name, meta in dict(payload.get("files", {})).items()
+    }
 
 
 def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
@@ -194,13 +269,23 @@ def _capture_session_id(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> 
         ctx.store.set_session_id(ctx.run.id, attempt, State.IMPLEMENTING, str(event["thread_id"]))
 
 
-def _collect(
-    ctx: Context,
-    attempt_dir: AttemptDir,
-    attempt: int,
-    vault_before: dict[str, tuple[int, int, str]],
-) -> None:
+def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
+    """Read the attempt back off the filesystem and decide what it proved.
+
+    Called either by `run` moments after the agent exits, or by `steps/reap.py` on a
+    later tick — possibly in a different process, after a reboot. Nothing here reads
+    anything the starting call held in memory, which is the property that makes the
+    second case work: the vault snapshot, the session id and the exit code are all on
+    disk, in the attempt directory, under the same absolute path on both sides.
+    """
     exit_code = attempt_dir.exit_code()
+    vault_before = _read_vault_snapshot(ctx, attempt_dir)
+    # A crash between `finish_attempt` and `advance` leaves the run at `implementing`
+    # with the attempt already recorded, and the next tick re-enters here. The verdict
+    # is re-derived — it is a pure function of files that have not changed — but the
+    # append-only tables are not written twice, because two cost rows for one model
+    # call is a spend report that is quietly wrong.
+    recorded = _already_recorded(ctx, attempt)
     try:
         transcript = ctx.agent.read_transcript(attempt_dir.events, attempt_dir.stderr)
     except TranscriptError as exc:
@@ -212,6 +297,55 @@ def _collect(
     if transcript.session_id:
         ctx.store.set_session_id(ctx.run.id, attempt, State.IMPLEMENTING, transcript.session_id)
 
+    if not recorded:
+        _record_evidence(ctx, attempt_dir, attempt, transcript)
+
+    _check_vault(ctx, attempt, vault_before)
+
+    if transcript.failed or exit_code not in (0,):
+        ctx.store.finish_attempt(
+            ctx.run.id, attempt, State.IMPLEMENTING, exit_code=exit_code, outcome="failed"
+        )
+        tail = artifacts.tail_lines(attempt_dir.stderr, 40)
+        raise Resumable(
+            "agent-failed",
+            f"exit {exit_code}; {transcript.failure or 'no turn.failed event'}\n{tail}",
+        )
+
+    result = _validated_result(ctx, attempt_dir, attempt, recorded=recorded)
+    artifacts.write_manifest(attempt_dir.root, produced_by=str(State.IMPLEMENTING))
+    ctx.store.finish_attempt(
+        ctx.run.id,
+        attempt,
+        State.IMPLEMENTING,
+        exit_code=exit_code,
+        outcome=str(result.get("status")),
+        session_id=transcript.session_id,
+    )
+
+    if result.get("status") == "blocked":
+        raise Blocked("agent-blocked", str(result.get("blocked_reason") or "no reason given"))
+
+    ctx.log(
+        "implement.finished",
+        status=result.get("status"),
+        files=len(result.get("files_changed", [])),
+        tests=len(result.get("tests_added", [])),
+        behaviour_changed=result.get("behaviour_changed"),
+        tokens_in=transcript.usage.input_tokens,
+        tokens_out=transcript.usage.output_tokens,
+    )
+    advance(ctx, State.VERIFYING)
+
+
+def _already_recorded(ctx: Context, attempt: int) -> bool:
+    row = ctx.store.attempt_row(ctx.run.id, attempt, State.IMPLEMENTING)
+    return row is not None and row["ended_at"] is not None
+
+
+def _record_evidence(
+    ctx: Context, attempt_dir: AttemptDir, attempt: int, transcript: Transcript
+) -> None:
     ctx.store.record_cost(
         ctx.run.id,
         attempt,
@@ -238,45 +372,10 @@ def _collect(
         )
         ctx.log("implement.hook-denied", level="warning", count=len(transcript.hook_denials))
 
-    _check_vault(ctx, attempt, vault_before)
 
-    if transcript.failed or exit_code not in (0,):
-        ctx.store.finish_attempt(
-            ctx.run.id, attempt, State.IMPLEMENTING, exit_code=exit_code, outcome="failed"
-        )
-        tail = artifacts.tail_lines(attempt_dir.stderr, 40)
-        raise Resumable(
-            "agent-failed",
-            f"exit {exit_code}; {transcript.failure or 'no turn.failed event'}\n{tail}",
-        )
-
-    result = _validated_result(ctx, attempt_dir, attempt)
-    artifacts.write_manifest(attempt_dir.root, produced_by=str(State.IMPLEMENTING))
-    ctx.store.finish_attempt(
-        ctx.run.id,
-        attempt,
-        State.IMPLEMENTING,
-        exit_code=exit_code,
-        outcome=str(result.get("status")),
-        session_id=transcript.session_id,
-    )
-
-    if result.get("status") == "blocked":
-        raise Blocked("agent-blocked", str(result.get("blocked_reason") or "no reason given"))
-
-    ctx.log(
-        "implement.finished",
-        status=result.get("status"),
-        files=len(result.get("files_changed", [])),
-        tests=len(result.get("tests_added", [])),
-        behaviour_changed=result.get("behaviour_changed"),
-        tokens_in=transcript.usage.input_tokens,
-        tokens_out=transcript.usage.output_tokens,
-    )
-    advance(ctx, State.VERIFYING)
-
-
-def _validated_result(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> dict[str, Any]:
+def _validated_result(
+    ctx: Context, attempt_dir: AttemptDir, attempt: int, *, recorded: bool = False
+) -> dict[str, Any]:
     """Schema-valid or the state does not advance. F6 — the raw file is kept either way."""
     if not attempt_dir.last_message.exists():
         raise Blocked("schema-invalid", "the agent wrote no last-message.json")
@@ -289,12 +388,14 @@ def _validated_result(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> di
     try:
         validate_against_schema(payload, schema)
     except SchemaInvalid as exc:
-        ctx.store.record_check(
-            ctx.run.id, attempt, "implement_result_schema", "fail", detail=str(exc)
-        )
+        if not recorded:
+            ctx.store.record_check(
+                ctx.run.id, attempt, "implement_result_schema", "fail", detail=str(exc)
+            )
         raise Blocked("schema-invalid", str(exc)) from exc
 
-    ctx.store.record_check(ctx.run.id, attempt, "implement_result_schema", "pass")
+    if not recorded:
+        ctx.store.record_check(ctx.run.id, attempt, "implement_result_schema", "pass")
     return dict(payload)
 
 
@@ -332,13 +433,18 @@ def _check_vault(ctx: Context, attempt: int, before: dict[str, tuple[int, int, s
         )
 
 
-def build_prompt(ctx: Context) -> tuple[str, str]:
+def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str, str]:
     """`(prompt, sha256 of the inlined skill)`.
 
     The prompt is assembled from files the control plane already wrote, plus one skill
     body it inlines. Nothing here restates a gate command or a review rule: those live
     in `harness.config.json` and the vendored tree, and the agent reads them where they
     are.
+
+    `continuation` is §16.3a rung 2: the failure evidence from the attempt that just
+    died. It is appended rather than substituted, because the ticket, the spec and the
+    boundaries are as true on the second attempt as on the first — what changes is that
+    the model now knows what already failed.
     """
     if ctx.issue is None:
         raise Blocked("no-issue-loaded", ctx.run.linear_id)
@@ -421,6 +527,17 @@ def build_prompt(ctx: Context) -> tuple[str, str]:
         "decides pass or fail. An honest `gates_run` with a failure in it is a better",
         "outcome than an optimistic one.",
     ]
+    if continuation:
+        sections += [
+            "",
+            "## This is not the first attempt",
+            "",
+            "The worktree has **not** been reset, so whatever the previous attempt wrote is",
+            "in front of you. Decide whether to keep, amend or revert it — do not start",
+            "again from nothing, and do not assume it was wrong.",
+            "",
+            continuation.strip(),
+        ]
     return "\n".join(sections) + "\n", skill_sha
 
 

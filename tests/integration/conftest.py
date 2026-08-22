@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -154,6 +155,19 @@ class FakeSandbox:
     #: start it first fetches from a remote that is not there. That is how a real FRO-6 run
     #: failed, against a remote `git remote -v` had listed a minute earlier.
     running: set[str] = field(default_factory=set)
+    #: What `poll` should answer regardless of the filesystem. `None` means "read the
+    #: attempt directory", which is what the real adapter does. Set it to model the two
+    #: cases no in-process fake produces on its own: a sandbox that stopped under a live
+    #: run (F3), and a host that rebooted leaving neither `exit` nor a fresh heartbeat
+    #: (F4). Both are the shapes recovery exists for, and both are invisible to a fake
+    #: that writes `exit` synchronously.
+    poll_status: RunStatus | None = None
+    #: When true, `exec_detached` writes only the prompt-side files and no `exit`, so the
+    #: attempt looks like one still in flight. That is the state a tick hands to the
+    #: *next* tick, and nothing else in this file can produce it.
+    detach_without_finishing: bool = False
+    #: Every detached invocation, so a test can prove a resume passed a session id.
+    detached: list[tuple[str, str]] = field(default_factory=list)
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
@@ -340,6 +354,12 @@ class FakeSandbox:
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
         self._start(handle.sandbox)
+        self.detached.append((handle.sandbox, script))
+        if self.detach_without_finishing:
+            directory = handle.attempt_dir
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "heartbeat").write_text(str(int(time.time())))
+            return
         clone = self.clone_dir(handle.sandbox)
         if clone is not None:
             # The agent's commits land in the clone and nowhere else, which is what makes
@@ -356,6 +376,8 @@ class FakeSandbox:
         (directory / "exit").write_text(str(self.exit_code))
 
     def poll(self, handle: RunHandle) -> RunStatus:
+        if self.poll_status is not None:
+            return self.poll_status
         return RunStatus.EXITED if (handle.attempt_dir / "exit").exists() else RunStatus.RUNNING
 
     def collect(self, handle: RunHandle) -> RunResult:

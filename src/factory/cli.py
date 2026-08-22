@@ -1,9 +1,14 @@
-"""`factory` — the command line. Phase 1 ships `run`, `status`, `doctor` and `cancel`.
+"""`factory` — the command line: `run`, `tick`, `status`, `doctor` and `cancel`.
 
-`run` is typed by a human. There is no poller in this phase and no daemon: §19's
-approval boundary for Phase 1 is that James applies `ready-for-agent` *and* types the
-command, and the cheapest way to keep that true is not to build the thing that would
-make it false.
+`run` drives one ticket in the foreground and is typed by a human. `tick` is the same
+pipeline without the human: one pass that reaps whatever a previous pass started,
+recovers whatever died, moves every run that can move, and only then looks for new
+`ready-for-agent` work. §19's approval boundary for Phase 4 is that James decides when
+the timer is loaded — until it is, `tick` is a command like any other.
+
+The two share every step. What differs is who waits: `run` stays with an agent for the
+length of its turn, and `tick` starts it and comes back later, because a tick that
+blocked on a model run could not reap anything else while it did.
 """
 
 from __future__ import annotations
@@ -16,10 +21,10 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from factory import artifacts, machine, repo
+from factory import artifacts, machine, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import (
@@ -33,7 +38,7 @@ from factory.intake.linear import (
 from factory.machine import Blocked, Resumable, State
 from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
-from factory.routing import MODEL_CACHE, RoutingError, load_routing
+from factory.routing import MODEL_CACHE, Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
 from factory.steps import Context
 from factory.steps import block as block_step
@@ -42,6 +47,7 @@ from factory.steps import context as context_step
 from factory.steps import deliver as deliver_step
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
+from factory.steps import reap as reap_step
 from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
@@ -147,7 +153,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if ctx.run.state is not State.APPROVED:
         print(
             f"\n{ticket} is already at `{ctx.run.state}` (attempt {ctx.run.attempt}). "
-            "The factory drives a ticket once and has no resume command yet: "
+            "`factory run` starts a ticket; it does not pick one up part-way. "
+            f"`factory tick` advances a run that is already going, "
             f"`factory status {ticket} --evidence` shows what happened, and "
             f"`factory cancel {ticket}` clears the worktree, the branch and the "
             "tracker state so it can be run again."
@@ -279,6 +286,286 @@ def _report(ctx: Context) -> None:
         print(f"branch     {ctx.run.branch}")
     print(f"tokens     in {tokens_in}, out {tokens_out}")
     print(f"cost       {f'${usd:.2f}' if usd is not None else 'token counts only (§18.3)'}")
+
+
+# --------------------------------------------------------------------------------
+# factory tick
+# --------------------------------------------------------------------------------
+
+
+#: How long a tick holds a run before another process may take it. Longer than a tick
+#: interval by a wide margin, because the holder renews on every transition and a lease
+#: that expired under a healthy holder is F13's failure, not a recovery.
+TICK_LEASE_SECONDS = 900
+
+#: Where the forward dispatch takes over from the poller. `implementing` and `planning`
+#: are absent on purpose: those two are `steps/reap.py`'s, because the run in them is
+#: not waiting for the factory to do something, it is waiting for an agent that a
+#: previous process started.
+_FORWARD: dict[State, str] = {
+    State.APPROVED: "claim",
+    State.CLAIMED: "context",
+    State.CONTEXT_LOADED: "sandbox",
+    State.SANDBOX_CREATING: "sandbox",
+    State.SANDBOX_READY: "worktree",
+    State.WORKTREE_READY: "agent",
+    State.VERIFYING: "verify",
+    State.REVIEWING: "review",
+    State.PR_READY: "deliver",
+}
+
+
+def cmd_tick(args: argparse.Namespace) -> int:
+    """One pass over everything the factory owns. Safe to run at any instant.
+
+    A tick reaps what a previous tick started, recovers what died, moves every run that
+    can move, and then — and only then — looks for new work. That order is the whole
+    design: a machine that claimed first would keep starting runs it had not yet noticed
+    were broken.
+
+    Nothing here is held in memory between calls. `launchd` will run this every 60 s in
+    a fresh process, so every fact it acts on is read from SQLite or from the filesystem
+    at the top of the pass.
+    """
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    # F25: an invalid routing table refuses the tick and names the rule. It never falls
+    # back to a default, because a factory silently running every role on one model
+    # looks exactly like one routing correctly.
+    routing = load_routing(home / "config" / "models.toml")
+
+    store = _open_store(home, dry_run=False)
+    ok, detail = store.integrity_ok()
+    if not ok:
+        print(f"tick refused: sqlite says {detail}", file=sys.stderr)
+        return 1
+
+    free_gb = shutil.disk_usage(home).free / 1_000_000_000
+    room = free_gb >= registry.defaults.disk_min_free_gb
+    if not room:
+        print(
+            f"disk below the floor: {free_gb:.1f} GB free, floor is "
+            f"{registry.defaults.disk_min_free_gb} GB. No new claims this tick."
+        )
+
+    linear = LinearClient()
+    lines = tick_once(
+        home,
+        registry,
+        routing,
+        store,
+        linear,
+        claim=room and not args.no_claim,
+        verbose=args.verbose,
+    )
+    for line in lines:
+        print(line)
+    if not lines:
+        print("nothing to do")
+    return 0
+
+
+#: How a run row becomes a `Context`. Injectable for exactly one reason: §21.3 requires
+#: the whole state machine to run in-process against fakes, and the default builds the
+#: real `sbx` and `codex` adapters. Nothing in production passes anything else.
+ContextFactory = Callable[[Run], Context]
+
+
+def tick_once(
+    home: Path,
+    registry: Registry,
+    routing: Routing,
+    store: Store,
+    linear: LinearClient,
+    *,
+    claim: bool,
+    verbose: bool = False,
+    context_factory: ContextFactory | None = None,
+) -> list[str]:
+    """The pass itself, separated from the command so the tests can drive it with fakes."""
+    build = context_factory or (
+        lambda run: _context_for(home, registry, routing, store, linear, run)
+    )
+    lines: list[str] = []
+
+    # Reaping and recovery come first, and claiming comes last. A machine that claimed
+    # first would keep starting runs it had not yet noticed were broken.
+    for run in store.runs_in_states([*reap_step.AGENT_STATES, State.RESUMABLE]):
+        line = _work_on(store, run, build, verbose=verbose)
+        if line:
+            lines.append(line)
+
+    for run in store.runs_in_states(list(_FORWARD)):
+        line = _work_on(store, run, build, verbose=verbose)
+        if line:
+            lines.append(line)
+
+    if claim:
+        lines += _claim_new_work(registry, store, linear, build, verbose=verbose)
+    return lines
+
+
+def _work_on(store: Store, run: Run, build: ContextFactory, *, verbose: bool) -> str:
+    """Take one run as far as it will go this tick, under a lease, and say what happened.
+
+    Every outcome is a string rather than an exception reaching the caller: one broken
+    run must not stop the tick from looking at the others, which is the difference
+    between a poller and a script that happens to loop.
+    """
+    if not store.acquire_lease(run.id, ttl_seconds=TICK_LEASE_SECONDS):
+        return f"{run.linear_id:<10} leased by {run.lease_owner}; skipped" if verbose else ""
+
+    ctx: Context | None = None
+    try:
+        ctx = build(run)
+        return _drive_from_here(ctx)
+    except Blocked as exc:
+        if ctx is not None:
+            _block(ctx, exc.reason, exc.detail)
+            return f"{run.linear_id:<10} blocked: {exc.reason}"
+        return f"{run.linear_id:<10} blocked before its context loaded: {exc.reason}"
+    except Resumable as exc:
+        if ctx is not None and machine.can(ctx.state, State.RESUMABLE):
+            store.record_transition(
+                ctx.run.id,
+                from_state=ctx.state,
+                to_state=State.RESUMABLE,
+                actor="auto",
+                rule=exc.reason,
+                detail=exc.detail[:2000],
+            )
+        return f"{run.linear_id:<10} resumable: {exc.reason}"
+    except (GitError, SbxError, LinearError, RegistryError) as exc:
+        # An adapter failure is not a factory crash and must not end the pass. It is
+        # reported and the run is left exactly where it was, so the next tick sees the
+        # same state and can try again — which is what makes a transient Linear outage
+        # (F17) a pause rather than a state change.
+        return f"{run.linear_id:<10} adapter error, left in place: {exc}"
+    finally:
+        store.release_lease(run.id)
+
+
+def _drive_from_here(ctx: Context) -> str:
+    """Advance one run until it is waiting on something that is not the factory.
+
+    The loop ends when the state stops changing, which happens for exactly three
+    reasons: an agent is now running, a human is now needed, or the run finished. Every
+    body of the loop is a step that was already idempotent, so re-entering a state the
+    tick has seen before costs a database read and nothing else.
+    """
+    steps: list[str] = []
+    while True:
+        before = ctx.state
+        if before in reap_step.AGENT_STATES:
+            verdict = reap_step.reap(ctx)
+            steps.append(f"{before}:{verdict.outcome}")
+            if verdict.outcome in (reap_step.Outcome.RUNNING, reap_step.Outcome.ORPHANED):
+                break
+            if verdict.outcome is reap_step.Outcome.NEXT_STEP:
+                implement_step.start(ctx, continuation=recovery.continuation_prompt(ctx))
+                break
+        elif before is State.RESUMABLE:
+            verdict_r = recovery.resume_run(ctx)
+            steps.append(f"resumable:{verdict_r.disposition}({verdict_r.reason})")
+            break
+        else:
+            action = _FORWARD.get(before)
+            if action is None:
+                break
+            _perform(ctx, action)
+            steps.append(f"{before}->{ctx.state}")
+        if ctx.state is before:
+            break
+    return f"{ctx.run.linear_id:<10} {'  '.join(steps)}" if steps else ""
+
+
+def _perform(ctx: Context, action: str) -> None:
+    if action == "claim":
+        claim_step.run(ctx)
+    elif action == "context":
+        context_step.run(ctx)
+    elif action == "sandbox":
+        sandbox_step.run(ctx)
+    elif action == "worktree":
+        worktree_step.run(ctx)
+    elif action == "agent":
+        if plan_step.should_plan(ctx):
+            plan_step.start(ctx)
+        else:
+            implement_step.start(ctx)
+    elif action == "verify":
+        verify_step.run(ctx)
+    elif action == "review":
+        review_step.run(ctx)
+    elif action == "deliver":
+        deliver_step.run(ctx)
+
+
+def _context_for(
+    home: Path,
+    registry: Registry,
+    routing: Routing,
+    store: Store,
+    linear: LinearClient,
+    run: Run,
+) -> Context:
+    project = registry.resolve(run.linear_id)
+    return Context(
+        home=home,
+        registry=registry,
+        routing=routing,
+        store=store,
+        linear=linear,
+        sandbox=SbxAdapter(),
+        agent=CodexAdapter(),
+        project=project,
+        run=run,
+        issue=linear.issue(run.linear_id),
+        harness=load_harness_config(project.path),
+    )
+
+
+def _claim_new_work(
+    registry: Registry,
+    store: Store,
+    linear: LinearClient,
+    build: ContextFactory,
+    *,
+    verbose: bool,
+) -> list[str]:
+    """§7.1 — every `ready-for-agent` ticket the registry claims a team for.
+
+    Eligibility is not re-implemented here: a new row is created at `approved` and the
+    forward dispatch runs the same `claim` step `factory run` does, so the intake
+    conditions are evaluated in exactly one place whether a human typed the command or
+    the timer did.
+    """
+    lines: list[str] = []
+    teams = sorted({p.team for p in registry.projects.values()})
+    for ticket in linear.ready_issues(teams):
+        existing = store.live_run_for_ticket(ticket)
+        if existing is not None:
+            if verbose:
+                lines.append(f"{ticket:<10} already has a live run at {existing.state}")
+            continue
+        try:
+            project = registry.resolve(ticket)
+        except (Blocked, RegistryError) as exc:
+            lines.append(f"{ticket:<10} not claimable: {exc}")
+            continue
+        busy = store.active_runs_for_project(project.name)
+        if len(busy) >= registry.defaults.concurrency_per_project:
+            if verbose:
+                lines.append(f"{ticket:<10} {project.name} is at its writer limit; waiting")
+            continue
+
+        issue = linear.issue(ticket)
+        run = store.insert_run(linear_id=ticket, project=project.name, team=issue.team_key)
+        lines.append(f"{ticket:<10} claimed as run {run.id}")
+        line = _work_on(store, run, build, verbose=verbose)
+        if line:
+            lines.append(line)
+    return lines
 
 
 # --------------------------------------------------------------------------------
@@ -808,6 +1095,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="print every command, execute none")
     run.add_argument("--plan", action="store_true", help="force the planning step first")
     run.set_defaults(func=cmd_run)
+
+    tick = sub.add_parser("tick", help="one pass: reap, recover, advance, claim")
+    tick.add_argument(
+        "--once",
+        action="store_true",
+        help="one pass and exit (the only mode there is; the daemon calls this)",
+    )
+    tick.add_argument("--verbose", action="store_true", help="also report what it skipped")
+    tick.add_argument(
+        "--no-claim", action="store_true", help="advance existing runs, start no new ones"
+    )
+    tick.set_defaults(func=cmd_tick)
 
     status = sub.add_parser("status", help="what the factory is doing")
     status.add_argument("ticket", nargs="?")

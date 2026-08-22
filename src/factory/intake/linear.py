@@ -133,6 +133,22 @@ query($id: String!) {
 }
 """
 
+#: §7.1's poller query. Read-only, filtered server-side by team and by the one label
+#: that starts the factory, and deliberately *not* filtered by workflow state: a ticket
+#: carrying `ready-for-agent` in the wrong state is something the eligibility conditions
+#: must be allowed to see and refuse, and a filter here would hide it instead.
+_READY_QUERY = """
+query($teams: [String!]!, $label: String!) {
+  issues(
+    filter: { team: { key: { in: $teams } }, labels: { name: { eq: $label } } }
+    first: 50
+    orderBy: updatedAt
+  ) {
+    nodes { identifier title updatedAt state { name type } }
+  }
+}
+"""
+
 _STATES_QUERY = """
 query($teamId: String!) {
   team(id: $teamId) { states { nodes { id name type position } } }
@@ -251,6 +267,20 @@ class LinearClient:
             comments=comments,
             siblings=siblings,
         )
+
+    def ready_issues(self, team_keys: Sequence[str]) -> list[str]:
+        """Every ticket carrying `ready-for-agent` in the given teams, oldest update first.
+
+        The identifiers only. The tick reads each one in full through `issue()` before
+        it decides anything, because the eligibility conditions need the description,
+        the parent and the comments — and a poller that made its judgement from a list
+        view would be judging a summary.
+        """
+        if not team_keys:
+            return []
+        data = self._call(_READY_QUERY, {"teams": list(team_keys), "label": READY_LABEL})
+        nodes = (data.get("issues") or {}).get("nodes", [])
+        return [str(node["identifier"]) for node in nodes]
 
     def issue_uuid(self, identifier: str) -> tuple[str, str]:
         """`(uuid, current state name)`. Mutations need the uuid, not the identifier."""

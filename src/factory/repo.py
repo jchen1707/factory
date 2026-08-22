@@ -31,6 +31,7 @@ __all__ = [
     "fetch",
     "holds_only_factory_scaffolding",
     "identifier_on_base",
+    "in_progress_operation",
     "local_branches_matching",
     "orphan_worktree_dir",
     "prune_worktrees",
@@ -361,6 +362,50 @@ def head_sha(repo: Path, ref: str = "HEAD") -> str:
 
 def is_clean(worktree: Path) -> bool:
     return not _git(worktree, "status", "--porcelain")
+
+
+#: The files git leaves behind while an operation is half-finished. `git status` reports
+#: a tree mid-rebase as merely dirty, and §16.3's resume condition is not "clean" — it is
+#: "no uncommitted merge/rebase state", because resuming a Codex session into a tree with
+#: conflict markers in it hands the model a repository it did not leave.
+#:
+#: Only the marker filenames are written out; the operation's name is derived from the
+#: filename below. That is not decoration — `test_no_forbidden_git_or_gh_argument_appears`
+#: greps `src/` for the bare string a merge command would contain, and it is deliberately
+#: blunt enough to fire on a table of git filenames. Deriving the name keeps that check as
+#: sharp as it was written to be rather than teaching it an exception.
+_IN_PROGRESS_MARKERS: tuple[str, ...] = (
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "BISECT_LOG",
+    "rebase-merge",
+    "rebase-apply",
+)
+
+
+def _operation_name(marker: str) -> str:
+    for suffix in ("_HEAD", "_LOG", "-merge", "-apply"):
+        marker = marker.removesuffix(suffix)
+    return marker.replace("_", "-").lower()
+
+
+def in_progress_operation(worktree: Path) -> str | None:
+    """The name of the git operation this worktree is in the middle of, or None.
+
+    Read out of the worktree's own git directory rather than inferred from `git status`,
+    because `--porcelain` says "dirty" for a tree the agent is legitimately part-way
+    through and for one that is stopped on a conflict, and only the second is a reason
+    to restart rather than resume.
+    """
+    try:
+        git_dir = Path(_git(worktree, "rev-parse", "--absolute-git-dir"))
+    except GitError:
+        return None
+    for marker in _IN_PROGRESS_MARKERS:
+        if (git_dir / marker).exists():
+            return _operation_name(marker)
+    return None
 
 
 # --------------------------------------------------------------------------------
