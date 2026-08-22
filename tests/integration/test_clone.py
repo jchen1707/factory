@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from factory import cli, repo
+from factory import cli, recovery, repo
 from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
@@ -419,6 +419,70 @@ def test_the_pr_body_carries_the_gate_table_for_a_clone_run(
 def _stub_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
+
+
+# --------------------------------------------------------------------------------
+# verifying — a resume re-establishes the run's branch in the shared clone
+# --------------------------------------------------------------------------------
+
+
+def test_a_clone_verify_resume_re_establishes_the_run_branch_before_running_gates(
+    clone_ctx: Context,
+) -> None:
+    """The handoff's open question 2. A clone build sandbox is shared across a project's
+    runs, so a second run checking out its own branch leaves the clone on the wrong tree.
+    A `--from verifying` resume would then spawn the gate report against that other
+    ticket's code while the evidence points at this one. `verify.start` puts the clone
+    back on the run's branch first; `--from reviewing` dodged this (review fetches back
+    fresh), verify did not."""
+    _to_verifying(clone_ctx)
+    branch = clone_ctx.run.branch
+    assert branch is not None
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == branch
+
+    # Another run of the same project repoints the shared clone onto its own branch.
+    git(clone, "checkout", "-b", "feat/other-ticket")
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "feat/other-ticket"
+
+    # Park at blocked-at-verifying (FRO-6's shape) and resume into verifying.
+    clone_ctx.store.update_run(clone_ctx.run.id, blocked_reason="env-gate-failed")
+    clone_ctx.store.record_transition(
+        clone_ctx.run.id,
+        from_state=State.VERIFYING,
+        to_state=State.BLOCKED,
+        actor="auto",
+        rule="env-gate-failed",
+        detail="env-gate-failed",
+    )
+    clone_ctx.refresh()
+    recovery.resume(clone_ctx)
+    assert clone_ctx.state is State.VERIFYING
+
+    # The tick's START_NEEDED action re-establishes the run's branch before spawning.
+    verify_step.start(clone_ctx)
+
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == branch
+
+
+def test_a_clone_verify_resume_blocks_when_the_branch_is_gone(clone_ctx: Context) -> None:
+    """A resume that has lost the agent's branch — the sandbox was recreated, or the clone
+    reset — blocks rather than silently cutting a fresh empty branch and running the gates
+    against a tree with no agent work in it. That is a human decision, not a re-run."""
+    _to_verifying(clone_ctx)
+    branch = clone_ctx.run.branch
+    assert branch is not None
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+
+    # The branch is gone: detach so it is not checked out, then delete it.
+    git(clone, "checkout", "--detach", "HEAD")
+    git(clone, "branch", "-D", branch)
+
+    with pytest.raises(Blocked) as caught:
+        verify_step.start(clone_ctx)
+    assert caught.value.reason == "clone-branch-missing"
 
 
 # --------------------------------------------------------------------------------
