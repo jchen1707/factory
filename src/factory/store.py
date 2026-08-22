@@ -17,7 +17,7 @@ import socket
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +26,18 @@ from factory.machine import TERMINAL, State
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+#: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
+#: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
+#: this and adding a migration that rebuilds the index** — a derived constant does not
+#: reach a database that already exists.
+#:
+#: Separate from `SCHEMA_VERSION` because they answer different questions. The schema
+#: version moves whenever anything about the tables changes; this one moves only when the
+#: set of live states does, so an unrelated column cannot silently retire the tripwire in
+#: `test_terminal_states_are_pinned_to_the_live_run_index`.
+LIVE_INDEX_SCHEMA_VERSION = 2
 
 
 def _runs_ddl(table: str) -> str:
@@ -77,6 +88,17 @@ _LIVE_RUN_INDEX = (
     "CREATE UNIQUE INDEX IF NOT EXISTS runs_one_live_per_ticket ON runs(linear_id) "
     f"WHERE state NOT IN ({', '.join(chr(39) + str(s) + chr(39) for s in sorted(TERMINAL))})"
 )
+
+#: Every schema step after the first, as plain statements. Version 2 is absent because
+#: it is a table rebuild rather than a statement list and has its own method below.
+#:
+#: These run on a **fresh** database too, immediately after `_SCHEMA`. That is what keeps
+#: one shape: if the DDL above and a later `ALTER TABLE` could both define a column, they
+#: would eventually disagree, and the disagreement would only show up on whichever of the
+#: two paths nobody had run lately.
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    3: ("ALTER TABLE runs ADD COLUMN full_review INTEGER NOT NULL DEFAULT 0",),
+}
 
 _SCHEMA = (
     _runs_ddl("runs")
@@ -153,6 +175,11 @@ class Run:
     pr_url: str | None
     created_at: int
     updated_at: int
+    #: James asked for the full nine-axis fan-out on this run regardless of what the
+    #: §15.2 trigger rules say. On the run row rather than on the command line's
+    #: `Context`, because the review can happen in a later process than the one that
+    #: was asked — under `factory tick` it usually does.
+    full_review: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Run:
@@ -172,6 +199,7 @@ class Run:
             pr_url=row["pr_url"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            full_review=bool(row["full_review"]),
         )
 
 
@@ -206,14 +234,34 @@ class Store:
     # -- migrations ---------------------------------------------------------------
 
     def _migrate(self) -> None:
-        current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        """Walk every version between what is on disk and `SCHEMA_VERSION`, in order.
+
+        A loop rather than a chain of `elif`s, and that is a fix rather than a style
+        choice: the previous form applied exactly **one** step and then stamped the
+        version as current, so a database left at 1 would have run the 1 -> 2 rebuild
+        and then claimed to be at 3 with none of 3's changes applied. Nothing had two
+        versions to cross until now, which is the only reason it never fired.
+        """
+        current = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
         if current >= SCHEMA_VERSION:
             return
         if current == 0:
+            # `_SCHEMA` plus `_LIVE_RUN_INDEX` *is* the version-2 shape — that rebuild's
+            # whole purpose was to replace a column-level UNIQUE with this index, and the
+            # DDL above never had one. So a fresh database starts at 2 and takes only the
+            # steps after it; running the rebuild against a table created a line earlier
+            # would drop and recreate it for nothing.
             self._conn.executescript(_SCHEMA)
             self._conn.execute(_LIVE_RUN_INDEX)
-        elif current == 1:
-            self._upgrade_1_to_2()
+            current = 2
+        while current < SCHEMA_VERSION:
+            target = current + 1
+            if target == 2:
+                self._upgrade_1_to_2()
+            else:
+                for statement in _MIGRATIONS[target]:
+                    self._conn.execute(statement)
+            current = target
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def _upgrade_1_to_2(self) -> None:
@@ -264,7 +312,13 @@ class Store:
     # -- runs ---------------------------------------------------------------------
 
     def insert_run(
-        self, *, linear_id: str, project: str, team: str, state: State = State.APPROVED
+        self,
+        *,
+        linear_id: str,
+        project: str,
+        team: str,
+        state: State = State.APPROVED,
+        full_review: bool = False,
     ) -> Run:
         """`INSERT OR IGNORE` against `_LIVE_RUN_INDEX` — §7.2 phase one.
 
@@ -281,9 +335,9 @@ class Store:
         run_id = new_run_id()
         inserted = self._conn.execute(
             "INSERT OR IGNORE INTO runs "
-            "(id, linear_id, project, team, state, attempt, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,0,?,?)",
-            (run_id, linear_id, project, team, str(state), now, now),
+            "(id, linear_id, project, team, state, attempt, created_at, updated_at, full_review) "
+            "VALUES (?,?,?,?,?,0,?,?,?)",
+            (run_id, linear_id, project, team, str(state), now, now, int(full_review)),
         ).rowcount
         # Ask for the row by the id just written rather than by ticket: a terminal run
         # and this fresh one can share a `created_at` second, and picking the wrong one
@@ -324,6 +378,38 @@ class Store:
         ).fetchall()
         return [Run.from_row(r) for r in rows]
 
+    def runs_in_states(self, states: Sequence[State]) -> list[Run]:
+        """Every run currently sitting in one of these states, oldest update first.
+
+        The tick's work list. Ordered by `updated_at` so a run that has been waiting
+        longest is looked at first, which is the only ordering that cannot starve a run
+        when the tick runs out of time.
+        """
+        if not states:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM runs WHERE state IN "  # noqa: S608 - placeholders below
+            f"({','.join('?' * len(states))}) ORDER BY updated_at",
+            tuple(str(s) for s in states),
+        ).fetchall()
+        return [Run.from_row(r) for r in rows]
+
+    def live_run_for_ticket(self, linear_id: str) -> Run | None:
+        """The ticket's run that has not reached a terminal state, if there is one.
+
+        `run_by_ticket` returns the most recent row whatever its state, which is right
+        for `status` and wrong for the poller: a cancelled run must not stop the ticket
+        being picked up again, and that distinction is exactly what `runs_one_live_per_ticket`
+        already encodes in the index.
+        """
+        terminal = tuple(str(s) for s in sorted(TERMINAL))
+        row = self._conn.execute(
+            "SELECT * FROM runs WHERE linear_id = ? AND state NOT IN "  # noqa: S608
+            f"({','.join('?' * len(terminal))}) ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (linear_id, *terminal),
+        ).fetchone()
+        return Run.from_row(row) if row else None
+
     def update_run(self, run_id: str, **fields: object) -> None:
         if not fields:
             return
@@ -334,6 +420,7 @@ class Store:
             "attempt",
             "blocked_reason",
             "pr_url",
+            "full_review",
         }
         unknown = set(fields) - allowed
         if unknown:
@@ -516,6 +603,45 @@ class Store:
             "WHERE run_id = ? AND attempt = ? AND state = ?",
             (int(time.time()), exit_code, outcome, session_id, run_id, attempt, str(state)),
         )
+
+    def attempt_row(self, run_id: str, attempt: int, state: State) -> sqlite3.Row | None:
+        """One attempt, by its primary key. `None` when the state never spawned one.
+
+        The tick reads `sandbox` and `artifact_dir` out of this rather than rebuilding
+        them from the registry, because a sandbox can be renamed in `projects.toml`
+        between the attempt starting and the tick that reaps it, and the attempt has to
+        be reaped where it actually ran.
+        """
+        return self._conn.execute(
+            "SELECT * FROM attempts WHERE run_id = ? AND attempt = ? AND state = ?",
+            (run_id, attempt, str(state)),
+        ).fetchone()
+
+    def attempts_in_state(self, run_id: str, state: State) -> int:
+        """How many attempts this run has spent in one state — §16.4's per-state ceiling."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE run_id = ? AND state = ?",
+            (run_id, str(state)),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def resumable_reentries(self, run_id: str, from_state: State) -> int:
+        """How many times a run left `from_state` for `resumable`.
+
+        `attempts` is keyed `(run_id, attempt, state)` and `start_attempt` is
+        `INSERT OR REPLACE`, so re-running a non-agent state (verify/review) at the
+        same attempt number never grows `attempts_in_state` — the per-state ceiling
+        there is decorative for those re-runs. The `transitions` table records one
+        `from_state -> resumable` row every time reap orphans or times out an attempt,
+        so counting those is the re-run ceiling that actually increments. Used by
+        `recovery.resume_run` to bound a hanging verify/review re-run to `failed`.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM transitions "
+            "WHERE run_id = ? AND from_state = ? AND to_state = ?",
+            (run_id, str(from_state), str(State.RESUMABLE)),
+        ).fetchone()
+        return int(row["n"]) if row else 0
 
     def set_session_id(self, run_id: str, attempt: int, state: State, session_id: str) -> None:
         """Stored before the run is considered started, so a crash can resume by id.

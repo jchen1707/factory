@@ -100,3 +100,48 @@ def test_stderr_is_a_separate_file_from_the_event_stream(tmp_path: Path) -> None
     # would put non-JSON into a JSONL parser and lose the evidence either way.
     attempt = AttemptDir.create(tmp_path / ".factory", 1)
     assert attempt.stderr != attempt.events
+
+
+def test_a_reused_attempt_directory_never_keeps_the_previous_exit(tmp_path: Path) -> None:
+    """The stale-`exit` defect, measured on FRO-6 on 2026-08-22.
+
+    Every reader treats `exit` as authoritative — `implement._await_exit` returns the
+    moment it appears and `sbx.poll` calls it terminal regardless of what the VM is
+    doing. A stale one is not clutter, it is a false answer to the only question the
+    protocol asks, and the reader has no way to tell. The real run returned a four-hour-old
+    verdict while its own agent was still working.
+    """
+    factory_dir = tmp_path / ".factory"
+    first = AttemptDir.create(factory_dir, 1)
+    first.exit_file.write_text("0")
+    first.last_message.write_text('{"status": "blocked"}')
+    first.events.write_text('{"type":"thread.started"}\n')
+    first.heartbeat.write_text("1")
+    first.stderr.write_text("noise")
+
+    second = AttemptDir.create(factory_dir, 1)
+
+    assert second.root == first.root
+    assert not second.exit_file.exists()
+    assert not second.last_message.exists()
+    assert not second.events.exists()
+    assert not second.heartbeat.exists()
+    assert not second.stderr.exists()
+    assert second.exit_code() is None
+
+
+def test_creating_an_attempt_directory_keeps_the_planning_half_of_a_rewind(
+    tmp_path: Path,
+) -> None:
+    # `plan.py` writes `plan-exit` and friends into the same directory for the planning
+    # half of one attempt, and those belong to an invocation that already finished.
+    # Clearing them would erase the plan the implement half is about to act on.
+    factory_dir = tmp_path / ".factory"
+    planned = AttemptDir.create(factory_dir, 2)
+    planned.path("plan-exit").write_text("0")
+    planned.path("plan-events.jsonl").write_text("{}\n")
+
+    AttemptDir.create(factory_dir, 2)
+
+    assert planned.path("plan-exit").exists()
+    assert planned.path("plan-events.jsonl").exists()

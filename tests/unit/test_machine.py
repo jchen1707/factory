@@ -161,3 +161,14 @@ def test_leaving_blocked_is_still_a_human_decision() -> None:
     # every stop into a retry loop.
     for target in TRANSITIONS[State.BLOCKED] - {State.CANCELLED}:
         assert requires_human_rule(State.BLOCKED, target) == "unblock-is-a-judgement"
+
+
+def test_a_blocked_run_can_resume_into_the_state_that_blocked_it() -> None:
+    # FRO-6 was blocked *at* verifying with a complete, gate-passing implementation. The
+    # cheap repair is to re-enter the state that blocked rather than spend another 10
+    # M-token implement, and the only way that is expressible is `blocked -> verifying`
+    # (and its reviewing twin). Both are the same human judgement as the existing exits.
+    assert can(State.BLOCKED, State.VERIFYING)
+    assert can(State.BLOCKED, State.REVIEWING)
+    assert requires_human_rule(State.BLOCKED, State.VERIFYING) == "unblock-is-a-judgement"
+    assert requires_human_rule(State.BLOCKED, State.REVIEWING) == "unblock-is-a-judgement"

@@ -99,7 +99,44 @@ class AttemptDir:
         """
         root = factory_dir / "run" / str(attempt)
         root.mkdir(parents=True, exist_ok=True)
+        cls(root)._clear_terminal_markers()
         return cls(root)
+
+    def _clear_terminal_markers(self) -> None:
+        """Remove any previous invocation's terminal evidence from this directory.
+
+        The filesystem is the protocol, and every reader here treats `exit` as
+        authoritative: `implement._await_exit` returns the moment it appears and
+        `sbx.poll` calls it terminal regardless of what the VM is doing. A stale one is
+        therefore not clutter — it is a false answer to the only question the protocol
+        asks, and the reader has no way to tell.
+
+        Belt to `Context.factory_dir`'s braces. That path now carries the run id so two
+        runs cannot land here at all; this makes the directory safe even when they do,
+        because a guarantee that depends on a path being constructed correctly somewhere
+        else is a guarantee with a seam in it.
+
+        Only the bare names are cleared. `plan.py` writes `plan-exit` and friends into
+        this same directory for the planning half of a rewind, and those belong to an
+        invocation that already finished.
+        """
+        for name in ("exit", "last-message.json", "events.jsonl", "stderr.log", "heartbeat"):
+            (self.root / name).unlink(missing_ok=True)
+
+    def clear_liveness(self) -> None:
+        """Remove only the run-liveness markers (`exit`, `heartbeat`), leaving evidence.
+
+        A verify or review run reuses the implement attempt's directory — it reads the
+        implementer's `last-message.json` and the deliver step archives the whole dir —
+        so it cannot go through `_clear_terminal_markers`, which would delete that
+        evidence. It does need a fresh `exit`/`heartbeat` of its own, because the
+        implementer left a (stale, terminal) `exit` there and `poll` treats `exit` as
+        authoritative regardless of what produced it. The sbx holder files
+        (`sbx-exec.pid`, `sbx-exec.stderr`) are overwritten by `exec_detached`, so they
+        need no explicit clear here.
+        """
+        for name in ("exit", "heartbeat"):
+            (self.root / name).unlink(missing_ok=True)
 
     @property
     def request(self) -> Path:

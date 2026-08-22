@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from factory.intake.linear import (
     Issue,
+    LinearClient,
     RepoFacts,
     context_files,
     eligibility_verdict,
     evaluate_eligibility,
+    open_blockers,
 )
 
 SPEC = "S" * 250
@@ -145,3 +149,146 @@ def test_acceptance_criteria_are_extracted_in_order() -> None:
     )
     assert len(issue.acceptance_criteria) == 2
     assert issue.acceptance_criteria[0].endswith("one")
+
+
+# -- condition 11: the blockers Linear already knows about ---------------------
+
+
+def _condition(conditions: list, number: int):  # type: ignore[no-untyped-def]
+    return next(c for c in conditions if c.number == number)
+
+
+def test_a_ticket_with_no_recorded_blockers_passes_condition_eleven() -> None:
+    conditions = evaluate_eligibility(_issue(), _facts())
+
+    assert _condition(conditions, 11).passed
+    assert eligibility_verdict(conditions)[0]
+
+
+def test_a_blocker_that_is_not_done_makes_the_ticket_ineligible() -> None:
+    # The FRO-7 case, exactly: Linear recorded FRO-6 as blocking it the whole time, and
+    # the factory spent a model run finding out.
+    issue = _issue(blocked_by=(("FRO-6", "started"),))
+
+    conditions = evaluate_eligibility(issue, _facts())
+
+    assert not _condition(conditions, 11).passed
+    assert "FRO-6" in _condition(conditions, 11).label
+
+
+def test_a_done_blocker_does_not_hold_the_ticket() -> None:
+    issue = _issue(blocked_by=(("FRO-5", "completed"),))
+
+    assert _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_one_open_blocker_among_several_is_enough_to_hold_it() -> None:
+    issue = _issue(blocked_by=(("FRO-5", "completed"), ("FRO-6", "started")))
+
+    assert not _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_a_cancelled_blocker_still_blocks() -> None:
+    # The dependent slice needs the blocker's seams to have been *built*, and a ticket
+    # nobody implemented has none. A stale relation to a cancelled ticket is a relation
+    # for a human to remove, and the condition names it every time it fires.
+    issue = _issue(blocked_by=(("FRO-6", "canceled"),))
+
+    assert not _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_a_blocked_ticket_is_skipped_rather_than_blocked() -> None:
+    """Reasonless on purpose. Every reasoned failure needs a human to clear `needs-info`
+    afterwards, and this is the one condition that resolves itself: when the blocker
+    reaches Done the next tick picks the ticket up with no intervention. Writing
+    `needs-info` here would freeze a ticket that was about to become ready."""
+    issue = _issue(blocked_by=(("FRO-6", "started"),))
+
+    eligible, block_reason, failures = eligibility_verdict(evaluate_eligibility(issue, _facts()))
+
+    assert not eligible
+    assert block_reason is None
+    assert any("11." in f for f in failures)
+
+
+# -- the parser, against the shape the live API actually returned ---------------
+
+
+#: One `issue` payload, in the shape measured against api.linear.app on 2026-08-22 for
+#: FRO-7. Trimmed to the fields the parser reads, but not reshaped: the nesting, the
+#: `type` discriminator and the `issue` (rather than `relatedIssue`) key under
+#: `inverseRelations` are all as they came back, because those are exactly the three
+#: things a hand-written guess gets wrong.
+_MEASURED_PAYLOAD = {
+    "issue": {
+        "identifier": "FRO-7",
+        "title": "Filter your Projects by status, including archived",
+        "description": "## Acceptance criteria\n\n- [ ] it filters\n",
+        "url": "https://linear.app/x/issue/FRO-7",
+        "state": {"name": "Todo", "type": "unstarted"},
+        "team": {"key": "FRO", "id": "team-uuid"},
+        "labels": {"nodes": [{"name": "ready-for-agent"}]},
+        "parent": {
+            "identifier": "FRO-1",
+            "title": "Projects",
+            "description": SPEC,
+            "children": {"nodes": []},
+        },
+        "comments": {"nodes": []},
+        "inverseRelations": {
+            "nodes": [
+                {
+                    "type": "blocks",
+                    "issue": {"identifier": "FRO-6", "state": {"name": "Todo", "type": "started"}},
+                }
+            ]
+        },
+    }
+}
+
+
+def _client(payload: dict) -> LinearClient:
+    return LinearClient(transport=lambda query, variables, key: payload)
+
+
+def test_the_parser_reads_blockers_out_of_the_measured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+
+    issue = _client(_MEASURED_PAYLOAD).issue("FRO-7")
+
+    assert issue.blocked_by == (("FRO-6", "started"),)
+    assert open_blockers(issue) == ["FRO-6"]
+
+
+def test_the_parser_reads_the_direction_that_means_blocks_me(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`relations` is what this ticket blocks; `inverseRelations` is what blocks it.
+
+    Reading the wrong one would hold every ticket open on its own *dependents* — FRO-6
+    would refuse to run because FRO-7 depends on it, which is backwards and would look
+    like the feature working. Measured on 2026-08-22: FRO-6's `relations` names FRO-7 and
+    its `inverseRelations` names FRO-5.
+    """
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+    backwards = json.loads(json.dumps(_MEASURED_PAYLOAD))
+    backwards["issue"]["relations"] = backwards["issue"].pop("inverseRelations")
+
+    issue = _client(backwards).issue("FRO-7")
+
+    assert issue.blocked_by == ()
+
+
+def test_a_relation_that_is_not_a_block_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Linear's relation types include `related`, `similar` and `duplicate`. Only
+    # `blocks` stops a run; treating a "related" link as a dependency would refuse
+    # tickets for being mentioned near each other.
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+    related = json.loads(json.dumps(_MEASURED_PAYLOAD))
+    related["issue"]["inverseRelations"]["nodes"][0]["type"] = "related"
+
+    assert _client(related).issue("FRO-7").blocked_by == ()

@@ -34,6 +34,33 @@ class Workspace:
         return f"{self.path}:ro" if self.readonly else str(self.path)
 
 
+def detached_shell_script(*, heartbeat_path: Path, exit_path: Path, body: str) -> str:
+    """The `/bin/sh -lc` envelope for a detached run inside a sandbox.
+
+    A heartbeat loop, the `body` (the command(s) that do the work), and the body's
+    exit code written to `exit_path` last and atomically (`mv` from a temp file),
+    so `exit` appearing is the terminal record `poll` and `reap` rely on (§4.2).
+    `body` is interpolated raw — the caller `shlex.quote`s every path and argv it
+    names — so this function never has to guess what needs quoting.
+
+    The codex agent wrapper (`agent/codex.py:wrapper_script`) and the verify gate
+    report both run through here, so the heartbeat/exit protocol has one copy.
+    """
+    import shlex
+
+    hb = shlex.quote(str(heartbeat_path))
+    ex = shlex.quote(str(exit_path))
+    return (
+        "set -u\n"
+        f"( while :; do date -u +%s > {hb}; sleep 20; done ) &\n"
+        "HB=$!\n"
+        f"{body}\n"
+        "code=$?\n"
+        "kill $HB 2>/dev/null\n"
+        f'printf %s "$code" > {ex}.tmp && mv {ex}.tmp {ex}\n'
+    )
+
+
 @dataclass(frozen=True)
 class SandboxSpec:
     """What a sandbox is. Three of these fields are fixed at creation and cannot be

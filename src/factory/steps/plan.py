@@ -23,16 +23,18 @@ from pathlib import Path
 from factory import artifacts
 from factory.agent.base import AgentInvocation
 from factory.artifacts import AttemptDir
-from factory.machine import Blocked, Resumable, State
+from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
 from factory.steps import Context, advance
 
-__all__ = ["run", "should_plan"]
+__all__ = ["collect", "plan_dir", "run", "should_plan", "start"]
 
 STEP = "plan"
 
 PLAN_FILES = ("plan.md", "test-plan.md")
+
+POLL_INTERVAL_SECONDS = 10
 
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
@@ -55,15 +57,48 @@ def should_plan(ctx: Context, *, forced: bool = False) -> bool:
 
 
 def run(ctx: Context) -> None:
-    """Run layer A's `/plan` in a fresh context and require both files to exist."""
+    """Run layer A's `/plan` in a fresh context and require both files to exist.
+
+    `factory run`'s path: start, wait, collect. `factory tick` calls `start` and
+    `collect` separately so a tick is never held open for the length of a model run.
+    """
+    started = start(ctx)
+    if started is None:
+        return
+    attempt_dir, _handle, exit_path = started
+    timeout = ctx.timeout_for(State.PLANNING)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not exit_path.exists():
+        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
+        time.sleep(POLL_INTERVAL_SECONDS)
+    if not exit_path.exists():
+        raise Resumable("plan-timeout", f"no exit file after {timeout}s")
+    collect(ctx, attempt_dir)
+
+
+def plan_dir(ctx: Context) -> Path:
+    """`.agents/plans/<branch-slug>/` — recomputed rather than remembered.
+
+    `collect` may run in a later process than `start`, so anything it needs must either
+    be on disk or be derivable from the run row. This is derivable.
+    """
+    branch_slug = (ctx.branch or ctx.run.linear_id).replace("/", "-")
+    return ctx.worktree / ".agents" / "plans" / branch_slug
+
+
+def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle, Path] | None:
+    """Write the plan prompt and spawn the detached agent. `None` for a dry run.
+
+    `actor` threads through the `advance` into `planning`; see `implement.start`. A rewind
+    from `SUSPENDED`/`BLOCKED` is human-gated, a rung-3 rewind from `RESUMABLE` is not.
+    """
     attempt = ctx.run.attempt + 1
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = ctx.routing.role("planner")
-    branch_slug = (ctx.branch or ctx.run.linear_id).replace("/", "-")
-    plan_dir = worktree / ".agents" / "plans" / branch_slug
+    plans = plan_dir(ctx)
 
-    prompt = _prompt(ctx, plan_dir)
+    prompt = _prompt(ctx, plans)
     prompt_path = attempt_dir.path("plan-prompt.md")
 
     invocation = AgentInvocation(
@@ -99,14 +134,27 @@ def run(ctx: Context) -> None:
                 )
             )
         )
-        ctx.would(f"require {plan_dir}/plan.md and test-plan.md")
-        advance(ctx, State.PLANNING)
+        ctx.would(f"require {plans}/plan.md and test-plan.md")
+        advance(ctx, State.PLANNING, actor=actor)
         advance(ctx, State.IMPLEMENTING)
-        return
+        return None
 
     prompt_path.write_text(prompt, encoding="utf-8")
     shutil.copyfile(invocation.schema_path, attempt_dir.schema)
-    advance(ctx, State.PLANNING)
+    # Recorded under the same attempt number the implement phase will use, which is why
+    # both write into one attempt directory under `plan-` and bare prefixes: a rewind is
+    # one attempt with two phases, not two attempts. `steps/reap.py` needs the row to
+    # exist at all — without it a planning run that outlives its tick looks like a run
+    # with no attempt, which is the shape of an orphan.
+    ctx.store.start_attempt(
+        ctx.run.id,
+        attempt,
+        State.PLANNING,
+        sandbox=ctx.project.build_sandbox,
+        artifact_dir=str(attempt_dir.root),
+    )
+    ctx.refresh()
+    advance(ctx, State.PLANNING, actor=actor)
 
     handle = RunHandle(
         run_id=ctx.run.id,
@@ -117,36 +165,57 @@ def run(ctx: Context) -> None:
     )
     ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
     ctx.log("plan.started", model=role.model, effort=role.effort)
+    return attempt_dir, handle, invocation.exit_path
 
-    timeout = ctx.timeout_for(State.PLANNING)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and not invocation.exit_path.exists():
-        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        time.sleep(10)
-    if not invocation.exit_path.exists():
-        raise Resumable("plan-timeout", f"no exit file after {timeout}s")
 
-    missing = [name for name in PLAN_FILES if not (plan_dir / name).exists()]
+def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
+    """Both files, or the run blocks. The evidence that planning happened is the files.
+
+    `/plan`'s final message is prose, so there is no schema to validate; what is
+    checkable is whether `plan.md` and `test-plan.md` exist, and a `/plan` that finished
+    without writing them has not planned.
+    """
+    plans = plan_dir(ctx)
+    missing = [name for name in PLAN_FILES if not (plans / name).exists()]
     if missing:
+        ctx.store.finish_attempt(
+            ctx.run.id,
+            ctx.run.attempt,
+            State.PLANNING,
+            exit_code=_exit_code(attempt_dir),
+            outcome="plan-incomplete",
+        )
         raise Blocked(
             "plan-incomplete",
-            f"`/plan` finished but did not write {missing} under {plan_dir}",
+            f"`/plan` finished but did not write {missing} under {plans}",
         )
-    ctx.store.record_check(
-        ctx.run.id, ctx.run.attempt, "plan_written", "pass", artifact=str(plan_dir)
-    )
+    ctx.store.record_check(ctx.run.id, ctx.run.attempt, "plan_written", "pass", artifact=str(plans))
     artifacts.write_manifest(attempt_dir.root, produced_by=str(State.PLANNING))
-    ctx.log("plan.finished", plan_dir=str(plan_dir))
+    ctx.store.finish_attempt(
+        ctx.run.id,
+        ctx.run.attempt,
+        State.PLANNING,
+        exit_code=_exit_code(attempt_dir),
+        outcome="planned",
+    )
+    ctx.log("plan.finished", plan_dir=str(plans))
 
 
-def _prompt(ctx: Context, plan_dir: Path) -> str:
+def _exit_code(attempt_dir: AttemptDir) -> int | None:
+    try:
+        return int(attempt_dir.path("plan-exit").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _prompt(ctx: Context, plans: Path) -> str:
     if ctx.issue is None:
         raise Blocked("no-issue-loaded", ctx.run.linear_id)
     lines = [
         f"# Plan {ctx.issue.identifier} — {ctx.issue.title}",
         "",
         "Use the `plan` command from this repository's harness. Write two files under",
-        f"`{plan_dir}`: `plan.md` and `test-plan.md`. Write no implementation code in",
+        f"`{plans}`: `plan.md` and `test-plan.md`. Write no implementation code in",
         "this turn.",
         "",
         "## Context, already written for you",

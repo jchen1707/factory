@@ -10,7 +10,15 @@ from typing import Any
 
 from factory.machine import Blocked
 
-__all__ = ["Defaults", "Project", "Registry", "RegistryError", "VaultConfig", "load_registry"]
+__all__ = [
+    "Defaults",
+    "GarbageCollection",
+    "Project",
+    "Registry",
+    "RegistryError",
+    "VaultConfig",
+    "load_registry",
+]
 
 
 class RegistryError(Exception):
@@ -38,6 +46,21 @@ class RedPhase:
 
 
 @dataclass(frozen=True)
+class GarbageCollection:
+    """§16.5's four ages. Every one is a *floor* on how long the factory keeps
+    something, never a promise to delete it: a pushed branch, an open PR and a sandbox
+    the factory did not create are all untouchable at any age."""
+
+    worktree_days: int = 7
+    sandbox_idle_hours: int = 12
+    #: Deliberately far above `sandbox_idle_hours`. Stopping a sandbox costs a restart;
+    #: removing one costs rebuilding the image cache, which is expensive enough that the
+    #: note this plan came from calls it out by name.
+    sandbox_rm_days: int = 14
+    artifact_days: int = 60
+
+
+@dataclass(frozen=True)
 class Defaults:
     worktree_subdir: str
     max_attempts: int
@@ -46,6 +69,7 @@ class Defaults:
     concurrency_per_project: int
     planning: Planning
     redphase: RedPhase
+    gc: GarbageCollection
     timeouts_seconds: Mapping[str, int]
     #: §8.7 — per-sandbox egress denials applied to **every** factory sandbox at
     #: creation. `sbx` fixes these at `create`, so this is a creation-time decision
@@ -115,6 +139,7 @@ class Registry:
 def _defaults(raw: Mapping[str, Any]) -> Defaults:
     planning_raw = dict(raw.get("planning", {}))
     redphase_raw = dict(raw.get("redphase", {}))
+    gc_raw = dict(raw.get("gc", {}))
     inconclusive = str(redphase_raw.get("inconclusive", "report"))
     if inconclusive not in {"report", "escalate", "block"}:
         raise RegistryError(
@@ -134,6 +159,12 @@ def _defaults(raw: Mapping[str, Any]) -> Defaults:
         redphase=RedPhase(
             inconclusive=inconclusive,
             inconclusive_alarm_pct=int(redphase_raw.get("inconclusive_alarm_pct", 30)),
+        ),
+        gc=GarbageCollection(
+            worktree_days=int(gc_raw.get("worktree_days", 7)),
+            sandbox_idle_hours=int(gc_raw.get("sandbox_idle_hours", 12)),
+            sandbox_rm_days=int(gc_raw.get("sandbox_rm_days", 14)),
+            artifact_days=int(gc_raw.get("artifact_days", 60)),
         ),
         timeouts_seconds={str(k): int(v) for k, v in dict(raw.get("timeouts_seconds", {})).items()},
         deny_network=tuple(str(h) for h in raw.get("deny_network", ())),

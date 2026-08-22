@@ -10,6 +10,7 @@ assembly, PR-body layout) have their own unit tests.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,8 @@ from factory.steps import Context
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
-from tests.integration.conftest import FakeLinear, FakeSandbox, git
+from factory.store import Store
+from tests.integration.conftest import FakeLinear, FakeSandbox, _seed_vendored_review_tree, git
 from tests.integration.test_pipeline import _fake, _to_verifying
 
 # --------------------------------------------------------------------------------
@@ -76,8 +78,11 @@ def _stub_redphase(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_clean_review_advances_to_pr_ready(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     _to_reviewing(ctx)
     _stub_redphase(monkeypatch)
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    # The fan-out runs detached; the fake writes the canned findings to each axis. The
+    # fixture's diff is small, so the real Tier-2 trigger skips and only the two Tier-1
+    # axes run — the summary names the skip rule.
+    _fake(ctx).review_findings = {"findings": []}
 
     review_step.run(ctx)
 
@@ -92,11 +97,10 @@ def test_a_critical_tier1_finding_blocks_and_names_the_finding(
 ) -> None:
     _to_reviewing(ctx)
     _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
     finding = [{"severity": "critical", "file": "src/app.py", "line": 9, "summary": "off by one"}]
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: (finding, True))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: None)
-    # Tier 2 returns more findings (none critical here) — the block is from Tier 1.
-    monkeypatch.setattr(review_step, "_tier2", lambda ctx, rd: [])
+    _fake(ctx).review_findings = {"findings": finding}
+    # Tier 2 skips on the small fixture diff, so the critical finding is from Tier 1.
 
     with pytest.raises(Blocked) as caught:
         review_step.run(ctx)
@@ -147,8 +151,8 @@ def test_a_test_weakening_guard_routes_to_awaiting_human(
 def _to_pr_ready(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     _to_reviewing(ctx)
     _stub_redphase(monkeypatch)
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
     review_step.run(ctx)
     assert ctx.state is State.PR_READY
 
@@ -318,25 +322,6 @@ def test_a_step_that_dies_of_a_git_failure_blocks_the_run(
     assert "corrupt patch" in caught.value.detail
 
 
-def _seed_vendored_review_tree(worktree: Path) -> None:
-    """The parts of layer A a real review reads out of the worktree: the two Tier-1
-    frames, the findings schema, and the portable Tier-2 skill."""
-    vendor = worktree / ".agents/vendor/harness"
-    for agent in ("standards-reviewer", "spec-checker"):
-        path = vendor / "agents" / f"{agent}.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"# {agent}\n\nreview frame body", encoding="utf-8")
-    schema = vendor / "schema" / "review-findings.schema.json"
-    schema.parent.mkdir(parents=True, exist_ok=True)
-    schema.write_text(
-        json.dumps({"type": "object", "properties": {"findings": {"type": "array"}}}),
-        encoding="utf-8",
-    )
-    skill = vendor / "skills" / "full-review" / "SKILL.md"
-    skill.parent.mkdir(parents=True, exist_ok=True)
-    skill.write_text("# full review\n\nthe portable nine-axis skill", encoding="utf-8")
-
-
 def test_both_tiers_write_where_the_sandbox_can_actually_write(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -351,19 +336,81 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     _stub_redphase(monkeypatch)
     _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
     # Force Tier 2 to run, so both tiers are exercised in one drive.
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: None)
+    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, tier1_has_human=False: None)
+    _fake(ctx).review_findings = {"findings": []}
 
     review_step.run(ctx)
 
     scratch = review_step._review_scratch(ctx)
-    outputs = [
-        Path(argv[argv.index("-o") + 1])
-        for _name, argv in _fake(ctx).sync_calls
-        if argv and argv[0] == "codex" and "-o" in argv
-    ]
+    # The fan-out ran detached; the per-axis `-o` paths are baked into the script. Every
+    # one must sit inside the sandbox's writable scratch mount, the way the real codex
+    # `-o` enforces it — a `-o` outside the mounts writes nothing (BAC-4 2efa19065ce6476e).
+    scripts = [s for _name, s in _fake(ctx).detached if "review-standards" in s]
+    assert len(scripts) == 1
+    outputs = [Path(m.group(1)) for m in re.finditer(r"(?:^|\s)-o (\S+)", scripts[0])]
     assert len(outputs) == 3  # standards, spec, full
     assert all(out.parent == scratch for out in outputs), outputs
     # And each landed in the run's own directory afterwards.
     for name in ("review-standards.json", "review-spec.json", "review-full.json"):
         assert (ctx.state_dir / "review" / name).exists(), name
     assert not list(scratch.glob("review-*.json"))  # moved, not copied
+
+
+def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The override, end to end, with the real trigger function in place.
+
+    The fixture's diff is two files and a few dozen lines, which every §15.2 rule
+    declines — `test_a_clean_review_opens_no_pr_and_advances` asserts exactly that. So
+    the only thing that can make the fan-out run here is the flag.
+    """
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    ctx.store.update_run(ctx.run.id, full_review=True)
+    ctx.refresh()
+
+    review_step.run(ctx)
+
+    summary = json.loads((ctx.state_dir / "review" / "review-summary.json").read_text())
+    assert summary["tier2"] == review_step.FORCED
+    assert (ctx.state_dir / "review" / "review-full.json").exists()
+
+
+def test_the_override_survives_the_process_that_asked_for_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is on the run row, not on the `Context`, and this is why.
+
+    Under `factory tick` the review happens in a later process than the one that took
+    the flag — usually several ticks later. A flag carried on the command line's context
+    would be an override that worked only while a human was watching, which is the exact
+    shape of unprovenness it exists to fix.
+    """
+    _to_reviewing(ctx)
+    ctx.store.update_run(ctx.run.id, full_review=True)
+
+    # A fresh reader of the same database, holding nothing the first one held.
+    reread = Store(ctx.store.path).run_by_id(ctx.run.id)
+
+    assert reread is not None
+    assert reread.full_review is True
+
+
+def test_a_forced_tier2_says_so_in_the_pull_request_body(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A forced fan-out reported as a triggered one would misstate what the review rules
+    # concluded about this diff, which is the only thing the rules are for.
+    review_dir = ctx.state_dir / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-summary.json").write_text(
+        json.dumps({"tier2": review_step.FORCED, "findings": []})
+    )
+
+    line = deliver_step._review_summary(ctx)
+
+    assert "Tier 2 ran" in line
+    assert "--full-review" in line
+    assert "skipped" not in line

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -599,15 +600,16 @@ def test_cancel_leaves_another_tickets_branch_alone(
 def test_the_verify_step_invokes_the_report_hook_by_path_not_a_gate_name(
     ctx: Context,
 ) -> None:
-    # The factory holds no gate command. The argv names the vendored report hook and
-    # `--json`; it does not name ruff, mypy, pytest or any other gate.
+    # The factory holds no gate command. The detached script names the vendored report hook
+    # and `--json`; it does not name ruff, mypy, pytest or any other gate.
     _to_verifying(ctx)
     verify_step.run(ctx)
-    report_calls = [
-        argv for _name, argv in _fake(ctx).sync_calls if any("gate_report.mjs" in a for a in argv)
-    ]
-    assert len(report_calls) == 1
-    argv = report_calls[0]
+    scripts = [s for _name, s in _fake(ctx).detached if "gate_report.mjs" in s]
+    assert len(scripts) == 1
+    # The redirect paths after `>` carry the pytest temp dir name, so tokenise only the
+    # node command before the first redirect.
+    cmd = next(line for line in scripts[0].splitlines() if "gate_report.mjs" in line)
+    argv = shlex.split(cmd.split(" > ")[0])
     assert "--json" in argv
     assert ".agents/vendor/harness/hooks/gate_report.mjs" in argv
     # No gate name leaks into the invocation.
@@ -627,11 +629,10 @@ def test_the_verify_step_passes_the_run_base_ref_so_post_commit_gates_run(
     _to_verifying(ctx)
     assert ctx.run.base_ref == "origin/v2"  # set at worktree creation
     verify_step.run(ctx)
-    report_calls = [
-        argv for _name, argv in _fake(ctx).sync_calls if any("gate_report.mjs" in a for a in argv)
-    ]
-    assert len(report_calls) == 1
-    argv = report_calls[0]
+    scripts = [s for _name, s in _fake(ctx).detached if "gate_report.mjs" in s]
+    assert len(scripts) == 1
+    cmd = next(line for line in scripts[0].splitlines() if "gate_report.mjs" in line)
+    argv = shlex.split(cmd.split(" > ")[0])
     assert "--base" in argv
     # The base ref follows the flag as its value, not glued with `=`.
     assert argv[argv.index("--base") + 1] == "origin/v2"

@@ -25,6 +25,7 @@ from factory.delivery import github
 from factory.machine import Blocked, State
 from factory.steps import Context, advance
 from factory.steps import block as block_step
+from factory.steps import review as review_step
 
 __all__ = ["run"]
 
@@ -181,7 +182,14 @@ def _review_summary(ctx: Context) -> str:
         return "no review summary recorded"
     tier2 = summary.get("tier2", "no-trigger")
     findings = summary.get("findings", [])
-    head = "Tier 2 ran" if tier2 == "ran" else f"Tier 2 skipped (`{tier2}`)"
+    if tier2 == "ran":
+        head = "Tier 2 ran"
+    elif tier2 == review_step.FORCED:
+        # Said plainly, because a reader deciding how much this review is worth needs to
+        # know the trigger rules did *not* think this diff warranted the fan-out.
+        head = "Tier 2 ran (forced with `--full-review`; no trigger rule fired)"
+    else:
+        head = f"Tier 2 skipped (`{tier2}`)"
     if not findings:
         return f"{head}; Tier-1 found no defects."
     severities = [f.get("severity", "?") for f in findings]

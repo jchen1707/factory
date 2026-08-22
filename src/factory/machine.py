@@ -101,7 +101,14 @@ _WORKFLOW: dict[State, frozenset[State]] = {
     ),
     State.PR_READY: frozenset({State.AWAITING_HUMAN, State.BLOCKED, State.CANCELLED}),
     State.AWAITING_HUMAN: frozenset({State.COMPLETED, State.CANCELLED, State.IMPLEMENTING}),
-    State.BLOCKED: frozenset({State.IMPLEMENTING, State.PLANNING, State.CANCELLED}),
+    #: `verifying` and `reviewing` are the two edges the live resume case needs: FRO-6 was
+    #: blocked *at* `verifying` with a complete, gate-passing implementation, and the cheap
+    #: repair is to re-enter the state that blocked rather than spend another 10 M-token
+    #: implement. Both exits are human-gated below under the existing `unblock-is-a-judgement`
+    #: rule, so widening the way *out* of `blocked` does not widen it to automatic.
+    State.BLOCKED: frozenset(
+        {State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING, State.CANCELLED}
+    ),
     State.RESUMABLE: frozenset(
         {State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING, State.FAILED}
     ),
@@ -155,6 +162,8 @@ HUMAN_ONLY: dict[tuple[State, State], str] = {
     (State.AWAITING_HUMAN, State.COMPLETED): "merge-is-james",
     (State.BLOCKED, State.IMPLEMENTING): "unblock-is-a-judgement",
     (State.BLOCKED, State.PLANNING): "unblock-is-a-judgement",
+    (State.BLOCKED, State.VERIFYING): "unblock-is-a-judgement",
+    (State.BLOCKED, State.REVIEWING): "unblock-is-a-judgement",
     (State.AWAITING_HUMAN, State.IMPLEMENTING): "reopen-after-review-is-james",
     (State.FAILED, State.RESUMABLE): "reauthorise-spend",
 }
@@ -183,7 +192,7 @@ class Blocked(Exception):
     `empty-spec`, `no-acceptance-criteria`, `duplicate-pr`, `team-repo-mismatch`,
     `stack-mismatch`, `vault-unresolved`, `enforcement-disabled`, `schema-invalid`,
     `evidence-mismatch`, `budget-exceeded`, `vault-write-outside-allowlist`,
-    `already-implemented`, `branch-exists`.
+    `already-implemented`, `branch-exists`, `env-gate-failed`.
     """
 
     def __init__(self, reason: str, detail: str = "") -> None:

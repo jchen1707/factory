@@ -58,6 +58,7 @@ ignore = ["E501"]
 "src/factory/steps/sandbox.py" = ["S603", "S607"]
 "src/factory/delivery/github.py" = ["S603", "S607"]
 "src/factory/cli.py" = ["S603", "S607"]
+"src/factory/gc.py" = ["S603", "S607"]
 
 [tool.ruff.format]
 docstring-code-format = true

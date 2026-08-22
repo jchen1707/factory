@@ -80,18 +80,19 @@ class CodexAdapter:
         plain stderr lines: merged, they would put non-JSON into a JSONL parser and the
         evidence would be lost either way.
         """
+        from factory.sandbox.base import detached_shell_script
+
         argv = " ".join(shlex.quote(part) for part in self.command(invocation))
-        return f"""set -u
-( while :; do date -u +%s > {shlex.quote(str(invocation.heartbeat_path))}; sleep 20; done ) &
-HB=$!
-{argv} < {shlex.quote(str(invocation.prompt_path))} \\
-  > {shlex.quote(str(invocation.events_path))} \\
-  2> {shlex.quote(str(invocation.stderr_path))}
-code=$?
-kill $HB 2>/dev/null
-printf %s "$code" > {shlex.quote(str(invocation.exit_path) + ".tmp")} \\
-  && mv {shlex.quote(str(invocation.exit_path) + ".tmp")} {shlex.quote(str(invocation.exit_path))}
-"""
+        body = (
+            f"{argv} < {shlex.quote(str(invocation.prompt_path))} "
+            f"> {shlex.quote(str(invocation.events_path))} "
+            f"2> {shlex.quote(str(invocation.stderr_path))}"
+        )
+        return detached_shell_script(
+            heartbeat_path=invocation.heartbeat_path,
+            exit_path=invocation.exit_path,
+            body=body,
+        )
 
     def read_transcript(self, events: Path, stderr: Path) -> Transcript:
         text = events.read_text(encoding="utf-8", errors="replace") if events.exists() else ""

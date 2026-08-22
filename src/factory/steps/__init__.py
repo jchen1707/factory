@@ -12,6 +12,7 @@ pick it up". Returning normally means the state advanced.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -126,9 +127,21 @@ class Context:
 
         Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host checkout.
         The evidence stays where it was written.
+
+        Keyed by **run id**, not by ticket. A bind-mounted project gets a fresh tree for
+        free, because `cancel` removes the worktree the evidence lives in — but the clone
+        mount survives every run, so a ticket-keyed path put a second run of the same
+        ticket on top of the first one's attempt directory. Measured on 2026-08-22: the
+        second `factory run FRO-6` found the first run's `exit` file already present,
+        returned from its wait instantly, read the first run's `last-message.json` and
+        reported a four-hour-old verdict — with the first run's token counts, to the
+        digit — while its own agent was still running in the sandbox. That is the exact
+        failure this system exists to catch: it looked like a result and proved nothing.
+        A run id in the path makes two runs of one ticket structurally unable to collide,
+        and keeps the earlier run's evidence intact instead of overwriting it.
         """
         if self.project.requires_clone:
-            return self.clone_mount / self.run.linear_id / ".factory"
+            return self.clone_mount / self.run.linear_id / self.run.id / ".factory"
         return self.worktree / ".factory"
 
     # -- plumbing -----------------------------------------------------------------
@@ -250,12 +263,25 @@ def record_effect(
     else:
         ctx.store.intend_effect(run_id, attempt, step, system, key)
 
+    # F1/F2 — crash injection for the ledger's idempotency test. `pre` exits after the
+    # `intended` row is committed but before the external write; `post` exits after the
+    # write but before `confirmed`. The next call reconciles rather than retries blindly —
+    # the whole reason the ledger exists. No-op in production, where the var is unset.
+    _crash_if_asked(f"{system}:{key}:pre")
     external_id = perform()
+    _crash_if_asked(f"{system}:{key}:post")
     ctx.store.confirm_effect(
         run_id, attempt, step, system, key, str(external_id) if external_id else None
     )
     ctx.log("effect.performed", step=step, system=system)
     return str(external_id) if external_id else None
+
+
+def _crash_if_asked(point: str) -> None:
+    """Raise `SystemExit` when `FACTORY_CRASH_AT` names `point`, so the ledger's
+    reconcile-on-resume path can be tested against a real crash between its two halves."""
+    if os.environ.get("FACTORY_CRASH_AT") == point:
+        raise SystemExit(f"FACTORY_CRASH_AT={point}")
 
 
 def effect_marker(ctx: Context, step: str) -> str:

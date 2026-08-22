@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from factory import cli, repo
+from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
 from factory.sandbox.sbx import create_argv
@@ -33,6 +35,7 @@ from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
+from factory.store import Run
 from tests.integration.conftest import FakeSandbox, git
 
 
@@ -362,8 +365,6 @@ def test_the_review_step_fetches_back_before_the_replay(
 
     monkeypatch.setattr(review_step.redphase, "replay", _record_worktree)
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
 
     _to_verifying(clone_ctx)
     verify_step.run(clone_ctx)
@@ -418,8 +419,6 @@ def test_the_pr_body_carries_the_gate_table_for_a_clone_run(
 def _stub_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
 
 
 # --------------------------------------------------------------------------------
@@ -559,3 +558,84 @@ def test_the_dry_run_prints_the_in_vm_checkout_and_the_fetch_back(clone_ctx: Con
     assert "--clone" in planned
     assert f"checkout -b {clone_ctx.shadow_branch}" in planned
     assert str(clone_ctx.clone_mount) in planned
+
+
+def _rerun_the_same_ticket(ctx: Context) -> Run:
+    """Cancel this run and start a second one for the **same ticket**, as `factory cancel`
+    followed by `factory run` does.
+
+    The same ticket is the whole point: `_LIVE_RUN_INDEX` allows a second row only once
+    the first reaches a terminal state, and that pair — cancel, then re-run — is exactly
+    the sequence that produced the stale-`exit` read on FRO-6.
+    """
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.run.state, to_state=State.CANCELLED, actor="human"
+    )
+    return ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+
+
+def test_two_runs_of_one_ticket_cannot_share_an_attempt_directory(
+    clone_ctx: Context, tmp_path: Path
+) -> None:
+    """A bind-mounted project gets a fresh evidence tree for free — `cancel` removes the
+    worktree it lives in. The clone mount survives every run, so before this the second
+    run of a ticket landed on the first one's attempt directory: it found the stale
+    `exit`, returned from its wait instantly, and reported the first run's verdict and
+    token counts while its own agent was still running in the sandbox.
+    """
+    first = clone_ctx.factory_dir
+    second = replace(clone_ctx, run=_rerun_the_same_ticket(clone_ctx)).factory_dir
+
+    assert first != second
+    # Both still inside the one mount `sbx` fixed at creation — the mount is what is
+    # fixed, subdirectories under it are free.
+    assert clone_ctx.clone_mount in first.parents
+    assert clone_ctx.clone_mount in second.parents
+
+
+def test_a_second_run_does_not_read_the_first_runs_verdict(clone_ctx: Context) -> None:
+    # The property that actually failed, stated directly: evidence written by one run is
+    # not reachable from another run's attempt directory.
+    _to_worktree_ready(clone_ctx)
+    first_attempt = AttemptDir.create(clone_ctx.factory_dir, 1)
+    first_attempt.exit_file.write_text("0")
+    first_attempt.last_message.write_text('{"status": "blocked"}')
+
+    second_ctx = replace(clone_ctx, run=_rerun_the_same_ticket(clone_ctx))
+    second_attempt = AttemptDir.create(second_ctx.factory_dir, 1)
+
+    assert not second_attempt.exit_file.exists()
+    assert first_attempt.exit_file.exists()  # and the first run's record survives
+
+
+def test_cancel_never_offers_the_repository_itself_as_a_worktree(clone_ctx: Context) -> None:
+    """`factory cancel FRO-6`, 2026-08-22, ran
+    `git worktree remove --force /Users/james/frontend-harness`.
+
+    A `--clone` run records the project path as its workdir — the branch is cut inside
+    the VM, so the host side *is* the repository. `git worktree list` includes the main
+    working tree, so `worktree_exists` said yes and the rollback believed it had found
+    debris. Git declined and the whole cancel aborted with it, leaving the tracker
+    un-restored and the ticket stuck.
+    """
+    _to_worktree_ready(clone_ctx)
+    clone_ctx.store.update_run(clone_ctx.run.id, worktree=str(clone_ctx.project.path))
+    clone_ctx.refresh()
+
+    paths = cli._worktree_paths(
+        clone_ctx.project, clone_ctx.registry, clone_ctx.run, clone_ctx.run.linear_id
+    )
+
+    assert clone_ctx.project.path not in paths
+
+
+def test_removing_the_repository_itself_is_refused_by_name(clone_ctx: Context) -> None:
+    # The second lock on the same door. Whatever hands it a path, the primitive refuses
+    # the repository rather than throwing git's error from the middle of a rollback.
+    with pytest.raises(repo.GitError) as caught:
+        repo.remove_worktree(clone_ctx.project.path, clone_ctx.project.path, force=True)
+
+    assert "the repository itself" in str(caught.value)
+    assert clone_ctx.project.path.is_dir()
