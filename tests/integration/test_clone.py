@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from factory.machine import Blocked, State
+from factory.sandbox.base import SandboxSpec
 from factory.sandbox.sbx import create_argv
 from factory.steps import Context
 from factory.steps import claim as claim_step
@@ -130,7 +131,7 @@ def test_the_isolation_canary_fails_when_the_sandbox_is_bind_mounted(
     assert not list((clone_ctx.project.path / ".factory").glob("clone-canary-*"))
 
 
-def _clone_spec(ctx: Context):
+def _clone_spec(ctx: Context) -> SandboxSpec:
     """`build_spec` before the monkeypatch replaces it."""
     return sandbox_step.SandboxSpec(
         project=ctx.project.name,
