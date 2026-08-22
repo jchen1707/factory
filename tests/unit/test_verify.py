@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from factory.harness import Gate, HarnessConfig
-from factory.steps.verify import _claims_opt_in, _evidence_mismatch
+from factory.steps.verify import _asserted_opt_in_gates, _evidence_mismatch, _gate_argv
 
 
 def _harness(*gates: Gate) -> HarnessConfig:
@@ -31,36 +31,44 @@ def _harness(*gates: Gate) -> HarnessConfig:
     )
 
 
-# -- the --all decision (§12.1) ------------------------------------------------
+# -- the per-gate opt-in assertion (§12.1) -------------------------------------
 
 
-def test_a_claimed_e2e_gate_asserts_all() -> None:
+def test_a_claimed_e2e_gate_is_asserted_by_name() -> None:
     harness = _harness(
         Gate("ruff check", "lint", ("uv", "run", "ruff", "check", ".")),
         Gate("playwright smoke", "e2e", ("pnpm", "exec", "playwright")),
     )
-    assert _claims_opt_in(harness, ["ruff check", "playwright smoke"]) is True
+    assert _asserted_opt_in_gates(harness, ["ruff check", "playwright smoke"]) == [
+        "playwright smoke"
+    ]
 
 
-def test_a_claimed_integration_gate_asserts_all() -> None:
+def test_a_claimed_integration_gate_is_asserted_by_name() -> None:
     harness = _harness(Gate("integration", "integration", ()))
-    assert _claims_opt_in(harness, ["integration"]) is True
+    assert _asserted_opt_in_gates(harness, ["integration"]) == ["integration"]
 
 
-def test_only_stop_kinds_claimed_does_not_assert_all() -> None:
+def test_only_stop_kinds_claimed_asserts_nothing() -> None:
     harness = _harness(Gate("ruff check", "lint", ()), Gate("pytest", "test", ()))
-    assert _claims_opt_in(harness, ["ruff check", "pytest"]) is False
+    assert _asserted_opt_in_gates(harness, ["ruff check", "pytest"]) == []
 
 
-def test_a_claimed_gate_not_in_the_config_does_not_assert_all() -> None:
+def test_a_claimed_gate_not_in_the_config_asserts_nothing() -> None:
     # `mypy` is claimed but the config declares no such gate, so there is no kind to
-    # cross-check and `--all` is not passed on its account.
+    # cross-check and nothing is asserted on its account.
     harness = _harness(Gate("ruff check", "lint", ()))
-    assert _claims_opt_in(harness, ["mypy"]) is False
+    assert _asserted_opt_in_gates(harness, ["mypy"]) == []
 
 
-def test_no_harness_config_does_not_assert_all() -> None:
-    assert _claims_opt_in(None, ["playwright smoke"]) is False
+def test_no_harness_config_asserts_nothing() -> None:
+    assert _asserted_opt_in_gates(None, ["playwright smoke"]) == []
+
+
+def test_two_claims_naming_one_gate_assert_it_once() -> None:
+    harness = _harness(Gate("playwright", "e2e", ()))
+    argv = _gate_argv(harness, ["playwright — 4 tests", "playwright — rerun, 4 tests"], "")
+    assert argv.count("--gate") == 1
 
 
 # -- the evidence-mismatch cross-check (§15.1) --------------------------------
@@ -122,21 +130,48 @@ def _frontend_harness() -> HarnessConfig:
     )
 
 
-def test_a_free_form_claim_of_an_opt_in_gate_asks_for_all() -> None:
+def test_a_free_form_claim_of_an_opt_in_gate_is_resolved_to_its_gate() -> None:
     """The FRO-6 defect. `_claims_opt_in` looked the claim up in a dict by equality while
     `_evidence_mismatch`, ten lines below, matched by containment — so every opt-in
-    lookup missed, `--all` was never passed, `playwright` and `lighthouse` came back
+    lookup missed, no opt-in gate was asserted, `playwright` and `lighthouse` came back
     `not_applicable`, and the very same claims then failed the mismatch check for not
     being `pass` or `fail`. The agent had run both, honestly, and was blocked for it."""
-    assert _claims_opt_in(_frontend_harness(), _REAL_CLAIMS)
+    assert _asserted_opt_in_gates(_frontend_harness(), _REAL_CLAIMS) == [
+        "playwright",
+        "lighthouse",
+    ]
 
 
-def test_claiming_no_opt_in_gate_leaves_all_off() -> None:
-    # `--all` is opt-in and asserting a `when` clause nobody claimed would spend an e2e
-    # suite on every run.
-    assert not _claims_opt_in(
+def test_claiming_no_opt_in_gate_asserts_nothing() -> None:
+    # Asserting a `when` clause nobody claimed would spend an e2e suite on every run.
+    assert not _asserted_opt_in_gates(
         _frontend_harness(), ["eslint — pnpm lint passed", "vitest — pnpm test passed"]
     )
+
+
+def test_claiming_playwright_does_not_assert_lighthouse() -> None:
+    """The FRO-7 defect, and the reason `--all` is gone from the argv.
+
+    FRO-7's agent claimed five stop gates and `playwright`, all of which passed. The old
+    code answered "some opt-in gate was claimed" with a bool and the caller passed
+    `--all`, which asserted *every* opt-in `when` clause — including lighthouse's
+    "performance or accessibility budgets are in scope", false for a status filter. That
+    gate cannot pass on this machine (its own caveat: the performance category scores
+    null against the installed Chrome), so the run blocked with `env-gate-failed` on a
+    gate that should never have executed, and no amount of implementing could clear it.
+    """
+    claims = [
+        "eslint — passed",
+        "vitest — 78 tests passed",
+        "playwright — 5 tests passed",
+    ]
+    assert _asserted_opt_in_gates(_frontend_harness(), claims) == ["playwright"]
+
+    argv = _gate_argv(_frontend_harness(), claims, "origin/v2")
+    assert "--all" not in argv, "the blanket assertion is what forced lighthouse to run"
+    assert argv.count("--gate") == 1
+    assert "playwright" in argv
+    assert "lighthouse" not in argv
 
 
 def test_the_two_checks_agree_about_which_gate_a_claim_names() -> None:

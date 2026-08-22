@@ -44,10 +44,10 @@ STEP = "verify"
 #: factory never names a gate; it names the document that lists them.
 _REPORT_HOOK = ".agents/vendor/harness/hooks/gate_report.mjs"
 
-#: Opt-in gate kinds (§12.1): the Stop hook does not run them, so without `--all` they
-#: come back `not_applicable`. The factory asserts the agent's claim by passing `--all`,
-#: cross-checked by name against `harness.config.json`'s own gates — never by
-#: pattern-matching the diff.
+#: Opt-in gate kinds (§12.1): the Stop hook does not run them, so unasserted they come
+#: back `not_applicable`. The factory asserts the agent's claim per gate, by name,
+#: cross-checked against `harness.config.json`'s own gates — never by pattern-matching
+#: the diff.
 _OPT_IN_KINDS = frozenset({"e2e", "integration"})
 
 #: A claimed gate must show up as one of these in the report. Anything else —
@@ -82,8 +82,8 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     The gate report runs in the build sandbox against the worktree, with `--base` set to
     the run's base ref so `gate_report.mjs`'s "did this app change?" check sees the
     committed change rather than a clean working tree (every gate would otherwise be
-    `skipped_unchanged`). `--all` is passed iff the agent claimed an opt-in gate,
-    cross-checked by name against `harness.config.json`.
+    `skipped_unchanged`). One `--gate <name>` is passed per opt-in gate the agent
+    claimed, cross-checked by name against `harness.config.json`.
 
     `actor` threads through the `advance` into `verifying`. The hop is automatic for
     the tick's forward dispatch and the resumable re-run, but `BLOCKED -> verifying` is
@@ -165,8 +165,8 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
 def _gate_argv(harness: HarnessConfig | None, gates_run: list[str], base_ref: str) -> list[str]:
     argv = ["node", _REPORT_HOOK, "--json"]
-    if _claims_opt_in(harness, gates_run):
-        argv.append("--all")
+    for name in _asserted_opt_in_gates(harness, gates_run):
+        argv += ["--gate", name]
     if base_ref:
         argv += ["--base", base_ref]
     return argv
@@ -359,18 +359,34 @@ def _next_is_rewind(ctx: Context) -> bool:
     return recovery.next_attempt_disposition(ctx).disposition is recovery.Disposition.REWIND
 
 
-def _claims_opt_in(harness: HarnessConfig | None, gates_run: list[str]) -> bool:
-    """Pass `--all` iff the agent claimed a gate whose `kind` is opt-in, cross-checked by
-    name against `harness.config.json`'s own gates. The claim is the agent's structured
-    answer; the name→kind lookup is the deterministic check against the canonical config —
-    never a pattern match over the diff (§12.1). Without `--all`, opt-in gates come back
-    `not_applicable`, which is correct when the agent did not claim them."""
+def _asserted_opt_in_gates(harness: HarnessConfig | None, gates_run: list[str]) -> list[str]:
+    """The opt-in gates the agent claimed, by their canonical `harness.config.json` names.
+
+    The claim is the agent's structured answer; the name→kind lookup is the deterministic
+    check against the canonical config — never a pattern match over the diff (§12.1). A
+    gate the agent did not claim is not asserted, so it comes back `not_applicable`.
+
+    This used to return a bool and the caller passed `--all`, which is where FRO-7 died.
+    `--all` asserts *every* opt-in gate's `when` clause at once, and a `when` is prose no
+    machine can evaluate — so an agent that honestly ran `playwright` also asserted
+    lighthouse's "performance or accessibility budgets are in scope", which was false for
+    a status-filter feature and which cannot pass on this machine at all (its own caveat:
+    the performance category scores null against the installed Chrome). The run blocked
+    with `env-gate-failed` on a gate that should never have executed, and no amount of
+    implementing could have cleared it. Asserting per gate is the repair: the factory now
+    asserts exactly what the agent claimed and nothing adjacent to it.
+
+    Order follows the config, not the claim, so the argv is stable across runs whose
+    agent happened to list its gates differently. Deduplicated: two claims naming one
+    gate assert it once.
+    """
     if harness is None:
-        return False
+        return []
     kinds = {gate.name: gate.kind for gate in harness.gates}
-    return any(
-        kinds.get(_gate_named_in(claim, kinds) or "") in _OPT_IN_KINDS for claim in gates_run
-    )
+    claimed = {_gate_named_in(claim, kinds) for claim in gates_run}
+    return [
+        gate.name for gate in harness.gates if gate.kind in _OPT_IN_KINDS and gate.name in claimed
+    ]
 
 
 def _gate_named_in(claim: str, names: Iterable[str]) -> str | None:
