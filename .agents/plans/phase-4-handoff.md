@@ -79,11 +79,48 @@ under `tick` the review happens in a later process than the one that took the fl
 `--full-review`; no trigger rule fired". A forced fan-out reported as a triggered one
 would misstate what the rules concluded about the diff.
 
-So the remaining gap is one real run. `factory run FRO-7 --full-review` is the cheapest
-way to close it: it proves the fan-out end to end on a diff whose size does not matter,
-and it lands FRO-7 either way. **Nothing has run it yet — the flag is built and unit- and
-integration-tested against fakes, and Tier 2 has still never executed to completion
-against a real reviewer sandbox.** Until that run happens, this section stays open.
+**`factory run FRO-7 --full-review` was run on 2026-08-22 and did not get there.** It
+passed all ten intake conditions, reached `implementing`, and the agent stopped itself:
+
+> FRO-7 is explicitly blocked by FRO-6 and must reuse its URL-parameter and
+> result-announcement seams. Those seams do not exist on origin/v2 or any fetched FRO-6
+> ref, so implementing them here would violate the ticket boundary.
+
+That is the agent behaving correctly — it read the slice boundary and refused to invent a
+sibling's seams rather than quietly widening its scope. Cost 351 540 in / 5 182 out, and
+the factory wrote `needs-info` to FRO-7, so **FRO-6 and FRO-7 are now both held at intake
+and both need a human to clear the label.**
+
+The dependency chain is FRO-5 → FRO-6 → FRO-7, and FRO-5 landing did not unblock FRO-7.
+So the run that proves Tier 2 is **`factory run FRO-6 --full-review`**, once someone
+removes FRO-6's `needs-info`. FRO-6 is a single-slice ticket and will almost certainly not
+trigger Tier 2 on its own, which is exactly what the override is for.
+
+**Tier 2 has still never executed to completion.** This section stays open.
+
+### What the FRO-7 run did prove
+
+Two things Phase 4's refactor had only ever run against fakes, both confirmed on a real
+`--clone` project:
+
+- **The two-phase implement step works across the real wrapper.** `start` spawned the
+  detached run and `collect` read it back — `check implement_result_schema: pass` and a
+  schema-valid `blocked` result. The `FakeSandbox` writes `exit` synchronously and the
+  real wrapper does not, so this was the live regression risk in splitting the step.
+- **`vault-before.json` lands on the clone mount**, not in the worktree —
+  `state/clone/frontend-harness/FRO-7/.factory/run/1/`, 17 KB, written at `start` and read
+  at `collect`. `check vault_snapshot: pass`. That is the path PR #16 had to fix once
+  already.
+
+### An intake condition this run argues for
+
+FRO-7's description carries a `## Blocked by` section naming FRO-6 in prose. Intake reads
+that description already and does not look at the section, so it spent a model run to
+learn something a string match would have answered in zero seconds. A condition 11 —
+*every ticket named under "Blocked by" is Done* — is cheap, and its failure mode is the
+good one: a false block is a ticket a human re-reads, where the current behaviour is a
+paid run that ends in `needs-info`. Worth building before the daemon is loaded, because
+under a timer this run would have happened unattended.
 
 ## Two defects worth knowing about, not yet fixed
 
