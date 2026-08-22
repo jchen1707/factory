@@ -1,11 +1,122 @@
-# Phase 4 handoff — 2026-08-22
+# Phase 4 handoff — begun 2026-08-22
 
-Phase 3 is closed. `SOFTWARE-FACTORY-PLAN.md` §19 "Phase 4 — polling, idempotency,
-recovery, resume, cleanup" (line 2188) is the specification for what comes next; this file
-records only what a new session cannot read out of the plan or the code.
+Phase 3 is closed and **Phase 4 is under way** on branch
+`feat/phase-4-tick-and-recovery` (12 commits, unpushed, unreviewed).
+`SOFTWARE-FACTORY-PLAN.md` §19 "Phase 4 — polling, idempotency, recovery, resume,
+cleanup" (line 2188) is the specification; this file records only what a new session
+cannot read out of the plan or the code.
 
-Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology. Everything it lists
-as open is now closed except one item, named below.
+Read `.agents/plans/phase-3-handoff.md` for the Phase 2/3 archaeology.
+
+**Start here:** "Where Phase 4 stands" below, then "Build `resume` next".
+
+## Where Phase 4 stands
+
+| §19 item | State |
+| --- | --- |
+| `cli.py: tick` | **built** — one pass: reap, recover, advance, claim, in that order |
+| `steps/reap.py` | **built** — §16.1's orphan detection, read entirely off disk |
+| `recovery.py` | **built** — §16.3 resume-vs-restart and §16.3a's ladder, `decide` is pure |
+| `gc.py` + `cli.py: gc` | **built** — §16.5, `--dry-run` is the same code path |
+| `steps/plan.py` rewind | **built** — rung 3 enters `planning`; `plan` records an attempt row now |
+| `cli.py: suspend` / `resume` | **not built** — next, and designed below |
+| `cli.py: daemon` + `ops/com.jchen.factory.plist` | not built |
+| `src/factory/console/` | not built |
+| `docs/runbook.md` | not built |
+
+Plus three things §19 does not list, all forced by real runs: `factory run --full-review`
+(§15.2 override), intake **condition 11** (blocking relations), and the poller evaluating
+intake at all — see "Defects this session".
+
+**The property the whole phase turns on** is §4.2's, and it is now real in code: *the tick
+that asks is never the tick that started the run.* The agent steps are two-phase —
+`implement.start`/`implement.collect`, `plan.start`/`plan.collect` — and `collect` reads
+nothing that `start` held in memory. The vault snapshot moved out of a local variable into
+`vault-before.json` in the attempt directory for exactly that reason, and its absence
+blocks rather than defaulting to an empty `before`. `factory run` still calls
+start + wait + collect; only the tick uses the halves.
+
+**One gap in the tick, known and deliberate.** `verify`, `review` and `deliver` are still
+synchronous inside a pass, so a tick can block for minutes on the review fan-out. `launchd`
+does not overlap `StartInterval` instances so it is safe, but reaping stalls while a review
+runs. Making those two-phase is its own slice and should come before the daemon is loaded
+under a timer.
+
+## Build `resume` next
+
+§16.3b is the spec. Three notes it does not contain, and each will cost an hour to
+rediscover.
+
+**1. The state machine has no edge for the case you actually have.** `machine.py`'s
+`_WORKFLOW` gives `BLOCKED` exactly two exits — `IMPLEMENTING` and `PLANNING`, both
+reserved by `unblock-is-a-judgement`. There is no `BLOCKED -> VERIFYING` and no
+`BLOCKED -> REVIEWING`. But the live subject (FRO-6, below) is blocked *at* `verifying`
+with a complete implementation and a passing gate report: the cheap repair is to re-enter
+the state that blocked, not to spend another 10 M-token implement. Add both edges to
+`_WORKFLOW` and both pairs to `HUMAN_ONLY` under the existing rule name. Note that
+`assert_table_is_sound` and the §21.1 table-driven test will both need to still pass.
+
+**2. The attempt counter must not increment on a non-agent resume.** §16.3b says "either
+way the attempt counter increments, so a suspended-and-resumed run cannot escape the
+budget by cycling", and that is right for `implementing` and `planning` — they start a
+fresh agent turn. It is wrong for `verifying` and `reviewing`: no model call happens on
+re-entry into verify, so incrementing would spend budget for nothing **and** break the
+lookup, because `verify.py` and `deliver.py` both address `factory_dir / "run" / str(attempt)`
+and would look in a directory that does not exist. Increment when the resume starts an
+agent, not otherwise.
+
+**3. Which state to resume into is already recorded, so do not parse it.**
+`record_transition(from_state=..., to_state=SUSPENDED)` stores the origin in the
+`transitions` row. `recovery.state_that_died` is the same lookup for `RESUMABLE`;
+generalise it to `state_before(ctx, target)` rather than writing a second one — this file
+records one defect today that was two functions disagreeing about the same input.
+
+The rest is mechanical and belongs in `recovery.py` beside `resume_run`, with thin
+commands in `cli.py`:
+
+- `factory suspend <TICKET> [--reason]` — `kill_agent`, **wait for the `exit` file** so the
+  attempt ends with a real terminal record rather than a truncated one (the same thing
+  `reap` does on a state timeout), `sbx stop` only when no other run is using the sandbox,
+  keep the worktree/branch/attempt directory/session id, then `advance(..., SUSPENDED,
+  actor="human")` and one Linear comment through the effects ledger.
+- `factory resume <TICKET> [--from <state>] [--authorise]` — `--authorise` is §16.4's
+  `FAILED -> RESUMABLE` re-authorisation and is already `HUMAN_ONLY: reauthorise-spend`.
+  Everything else routes through the existing `recovery.resume_run` machinery.
+
+**Do it before re-running anything.** FRO-6's blocked run holds a finished implementation
+that cost 10 582 685 input tokens; resuming it into `verifying` re-runs the gate report
+(no model call) and then the review, which is the only part still unproven. Re-running from
+scratch pays for that implement a second time, and BAC-4's four re-runs at 7-16 M each are
+what exhausted the Codex credit once already.
+
+One practical detail: the build sandbox is `stopped`, and the branch lives inside its
+clone. `sbx stop` does not destroy it — only `sbx rm` does — but a resume that reaches
+`reviewing` will need `clone.fetch_back`, which needs the sandbox running and the git
+daemon port re-read. `steps/clone.py:_fetch_with_the_sandbox_running` already knows that
+dance; do not reimplement it.
+
+## What remains after `resume`
+
+In the order I would do them:
+
+1. **Make `verify`/`review`/`deliver` two-phase**, closing the gap above. The daemon should
+   not be loaded under a timer while a tick can block for minutes.
+2. **`daemon` + `ops/com.jchen.factory.plist`** — `StartInterval 60`, `RunAtLoad`, stdout
+   and stderr to `~/factory/logs/`. §19's rollback is `launchctl bootout`; the daemon is
+   stateless between ticks so stopping it is safe at any instant.
+3. **`docs/runbook.md`** — what James does when the factory is stuck. Write it after the
+   daemon, from what actually went wrong, not before it from imagination.
+4. **The console** (§18.5, five views, loopback only). The largest item and the least
+   load-bearing: every view has a CLI form and §18.5 says the CLI is built first. The
+   context percentage needs `~/.codex/models_cache.json` for the denominator — P0-7 proved
+   the event stream carries neither the window nor a percentage.
+5. **The §22 rows Phase 4 owns.** Covered so far: F3, F4, F12, F13, F24 (and F15/F16
+   partly, through `gc`'s refusals). Not covered: **F1/F2** (crash between the effects
+   `INSERT` and the write, via a `FACTORY_CRASH_AT` env hook — the ledger's whole reason
+   for existing and still untested under a real crash), **F14** (disk floor), **F17**
+   (Linear unreachable mid-run), **F22** (suspend then resume), **F23** (third consecutive
+   gate failure enters `planning`), **F25** (`models.toml` refusing to start), **F26**
+   (a console control aimed at a `codex-*` sandbox).
 
 ## Where Phase 3 ended
 
@@ -96,7 +207,16 @@ So the run that proves Tier 2 is **`factory run FRO-6 --full-review`**, once som
 removes FRO-6's `needs-info`. FRO-6 is a single-slice ticket and will almost certainly not
 trigger Tier 2 on its own, which is exactly what the override is for.
 
-**Tier 2 has still never executed to completion.** This section stays open.
+**Tier 2 has still never executed to completion.** Three runs on 2026-08-22 tried and none
+reached `reviewing`:
+
+| run | outcome | what it proved |
+| --- | --- | --- |
+| `factory run FRO-7 --full-review` | `agent-blocked` — FRO-7 needs FRO-6's seams | the two-phase implement step works against the real wrapper; `vault-before.json` lands on the clone mount. Argued condition 11 into existence |
+| `factory run FRO-6 --full-review` #1 | invalid — read the previous run's evidence | defect 1 |
+| `factory run FRO-6 --full-review` #2 | `evidence-mismatch` at `verifying`, gate verdict `pass` | defect 3, and a finished implementation now waiting on `resume` |
+
+This section stays open, and the next thing that closes it is `resume`, not another run.
 
 ### What the FRO-7 run did prove
 
@@ -153,11 +273,75 @@ constraint that broke. Four to add:
    withdrawn on stop, never restored, and the daemon port is reassigned on every start.
    `sbx ls --json` is the only durable source. This is the kind of thing that looks like a
    factory bug for an hour before it turns out to be a platform lifecycle.
+5. **Footgun 1 is not theoretical and I walked into it anyway.** Having read it that same
+   session, I ran `git checkout -- src/factory/repo.py` to undo a mutation and destroyed
+   two uncommitted fixes with it. Commit *first*, then mutate, then `git checkout` is
+   safe because it restores the commit. Budget the extra commit; it is cheaper than
+   re-deriving the fix.
+6. **An identical token count between two runs is not a coincidence.** It is the tell that
+   the second run read the first one's evidence. Any two numbers matching to the digit
+   across runs — tokens, exit codes, durations — should be treated as a reused artifact
+   until proved otherwise.
+7. **`ls` and other bare commands can return empty under the harness's hooks.** Twice a
+   `ls` produced no output where files plainly existed; `ls -a <absolute path>` worked.
+   Do not conclude a directory is empty from one silent listing.
 
-## Defects found and fixed this session, in order
+## Defects this session found, in order
 
-The pattern is the useful part: **five of the six were found by probing the real sandbox
-before spending a model run, and each would have cost a ~20-minute run to find otherwise.**
+All three came out of two real runs, and all three are the same shape: **the factory
+producing a confident answer that was not about the run in front of it**, or punishing the
+agent for being more thorough than the minimum. Each fix has a regression test that was
+mutated to prove it fails without the fix.
+
+1. **A second run of one ticket read the first run's verdict.** `factory run FRO-6` recorded
+   `implementing -> blocked` in the same second it spawned its agent, reporting a
+   four-hour-old block reason and the previous run's token counts *to the digit*, while its
+   own agent kept working in the sandbox for another ninety seconds. `Context.factory_dir`
+   keyed the clone evidence tree by **ticket**; a bind-mounted worktree is deleted by
+   `cancel` and gets a fresh tree free, but the clone mount survives every run, so the
+   second run landed on the first one's `run/1`, found its `exit` file, and
+   `implement._await_exit` returned instantly — it returns the moment that file appears and
+   cannot tell stale from fresh. `sbx.poll` trusts it identically, so **`reap` would have
+   done the same thing unattended under the daemon.** Fixed at two layers: `factory_dir`
+   carries the run id, and `AttemptDir.create` clears the terminal markers of any previous
+   invocation (bare names only — `plan-exit` and siblings belong to a rewind's planning
+   half).
+2. **`factory cancel` tried to remove the repository.** For a `--clone` run `runs.worktree`
+   is the project path — correctly, the branch is cut inside the VM — and `git worktree
+   list` includes the main working tree, so `worktree_exists` said yes and the rollback
+   ran `git worktree remove --force /Users/james/frontend-harness`. Git declined and **the
+   whole cancel aborted with it**, leaving the tracker un-restored. `_worktree_paths` no
+   longer offers it and `repo.remove_worktree` refuses the repository by name.
+3. **The opt-in gate lookup read a claim differently from the mismatch check.** FRO-6
+   blocked on `evidence-mismatch` naming `playwright, lighthouse` — gates the agent had
+   genuinely run and passed. `gates_run` entries are free-form (`"playwright — pnpm
+   test:e2e passed (4 tests)"`); `_evidence_mismatch` knew that and matched by longest-name
+   containment, while `_claims_opt_in` ten lines above looked the claim up in a dict **by
+   equality**. So `--all` was never passed, and layer A's contract is that without it the
+   e2e/integration gates are `not_applicable` — *"opt-in is not optional: the caller
+   asserts a gate's `when` clause by passing this"*. The report could not corroborate a
+   claim the factory had declined to have checked, and the mismatch rule called that
+   disagreement. **The repair tightens rather than relaxes**: one matcher, `_gate_named_in`,
+   used by both, so with `--all` the report actually runs those gates and the claim is
+   verified instead of unfalsifiable. `skipped_unchanged` still blocks and a test pins it.
+
+Two more worth recording that were not code defects:
+
+- **The poller evaluated no intake condition at all.** `claim_step` performs the claim and
+  judges nothing; the ten conditions lived in `cmd_run`. An unattended tick would have
+  started a run on any ticket carrying `ready-for-agent` and discovered the rest by spending
+  a model run. `assess` is the one evaluator now.
+- **A regression test that could not fail.** The first clone re-run test used a *different
+  ticket* for the second run, so the paths differed whatever `factory_dir` did — reverting
+  the fix left it green. Only the mutation pass caught it. A test written from the fix
+  rather than from the failure is the trap; write it against the real sequence
+  (cancel, then re-run the same ticket).
+
+## Defects Phase 3 found and fixed, in order
+
+Kept because the pattern is the useful part: **five of the six were found by probing the
+real sandbox before spending a model run, and each would have cost a ~20-minute run to
+find otherwise.**
 
 1. `pnpm test` in a scratch with no `node_modules` exits 1 saying "ELIFECYCLE Test failed",
    and `_ASSERTION_FAILURE_SIGNS` matched the bare word `failed` — so a replay in which
@@ -181,32 +365,33 @@ before spending a model run, and each would have cost a ~20-minute run to find o
 - **BAC** — done and archived. Nothing pending.
 - **FRO-10 / FRO-9** — FRO-10 Done. FRO-9 is the parent spec I filed for it; it is a spec,
   not a work item, and carries no `ready-for-agent` label. Move it to Backlog if it clutters.
-- **FRO-6** — `In Progress` with `needs-info`. Its blocker (FRO-5) is gone, so the ticket is
-  ready, but the label still holds it at intake by design and a human must remove it. Its
-  `blocked` run row is also the natural first test subject for Phase 4's `resume`.
+- **FRO-6** — **`blocked: evidence-mismatch` at `verifying`, and this is the live subject
+  for `resume`.** The run (`ab00d69c38844d2c`, 2026-08-22 01:28-01:51) is real work: 22
+  minutes, 10 582 685 in / 34 692 out, four files and four tests written, and a gate report
+  whose **verdict is `pass`** — eslint, prettier, tsc, vitest and vite build all green. It
+  blocked on defect 3 above, which is fixed. The implementation is intact in the build
+  sandbox's clone (`stopped`, not removed) and the evidence is at
+  `state/clone/frontend-harness/FRO-6/ab00d69c38844d2c/.factory/run/1/`. Resuming it into
+  `verifying` is the cheap path to a proven Tier 2; re-running pays for that implement
+  again.
 - **FRO-5** — Done. Landed by frontend-harness#40, a merge-forward of the long-closed
   `feat/FRO-5-projects-list` across 64 commits of drift, with three conflicts resolved and
-  all seven CI checks green. Linear moved it to Done off the `Fixes FRO-5` line.
-- **FRO-7** — Todo, unblocked, passes intake, nothing in its way. The Tier-2 candidate.
+  all seven CI checks green. Linear moved it to Done off the `Fixes FRO-5` line. Verified
+  on `origin/v2` on 2026-08-22: `src/features/projects/**` is present.
+- **FRO-7** — `In Progress` with `needs-info`, written by its own blocked run. It is
+  blocked by FRO-6 (a formal Linear relation) and **intake condition 11 now refuses it for
+  free**, so it needs no babysitting: clear the label whenever FRO-6 lands and the poller
+  will take it.
 - **FRO-8** — Todo, refused by intake for having no parent spec. It is the same defect
   FRO-10 fixed; it should probably be closed as duplicate.
 - **FRO-1** — the parent of FRO-2..7. Intake refuses it correctly; it is a spec.
 
-## Phase 4
+## Two facts Phase 3 learned that the rest of Phase 4 still depends on
 
-`SOFTWARE-FACTORY-PLAN.md` line 2188 has the file table and the validation commands. The
-headline is that Phase 4 is where the factory stops needing a human to type `factory run`:
-`tick`/`daemon` under launchd, `steps/reap.py` for orphan detection, `recovery.py` for
-§16.3 resume-vs-restart, `gc.py` for §16.5, the §16.3a rewind ladder in `plan.py`, and the
-loopback console in `src/factory/console/`.
-
-Two things Phase 3 learned that Phase 4 depends on:
-
-- **There is still no resume.** `machine.py:104` makes `BLOCKED → REVIEWING` illegal and
-  unblocking is human-only. Phase 4's `resume` is the first time a blocked run can move
-  without a fresh implement, and the FRO-6 run sitting at `In Progress` is a live test
-  subject for it.
+- **`BLOCKED` has only two exits and neither is the one `resume` needs.** See "Build
+  `resume` next" — this is the same observation the Phase 3 handoff made as "there is no
+  resume", now with the specific edge named.
 - **The host process is out of the run's TCB but the machine is not** (§4.2, and the long
   comment in `sbx.py:exec_detached`). A daemon that ticks every 60 s must read liveness
-  from `<attempt>/sbx-exec.pid` and the heartbeat, never from its own memory — the tick
-  that asks is never the tick that started the run.
+  from `<attempt>/sbx-exec.pid` and the heartbeat, never from its own memory. `reap.py`
+  does exactly that and nothing else; keep it that way.
