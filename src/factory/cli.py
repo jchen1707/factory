@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from factory import artifacts, machine, recovery, repo
+from factory import artifacts, gc, machine, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import (
@@ -576,6 +576,31 @@ def _claim_new_work(
 
 
 # --------------------------------------------------------------------------------
+# factory gc
+# --------------------------------------------------------------------------------
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    """§16.5. `--dry-run` names every worktree, branch, sandbox and artifact it would
+    touch and touches none — and it is the same code path, so what it prints is what a
+    real sweep would do rather than a second implementation that could drift."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    store = _open_store(home, dry_run=False)
+
+    actions = gc.sweep(home, registry, store, SbxAdapter(), dry_run=args.dry_run, now=None)
+    for action in actions:
+        print(action)
+
+    did = sum(1 for a in actions if a.done)
+    if args.dry_run:
+        print(f"\nDry run: {len(actions)} action(s) considered, none performed.")
+    else:
+        print(f"\n{did} action(s) performed, {len(actions) - did} skipped or refused.")
+    return 0
+
+
+# --------------------------------------------------------------------------------
 # factory status
 # --------------------------------------------------------------------------------
 
@@ -1119,6 +1144,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-claim", action="store_true", help="advance existing runs, start no new ones"
     )
     tick.set_defaults(func=cmd_tick)
+
+    gc_parser = sub.add_parser("gc", help="reclaim what finished runs left behind")
+    gc_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="name everything it would touch and touch none of it",
+    )
+    gc_parser.set_defaults(func=cmd_gc)
 
     status = sub.add_parser("status", help="what the factory is doing")
     status.add_argument("ticket", nargs="?")

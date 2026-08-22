@@ -51,6 +51,17 @@ inconclusive = "report"
 # Seeded from P0-14's measured 17 %, with headroom (p0-14-red-phase.md).
 inconclusive_alarm_pct = 40
 
+[defaults.gc]
+# §16.5. Every number is a floor on how long the factory keeps something, never a
+# promise to delete it — a pushed branch, an open PR and a sandbox the factory did
+# not create are untouchable at any age.
+worktree_days = 7
+sandbox_idle_hours = 12
+# Far above the idle hours on purpose: stopping a sandbox costs a restart, removing
+# one costs rebuilding the image cache.
+sandbox_rm_days = 14
+artifact_days = 60
+
 [defaults.timeouts_seconds]
 # §5.1's per-state timeouts. The gate suite measures under three seconds on both
 # host and sandbox (p0-10), so every number here is dominated by the model.
