@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from factory.intake.linear import (
     Issue,
+    LinearClient,
     RepoFacts,
     context_files,
     eligibility_verdict,
     evaluate_eligibility,
+    open_blockers,
 )
 
 SPEC = "S" * 250
@@ -205,3 +209,86 @@ def test_a_blocked_ticket_is_skipped_rather_than_blocked() -> None:
     assert not eligible
     assert block_reason is None
     assert any("11." in f for f in failures)
+
+
+# -- the parser, against the shape the live API actually returned ---------------
+
+
+#: One `issue` payload, in the shape measured against api.linear.app on 2026-08-22 for
+#: FRO-7. Trimmed to the fields the parser reads, but not reshaped: the nesting, the
+#: `type` discriminator and the `issue` (rather than `relatedIssue`) key under
+#: `inverseRelations` are all as they came back, because those are exactly the three
+#: things a hand-written guess gets wrong.
+_MEASURED_PAYLOAD = {
+    "issue": {
+        "identifier": "FRO-7",
+        "title": "Filter your Projects by status, including archived",
+        "description": "## Acceptance criteria\n\n- [ ] it filters\n",
+        "url": "https://linear.app/x/issue/FRO-7",
+        "state": {"name": "Todo", "type": "unstarted"},
+        "team": {"key": "FRO", "id": "team-uuid"},
+        "labels": {"nodes": [{"name": "ready-for-agent"}]},
+        "parent": {
+            "identifier": "FRO-1",
+            "title": "Projects",
+            "description": SPEC,
+            "children": {"nodes": []},
+        },
+        "comments": {"nodes": []},
+        "inverseRelations": {
+            "nodes": [
+                {
+                    "type": "blocks",
+                    "issue": {"identifier": "FRO-6", "state": {"name": "Todo", "type": "started"}},
+                }
+            ]
+        },
+    }
+}
+
+
+def _client(payload: dict) -> LinearClient:
+    return LinearClient(transport=lambda query, variables, key: payload)
+
+
+def test_the_parser_reads_blockers_out_of_the_measured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+
+    issue = _client(_MEASURED_PAYLOAD).issue("FRO-7")
+
+    assert issue.blocked_by == (("FRO-6", "started"),)
+    assert open_blockers(issue) == ["FRO-6"]
+
+
+def test_the_parser_reads_the_direction_that_means_blocks_me(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`relations` is what this ticket blocks; `inverseRelations` is what blocks it.
+
+    Reading the wrong one would hold every ticket open on its own *dependents* — FRO-6
+    would refuse to run because FRO-7 depends on it, which is backwards and would look
+    like the feature working. Measured on 2026-08-22: FRO-6's `relations` names FRO-7 and
+    its `inverseRelations` names FRO-5.
+    """
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+    backwards = json.loads(json.dumps(_MEASURED_PAYLOAD))
+    backwards["issue"]["relations"] = backwards["issue"].pop("inverseRelations")
+
+    issue = _client(backwards).issue("FRO-7")
+
+    assert issue.blocked_by == ()
+
+
+def test_a_relation_that_is_not_a_block_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Linear's relation types include `related`, `similar` and `duplicate`. Only
+    # `blocks` stops a run; treating a "related" link as a dependency would refuse
+    # tickets for being mentioned near each other.
+    monkeypatch.setattr("factory.intake.linear.keychain_secret", lambda service="x": "key")
+    related = json.loads(json.dumps(_MEASURED_PAYLOAD))
+    related["issue"]["inverseRelations"]["nodes"][0]["type"] = "related"
+
+    assert _client(related).issue("FRO-7").blocked_by == ()
