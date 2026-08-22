@@ -232,11 +232,44 @@ def scratch_path(ctx: Context) -> Path:
     return ctx.project.path / ".factory" / "worktrees" / f"scratch-{ctx.run.id}-{ctx.run.attempt}"
 
 
+#: The installed-dependency directory a node stack keeps beside `package.json`, and the
+#: whole reason this project cannot be bind-mounted. It is gitignored, so a `git worktree
+#: add` inside the clone does not carry it.
+_DEPENDENCIES = "node_modules"
+
+
 def scratch_add(ctx: Context, scratch: Path, base_ref: str) -> None:
+    """A detached checkout at the base ref, inside the clone, with the dependencies linked.
+
+    The link is not a convenience. Measured 2026-08-22: without it `pnpm test` in the
+    scratch exits 1 with "vitest: not found" and "node_modules missing" — no test runs at
+    all, and the replay's whole question ("does this test fail without the implementation?")
+    goes unanswered on every single frontend run. `redphase._RUNNER_MISSING_SIGNS` is the
+    safety net for when this cannot be done; this is the repair.
+
+    A symlink rather than a copy: `pnpm`'s tree is large and mostly symlinks into a store
+    already, and the scratch is deleted minutes later. What is linked is the *installed*
+    tree, which is the diff's dependency set rather than the base ref's — a real difference
+    if the change edited `package.json`, and the honest one to prefer: a replay that runs
+    against slightly-newer dependencies answers the question, and one that cannot start
+    answers nothing.
+    """
     _exec(
         ctx,
         ["git", "-C", str(ctx.project.path), "worktree", "add", "--detach", str(scratch), base_ref],
     )
+    dependencies = ctx.project.path / _DEPENDENCIES
+    linked = ctx.sandbox.exec_sync(
+        ctx.project.build_sandbox,
+        [
+            "/bin/sh",
+            "-c",
+            f'[ -d "{dependencies}" ] && ln -s "{dependencies}" "{scratch / _DEPENDENCIES}"',
+        ],
+        env=dict(ctx.project.env),
+        timeout=120,
+    )
+    ctx.log("clone.scratch_ready", scratch=str(scratch), dependencies_linked=linked.ok)
 
 
 def scratch_apply(ctx: Context, scratch: Path, patch: str) -> None:

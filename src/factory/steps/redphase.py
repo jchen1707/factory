@@ -59,6 +59,23 @@ _COLLECTION_ERROR_SIGNS: tuple[str, ...] = (
     "::error",
 )
 
+#: The gate never started. Measured 2026-08-22 in a `--clone` scratch worktree: `pnpm test`
+#: with no `node_modules` exits 1 and prints "ELIFECYCLE Test failed", which the assertion
+#: list below matches on the bare word `failed` — so a run where **no test executed at all**
+#: was classified as a real red phase, the single worst verdict this module can produce.
+#:
+#: Checked before either list and dominating both, because it is not a competing signal: if
+#: the runner could not start, nothing else in the output is evidence about a test. The
+#: python equivalents live in the collection list; these are the ones a node stack produces.
+_RUNNER_MISSING_SIGNS: tuple[str, ...] = (
+    "node_modules missing",
+    "cannot find module",
+    "err_module_not_found",
+    "command not found",
+    ": not found",
+    "executable not found",
+)
+
 #: The complementary signature — the test *ran* and failed an assertion. That is the red
 #: phase: the test reached its assertion and the base-ref code did not satisfy it.
 _ASSERTION_FAILURE_SIGNS: tuple[str, ...] = (
@@ -232,8 +249,9 @@ def _classify(completed: Completed, test_files: list[str]) -> tuple[str, str]:
 
     - `green`: exit 0. The tests pass at the base ref — proves nothing (test-proves-nothing).
     - `red`: the gate failed on an assertion in a new/changed test. The red phase is real.
-    - `inconclusive`: the gate failed before it could run a test (import / collection error),
-      or the failure kind could not be read. The one judgement; reported, not blocked.
+    - `inconclusive`: the gate never started (the runner is not installed), or it failed
+      before it could run a test (import / collection error), or the failure kind could not
+      be read. The one judgement; reported, not blocked.
 
     This is the layer P0-14 calibrates: the inconclusive default is `report`, so a
     misclassification here is a noisy PR body, not a wrong transition. The two mechanical
@@ -243,6 +261,12 @@ def _classify(completed: Completed, test_files: list[str]) -> tuple[str, str]:
     detail = completed.stdout.strip() or completed.stderr.strip()
     if completed.returncode == 0:
         return "green", detail
+    if any(sign in output for sign in _RUNNER_MISSING_SIGNS):
+        # The runner never started, so there is no test result to read either way. This is
+        # checked ahead of the two lists rather than alongside them: a lifecycle error says
+        # "Test failed", and letting that compete with the assertion signal is how a run
+        # with zero executed tests came back as a real red phase.
+        return "inconclusive", detail
     has_collection = any(sign in output for sign in _COLLECTION_ERROR_SIGNS)
     has_assertion = any(sign in output for sign in _ASSERTION_FAILURE_SIGNS)
     if has_assertion and not has_collection:
