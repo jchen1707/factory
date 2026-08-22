@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
 from factory.sandbox.sbx import create_argv
@@ -559,3 +560,39 @@ def test_the_dry_run_prints_the_in_vm_checkout_and_the_fetch_back(clone_ctx: Con
     assert "--clone" in planned
     assert f"checkout -b {clone_ctx.shadow_branch}" in planned
     assert str(clone_ctx.clone_mount) in planned
+
+
+def test_two_runs_of_one_ticket_cannot_share_an_attempt_directory(
+    clone_ctx: Context, tmp_path: Path
+) -> None:
+    """A bind-mounted project gets a fresh evidence tree for free — `cancel` removes the
+    worktree it lives in. The clone mount survives every run, so before this the second
+    run of a ticket landed on the first one's attempt directory: it found the stale
+    `exit`, returned from its wait instantly, and reported the first run's verdict and
+    token counts while its own agent was still running in the sandbox.
+    """
+    first = clone_ctx.factory_dir
+    second_run = clone_ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
+    second = replace(clone_ctx, run=second_run).factory_dir
+
+    assert first != second
+    # Both still inside the one mount `sbx` fixed at creation — the mount is what is
+    # fixed, subdirectories under it are free.
+    assert clone_ctx.clone_mount in first.parents
+    assert clone_ctx.clone_mount in second.parents
+
+
+def test_a_second_run_does_not_read_the_first_runs_verdict(clone_ctx: Context) -> None:
+    # The property that actually failed, stated directly: evidence written by one run is
+    # not reachable from another run's attempt directory.
+    _to_worktree_ready(clone_ctx)
+    first_attempt = AttemptDir.create(clone_ctx.factory_dir, 1)
+    first_attempt.exit_file.write_text("0")
+    first_attempt.last_message.write_text('{"status": "blocked"}')
+
+    second_run = clone_ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
+    second_ctx = replace(clone_ctx, run=second_run)
+    second_attempt = AttemptDir.create(second_ctx.factory_dir, 1)
+
+    assert not second_attempt.exit_file.exists()
+    assert first_attempt.exit_file.exists()  # and the first run's record survives

@@ -99,7 +99,29 @@ class AttemptDir:
         """
         root = factory_dir / "run" / str(attempt)
         root.mkdir(parents=True, exist_ok=True)
+        cls(root)._clear_terminal_markers()
         return cls(root)
+
+    def _clear_terminal_markers(self) -> None:
+        """Remove any previous invocation's terminal evidence from this directory.
+
+        The filesystem is the protocol, and every reader here treats `exit` as
+        authoritative: `implement._await_exit` returns the moment it appears and
+        `sbx.poll` calls it terminal regardless of what the VM is doing. A stale one is
+        therefore not clutter — it is a false answer to the only question the protocol
+        asks, and the reader has no way to tell.
+
+        Belt to `Context.factory_dir`'s braces. That path now carries the run id so two
+        runs cannot land here at all; this makes the directory safe even when they do,
+        because a guarantee that depends on a path being constructed correctly somewhere
+        else is a guarantee with a seam in it.
+
+        Only the bare names are cleared. `plan.py` writes `plan-exit` and friends into
+        this same directory for the planning half of a rewind, and those belong to an
+        invocation that already finished.
+        """
+        for name in ("exit", "last-message.json", "events.jsonl", "stderr.log", "heartbeat"):
+            (self.root / name).unlink(missing_ok=True)
 
     @property
     def request(self) -> Path:

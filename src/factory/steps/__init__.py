@@ -126,9 +126,21 @@ class Context:
 
         Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host checkout.
         The evidence stays where it was written.
+
+        Keyed by **run id**, not by ticket. A bind-mounted project gets a fresh tree for
+        free, because `cancel` removes the worktree the evidence lives in — but the clone
+        mount survives every run, so a ticket-keyed path put a second run of the same
+        ticket on top of the first one's attempt directory. Measured on 2026-08-22: the
+        second `factory run FRO-6` found the first run's `exit` file already present,
+        returned from its wait instantly, read the first run's `last-message.json` and
+        reported a four-hour-old verdict — with the first run's token counts, to the
+        digit — while its own agent was still running in the sandbox. That is the exact
+        failure this system exists to catch: it looked like a result and proved nothing.
+        A run id in the path makes two runs of one ticket structurally unable to collide,
+        and keeps the earlier run's evidence intact instead of overwriting it.
         """
         if self.project.requires_clone:
-            return self.clone_mount / self.run.linear_id / ".factory"
+            return self.clone_mount / self.run.linear_id / self.run.id / ".factory"
         return self.worktree / ".factory"
 
     # -- plumbing -----------------------------------------------------------------

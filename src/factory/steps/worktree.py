@@ -125,9 +125,7 @@ def _run_clone(ctx: Context, branch: str) -> None:
             f"sbx exec {ctx.project.build_sandbox} git -C {ctx.project.path} "
             f"checkout -b {branch} {ctx.project.base_ref}  # inside the clone"
         )
-        ctx.would(
-            f"copy staged context into {ctx.clone_mount}/{ctx.run.linear_id}/.factory/context/"
-        )
+        ctx.would(f"copy staged context into {ctx.factory_dir}/context/")
         advance(ctx, State.WORKTREE_READY)
         return
 
