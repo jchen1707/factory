@@ -365,8 +365,6 @@ def test_the_review_step_fetches_back_before_the_replay(
 
     monkeypatch.setattr(review_step.redphase, "replay", _record_worktree)
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
 
     _to_verifying(clone_ctx)
     verify_step.run(clone_ctx)
@@ -421,8 +419,6 @@ def test_the_pr_body_carries_the_gate_table_for_a_clone_run(
 def _stub_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
-    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
-    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
 
 
 # --------------------------------------------------------------------------------

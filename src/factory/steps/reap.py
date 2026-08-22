@@ -25,13 +25,23 @@ from factory.sandbox.base import RunHandle, RunStatus
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
+from factory.steps import review as review_step
+from factory.steps import verify as verify_step
 
-__all__ = ["AGENT_STATES", "Outcome", "Verdict", "reap"]
+__all__ = ["DETACHED_STATES", "Outcome", "Verdict", "reap"]
 
-#: The two states whose entry action spawns a detached agent, and therefore the only
-#: two that can be orphaned. A run sitting anywhere else is between steps: the next
-#: tick re-enters it, which is what "idempotent by construction" buys.
-AGENT_STATES: tuple[State, ...] = (State.PLANNING, State.IMPLEMENTING)
+#: The states whose entry action spawns a detached run inside a sandbox — a codex
+#: agent (planning, implementing, the review fan-out) or a node gate report (verify).
+#: All of them report through the filesystem (`heartbeat`/`exit`/`sbx-exec.pid`) and
+#: are reaped the same way: the tick that asks is never the tick that started the run.
+#: A run sitting anywhere else is between steps: the next tick re-enters it, which is
+#: what "idempotent by construction" buys.
+DETACHED_STATES: tuple[State, ...] = (
+    State.PLANNING,
+    State.IMPLEMENTING,
+    State.VERIFYING,
+    State.REVIEWING,
+)
 
 #: How long after the wrapper is signalled the tick waits for its `exit` file. The
 #: wrapper writes `exit` last and atomically, so this is bounded by one `mv`; a run
@@ -54,6 +64,11 @@ class Outcome(StrEnum):
     #: start — a completed plan, or gates that failed and sent the work back. Nothing to
     #: reap; the tick's forward dispatch takes it from here.
     NEXT_STEP = "next-step"
+    #: A detached state was entered with no attempt row — verify/review reached by the
+    #: previous state's `collect` (which advanced the state but spawned nothing). The
+    #: tick must call that state's `start` to spawn the run. Mirrors NEXT_STEP: reap
+    #: returns a verdict, the drive loop acts; reap itself stays observation-only.
+    START_NEEDED = "start-needed"
 
 
 @dataclass(frozen=True)
@@ -71,22 +86,33 @@ def reap(ctx: Context) -> Verdict:
     because there is no live call stack for the exception to unwind.
     """
     state = ctx.run.state
-    if state not in AGENT_STATES:
-        return Verdict(Outcome.NOT_APPLICABLE, f"{state} spawns no agent")
+    if state not in DETACHED_STATES:
+        return Verdict(Outcome.NOT_APPLICABLE, f"{state} spawns no detached run")
 
     row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, state)
     if row is None or not row["artifact_dir"]:
+        # A detached state entered with no attempt row. For planning/implementing that
+        # is a control plane that died before `start` could spawn — orphan it, the way
+        # the host-reboot-between-start_attempt-and-spawn case always has. For
+        # verify/review it is the normal entry: the previous state's `collect` advanced
+        # the state but spawned nothing, so this tick must call the state's `start`.
+        if state in (State.VERIFYING, State.REVIEWING):
+            return Verdict(Outcome.START_NEEDED, f"no {state} attempt yet")
         return _orphan(ctx, "no-attempt-record", f"no attempt row for {state} #{ctx.run.attempt}")
 
-    # A finished attempt in an agent state means one of two very different things, and
-    # the transition log is what tells them apart. Entering `implementing` from
+    # A finished attempt in a detached state means one of two very different things,
+    # and the transition log is what tells them apart. Entering `implementing` from
     # `verifying` is the gate report sending the work back, and entering `planning` at
     # all ends with a plan the implement phase has yet to act on — both are the run
     # waiting for its next phase. Anything else is a control plane that died between
-    # `finish_attempt` and the transition, and that one is completed below
-    # by re-collecting, which is why `collect` re-derives rather than re-records.
+    # `finish_attempt` and the transition, and that one is completed below by
+    # re-collecting, which is why `collect` re-derives rather than re-records. The
+    # `entered_from is VERIFYING` clause is gated on `state is IMPLEMENTING` so that a
+    # finished *review* attempt (also entered from verifying, once reviewing joins the
+    # reaped set) is not misclassified — it falls through to poll→re-collect.
     if row["ended_at"] is not None and (
-        state is State.PLANNING or _entered_from(ctx) is State.VERIFYING
+        state is State.PLANNING
+        or (state is State.IMPLEMENTING and _entered_from(ctx) is State.VERIFYING)
     ):
         return Verdict(Outcome.NEXT_STEP, f"{state} attempt {ctx.run.attempt} is finished")
 
@@ -134,6 +160,10 @@ def reap(ctx: Context) -> Verdict:
 def _collect(ctx: Context, state: State, attempt_dir: AttemptDir) -> None:
     if state is State.IMPLEMENTING:
         implement_step.collect(ctx, attempt_dir, ctx.run.attempt)
+    elif state is State.VERIFYING:
+        verify_step.collect(ctx, attempt_dir, ctx.run.attempt)
+    elif state is State.REVIEWING:
+        review_step.collect(ctx, attempt_dir, ctx.run.attempt)
     else:
         plan_step.collect(ctx, attempt_dir)
 

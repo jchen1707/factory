@@ -186,6 +186,17 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     if not skip_backoff and waited < wait_for:
         return Verdict(Disposition.RESTART, "backoff", ladder_rung(ctx.run.attempt))
 
+    if died_in in (State.VERIFYING, State.REVIEWING):
+        # A verify/review that orphaned or timed out re-runs the step fresh. There is no
+        # codex session to resume (verify is a node gate report; review.start re-runs
+        # Tier-1/Tier-2 fresh), so `decide()`'s RESUME/RESTART/REWIND dispositions all
+        # collapse to "re-run" — and its `attempts_in_state` ceiling is decorative here,
+        # because `start_attempt` is `INSERT OR REPLACE` on `(run, attempt, state)` and
+        # verify/review re-runs keep the same attempt number (handoff note 2: they read
+        # the implement attempt's evidence at `run/<attempt>`). The transitions table
+        # counts the re-runs instead: one `died_in -> resumable` row per reap orphan.
+        return _rerun_detached(ctx, died_in)
+
     verdict = decide(
         attempts_spent=ctx.run.attempt,
         attempts_in_state=ctx.store.attempts_in_state(ctx.run.id, died_in),
@@ -225,6 +236,47 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     )
     implement_step.start(ctx, resume_session=session, continuation=continuation_prompt(ctx))
     return verdict
+
+
+def _rerun_detached(ctx: Context, died_in: State) -> Verdict:
+    """Re-run an orphaned/timed-out verify or review, bounded by a re-run ceiling.
+
+    `resume_run`'s branch for `died_in in (verifying, reviewing)`. The step's `start`
+    advances `resumable -> {verifying,reviewing}` (a valid automatic edge) and spawns
+    the detached run; no attempt counter changes, so verify/review keep reading the
+    implement attempt's evidence at `run/<attempt>`. The `resumable_reentries` count
+    escalates to `failed` at `max_attempts`, which the `attempts_in_state` ceiling
+    could not do for a same-attempt re-run.
+    """
+    from factory.steps import review as review_step
+    from factory.steps import verify as verify_step
+
+    rung = ladder_rung(ctx.run.attempt)
+    reentries = ctx.store.resumable_reentries(ctx.run.id, died_in)
+    if reentries >= ctx.registry.defaults.max_attempts:
+        ctx.store.record_transition(
+            ctx.run.id,
+            from_state=State.RESUMABLE,
+            to_state=State.FAILED,
+            actor=AUTOMATIC,
+            rule=f"max-reruns-{died_in}",
+            detail=f"{reentries} {died_in} re-runs against a {ctx.registry.defaults.max_attempts} ceiling",
+        )
+        ctx.refresh()
+        ctx.log(
+            "recovery.rerun_failed",
+            level="warning",
+            state=str(died_in),
+            reentries=reentries,
+        )
+        return Verdict(Disposition.FAIL, f"max-reruns-{died_in}", rung)
+
+    if died_in is State.VERIFYING:
+        verify_step.start(ctx)
+    else:
+        review_step.start(ctx)
+    ctx.log("recovery.rerun", state=str(died_in), reentries=reentries)
+    return Verdict(Disposition.RESTART, f"rerun-{died_in}", rung)
 
 
 def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = False) -> State:
@@ -409,7 +461,7 @@ def suspend(ctx: Context, *, reason: str) -> State:
     from factory.steps import reap as reap_step
 
     origin = ctx.run.state
-    if origin in reap_step.AGENT_STATES:
+    if origin in reap_step.DETACHED_STATES:
         row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
         if row and row["artifact_dir"]:
             attempt_dir = Path(str(row["artifact_dir"]))

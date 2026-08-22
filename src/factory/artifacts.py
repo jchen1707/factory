@@ -123,6 +123,21 @@ class AttemptDir:
         for name in ("exit", "last-message.json", "events.jsonl", "stderr.log", "heartbeat"):
             (self.root / name).unlink(missing_ok=True)
 
+    def clear_liveness(self) -> None:
+        """Remove only the run-liveness markers (`exit`, `heartbeat`), leaving evidence.
+
+        A verify or review run reuses the implement attempt's directory — it reads the
+        implementer's `last-message.json` and the deliver step archives the whole dir —
+        so it cannot go through `_clear_terminal_markers`, which would delete that
+        evidence. It does need a fresh `exit`/`heartbeat` of its own, because the
+        implementer left a (stale, terminal) `exit` there and `poll` treats `exit` as
+        authoritative regardless of what produced it. The sbx holder files
+        (`sbx-exec.pid`, `sbx-exec.stderr`) are overwritten by `exec_detached`, so they
+        need no explicit clear here.
+        """
+        for name in ("exit", "heartbeat"):
+            (self.root / name).unlink(missing_ok=True)
+
     @property
     def request(self) -> Path:
         return self.root / "request.json"

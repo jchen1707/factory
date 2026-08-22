@@ -625,6 +625,24 @@ class Store:
         ).fetchone()
         return int(row["n"]) if row else 0
 
+    def resumable_reentries(self, run_id: str, from_state: State) -> int:
+        """How many times a run left `from_state` for `resumable`.
+
+        `attempts` is keyed `(run_id, attempt, state)` and `start_attempt` is
+        `INSERT OR REPLACE`, so re-running a non-agent state (verify/review) at the
+        same attempt number never grows `attempts_in_state` — the per-state ceiling
+        there is decorative for those re-runs. The `transitions` table records one
+        `from_state -> resumable` row every time reap orphans or times out an attempt,
+        so counting those is the re-run ceiling that actually increments. Used by
+        `recovery.resume_run` to bound a hanging verify/review re-run to `failed`.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM transitions "
+            "WHERE run_id = ? AND from_state = ? AND to_state = ?",
+            (run_id, str(from_state), str(State.RESUMABLE)),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def set_session_id(self, run_id: str, attempt: int, state: State, session_id: str) -> None:
         """Stored before the run is considered started, so a crash can resume by id.
 

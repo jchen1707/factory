@@ -356,10 +356,13 @@ def _report(ctx: Context) -> None:
 #: that expired under a healthy holder is F13's failure, not a recovery.
 TICK_LEASE_SECONDS = 900
 
-#: Where the forward dispatch takes over from the poller. `implementing` and `planning`
-#: are absent on purpose: those two are `steps/reap.py`'s, because the run in them is
-#: not waiting for the factory to do something, it is waiting for an agent that a
-#: previous process started.
+#: Where the forward dispatch takes over from the poller. `implementing`, `planning`,
+#: `verifying` and `reviewing` are absent on purpose: those four are
+#: `steps/reap.py`'s, because the run in them is not waiting for the factory to do
+#: something, it is waiting for a detached run (a codex agent or the gate report) that
+#: a previous process started — or, for verify/review just entered by the previous
+#: state's collect, it is waiting for this tick to call `start`. `pr_ready` stays
+#: forward: `deliver` is a short host-side push + PR, synchronous by design.
 _FORWARD: dict[State, str] = {
     State.APPROVED: "claim",
     State.CLAIMED: "context",
@@ -367,8 +370,6 @@ _FORWARD: dict[State, str] = {
     State.SANDBOX_CREATING: "sandbox",
     State.SANDBOX_READY: "worktree",
     State.WORKTREE_READY: "agent",
-    State.VERIFYING: "verify",
-    State.REVIEWING: "review",
     State.PR_READY: "deliver",
 }
 
@@ -448,7 +449,7 @@ def tick_once(
 
     # Reaping and recovery come first, and claiming comes last. A machine that claimed
     # first would keep starting runs it had not yet noticed were broken.
-    for run in store.runs_in_states([*reap_step.AGENT_STATES, State.RESUMABLE]):
+    for run in store.runs_in_states([*reap_step.DETACHED_STATES, State.RESUMABLE]):
         line = _work_on(store, run, build, verbose=verbose)
         if line:
             lines.append(line)
@@ -514,10 +515,17 @@ def _drive_from_here(ctx: Context) -> str:
     steps: list[str] = []
     while True:
         before = ctx.state
-        if before in reap_step.AGENT_STATES:
+        if before in reap_step.DETACHED_STATES:
             verdict = reap_step.reap(ctx)
             steps.append(f"{before}:{verdict.outcome}")
             if verdict.outcome in (reap_step.Outcome.RUNNING, reap_step.Outcome.ORPHANED):
+                break
+            if verdict.outcome is reap_step.Outcome.START_NEEDED:
+                # Verify/review entered by the previous state's collect, with no
+                # attempt spawned yet. Start the detached run now and break: the next
+                # tick reaps it. `start` does not advance (the run is already in this
+                # state), so without this branch the loop would break without spawning.
+                _start_detached(ctx, before)
                 break
             if verdict.outcome is reap_step.Outcome.NEXT_STEP:
                 implement_step.start(ctx, continuation=recovery.continuation_prompt(ctx))
@@ -537,6 +545,21 @@ def _drive_from_here(ctx: Context) -> str:
     return f"{ctx.run.linear_id:<10} {'  '.join(steps)}" if steps else ""
 
 
+def _start_detached(ctx: Context, state: State) -> None:
+    """Spawn a detached run for a verify/review state that reap found unstarted.
+
+    The only detached states that reach `START_NEEDED` (no attempt row) are
+    `verifying` and `reviewing` — `planning`/`implementing` orphan instead, because
+    their `start` is the sole entry point and a no-row row means it crashed before
+    spawning. verify/review, by contrast, are entered by the previous state's
+    `collect`, so a no-row row is the normal first tick, not a crash.
+    """
+    if state is State.VERIFYING:
+        verify_step.start(ctx)
+    elif state is State.REVIEWING:
+        review_step.start(ctx)
+
+
 def _perform(ctx: Context, action: str) -> None:
     if action == "claim":
         claim_step.run(ctx)
@@ -551,10 +574,6 @@ def _perform(ctx: Context, action: str) -> None:
             plan_step.start(ctx)
         else:
             implement_step.start(ctx)
-    elif action == "verify":
-        verify_step.run(ctx)
-    elif action == "review":
-        review_step.run(ctx)
     elif action == "deliver":
         deliver_step.run(ctx)
 
@@ -979,8 +998,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print(f"\nReview ran and a draft pull request is open: {ctx.run.pr_url}\n")
     elif ctx.state is State.AWAITING_HUMAN:
         print(f"\nThe run stopped at `{ctx.state}` for a human to look.")
-    elif ctx.state in reap_step.AGENT_STATES:
-        print(f"\nThe agent is running at `{ctx.state}`; `factory tick` collects it.")
+    elif ctx.state in reap_step.DETACHED_STATES:
+        print(f"\nA detached run is in progress at `{ctx.state}`; `factory tick` collects it.")
     else:
         print(f"\nThe run came to rest at `{ctx.state}`.")
     return 0

@@ -23,6 +23,7 @@ from factory.steps import claim as claim_step
 from factory.steps import context as context_step
 from factory.steps import implement as implement_step
 from factory.steps import reap as reap_step
+from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
@@ -361,8 +362,134 @@ def test_a_blocked_run_is_recorded_and_the_pass_keeps_going(ctx: Context) -> Non
 
 
 # --------------------------------------------------------------------------------
-# The poller evaluates intake — it does not delegate that to the claim step
+# verify and review are two-phase — start spawns, a later tick collects
 # --------------------------------------------------------------------------------
+
+
+def _stub_redphase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake's test gate returns exit 0, which the red-phase classifier reads as a green
+    `test-proves-nothing` block. The two-phase verify tests stop at verify, but the tick
+    drives straight on into review.start, so the replay is stubbed to "proceed"."""
+    monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
+    monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
+
+
+def test_reap_returns_start_needed_when_verify_has_no_attempt_row(ctx: Context) -> None:
+    # Verify is entered by implement.collect, which advances the state but spawns nothing,
+    # so the first tick to see `verifying` finds no attempt row and must call `verify.start`.
+    # `START_NEEDED` is the outcome that makes the drive do that (mirroring NEXT_STEP); the
+    # old behaviour orphaned a no-row implement attempt, which is wrong for verify.
+    _to_verifying(ctx)
+
+    verdict = reap_step.reap(ctx)
+
+    assert verdict.outcome is reap_step.Outcome.START_NEEDED
+
+
+def test_the_drive_starts_verify_on_start_needed(ctx: Context) -> None:
+    # Without a START_NEEDED branch the drive would break (state unchanged) and never
+    # spawn the gate report — the run would sit at `verifying` forever under the daemon.
+    _to_verifying(ctx)
+
+    _tick(ctx)
+
+    run = ctx.store.run_by_id(ctx.run.id)
+    assert run is not None
+    assert run.state is State.VERIFYING
+    assert ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.VERIFYING) is not None
+
+
+def test_a_second_tick_collects_the_verify_run_the_previous_one_started(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The core two-phase property, for verify: the tick that asks is never the tick that
+    # started the run. `start` spawned the gate report last tick; this tick reaps `exit`
+    # and collects, advancing to `reviewing` — in a call that never saw `start`'s return.
+    _stub_redphase(monkeypatch)
+    _start_an_attempt(ctx)
+    _tick(ctx)  # implement collected -> verifying started (detached, exit written)
+    assert ctx.store.run_by_id(ctx.run.id).state is State.VERIFYING  # type: ignore[union-attr]
+
+    _tick(ctx)  # verify collected -> reviewing
+
+    hops = [(row["from_state"], row["to_state"]) for row in ctx.store.transitions(ctx.run.id)]
+    assert (str(State.VERIFYING), str(State.REVIEWING)) in hops
+
+
+def test_collecting_verify_does_not_increment_the_attempt(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Handoff note 2: verify reads the implement attempt's `last-message.json`, so a
+    # verify that incremented would point at a directory that does not exist. The increment
+    # belongs to the *next* implement.start, not to verify.collect.
+    _stub_redphase(monkeypatch)
+    _to_verifying(ctx)
+    attempt_before = ctx.run.attempt
+
+    _tick(ctx)  # verify.start (the fake writes exit synchronously)
+    _tick(ctx)  # verify collected -> reviewing
+
+    assert ctx.store.run_by_id(ctx.run.id).attempt == attempt_before  # type: ignore[union-attr]
+
+
+def test_an_orphaned_verify_run_goes_resumable_and_is_rerun(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An orphaned verify attempt (row, no exit, dead holder) goes resumable — uniform with
+    # implement — and `resume_run` re-runs it via `verify.start` (not `implement.start`,
+    # which would silently re-run a whole implement with an incremented attempt).
+    _stub_redphase(monkeypatch)
+    _to_verifying(ctx)
+    # Spawn verify directly so ctx keeps the fixture's lease (a `_tick` would release it on
+    # exit, and `resume_run`'s `advance` needs a holder).
+    verify_step.start(ctx)
+    assert ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.VERIFYING) is not None
+
+    _fake(ctx).poll_status = RunStatus.ORPHANED  # the holder died; no exit will appear
+    verdict = reap_step.reap(ctx)  # ORPHANED -> resumable (no advance, no lease needed)
+    assert verdict.outcome is reap_step.Outcome.ORPHANED
+    _fake(ctx).poll_status = None
+    ctx.refresh()
+    assert ctx.run.state is State.RESUMABLE
+
+    # The rerun is gated by §16.4's backoff, so it does not fire in the same tick that
+    # orphaned. `factory resume` (and the daemon, after the window) calls `resume_run`;
+    # here it is driven directly with the backoff skipped. It re-runs `verify.start`
+    # (not `implement.start`, which would silently spend a fresh implement attempt).
+    recovery.resume_run(ctx, skip_backoff=True)
+    ctx.refresh()
+
+    hops = [(row["from_state"], row["to_state"]) for row in ctx.store.transitions(ctx.run.id)]
+    assert (str(State.VERIFYING), str(State.RESUMABLE)) in hops  # the orphan
+    assert (str(State.RESUMABLE), str(State.VERIFYING)) in hops  # the rerun via verify.start
+    assert ctx.run.state is State.VERIFYING
+
+
+def test_a_verify_run_that_orphaned_past_the_ceiling_escalates_to_failed(
+    ctx: Context,
+) -> None:
+    # `attempts_in_state` is decorative for verify (start_attempt is INSERT OR REPLACE on a
+    # fixed attempt number), so the re-run ceiling counts `verify -> resumable` transitions
+    # instead. At `max_attempts` of them, `resume_run` escalates to `failed` rather than
+    # re-running a hanging gate report forever — the loop the daemon cannot have.
+    _to_verifying(ctx)
+    for _ in range(ctx.registry.defaults.max_attempts):
+        ctx.store.record_transition(
+            ctx.run.id,
+            from_state=State.VERIFYING,
+            to_state=State.RESUMABLE,
+            actor="auto",
+            rule="attempt-orphaned",
+            detail="orphan",
+        )
+    ctx.refresh()
+
+    verdict = recovery.resume_run(ctx, skip_backoff=True)
+
+    assert verdict.disposition is Disposition.FAIL
+    run = ctx.store.run_by_id(ctx.run.id)
+    assert run is not None
+    assert run.state is State.FAILED
 
 
 def _ready(ctx: Context, *tickets: str) -> None:

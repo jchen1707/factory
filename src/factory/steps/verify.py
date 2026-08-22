@@ -11,11 +11,19 @@ report hook is named as a path, and the gates themselves come out of the report 
 The attempt directory is the **implement** attempt's, resolved the way `implement.py`
 did — except that implement already recorded the attempt, so here `ctx.run.attempt` *is*
 that attempt. Adding one again would point at a directory that does not exist yet.
+
+Two-phase, like `implement`: `start` spawns the gate report as a detached node process
+inside the build sandbox (heartbeat + atomic `exit`), and `collect` reads it back off
+the filesystem and advances. A tick that blocked for the length of a gate suite would be
+a tick that could not reap anything else, which the daemon cannot have. `factory run`
+uses `run` (start → await → collect); the tick uses `start` and `collect` separately.
 """
 
 from __future__ import annotations
 
 import json
+import shlex
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -24,11 +32,11 @@ from factory import artifacts
 from factory.agent.base import SchemaInvalid, validate_against_schema
 from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
-from factory.machine import Blocked, State
-from factory.sandbox.base import Completed
+from factory.machine import AUTOMATIC, Blocked, State
+from factory.sandbox.base import RunHandle, detached_shell_script
 from factory.steps import Context, advance
 
-__all__ = ["run"]
+__all__ = ["collect", "run", "start"]
 
 STEP = "verify"
 
@@ -48,18 +56,41 @@ _OPT_IN_KINDS = frozenset({"e2e", "integration"})
 #: honest `fail` is accepted here; the loop-back happens on the verdict, not the claim.
 _RAN = frozenset({"pass", "fail"})
 
+POLL_INTERVAL_SECONDS = 10
+
 
 def run(ctx: Context) -> None:
+    """Start the gate report and stay with it until it ends — `factory run`'s path.
+
+    `factory tick` uses `start` and `collect` separately, because a tick that blocked for
+    the length of a gate suite could not reap anything else. The two paths share every
+    line that matters: this one is `start`, a poll loop, and `collect`.
+    """
+    started = start(ctx)
+    if started is None:
+        return
+    attempt_dir, handle = started
+    _await_exit(ctx, attempt_dir, handle)
+    collect(ctx, attempt_dir, ctx.run.attempt)
+
+
+def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
+    """Spawn the gate report as a detached node process. Returns once it is running.
+
+    `None` means a dry run, which walks the states and executes nothing.
+
+    The gate report runs in the build sandbox against the worktree, with `--base` set to
+    the run's base ref so `gate_report.mjs`'s "did this app change?" check sees the
+    committed change rather than a clean working tree (every gate would otherwise be
+    `skipped_unchanged`). `--all` is passed iff the agent claimed an opt-in gate,
+    cross-checked by name against `harness.config.json`.
+
+    `actor` threads through the `advance` into `verifying`. The hop is automatic for
+    the tick's forward dispatch and the resumable re-run, but `BLOCKED -> verifying` is
+    `unblock-is-a-judgement`, so a human `factory resume --from verifying` passes
+    `"human"` or the advance refuses.
+    """
     worktree = ctx.worktree
-    # The factory commits the agent's work before it verifies, so the working tree is
-    # clean and `gate_report.mjs`'s default `git status --porcelain` "did this app change?"
-    # check sees nothing — every gate would be `skipped_unchanged` regardless of what the
-    # change touched. Against the run's base ref, `git diff --name-only <base>..HEAD` sees
-    # the committed change instead, so the gates actually run. `--base` switches the report
-    # to that check; the Stop hook never passes a base, because its working tree is the
-    # agent's uncommitted edits. See `gatedChangeSince` in the vendored `verify.mjs`.
-    # `run.base_ref` is set at worktree creation; the `project.base_ref` fallback mirrors
-    # `cli._restore`'s spelling so a run row that predates the column still verifies.
     base_ref = ctx.run.base_ref or ctx.project.base_ref
 
     if ctx.dry_run:
@@ -70,62 +101,137 @@ def run(ctx: Context) -> None:
         ctx.would("write gates.json beside last-message.json; cross-check gates_run")
         ctx.would("advance on pass -> reviewing, fail -> implementing, incomplete -> blocked")
         advance(ctx, State.REVIEWING)
-        return
+        return None
 
     attempt = ctx.run.attempt
     attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt))
+    # Reuse the implement attempt's directory — verify reads its `last-message.json` and
+    # the deliver step archives the whole dir — but clear the implementer's stale
+    # `exit`/`heartbeat` first, or `poll` would read a finished implement attempt as the
+    # gate report's terminal record. Evidence files (`last-message.json`, `events.jsonl`)
+    # are left in place.
+    attempt_dir.clear_liveness()
 
     gates_run = _gates_run(attempt_dir)
+    argv = _gate_argv(ctx.harness, gates_run, base_ref)
+    body = (
+        " ".join(shlex.quote(part) for part in argv)
+        + f" > {shlex.quote(str(attempt_dir.path('gates.stdout.txt')))}"
+        + f" 2> {shlex.quote(str(attempt_dir.path('gates.stderr.txt')))}"
+    )
+    script = detached_shell_script(
+        heartbeat_path=attempt_dir.heartbeat,
+        exit_path=attempt_dir.exit_file,
+        body=body,
+    )
+
+    ctx.store.start_attempt(
+        ctx.run.id,
+        attempt,
+        State.VERIFYING,
+        sandbox=ctx.project.build_sandbox,
+        artifact_dir=str(attempt_dir.root),
+    )
+    ctx.refresh()
+    # The hop into `verifying` is recorded once, by whoever put the run here. From
+    # `implementing` (via implement.collect) that was the previous step; from `blocked`
+    # it is this `start` under a human actor. Re-recording `verifying -> verifying` is an
+    # illegal transition, so `start` advances only when it is not already there.
+    if ctx.state is not State.VERIFYING:
+        advance(ctx, State.VERIFYING, actor=actor)
+
+    handle = RunHandle(
+        run_id=ctx.run.id,
+        attempt=attempt,
+        sandbox=ctx.project.build_sandbox,
+        workdir=str(worktree),
+        attempt_dir=attempt_dir.root,
+    )
+    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.log("verify.started", sandbox=handle.sandbox, base_ref=base_ref)
+    return attempt_dir, handle
+
+
+def _gate_argv(harness: HarnessConfig | None, gates_run: list[str], base_ref: str) -> list[str]:
     argv = ["node", _REPORT_HOOK, "--json"]
-    if _claims_opt_in(ctx.harness, gates_run):
+    if _claims_opt_in(harness, gates_run):
         argv.append("--all")
     if base_ref:
         argv += ["--base", base_ref]
+    return argv
 
-    completed = ctx.sandbox.exec_sync(
-        ctx.project.build_sandbox,
-        argv,
-        workdir=str(worktree),
-        env=dict(ctx.project.env),
-        timeout=ctx.timeout_for(State.VERIFYING),
+
+def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
+    """Watch the `exit` file. A timeout is never silently a success.
+
+    On timeout the node process is killed and the wrapper's `exit` file is waited for,
+    so the attempt ends with a real terminal record rather than a truncated one — the
+    same shape as `implement._await_exit`.
+    """
+    timeout = ctx.timeout_for(State.VERIFYING)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if attempt_dir.exit_file.exists():
+            return
+        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    ctx.log("verify.timeout", level="warning", seconds=timeout)
+    kill = getattr(ctx.sandbox, "kill_agent", None)
+    if kill is not None:
+        kill(handle.sandbox)
+    for _ in range(12):
+        if attempt_dir.exit_file.exists():
+            break
+        time.sleep(5)
+    from factory.machine import Resumable
+
+    raise Resumable(
+        "verify-timeout", f"no exit file after {timeout}s; the gate report was signalled"
     )
-    # Written before the parse, because `schema-invalid` was the one failure mode that
-    # destroyed its own evidence: `_validated_report` raises, `gates.json` below never
-    # gets written, and the only record left is the exception text in the `checks` row.
-    # A report the parser rejects is exactly the one someone has to read by hand.
-    _write_raw(attempt_dir, completed)
 
-    report = _validated_report(ctx, completed, attempt)
 
-    # Beside `last-message.json`, so one attempt directory holds the claim and its proof.
+def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
+    """Read the gate report off the filesystem and decide what it proved.
+
+    Called by `run` moments after the gate report exits, or by `reap` on a later tick —
+    possibly in a different process, after a reboot. Nothing here reads anything `start`
+    held in memory: the report is on disk at `gates.stdout.txt`, the claim at
+    `last-message.json`, both under the same absolute path on both sides.
+    """
+    recorded = _already_recorded(ctx, attempt)
+    report = _validated_report(ctx, attempt_dir, attempt, recorded=recorded)
     artifacts.write_json(attempt_dir.path("gates.json"), report)
-    ctx.store.record_check(
-        ctx.run.id,
-        attempt,
-        "gate_report",
-        "pass" if report["verdict"] == "pass" else "fail",
-        detail=json.dumps(
-            {
-                "verdict": report["verdict"],
-                "gates": [{"name": g["name"], "status": g["status"]} for g in report["gates"]],
-            }
-        )[:2000],
-        artifact=str(attempt_dir.root),
-    )
+    if not recorded:
+        ctx.store.record_check(
+            ctx.run.id,
+            attempt,
+            "gate_report",
+            "pass" if report["verdict"] == "pass" else "fail",
+            detail=json.dumps(
+                {
+                    "verdict": report["verdict"],
+                    "gates": [{"name": g["name"], "status": g["status"]} for g in report["gates"]],
+                }
+            )[:2000],
+            artifact=str(attempt_dir.root),
+        )
     ctx.log("verify.report", verdict=report["verdict"], gates=len(report["gates"]))
 
+    gates_run = _gates_run(attempt_dir)
     mismatched = _evidence_mismatch(gates_run, report["gates"])
     if mismatched:
         # The mismatch is recorded before the block, so the disagreeing gate names are in
         # the evidence even when the announcement transport is down — the same shape as
         # the implement step's schema-invalid check.
-        ctx.store.record_check(
-            ctx.run.id,
-            attempt,
-            "evidence-mismatch",
-            "fail",
-            detail=", ".join(mismatched)[:2000],
-        )
+        if not recorded:
+            ctx.store.record_check(
+                ctx.run.id,
+                attempt,
+                "evidence-mismatch",
+                "fail",
+                detail=", ".join(mismatched)[:2000],
+            )
         raise Blocked(
             "evidence-mismatch",
             "the agent claimed gates the report did not show as pass or fail: "
@@ -133,18 +239,25 @@ def run(ctx: Context) -> None:
         )
 
     verdict = report["verdict"]
+    # The attempt row is finished before the transition, so a crash between the two
+    # re-collects idempotently rather than advancing twice.
+    ctx.store.finish_attempt(
+        ctx.run.id, attempt, State.VERIFYING, exit_code=attempt_dir.exit_code(), outcome=verdict
+    )
     if verdict == "pass":
         advance(ctx, State.REVIEWING)
     elif verdict == "fail":
         # Loop back for a real failure. The next `implement` resolves
         # `attempt = ctx.run.attempt + 1`, so this attempt's evidence stays in its own
-        # directory and the agent gets a fresh one to fix the failure in.
+        # directory and the agent gets a fresh one to fix the failure in. `collect` does
+        # NOT increment the attempt — the increment lives in `implement.start`, and
+        # adding one here would point the next implement at a directory that does not
+        # exist (handoff note 2).
         advance(ctx, State.IMPLEMENTING)
     else:  # incomplete — never a pass
         # An unavailable gate or a missing app is an environment/manifest problem, not a
         # code failure, so it does not loop back to the agent. `gates-incomplete` is a
         # new slug; `Blocked` accepts any, and `machine.py:179` lists the canonical ones.
-        # This is the one design decision step 2 makes — see the handoff.
         raise Blocked(
             "gates-incomplete",
             "the gate report is incomplete: a gate could not start or an app had no "
@@ -152,6 +265,11 @@ def run(ctx: Context) -> None:
             + ", ".join(f"{g['name']}={g['status']}" for g in report["gates"])
             + (f"; missingApps={report['missingApps']}" if report.get("missingApps") else ""),
         )
+
+
+def _already_recorded(ctx: Context, attempt: int) -> bool:
+    row = ctx.store.attempt_row(ctx.run.id, attempt, State.VERIFYING)
+    return row is not None and row["ended_at"] is not None
 
 
 def _gates_run(attempt_dir: AttemptDir) -> list[str]:
@@ -239,45 +357,48 @@ def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]])
     return mismatched
 
 
-def _write_raw(attempt_dir: AttemptDir, completed: Completed) -> None:
-    """The two streams of the report hook, exactly as the sandbox produced them.
-
-    Split the way `implement.py` splits them (`AttemptDir.stderr`) and for the same
-    reason: one is the data the state machine advances on, the other is evidence about
-    the run that produced it. `gates.json` is the parsed document and only exists when
-    the parse succeeded; these two always exist, so a `schema-invalid` block leaves
-    something to read. Best-effort — a report that cannot be filed is not a reason to
-    lose the verdict."""
-    try:
-        attempt_dir.path("gates.stdout.txt").write_text(completed.stdout, encoding="utf-8")
-        attempt_dir.path("gates.stderr.txt").write_text(completed.stderr, encoding="utf-8")
-    except OSError:
-        pass
-
-
-def _validated_report(ctx: Context, completed: Completed, attempt: int) -> dict[str, Any]:
+def _validated_report(
+    ctx: Context, attempt_dir: AttemptDir, attempt: int, *, recorded: bool = False
+) -> dict[str, Any]:
     """The report is schema-valid or the state does not advance. The JSON `verdict` field
     is authoritative — the exit code only mirrors it — so a malformed document blocks
     rather than rounding to green. Deliberately strict: taking the first document out of a
     stream with trailing bytes on it (`raw_decode`) would round an unaccounted-for exec
     path to green, which is the failure this check exists to prevent. The raw streams are
-    already on disk by here (`_write_raw`), so a rejected document is still readable."""
+    already on disk (the detached script wrote them), so a rejected document is readable."""
+    stdout_path = attempt_dir.path("gates.stdout.txt")
     try:
-        payload = json.loads(completed.stdout)
+        raw = stdout_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise Blocked("schema-invalid", f"the gate report wrote no stdout: {exc}") from exc
+    try:
+        payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        ctx.store.record_check(
-            ctx.run.id, attempt, "gate_report_schema", "fail", detail=f"stdout is not JSON: {exc}"
-        )
-        raise Blocked("schema-invalid", f"gate report stdout is not JSON: {exc}") from exc
+        if not recorded:
+            ctx.store.record_check(
+                ctx.run.id,
+                attempt,
+                "gate_report_schema",
+                "fail",
+                detail=f"stdout is not JSON: {exc}",
+            )
+        stderr_tail = artifacts.tail_lines(attempt_dir.path("gates.stderr.txt"), 20)
+        raise Blocked(
+            "schema-invalid", f"gate report stdout is not JSON: {exc}\n{stderr_tail}"
+        ) from exc
 
     schema = json.loads(_schema_path(ctx).read_text(encoding="utf-8"))
     try:
         validate_against_schema(payload, schema)
     except SchemaInvalid as exc:
-        ctx.store.record_check(ctx.run.id, attempt, "gate_report_schema", "fail", detail=str(exc))
+        if not recorded:
+            ctx.store.record_check(
+                ctx.run.id, attempt, "gate_report_schema", "fail", detail=str(exc)
+            )
         raise Blocked("schema-invalid", f"gate report failed schema validation: {exc}") from exc
 
-    ctx.store.record_check(ctx.run.id, attempt, "gate_report_schema", "pass")
+    if not recorded:
+        ctx.store.record_check(ctx.run.id, attempt, "gate_report_schema", "pass")
     return dict(payload)
 
 

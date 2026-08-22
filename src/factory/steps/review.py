@@ -1,15 +1,15 @@
 """`reviewing -> pr_ready | awaiting_human` — the two-tier review (§15.2).
 
 Tier 1 is always run: Standards and Spec, independently, in a second, read-only sandbox
-whose workspace is the worktree mounted `:ro` and whose Codex config is overridden
+whose workspace is the project mounted `:ro` and whose Codex config is overridden
 per-invocation to `sandbox_mode="read-only"`. Two enforcement layers, neither of them a
 prompt. The prompt is **assembled, not authored** — frame plus checklist, concatenated
 exactly the way layer A's `full-review.js` `axisPrompt()` does it — so a review that runs
 here and a review that runs through the workflow cannot drift apart.
 
 Tier 2 is the full nine-axis fan-out, and it runs only when the change warrants it. The
-trigger rules are all deterministic and all recorded; otherwise Tier 2 is skipped and the PR
-body names the rule that skipped it. This is "do not run every skill for every ticket",
+trigger rules are all deterministic and all recorded; otherwise Tier 2 is skipped and the
+PR body names the rule that skipped it. This is "do not run every skill for every ticket",
 made mechanical.
 
 **Reviewers never repair.** The reviewer sandbox cannot write. A critical-or-high finding
@@ -21,26 +21,48 @@ The red-phase replay (§15.3) runs here too, as the first thing at the REVIEWING
 machine makes `verifying -> awaiting_human` illegal while §15.3's `escalate` option routes
 there, so the replay runs in `reviewing` where every outcome is reachable. See
 `redphase.py`'s header for the reasoning.
+
+Two-phase, like `implement` and `verify`: `start` runs the synchronous pre-checks
+(`clone.fetch_back`, the red-phase replay, the weakening guard), assembles the axis
+prompts, and spawns the codex fan-out as one detached script in the read-only review
+sandbox; `collect` lands and validates the findings, writes the summary, and advances.
+The red-phase replay stays synchronous because it runs the test gate in the **build**
+sandbox, while the codex axes must stay in the read-only **review** sandbox (§4.4 —
+enforcement by mount, not prompt), so the two cannot share one detached script. A
+behaviour-change ticket therefore blocks the tick for one test-run's duration before the
+fan-out detaches; accepted.
+
+One trigger rule is narrowed by the split. `_decide_tier2`'s `tier1_has_human` rule
+("Tier-1 found a critical/high → run the full fan-out") needs Tier-1's findings, which are
+not available at `start` time because Tier-1 runs inside the detached script. `start`
+computes the trigger with `tier1_has_human=False`, so the rule does not fire from the
+two-phase path. A Tier-1 critical/high still routes the run to `awaiting_human` via the
+transition below; only the *extra* Tier-2 findings in the narrow case (small diff, no
+diff-based trigger, Tier-1 critical/high) are lost — and `--full-review` covers it on
+demand. The rule stays in `_decide_tier2` for its table-driven test.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import json
+import shlex
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
 from factory import artifacts, repo
 from factory.agent.base import SchemaInvalid, validate_against_schema
+from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
-from factory.machine import Blocked, State
-from factory.sandbox.base import SandboxSpec, Workspace
+from factory.machine import AUTOMATIC, Blocked, State
+from factory.sandbox.base import RunHandle, SandboxSpec, Workspace, detached_shell_script
 from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
 
-__all__ = ["run"]
+__all__ = ["collect", "run", "start"]
 
 STEP = "review"
 
@@ -76,8 +98,35 @@ _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
 
+POLL_INTERVAL_SECONDS = 10
+
 
 def run(ctx: Context) -> None:
+    """Start the review and stay with it until it ends — `factory run`'s path.
+
+    `factory tick` uses `start` and `collect` separately, because a tick that blocked for
+    the length of the review fan-out could not reap anything else. The two paths share
+    every line that matters: this one is `start`, a poll loop, and `collect`.
+    """
+    started = start(ctx)
+    if started is None:
+        return
+    attempt_dir, handle = started
+    _await_exit(ctx, attempt_dir, handle)
+    collect(ctx, attempt_dir, ctx.run.attempt)
+
+
+def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
+    """Run the synchronous pre-checks, then spawn the codex fan-out detached.
+
+    Returns `None` when the run transitioned off `reviewing` without a detached spawn —
+    a dry run, a red-phase escalation, or a test-weakening escalation. Returns
+    `(attempt_dir, handle)` once the fan-out is running.
+
+    `actor` threads through the `advance` into `reviewing`: automatic for the tick and the
+    resumable re-run, but `BLOCKED -> reviewing` is `unblock-is-a-judgement`, so a human
+    `factory resume --from reviewing` passes `"human"` or the advance refuses.
+    """
     # The harness config is loaded at intake and carried on the context; the review cannot
     # run without it (the prompts are assembled from its `review.agentDir` / `checklistDir`).
     harness = ctx.harness
@@ -101,10 +150,11 @@ def run(ctx: Context) -> None:
 
     # 1. The red-phase replay (§15.3). May raise Blocked (test-proves-nothing,
     #    behaviour-change-without-test, inconclusive:block) or return "awaiting_human"
-    #    (inconclusive:escalate).
-    if redphase.replay(ctx) == "awaiting_human":
+    #    (inconclusive:escalate). Either way the run leaves `reviewing` here, without a
+    #    detached spawn, so `start` returns None and `run` returns.
+    if not ctx.dry_run and redphase.replay(ctx) == "awaiting_human":
         _awaiting_human(ctx, "redphase-inconclusive", "the red-phase replay was inconclusive")
-        return
+        return None
 
     # 2. The test-weakening guard — a judgement, so it escalates rather than blocks.
     offending = redphase.weakening_guard(ctx)
@@ -115,12 +165,9 @@ def run(ctx: Context) -> None:
             "the diff removes assertions in existing tests:\n"
             + "\n".join(f"- {line}" for line in offending[:20]),
         )
-        return
+        return None
 
     if ctx.dry_run:
-        # The replay and the weakening guard are dry-run aware and recorded their would-prints
-        # above. The Tier-1/Tier-2 fan-out is real model spend, so a dry run stops short of it
-        # and simulates the clean transition.
         ctx.would(
             f"Tier 1: standards + spec review in {ctx.project.review_sandbox} (read-only, sandbox_mode=read-only)"
         )
@@ -129,34 +176,224 @@ def run(ctx: Context) -> None:
             f"advance {State.REVIEWING} -> {State.PR_READY} (clean) | {State.AWAITING_HUMAN} (finding)"
         )
         advance(ctx, State.PR_READY)
-        return
+        return None
 
-    # 3. Tier 1 — always.
-    review_dir = ctx.state_dir / "review"
-    findings, tier1_has_human = _tier1(ctx, harness, review_dir)
-
-    # 4. Tier 2 — when the change warrants it. The rule that decides is recorded either way.
-    trigger = _tier2_trigger(ctx, harness, tier1_has_human)
-    if trigger is None:
-        # Tier 2 ran; merge its findings. The portable skill produces the same finding shape.
-        full = _tier2(ctx, review_dir)
-        findings += full
-        # "It ran" and "it ran because a human asked" are different facts, and the PR
-        # body says which. A forced fan-out reported as a triggered one would misstate
-        # what the review rules concluded about this diff — which is the only thing the
-        # rules are for.
-        tier2_rule = FORCED if ctx.run.full_review else "ran"
+    # 3. Decide the fan-out: which axes run, and the Tier-2 rule the PR body names. The
+    #    `tier1_has_human` trigger cannot fire here (Tier-1 has not run yet — see the
+    #    module header), so it is passed False. `--full-review` overrides first.
+    base_ref = ctx.run.base_ref or ctx.project.base_ref
+    trigger = _tier2_trigger(ctx, harness, tier1_has_human=False)
+    if ctx.run.full_review:
+        tier2_rule = FORCED
+        run_full = True
+    elif trigger is None:
+        tier2_rule = "ran"
+        run_full = True
     else:
         tier2_rule = trigger  # the skip rule, named in the PR body
+        run_full = False
 
-    # Stash the review summary on the context for the PR body (§13.2). The deliver step
-    # reads it back when assembling the body.
+    # 4. Assemble the per-axis prompts and the sandbox, then write a plan `collect` reads
+    #    back. The findings land in the per-project scratch (the reviewer's one writable
+    #    mount); `collect` moves them into this run's own directory.
+    review_dir = ctx.state_dir / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    scratch = _review_scratch(ctx)
+    spec = _review_spec(ctx, scratch)
+    ctx.sandbox.ensure(spec)
+    schema_path = ctx.worktree / _FINDINGS_SCHEMA
+
+    axes = []
+    for label, agent in _TIER1_AXES:
+        axes.append(
+            _axis_entry(
+                ctx,
+                harness,
+                review_dir,
+                scratch,
+                schema_path,
+                "tier1",
+                label,
+                _axis_prompt(ctx.worktree, harness, agent, base_ref),
+            )
+        )
+    if run_full:
+        axes.append(
+            _axis_entry(
+                ctx,
+                harness,
+                review_dir,
+                scratch,
+                schema_path,
+                "tier2",
+                "full",
+                _tier2_prompt(ctx, base_ref),
+            )
+        )
+    artifacts.write_json(
+        review_dir / "review-plan.json",
+        {"tier2": tier2_rule, "axes": [a["plan"] for a in axes]},
+    )
+
+    # 5. The detached script: one codex block per axis, each reading its prompt from a
+    #    file and writing findings (via `-o`) to the scratch. The envelope adds the
+    #    heartbeat + atomic `exit` that `poll` and `reap` read.
+    body = "\n".join(_axis_script_block(a) for a in axes)
+    attempt = ctx.run.attempt
+    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt))
+    # Reuse the implement attempt's directory (verify did too); clear the stale `exit`/
+    # `heartbeat` the previous step left, preserving the implement/verify evidence.
+    attempt_dir.clear_liveness()
+    script = detached_shell_script(
+        heartbeat_path=attempt_dir.heartbeat,
+        exit_path=attempt_dir.exit_file,
+        body=body,
+    )
+
+    ctx.store.start_attempt(
+        ctx.run.id,
+        attempt,
+        State.REVIEWING,
+        sandbox=ctx.project.review_sandbox,
+        artifact_dir=str(attempt_dir.root),
+    )
+    ctx.refresh()
+    if ctx.state is not State.REVIEWING:
+        advance(ctx, State.REVIEWING, actor=actor)
+
+    handle = RunHandle(
+        run_id=ctx.run.id,
+        attempt=attempt,
+        sandbox=ctx.project.review_sandbox,
+        workdir=str(ctx.worktree),
+        attempt_dir=attempt_dir.root,
+    )
+    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.log("review.started", axes=len(axes), tier2=tier2_rule)
+    return attempt_dir, handle
+
+
+def _axis_entry(
+    ctx: Context,
+    harness: HarnessConfig,
+    review_dir: Path,
+    scratch: Path,
+    schema_path: Path,
+    tier: str,
+    label: str,
+    prompt: str,
+) -> dict[str, Any]:
+    """One axis's start-time bookkeeping: write its prompt, choose its paths, build argv."""
+    prompt_path = review_dir / f"review-{label}.prompt"
+    prompt_path.write_text(prompt, encoding="utf-8")
+    scratch_out = _sandbox_out(scratch, f"review-{label}.json")
+    out_path = review_dir / f"review-{label}.json"
+    events_path = review_dir / f"review-{label}.events.jsonl"
+    stderr_path = review_dir / f"review-{label}.stderr.log"
+    argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree)
+    return {
+        "plan": {
+            "tier": tier,
+            "label": label,
+            "prompt": str(prompt_path),
+            "scratch_out": str(scratch_out),
+            "out": str(out_path),
+            "events": str(events_path),
+            "stderr": str(stderr_path),
+            "argv": list(argv),
+        },
+        "argv": argv,
+        "prompt_path": prompt_path,
+        "events_path": events_path,
+        "stderr_path": stderr_path,
+    }
+
+
+def _axis_script_block(axis: dict[str, Any]) -> str:
+    """The shell line for one axis: `codex exec … - < prompt > events 2> stderr`."""
+    argv = " ".join(shlex.quote(str(part)) for part in axis["argv"])
+    return (
+        f"{argv} < {shlex.quote(str(axis['prompt_path']))} "
+        f"> {shlex.quote(str(axis['events_path']))} "
+        f"2> {shlex.quote(str(axis['stderr_path']))}"
+    )
+
+
+def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
+    """Watch the `exit` file. A timeout is never silently a success."""
+    timeout = ctx.timeout_for(State.REVIEWING)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if attempt_dir.exit_file.exists():
+            return
+        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    ctx.log("review.timeout", level="warning", seconds=timeout)
+    kill = getattr(ctx.sandbox, "kill_agent", None)
+    if kill is not None:
+        kill(handle.sandbox)
+    for _ in range(12):
+        if attempt_dir.exit_file.exists():
+            break
+        time.sleep(5)
+    from factory.machine import Resumable
+
+    raise Resumable("review-timeout", f"no exit file after {timeout}s; the fan-out was signalled")
+
+
+def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
+    """Land and validate the fan-out's findings, write the summary, and advance.
+
+    Called by `run` after the fan-out exits, or by `reap` on a later tick — possibly in a
+    different process. Nothing here reads anything `start` held in memory: the plan at
+    `review-plan.json`, the findings in the per-project scratch, and the exit code are all
+    on disk.
+    """
+    review_dir = ctx.state_dir / "review"
+    plan = _read_plan(review_dir)
+    recorded = _already_recorded(ctx, attempt)
+
+    findings: list[dict[str, Any]] = []
+    tier1_has_human = False
+    for axis in plan.get("axes", []):
+        label = str(axis["label"])
+        scratch_out = Path(axis["scratch_out"])
+        out_path = Path(axis["out"])
+        events_path = Path(axis["events"])
+        stderr_path = Path(axis["stderr"])
+        _land(scratch_out, out_path)
+        axis_findings = _validated_findings(ctx, out_path, stderr_path, label)
+        # A secret in the review's own stream is compromised the way one in the PR body is.
+        artifacts.scan_for_secrets(
+            _read_text(events_path) + _read_text(stderr_path), f"review {label}"
+        )
+        findings += axis_findings
+        if axis.get("tier") == "tier1":
+            tier1_has_human = tier1_has_human or any(
+                f["severity"] in _HUMAN_SEVERITIES for f in axis_findings
+            )
+        if not recorded:
+            ctx.store.record_check(
+                ctx.run.id,
+                attempt,
+                f"review:{label}",
+                "pass",
+                detail=json.dumps(
+                    [{"sev": f["severity"], "file": f.get("file")} for f in axis_findings]
+                )[:2000],
+                artifact=str(review_dir),
+            )
+
+    tier2_rule = str(plan.get("tier2", "no-trigger"))
     _write_summary(ctx, review_dir, findings, tier2_rule)
+    ctx.store.finish_attempt(
+        ctx.run.id, attempt, State.REVIEWING, exit_code=attempt_dir.exit_code(), outcome=tier2_rule
+    )
 
-    # 5. Transition.
+    # 5. Transition. A critical/high finding (Tier-1 or Tier-2) is James's reserved
+    #    judgement: route to the human queue rather than auto-looping.
     if tier1_has_human or any(f["severity"] in _HUMAN_SEVERITIES for f in findings):
-        # A critical/high finding is James's reserved judgement: route to the human queue
-        # rather than auto-looping (Phase 4 adds the resume-to-implementer repair path).
         human = [f for f in findings if f["severity"] in _HUMAN_SEVERITIES]
         raise Blocked(
             "review-finding",
@@ -168,74 +405,32 @@ def run(ctx: Context) -> None:
     advance(ctx, State.PR_READY)
 
 
+def _already_recorded(ctx: Context, attempt: int) -> bool:
+    row = ctx.store.attempt_row(ctx.run.id, attempt, State.REVIEWING)
+    return row is not None and row["ended_at"] is not None
+
+
+def _read_plan(review_dir: Path) -> dict[str, Any]:
+    path = review_dir / "review-plan.json"
+    if not path.exists():
+        raise Blocked("review-plan-missing", f"no review-plan.json at {path}; was start run?")
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise Blocked("review-plan-missing", f"review-plan.json is not JSON: {exc}") from exc
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 # --------------------------------------------------------------------------------
 # Tier 1 — Standards + Spec, read-only, assembled prompts
 # --------------------------------------------------------------------------------
-
-
-def _tier1(
-    ctx: Context, harness: HarnessConfig, review_dir: Path
-) -> tuple[list[dict[str, Any]], bool]:
-    """Run the two Tier-1 axes. Returns `(findings, has_critical_or_high)`.
-
-    Each axis runs `codex exec` in the read-only review sandbox, with a prompt assembled
-    the way `axisPrompt` does it and the diff named in it, writing schema-valid findings
-    to `<review_dir>/review-<axis>.json`.
-    """
-    if ctx.dry_run:
-        for label, _agent in _TIER1_AXES:
-            ctx.would(f"assemble {label} prompt from {harness.review_agent_dir} + vendored frame")
-            ctx.would(
-                f"codex exec -c sandbox_mode=read-only (in {ctx.project.review_sandbox}), "
-                f"reviewing git diff {ctx.run.base_ref}...HEAD"
-            )
-        return [], False
-
-    scratch = _review_scratch(ctx)
-    spec = _review_spec(ctx, scratch)
-    ctx.sandbox.ensure(spec)
-    base_ref = ctx.run.base_ref or ctx.project.base_ref
-    schema_path = ctx.worktree / _FINDINGS_SCHEMA
-    review_dir.mkdir(parents=True, exist_ok=True)
-
-    findings: list[dict[str, Any]] = []
-    has_human = False
-    for label, agent in _TIER1_AXES:
-        prompt = _axis_prompt(ctx.worktree, harness, agent, base_ref)
-        # The reviewer writes into the project-stable scratch, because that is what it can
-        # reach; the run's own directory is where the evidence lives, so the file moves
-        # there the moment the axis returns.
-        scratch_out = _sandbox_out(scratch, f"review-{label}.json")
-        out_path = review_dir / f"review-{label}.json"
-        events_path = review_dir / f"review-{label}.events.jsonl"
-        stderr_path = review_dir / f"review-{label}.stderr.log"
-        argv = _review_argv(ctx, schema_path, scratch_out)
-        completed = ctx.sandbox.exec_sync(
-            ctx.project.review_sandbox,
-            argv,
-            workdir=str(ctx.worktree),
-            env=dict(ctx.project.env),
-            timeout=ctx.timeout_for(State.REVIEWING),
-            stdin=prompt,
-        )
-        events_path.write_text(completed.stdout, encoding="utf-8")
-        stderr_path.write_text(completed.stderr, encoding="utf-8")
-        _land(scratch_out, out_path)
-        axis_findings = _validated_findings(ctx, out_path, completed, label)
-        artifacts.scan_for_secrets(completed.stdout + completed.stderr, f"review {label} stdout")
-        findings += axis_findings
-        has_human = has_human or any(f["severity"] in _HUMAN_SEVERITIES for f in axis_findings)
-        ctx.store.record_check(
-            ctx.run.id,
-            ctx.run.attempt,
-            f"review:{label}",
-            "pass",
-            detail=json.dumps(
-                [{"sev": f["severity"], "file": f.get("file")} for f in axis_findings]
-            )[:2000],
-            artifact=str(review_dir),
-        )
-    return findings, has_human
 
 
 def _review_argv(
@@ -415,7 +610,7 @@ def _body(path: Path) -> str:
 
 
 def _validated_findings(
-    ctx: Context, out_path: Path, completed: Any, label: str
+    ctx: Context, out_path: Path, stderr_path: Path, label: str
 ) -> list[dict[str, Any]]:
     """Read the `-o` findings file, validate against the layer-A schema, return the list.
 
@@ -423,10 +618,10 @@ def _validated_findings(
     produced nothing the schema recognises is not the same as an axis that found nothing.
     """
     if not out_path.exists():
+        stderr_tail = _read_text(stderr_path)[:500]
         raise Blocked(
             "review-schema-invalid",
-            f"the {label} review wrote no findings file at {out_path}. exit={completed.returncode}; "
-            f"stderr={completed.stderr[:500]}",
+            f"the {label} review wrote no findings file at {out_path}. stderr={stderr_tail}",
         )
     try:
         payload = json.loads(out_path.read_text(encoding="utf-8"))
@@ -493,6 +688,10 @@ def _decide_tier2(
     blocked earlier by the red-phase replay — so without an override the fan-out is a code
     path reachable only by getting lucky with a diff size, and a path like that stays
     unproven.
+
+    Note: the two-phase `start` calls this with `tier1_has_human=False` because Tier-1 has
+    not run yet at spawn time; see the module header. The rule stays here for the
+    table-driven test.
     """
     if forced:
         return None
@@ -528,44 +727,25 @@ def _bug_without_test(ctx: Context) -> bool:
     return not payload.get("tests_added")
 
 
-def _tier2(ctx: Context, review_dir: Path) -> list[dict[str, Any]]:
-    """Run the portable `full-review` skill inside the reviewer sandbox.
+def _tier2_prompt(ctx: Context, base_ref: str) -> str:
+    """The portable `full-review` skill prompt, inlined rather than invoked.
 
-    The portable SKILL.md is inlined rather than invoked, matching the implement step's
-    pattern: a Codex skill's availability in the catalog is not guaranteed in an unattended
-    sandbox, and inlining the body keeps the review independent of skill-store plumbing.
+    Matching the implement step's pattern: a Codex skill's availability in the catalog is
+    not guaranteed in an unattended sandbox, and inlining the body keeps the review
+    independent of skill-store plumbing.
     """
     skill = ctx.worktree / ".agents/vendor/harness/skills/full-review/SKILL.md"
     if not skill.exists():
         raise Blocked(
             "review-skill-missing", f"the portable full-review skill is absent at {skill}"
         )
-    base_ref = ctx.run.base_ref or ctx.project.base_ref
     body = _body(skill)
-    prompt = (
+    return (
         f"{body}\n\n---\n\nRun the full review now, against `{base_ref}...HEAD` in this "
         f"worktree. Report defects only, ranked most severe first, each with file:line and a "
         "one-sentence failure scenario. Emit the findings as the JSON schema this run was "
         f"given (`{_FINDINGS_SCHEMA}`). Do not push fixes; the sandbox is read-only.\n"
     )
-    scratch_out = _sandbox_out(_review_scratch(ctx), "review-full.json")
-    out_path = review_dir / "review-full.json"
-    schema_path = ctx.worktree / _FINDINGS_SCHEMA
-    # The same argv Tier 1 builds. Tier 2 had its own copy, and the copy is how the two
-    # drifted: Tier 1 was moved onto the writable scratch and this one was not.
-    argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree)
-    completed = ctx.sandbox.exec_sync(
-        ctx.project.review_sandbox,
-        argv,
-        workdir=str(ctx.worktree),
-        env=dict(ctx.project.env),
-        timeout=ctx.timeout_for(State.REVIEWING),
-        stdin=prompt,
-    )
-    # `codex exec` (not `review`) has no `--base`; the prompt carries the range. Reuse the
-    # same landing and validation path as Tier 1.
-    _land(scratch_out, out_path)
-    return _validated_findings(ctx, out_path, completed, "full")
 
 
 # --------------------------------------------------------------------------------

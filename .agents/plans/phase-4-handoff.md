@@ -118,13 +118,32 @@ dance; do not reimplement it.
 `resume` and Tier 2 are **closed** (commits `5a3e400`, `822c11c`, pushed to
 `origin/feat/phase-4-tick-and-recovery`). In the order I would do them:
 
-1. **Make `verify`/`review`/`deliver` two-phase.** This session drove all three
-   synchronously inside one `factory resume` process and confirmed the gap is real: the
-   command blocked for the whole Tier-2 fan-out (~5 min, four codex axes at
-   `model_reasoning_effort=high`). The two-phase split (`start`/`collect`, like
-   `implement`) is the precondition for the daemon — `launchd` does not overlap
-   `StartInterval` instances so a blocking tick stalls reaping. The review fan-out is the
-   long pole; verify's gates and deliver's push are short.
+1. **Make `verify`/`review`/`deliver` two-phase.** — **DONE.** `verify` and `review`
+   are now `start`/`collect` (detached, reaped), mirroring `implement`; `deliver` stays
+   synchronous (host-side push+PR, seconds; `exec_detached` is sandbox-only, so splitting
+   it would need a new host-detach mechanism for no gain). `reap.DETACHED_STATES` gained
+   `verifying`/`reviewing` plus a `START_NEEDED` outcome (no attempt row → the tick calls
+   the state's `start`, the way `NEXT_STEP` calls `implement.start`); the `NEXT_STEP`
+   guard was tightened to `state is IMPLEMENTING and entered_from is VERIFYING` so a
+   finished review attempt isn't misclassified. Orphaned and timed-out verify/review go
+   `resumable` (uniform with implement); `recovery.resume_run` re-runs them via
+   `verify.start`/`review.start` directly, bounded by a new `store.resumable_reentries`
+   ceiling (the `attempts_in_state` ceiling is decorative for verify/review —
+   `start_attempt` is `INSERT OR REPLACE` on a fixed attempt number, so re-runs don't
+   grow it). `review.start` runs `fetch_back`+`redphase`+`weakening` synchronously (the
+   replay needs the build sandbox; the codex axes must stay in the read-only review
+   sandbox, so they can't share a detached script) then spawns one detached fan-out;
+   one behaviour-change ticket blocks the tick for one test-run's duration before the
+   fan-out detaches. One trigger rule narrowed: `_decide_tier2`'s `tier1_has_human` rule
+   can't fire from `start` (Tier-1 hasn't run yet), so a small-diff Tier-1 critical/high
+   no longer triggers the extra fan-out — it still routes to `awaiting_human` via the
+   transition, and `--full-review` covers it on demand. The rule stays in `_decide_tier2`
+   for its table-driven test. New tests in `test_phase4.py` (each mutation-checked): the
+   core two-phase property for verify, `START_NEEDED`, the orphan→resumable→rerun, and
+   the reentry ceiling→`failed`. All integration+unit+mypy green. Plan:
+   `.agents/plans/drifting-sprouting-lantern.md`. Next: item 2 (the `--all`/lighthouse
+   hazard) is now the blocker for the daemon — a daemon resuming such a ticket into
+   `verifying` will still loop back to a fresh implement on a lighthouse fail.
 2. **Fix the `--all`/lighthouse daemon hazard before loading the timer.** `gate_report.mjs`
    runs *every* opt-in gate under `--all` and does not re-evaluate `when`, so a frontend
    ticket whose agent claims any e2e/integration gate also forces lighthouse, which fails on

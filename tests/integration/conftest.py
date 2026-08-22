@@ -371,17 +371,56 @@ class FakeSandbox:
             (directory / "heartbeat").write_text(str(int(time.time())))
             return
         clone = self.clone_dir(handle.sandbox)
-        if clone is not None:
+        is_verify = "gate_report.mjs" in script
+        is_review = "review-standards" in script
+        if clone is not None and not is_verify and not is_review:
             # The agent's commits land in the clone and nowhere else, which is what makes
-            # `clone.fetch_back` a real fetch rather than a formality.
+            # `clone.fetch_back` a real fetch rather than a formality. Only the implement
+            # run commits; verify runs the gates and the review runs in a different sandbox.
             self._commit_in_clone(clone)
         directory = handle.attempt_dir
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "events.jsonl").write_text(
-            "\n".join(json.dumps(event) for event in self.events) + "\n"
+        if is_verify:
+            self._write_verify_artifacts(directory)
+        elif is_review:
+            self._write_review_artifacts(directory, script)
+        else:
+            (directory / "events.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in self.events) + "\n"
+            )
+            (directory / "stderr.log").write_text(self.stderr)
+            (directory / "last-message.json").write_text(json.dumps(self.result))
+            (directory / "heartbeat").write_text("0")
+            (directory / "exit").write_text(str(self.exit_code))
+
+    def _write_verify_artifacts(self, directory: Path) -> None:
+        """The detached gate report: the canned JSON to `gates.stdout.txt` and an exit
+        code that mirrors the verdict (0/1/3 for pass/fail/incomplete). The verify step
+        reuses the implement attempt's directory, so `last-message.json` is left in place
+        for the cross-check — only the gate-run files are written here."""
+        stdout = (
+            self.gate_report_raw_stdout
+            if self.gate_report_raw_stdout is not None
+            else json.dumps(self.gate_report, indent=2)
         )
-        (directory / "stderr.log").write_text(self.stderr)
-        (directory / "last-message.json").write_text(json.dumps(self.result))
+        (directory / "gates.stdout.txt").write_text(stdout, encoding="utf-8")
+        (directory / "gates.stderr.txt").write_text("", encoding="utf-8")
+        (directory / "heartbeat").write_text("0")
+        exit_for = {"pass": 0, "fail": 1, "incomplete": 3}
+        (directory / "exit").write_text(
+            str(exit_for.get(self.gate_report.get("verdict", "incomplete"), 3))
+        )
+
+    def _write_review_artifacts(self, directory: Path, script: str) -> None:
+        """The detached review fan-out: write the canned findings to each axis's `-o`
+        scratch path (parsed out of the script the way the real codex `-o` names it), plus
+        the heartbeat and exit the wrapper writes. The findings land in the per-project
+        scratch and `collect` moves them into the run's own directory — same as the real
+        path, modelled synchronously."""
+        for match in re.finditer(r"(?:^|\s)-o (\S+)", script):
+            out = Path(match.group(1).strip("'\""))
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(self.review_findings), encoding="utf-8")
         (directory / "heartbeat").write_text("0")
         (directory / "exit").write_text(str(self.exit_code))
 
@@ -529,6 +568,31 @@ def git(cwd: Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
+def _seed_vendored_review_tree(worktree: Path) -> None:
+    """The parts of layer A a real review reads out of the worktree: the two Tier-1
+    frames, the findings schema, and the portable Tier-2 skill.
+
+    Seeded into the shared `project_repo` fixture so a `--clone` run inherits them in its
+    private copy too — the review reads them out of `ctx.worktree`, which for a clone is a
+    fresh host checkout the fetch_back made, so they have to be in the repo, not patched in
+    per test.
+    """
+    vendor = worktree / ".agents/vendor/harness"
+    for agent in ("standards-reviewer", "spec-checker"):
+        path = vendor / "agents" / f"{agent}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {agent}\n\nreview frame body", encoding="utf-8")
+    schema = vendor / "schema" / "review-findings.schema.json"
+    schema.parent.mkdir(parents=True, exist_ok=True)
+    schema.write_text(
+        json.dumps({"type": "object", "properties": {"findings": {"type": "array"}}}),
+        encoding="utf-8",
+    )
+    skill = vendor / "skills" / "full-review" / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text("# full review\n\nthe portable nine-axis skill", encoding="utf-8")
+
+
 @pytest.fixture
 def project_repo(tmp_path: Path) -> Path:
     """A real git repository with a real `origin`, because `repo.py` shells out to git.
@@ -570,6 +634,7 @@ def project_repo(tmp_path: Path) -> Path:
         )
     )
     (work / "README.md").write_text("# python-harness\n")
+    _seed_vendored_review_tree(work)
     git(work, "add", "-A")
     git(work, "commit", "-m", "initial")
     git(work, "remote", "add", "origin", str(origin))
