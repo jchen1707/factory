@@ -26,6 +26,7 @@ from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
 from factory.steps import context as context_step
+from factory.steps import deliver as deliver_step
 from factory.steps import implement as implement_step
 from factory.steps import redphase as redphase_step
 from factory.steps import review as review_step
@@ -387,6 +388,38 @@ def test_a_stale_host_branch_blocks_rather_than_reviewing_the_wrong_code(
         clone_step.fetch_back(clone_ctx)
 
     assert caught.value.reason == "clone-mirror-stale"
+
+
+def test_the_pr_body_carries_the_gate_table_for_a_clone_run(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The evidence has to survive the worktree moving under the run.
+
+    `fetch_back` repoints `ctx.worktree` at a host checkout, but the attempt's evidence was
+    written to `ctx.factory_dir` on the mount and stays there. Anything that rebuilt the
+    attempt path from `ctx.worktree` therefore found an empty directory and rendered a PR
+    body with **no gate table and a blank verdict** — silently, because a missing file is
+    indistinguishable from a gate that did not run. FRO-10's first real PR shipped exactly
+    that. §13.2 requires the full table, so this asserts the rows are there.
+    """
+    _to_verifying(clone_ctx)
+    verify_step.run(clone_ctx)
+    _stub_review(monkeypatch)
+    review_step.run(clone_ctx)
+    assert clone_ctx.state is State.PR_READY
+
+    body = deliver_step._render_body(clone_ctx)
+
+    assert "ruff check" in body or "pytest" in body, body
+    assert "Verdict: **pass**" in body, body
+    assert "Fixes FRO-4" in body or f"Fixes {clone_ctx.run.linear_id}" in body
+
+
+def _stub_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
+    monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
+    monkeypatch.setattr(review_step, "_tier1", lambda ctx, h, rd: ([], False))
+    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, th: "no-trigger")
 
 
 # --------------------------------------------------------------------------------
