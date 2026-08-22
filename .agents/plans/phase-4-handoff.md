@@ -67,16 +67,23 @@ So it needs a large diff. **FRO-5 has since landed** ([frontend-harness#40](http
   to clear that label** — holding a blocked ticket at intake until someone does is the
   designed behaviour, not a bug.
 
-Neither is guaranteed to fire Tier 2: they are single-slice tickets and may land under both
-the 10-file and 400-line thresholds. Run FRO-7 and look at the diff size — if Tier 2 fires,
-the gap closes as a by-product and the PR body will say `Tier 2 ran` instead of naming a skip
-rule.
+Neither is guaranteed to fire Tier 2 on its own: they are single-slice tickets and may land
+under both the 10-file and 400-line thresholds.
 
-**If it does not fire, do not go hunting for a big enough ticket.** The better fix is a
-`factory run --full-review` override that forces the fan-out for one run. An unproven code
-path that can only be exercised by getting lucky with a diff size is a path that will stay
-unproven; a flag makes it testable on demand, and it is a few lines in `cli.py` plus a
-parameter through `review._tier2_trigger`. That is the recommendation.
+**Do not go hunting for a big enough ticket.** `factory run <TICKET> --full-review` now
+exists and forces the fan-out for one run, so the fan-out no longer depends on getting
+lucky with a diff size. It is checked first in `_decide_tier2` because it is an override
+rather than a seventh rule, it lives on the **run row** rather than on the `Context` —
+under `tick` the review happens in a later process than the one that took the flag — and
+`review-summary.json` records `ran:forced`, which the PR body reports as "forced with
+`--full-review`; no trigger rule fired". A forced fan-out reported as a triggered one
+would misstate what the rules concluded about the diff.
+
+So the remaining gap is one real run. `factory run FRO-7 --full-review` is the cheapest
+way to close it: it proves the fan-out end to end on a diff whose size does not matter,
+and it lands FRO-7 either way. **Nothing has run it yet — the flag is built and unit- and
+integration-tested against fakes, and Tier 2 has still never executed to completion
+against a real reviewer sandbox.** Until that run happens, this section stays open.
 
 ## Two defects worth knowing about, not yet fixed
 
