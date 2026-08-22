@@ -60,11 +60,14 @@ __all__ = [
 
 
 def remote_name(sandbox: str) -> str:
-    """The remote `sbx create --clone` adds to the *host* checkout.
+    """The remote `sbx create --clone` adds to the *host* checkout, for diagnostics only.
 
-    Measured: it resolves to `git://127.0.0.1:<port>/<repo>` — a plain git daemon the
-    sandbox runs, not the `ext::sbx exec` transport §19 Phase 7 sketched. Ordinary git
-    reaches it, which is why nothing here needs a custom transport.
+    Nothing in the fetch path uses it, and that is deliberate. Measured 2026-08-22: the
+    remote's port is reassigned by Docker on every start, the remote is withdrawn when the
+    sandbox stops, and starting it again does not restore it. Fetching by this name at the
+    `reviewing` entry — which is where a run always is by then — fetches from either a
+    missing name or a dead port. `SandboxAdapter.git_daemon_url` reads the live mapping
+    instead.
     """
     return f"sandbox-{sandbox}"
 
@@ -183,10 +186,9 @@ def fetch_back(ctx: Context) -> Path:
     branch = ctx.branch
     if branch is None:
         raise Blocked("no-branch", f"run {ctx.run.id} has no branch to fetch back")
-    remote = remote_name(ctx.project.build_sandbox)
     path = host_worktree_path(ctx)
 
-    _fetch_with_the_sandbox_running(ctx, remote, branch)
+    _fetch_with_the_sandbox_running(ctx, branch)
 
     # Torn down and rebuilt rather than updated in place. The mirror holds nothing: every
     # byte of it comes from `FETCH_HEAD`, and the host never commits to it. So a
@@ -213,7 +215,6 @@ def fetch_back(ctx: Context) -> Path:
     ctx.refresh()
     ctx.log(
         "clone.fetched_back",
-        remote=remote,
         branch=branch,
         worktree=str(path),
         head=repo.head_sha(path),
@@ -221,45 +222,48 @@ def fetch_back(ctx: Context) -> Path:
     return path
 
 
-def _fetch_with_the_sandbox_running(ctx: Context, remote: str, branch: str) -> None:
+def _fetch_with_the_sandbox_running(ctx: Context, branch: str) -> None:
     """Fetch the branch, having first made sure the daemon on the other end is up.
 
-    Measured 2026-08-22, and not something the earlier calibration could see because it
-    never let the sandbox stop between the commit and the fetch: **`sbx` owns the
-    `sandbox-<name>` remote's lifecycle.** It registers the remote on the host when the
-    sandbox starts, rewrites the URL with a *new* Docker-assigned port each time, and
-    removes the remote entirely when the sandbox stops. `sbx inspect --json` does not
-    report the daemon URL at all, so there is nothing to read back.
+    Two measured facts, neither visible to the earlier calibration because it never let the
+    sandbox stop between the commit and the fetch:
 
-    That matters here specifically. The build sandbox's last session is the implement
-    step's detached exec, so by the time the run reaches `reviewing` the sandbox has very
-    likely auto-stopped (30 s after the last session ends, §4.2) and the remote is gone —
-    which is exactly how a real FRO-6 run failed with "does not appear to be a git
-    repository" against a remote `git remote -v` had listed a minute earlier.
+    1. **The `sandbox-<name>` remote is not durable.** `sbx` registers it at `create`,
+       withdraws it when the sandbox stops, and does not restore it on the next start. A
+       real FRO-6 run failed here with "does not appear to be a git repository" against a
+       remote `git remote -v` had listed a minute earlier.
+    2. **The daemon's host port is reassigned on every start** (49155 → 49157 → 49159 over
+       one afternoon), so even a preserved remote would point at nothing.
 
-    So: start it, confirm the remote is back, fetch. The retry is not superstition — the
-    first attempt can lose a race against a sandbox that stopped between the check and the
-    fetch, and restarting is the entire repair.
+    So the URL is looked up live, every time, and the sandbox is started first — the port
+    only exists while it is running. This is squarely on the path: the build sandbox's last
+    session is the implement step's detached exec, so by `reviewing` it has auto-stopped
+    (30 s after the last session, §4.2). The retry covers losing a race against exactly
+    that timer between the lookup and the fetch.
     """
-    last: GitError | None = None
+    last: str = "the sandbox never reported a git daemon"
     for attempt in (1, 2):
-        # An `exec_sync` on a stopped sandbox starts it, and starting is what re-registers
-        # the remote. `/bin/true` is the cheapest thing that does it.
+        # An `exec_sync` on a stopped sandbox starts it, and only a running sandbox has a
+        # published port. `/bin/true` is the cheapest thing that does it.
         ctx.sandbox.exec_sync(ctx.project.build_sandbox, ["/bin/true"], timeout=300)
-        if not repo.remote_exists(ctx.project.path, remote):
+        url = ctx.sandbox.git_daemon_url(ctx.project.build_sandbox)
+        if url is None:
             continue
+        # `sbx` serves the clone under the repository's own directory name.
+        source = f"{url}/{ctx.project.path.name}" if url.startswith("git://") else url
         try:
-            repo.fetch_from(ctx.project.path, remote, branch)
+            repo.fetch_from(ctx.project.path, source, branch)
+            ctx.log("clone.fetched", source=source, attempt=attempt)
             return
         except GitError as exc:
-            last = exc
-            ctx.log("clone.fetch_retry", level="warning", attempt=attempt, detail=str(exc)[:300])
+            last = str(exc)
+            ctx.log("clone.fetch_retry", level="warning", attempt=attempt, detail=last[:300])
     raise Blocked(
         "clone-remote-unreachable",
-        f"the branch could not be fetched out of {ctx.project.build_sandbox}. `sbx` "
-        f"registers `{remote}` on the host only while that sandbox is running, and "
-        "rewrites its port on every start, so a stopped sandbox leaves nothing to fetch "
-        f"from. The agent's commits are still in the VM. Last error: {last}",
+        f"the branch could not be fetched out of {ctx.project.build_sandbox}. Its git "
+        "daemon is published only while the sandbox is running, and its host port is "
+        "reassigned on every start, so there is nothing durable to fetch from when it is "
+        f"down. The agent's commits are still in the VM. Last error: {last}",
     )
 
 

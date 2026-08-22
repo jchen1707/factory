@@ -26,7 +26,6 @@ from factory.sandbox.base import Completed, RunHandle, RunResult, RunStatus, San
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
-from factory.steps.clone import remote_name
 from factory.store import Store
 
 HELLO_EVENTS: list[dict[str, Any]] = [
@@ -189,38 +188,30 @@ class FakeSandbox:
         )
         git(target, "config", "user.email", "agent@example.invalid")
         git(target, "config", "user.name", "the agent")
-        # Not added here: `sbx` registers the remote when the sandbox *starts*, and a
-        # freshly created sandbox is not running. `_start` is the only thing that adds it.
+        # No `sandbox-<name>` remote is added, matching what the production path relies
+        # on: `sbx` does register one at create, but it is withdrawn on stop and never
+        # restored, so nothing reads it. `git_daemon_url` is the live lookup instead.
 
     def _start(self, name: str) -> None:
-        """What `sbx` does on start: bring the sandbox up and register its git daemon on
-        the host under a fresh URL. Idempotent, like the real one."""
         self.running.add(name)
-        clone = self.clone_dir(name)
-        spec = self._spec(name)
-        if clone is None or spec is None:
-            return
-        source = spec.workspaces[0].path
-        remote = remote_name(name)
-        subprocess.run(
-            ["git", "-C", str(source), "remote", "remove", remote],
-            capture_output=True,
-            check=False,
-        )
-        git(source, "remote", "add", remote, str(clone))
 
     def stop_sandbox(self, name: str) -> None:
         """The auto-stop, on demand. Tests call it to put a sandbox back where a real run
-        finds it at the `reviewing` entry: stopped, with its remote withdrawn."""
+        finds it at the `reviewing` entry: stopped, and serving nothing."""
         self.running.discard(name)
-        spec = self._spec(name)
-        if spec is None or not spec.clone:
-            return
-        subprocess.run(
-            ["git", "-C", str(spec.workspaces[0].path), "remote", "remove", remote_name(name)],
-            capture_output=True,
-            check=False,
-        )
+
+    def git_daemon_url(self, name: str) -> str | None:
+        """Published only while the sandbox is running — the constraint that broke.
+
+        Returned as a plain path rather than a `git://` URL, because the fake's clone is a
+        real directory and plain git reaches both. What is modelled is the *lifecycle*: a
+        stopped sandbox serves nothing, so a `fetch_back` that does not start one first has
+        nowhere to fetch from. That is exactly how a real FRO-6 run failed.
+        """
+        clone = self.clone_dir(name)
+        if clone is None or name not in self.running:
+            return None
+        return str(clone)
 
     def _vm_path(self, name: str, path: str) -> str:
         """Rewrite a host path under the project root into the clone. A no-op elsewhere —

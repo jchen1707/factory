@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from factory import repo
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
 from factory.sandbox.sbx import create_argv
@@ -311,9 +310,7 @@ def test_fetch_back_starts_a_stopped_sandbox_before_fetching(clone_ctx: Context)
     vm_head = git(clone, "rev-parse", "HEAD")
 
     _fake(clone_ctx).stop_sandbox(clone_ctx.project.build_sandbox)
-    assert not repo.remote_exists(
-        clone_ctx.project.path, clone_step.remote_name(clone_ctx.project.build_sandbox)
-    )
+    assert _fake(clone_ctx).git_daemon_url(clone_ctx.project.build_sandbox) is None
 
     path = clone_step.fetch_back(clone_ctx)
 

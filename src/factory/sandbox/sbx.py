@@ -45,6 +45,10 @@ SBX_EXEC_STDERR = "sbx-exec.stderr"
 #: `_detached` only knows about runs this object started.
 SBX_EXEC_PID = "sbx-exec.pid"
 
+#: The port `sbx`'s in-sandbox git daemon listens on. Its *host* port is reassigned on
+#: every start, so it is looked up rather than remembered; this is the stable half.
+GIT_DAEMON_PORT = 9418
+
 #: How long `exec_detached` waits for the wrapper's first heartbeat before calling the
 #: start a failure. Generous because it covers `sbx exec` starting a stopped sandbox,
 #: and cheap because the common case returns as soon as the file appears.
@@ -236,6 +240,38 @@ class SbxAdapter:
                 "sandboxes carry none (§8.7). Remove it and let the factory recreate "
                 "it: the secret set is fixed at creation and cannot be narrowed later."
             )
+
+    def git_daemon_url(self, name: str) -> str | None:
+        """Where a `--clone` sandbox serves the agent's commits, or None if it is not up.
+
+        `sbx create --clone` prints this URL once and registers it on the host as a
+        `sandbox-<name>` remote — and that remote is a trap. Measured 2026-08-22: the port
+        is reassigned by Docker on every start, the remote is withdrawn when the sandbox
+        stops, and starting it again does **not** restore the remote. A run that fetches by
+        remote name at the `reviewing` entry is therefore fetching from a name that is
+        either absent or pointing at a port nobody is listening on.
+
+        `sbx ls --json` reports the mapping structurally, which is the only durable source:
+        the entry whose `sandbox_port` is the git-daemon port carries the live host port.
+        `sbx inspect --json` does not report it at all.
+        """
+        assert_factory_sandbox(name)
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        if not result.ok:
+            return None
+        try:
+            listing = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        for sandbox in listing.get("sandboxes", []):
+            if sandbox.get("name") != name:
+                continue
+            for port in sandbox.get("ports") or []:
+                if int(port.get("sandbox_port", 0)) != GIT_DAEMON_PORT:
+                    continue
+                host = port.get("host_ip") or "127.0.0.1"
+                return f"git://{host}:{int(port['host_port'])}"
+        return None
 
     def stop(self, name: str) -> None:
         assert_factory_sandbox(name)
