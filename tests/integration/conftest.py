@@ -131,6 +131,10 @@ class FakeSandbox:
     #: What a reviewer axis writes to its `-o` path when that path is writable from
     #: inside the sandbox. Tests override it to exercise the finding transitions.
     review_findings: dict[str, Any] = field(default_factory=lambda: {"findings": []})
+    #: The credential names that are set, and non-empty, inside the VM's environment.
+    #: A different channel from `secrets`: `sbx inspect` cannot see it, which is exactly
+    #: how a live token stayed invisible to the preflight until 2026-08-22.
+    env_credentials: list[str] = field(default_factory=list)
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -190,6 +194,10 @@ class FakeSandbox:
             )
         if "HARNESS_SKIP_VERIFY" in " ".join(argv):
             return Completed(tuple(argv), 0, "", "")
+        if any("[ -n " in str(arg) for arg in argv):
+            # The preflight's env probe. It asks which of the repository's `secretVars`
+            # are set inside the VM and gets back names, never values.
+            return Completed(tuple(argv), 0, "\n".join(self.env_credentials), "")
         if argv and argv[0] == "codex" and "-o" in argv:
             # A reviewer axis. It writes its findings to the `-o` path — but only when
             # that path is inside one of the sandbox's writable workspaces, exactly as
@@ -443,6 +451,8 @@ template = ""
 build_sandbox = "factory-build-python-harness"
 review_sandbox = "factory-review-python-harness"
 vault_mount = "rw"
+# What `config/projects.toml` carries for this project, for the same measured reason.
+acknowledged_env_credentials = ["GH_TOKEN"]
 
 [projects.python-harness.env]
 UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/python-harness"

@@ -828,3 +828,46 @@ def test_a_rejected_report_leaves_its_raw_streams_on_disk(ctx: Context) -> None:
         '{"schemaVersion": 1, "verdict": "pass"}\ntrailing\n'
     )
     assert (attempt / "gates.stderr.txt").exists()
+
+
+def test_a_credential_in_the_vm_environment_blocks_before_any_model_call(
+    ctx: Context,
+) -> None:
+    """The second channel. `sbx inspect` reports proxy-managed secrets and cannot see an
+    environment variable, so a credential injected there passed the preflight in silence
+    until this check existed — measured on 2026-08-22, when every live sandbox carried a
+    40-character `gho_` value that `inspect` did not mention.
+
+    The registry acknowledges `GH_TOKEN` for this project, so the tracker key is the one
+    that blocks here: acknowledging one name says nothing about the next one to appear.
+    """
+    _fake(ctx).env_credentials = ["GH_TOKEN", "LINEAR_API_KEY"]
+
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    with pytest.raises(Blocked) as caught:
+        sandbox_step.run(ctx)
+
+    assert caught.value.reason == "enforcement-disabled"
+    assert "LINEAR_API_KEY" in caught.value.detail
+    assert ctx.run.state is not State.SANDBOX_READY
+
+
+def test_an_acknowledged_credential_is_warned_about_rather_than_blocking(
+    ctx: Context,
+) -> None:
+    _fake(ctx).env_credentials = ["GH_TOKEN"]
+
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+
+    assert ctx.run.state is State.SANDBOX_READY  # the run continues
+    warned = [
+        row
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == "preflight:acknowledged-env-credential"
+    ]
+    assert len(warned) == 1
+    assert warned[0]["status"] == "warn"
+    assert "GH_TOKEN" in warned[0]["detail"]

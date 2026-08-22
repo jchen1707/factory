@@ -94,6 +94,22 @@ network_allow  = ["pypi.org", "*.pythonhosted.org", "astral.sh", "github.com"]
 # bind-mounted workspace wrote a linux-aarch64 venv over the host's .venv and left
 # .venv/bin/python a broken symlink (p0-3-toolchain.md). Pointing uv at a VM-local
 # path was verified to keep both sides healthy across two full gate suites.
+#
+# Measured 2026-08-22 in three sandboxes at once — this project's build sandbox, its
+# reviewer, and a freshly created clone sandbox for the other project. Each carried a
+# 40-character `gho_` value in the environment while `sbx inspect` reported only the
+# gateway credential, so `preflight:no-secrets-in-vm` passed all three. That check reads
+# proxy-managed secrets and structurally cannot see an env var; `no-capability-env` reads
+# the other channel, and is why this line has to exist at all.
+#
+# Acknowledged rather than blocked, on two further measurements: the token does not
+# authenticate (`gh auth status` inside the sandbox reports it invalid), and the VM cannot
+# push regardless — `git push` dies on "could not read Username", because no credential
+# helper is wired. `sbx create` offers no flag to suppress it and `sbx secret ls` scopes
+# it to no factory sandbox, so there is nothing to remove from this side; the fix is
+# sbx's. Every run records this as a warning, and a credential name that is *not* listed
+# here blocks the run rather than riding in unseen.
+acknowledged_env_credentials = ["GH_TOKEN"]
 [projects.python-harness.env]
 UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/python-harness"
 
@@ -117,4 +133,7 @@ network_allow  = ["registry.npmjs.org", "*.npmjs.org", "github.com"]
 # the only shape that keeps node_modules VM-local, and Phase 2 builds it. Until
 # then this project refuses to claim rather than corrupting the host checkout.
 requires_clone = true
+# The same measurement as python-harness above — the clone sandbox that proved it was
+# this project's.
+acknowledged_env_credentials = ["GH_TOKEN"]
 [projects.frontend-harness.env]

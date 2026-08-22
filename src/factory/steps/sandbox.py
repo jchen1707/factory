@@ -14,7 +14,7 @@ from pathlib import Path
 
 from factory.harness import vendor_check
 from factory.machine import Blocked, State
-from factory.policy import capability_secrets
+from factory.policy import capability_env_names, capability_secrets
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.sandbox.sbx import create_argv
 from factory.steps import Context, advance
@@ -84,6 +84,27 @@ def build_spec(ctx: Context) -> SandboxSpec:
     )
 
 
+def _capability_env(ctx: Context, spec: SandboxSpec) -> list[str]:
+    """Which of the repository's `secretVars` are set, and non-empty, inside the VM.
+
+    Names only. The values never leave the sandbox and never reach a log — the question
+    is whether a credential is *there*, and printing one to answer that would be the
+    leak the check exists to prevent. An empty variable is not a credential, so the test
+    is `-n`, not existence.
+
+    Nothing to check is a pass: a repository that declares no `secretVars` has told us
+    which names matter, and the answer was none.
+    """
+    names = list(ctx.harness.secret_vars) if ctx.harness else []
+    if not names or ctx.dry_run:
+        return []
+    listed = " ".join(names)
+    # `rf`: the backslash is shell syntax (`\$$v` is "expand $v, once"), not Python's.
+    script = rf'for v in {listed}; do eval "value=\$$v"; [ -n "$value" ] && echo "$v"; done'
+    completed = ctx.sandbox.exec_sync(spec.name, ["/bin/sh", "-lc", script], timeout=120)
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip() in names]
+
+
 def preflight(ctx: Context, spec: SandboxSpec) -> None:
     """Five assertions, all of them positive. §8.7, §9.3, F8, F9, F20.
 
@@ -122,6 +143,25 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     secrets = info.get("secrets") or []
     offending = capability_secrets(secrets)
     checks.append(("no-secrets-in-vm", not offending, json.dumps(secrets)))
+
+    # 3b. The other channel. `sbx inspect` reports proxy-managed secrets and cannot see
+    #     an environment variable, so a credential injected into the VM's environment
+    #     passes check 3 in silence — measured on 2026-08-22, when all three live
+    #     sandboxes carried a 40-character `gho_` value while `inspect` showed only the
+    #     gateway. Which names count comes from the repository's own `secretVars`.
+    env_present = _capability_env(ctx, spec)
+    blocking, known = capability_env_names(env_present, ctx.project.acknowledged_env_credentials)
+    checks.append(("no-capability-env", not blocking, ", ".join(blocking or known) or "none set"))
+    if known:
+        # Acknowledged, not forgiven: recorded on every run so it stays visible in the
+        # ledger rather than becoming a thing nobody looks at again.
+        ctx.store.record_check(
+            ctx.run.id,
+            ctx.run.attempt,
+            "preflight:acknowledged-env-credential",
+            "warn",
+            detail=", ".join(known),
+        )
 
     # 4. The vendored layer-A tree is intact. F9. Run on the host, against the repo
     #    the sandbox has mounted, because `vendor_sync.py` is a host script and reading

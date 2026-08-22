@@ -25,6 +25,7 @@ __all__ = [
     "VaultChange",
     "assert_factory_sandbox",
     "assert_no_skip_verify",
+    "capability_env_names",
     "capability_secrets",
     "diff_vault",
     "host_execution_verdict",
@@ -183,9 +184,13 @@ def capability_secrets(secrets: Iterable[Any]) -> list[str]:
     `sbx` secrets are **proxy-managed**: the token never lands on the sandbox
     filesystem, and the proxy authenticates the agent's egress on its way out. So the
     hazard is not a readable file — it is that the agent can act as James without ever
-    holding a credential, which is what §13.2 ("GitHub writes: host only") forbids. An
-    env-var scan inside the VM finds nothing and looks green; only `sbx inspect` sees
-    this, which is why the preflight reads it from the sandbox.
+    holding a credential, which is what §13.2 ("GitHub writes: host only") forbids. Only
+    `sbx inspect` sees a proxy-managed secret, which is why the preflight reads it from
+    the sandbox.
+
+    This is one of two channels, not the only one. The plan's claim that an in-VM env
+    scan "finds nothing and looks green" is measured false — see `capability_env_names`,
+    which reads the other.
 
     Everything is a capability except `GATEWAY_CREDENTIAL`, whose exclusion is argued in
     full at its definition. Returned sorted so a failure message is stable.
@@ -196,6 +201,30 @@ def capability_secrets(secrets: Iterable[Any]) -> list[str]:
         if isinstance(entry, Mapping) and entry.get("name")
     ]
     return sorted(name for name in names if name != GATEWAY_CREDENTIAL)
+
+
+def capability_env_names(
+    present: Iterable[str], acknowledged: Iterable[str]
+) -> tuple[list[str], list[str]]:
+    """Split the credential names found *in the VM environment* into `(blocking, known)`.
+
+    The second channel, and the one §8.7 argued did not exist. The plan says an env scan
+    "finds nothing and looks green" because `sbx` secrets are proxy-managed — measured
+    false on 2026-08-22: `factory-build-python-harness-2`, `factory-review-python-harness`
+    and a freshly created clone sandbox each carried a 40-character `gho_` value in the
+    environment, while `sbx inspect` reported only the gateway credential. One channel
+    cannot see the other, so the preflight reads both.
+
+    Which names count is not the factory's opinion: they are the target repository's own
+    `harness.config.json` `hooks.secretVars`, the list layer B already keeps for its own
+    hooks. A name the project has explicitly acknowledged comes back as `known` and is
+    recorded as a warning on every run instead of passing in silence; anything else
+    blocks. Acknowledgement is a judgement about a specific name in a specific project,
+    which is why it lives in the registry rather than here.
+    """
+    known = set(acknowledged)
+    names = sorted(set(present))
+    return [n for n in names if n not in known], [n for n in names if n in known]
 
 
 # --------------------------------------------------------------------------------

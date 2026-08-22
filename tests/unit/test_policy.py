@@ -11,6 +11,7 @@ from factory.policy import (
     VaultChange,
     assert_factory_sandbox,
     assert_no_skip_verify,
+    capability_env_names,
     capability_secrets,
     diff_vault,
     host_execution_verdict,
@@ -165,3 +166,39 @@ def test_malformed_entries_are_ignored_rather_than_crashing_the_preflight() -> N
     # `sbx` is not ours and its JSON shape is not a contract we control. A preflight
     # that raises on an unexpected entry fails the run for the wrong reason.
     assert capability_secrets([None, "github", {}, {"name": ""}, {"name": "gh"}]) == ["gh"]
+
+
+# --------------------------------------------------------------------------------
+# §8.7 — the second channel: credentials in the VM's environment
+# --------------------------------------------------------------------------------
+
+#: Measured 2026-08-22 inside `factory-review-python-harness`, asking the repository's own
+#: `secretVars` which of them were set. `sbx inspect` on the same sandbox reported only the
+#: gateway credential, which is the whole point: one channel cannot see the other.
+MEASURED_ENV_CREDENTIALS = ["GH_TOKEN"]
+
+
+def test_an_unacknowledged_env_credential_blocks() -> None:
+    blocking, known = capability_env_names(MEASURED_ENV_CREDENTIALS, acknowledged=())
+    assert blocking == ["GH_TOKEN"]
+    assert known == []
+
+
+def test_an_acknowledged_env_credential_is_reported_rather_than_blocking() -> None:
+    blocking, known = capability_env_names(MEASURED_ENV_CREDENTIALS, acknowledged=("GH_TOKEN",))
+    assert blocking == []
+    assert known == ["GH_TOKEN"]  # recorded as a warning on every run, never silent
+
+
+def test_acknowledging_one_name_does_not_acknowledge_another() -> None:
+    # The failure this guards: a project that has looked at the forge token and decided to
+    # live with it has said nothing about a tracker key turning up beside it later.
+    blocking, known = capability_env_names(
+        ["GH_TOKEN", "LINEAR_API_KEY"], acknowledged=("GH_TOKEN",)
+    )
+    assert blocking == ["LINEAR_API_KEY"]
+    assert known == ["GH_TOKEN"]
+
+
+def test_nothing_set_in_the_environment_is_clean() -> None:
+    assert capability_env_names([], acknowledged=("GH_TOKEN",)) == ([], [])
