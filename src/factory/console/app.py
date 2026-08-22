@@ -131,7 +131,9 @@ def _elapsed_cell(elapsed: float, timeout: int | None) -> str:
         return text
     width = max(0, min(100, int((elapsed / timeout) * 100)))
     cls = "fail" if width >= 100 else ("warn" if width >= 75 else "")
-    return f'<span class="{cls}">{text}</span> <span class="bar"><i style="width:{width}%"></i></span>'
+    return (
+        f'<span class="{cls}">{text}</span> <span class="bar"><i style="width:{width}%"></i></span>'
+    )
 
 
 def _board_table(rows: list[console_views.RunRow]) -> str:
@@ -260,7 +262,9 @@ def create_app(
         reg, rt, st, _ = _cfg()
         run = st.run_by_ticket(ticket.upper())
         if run is None:
-            return HTMLResponse(_page(ticket, f"<h1>{_e(ticket)}</h1><p>No run.</p>"), status_code=404)
+            return HTMLResponse(
+                _page(ticket, f"<h1>{_e(ticket)}</h1><p>No run.</p>"), status_code=404
+            )
         detail = console_views.run_detail(home, reg, rt, st, run)
         r = detail.row
 
@@ -324,7 +328,7 @@ def create_app(
             finding_rows = "".join(
                 "<tr>"
                 f'<td><span class="chip">{_e(f.severity or "?")}</span></td>'
-                f'<td>{_e(f.file or "")}{f":{f.line}" if f.line else ""}</td>'
+                f"<td>{_e(f.file or '')}{f':{f.line}' if f.line else ''}</td>"
                 f'<td class="wrap">{_e(f.summary or "")}</td>'
                 "</tr>"
                 for f in ranked
@@ -378,6 +382,7 @@ def create_app(
     async def tail_stream(ticket: str) -> StreamingResponse:
         """The `events.jsonl` live tail (§18.5 View 3). The last lines only — a full
         transcript belongs in `factory logs`, not in a page."""
+
         def read_tail() -> str:
             """The blocking half, run in a worker thread. SQLite and the filesystem are
             both blocking, and doing either on the event loop would stall every other
@@ -449,9 +454,9 @@ def create_app(
                 )
                 + f"<td>{_e(r.state)}</td>"
                 + f'<td class="wrap">{_e(r.workspace)}</td>'
-                + f'<td>{_e(", ".join(r.published_ports) or "—")}</td>'
+                + f"<td>{_e(', '.join(r.published_ports) or '—')}</td>"
                 + f"<td>{_e(r.template)}</td>"
-                + f'<td>{_e(", ".join(r.runs_using) or "—")}</td>'
+                + f"<td>{_e(', '.join(r.runs_using) or '—')}</td>"
                 + f'<td class="wrap muted">{_e(r.last_denial or "")}</td>'
                 "</tr>"
                 for r in rows
@@ -513,9 +518,7 @@ def create_app(
     return app
 
 
-def _store_for_this_thread(
-    injected: Store | None, home: Path, open_store: Any
-) -> Store:
+def _store_for_this_thread(injected: Store | None, home: Path, open_store: Any) -> Store:
     """The injected store when this thread may use it, else a fresh connection to it.
 
     `sqlite3` refuses a connection across threads, and a served app is multi-threaded. The

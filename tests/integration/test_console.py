@@ -101,7 +101,10 @@ def test_a_terminal_run_is_not_on_the_board_but_still_has_a_page(ctx: Context) -
     # the board buries the runs actually in flight, but its evidence must still be reachable.
     _to_implementing(ctx)
     ctx.store.record_transition(
-        ctx.run.id, from_state=ctx.state, to_state=State.CANCELLED, actor="human",
+        ctx.run.id,
+        from_state=ctx.state,
+        to_state=State.CANCELLED,
+        actor="human",
         rule="abandon-is-james",
     )
     ctx.refresh()
@@ -115,7 +118,10 @@ def test_the_board_shows_a_blocked_badge_and_the_reason(ctx: Context) -> None:
     _to_implementing(ctx)
     ctx.store.update_run(ctx.run.id, blocked_reason="env-gate-failed")
     ctx.store.record_transition(
-        ctx.run.id, from_state=ctx.state, to_state=State.BLOCKED, actor="auto",
+        ctx.run.id,
+        from_state=ctx.state,
+        to_state=State.BLOCKED,
+        actor="auto",
         rule="env-gate-failed",
     )
     ctx.refresh()
@@ -258,9 +264,12 @@ def test_there_is_no_merge_button_on_any_page(ctx: Context) -> None:
         page = client.get(path).text
         assert "/merge" not in page, path
         assert ">Merge<" not in page, path
-    assert "merge" not in {slug for slug, _ in __import__(
-        "factory.console.app", fromlist=["_CONTROL_BUTTONS"]
-    )._CONTROL_BUTTONS}
+    assert "merge" not in {
+        slug
+        for slug, _ in __import__(
+            "factory.console.app", fromlist=["_CONTROL_BUTTONS"]
+        )._CONTROL_BUTTONS
+    }
 
 
 def test_a_control_writes_a_human_actor_transition(ctx: Context) -> None:
@@ -330,9 +339,7 @@ def test_a_control_aimed_at_an_operator_sandbox_is_refused(ctx: Context) -> None
     registry = replace(ctx.registry, projects={**ctx.registry.projects, "python-harness": hijacked})
 
     with pytest.raises(PermissionError):
-        dispatch_control(
-            "suspend", ctx.home, registry, ctx.routing, ctx.store, ctx.linear, ctx.run
-        )
+        dispatch_control("suspend", ctx.home, registry, ctx.routing, ctx.store, ctx.linear, ctx.run)
 
 
 def test_the_namespace_rule_itself_refuses_a_codex_sandbox() -> None:
@@ -382,9 +389,7 @@ def test_a_config_edit_putting_the_reviewer_on_the_builders_model_is_rejected(
 
     assert response.status_code == 303
     assert "error=" in response.headers["location"]
-    assert "reviewer.model" in response.headers["location"].replace("%20", " ").replace(
-        "%2E", "."
-    )
+    assert "reviewer.model" in response.headers["location"].replace("%20", " ").replace("%2E", ".")
     assert path.read_text(encoding="utf-8") == before  # never half-written
 
 

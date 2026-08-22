@@ -75,6 +75,7 @@ spawning, for clone runs only:
 ```python
 if ctx.project.requires_clone:
     from factory.steps import clone as clone_step
+
     clone_step.ensure_on_branch(ctx)
 ```
 
