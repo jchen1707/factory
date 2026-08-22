@@ -762,6 +762,13 @@ def _worktree_paths(project: Project, registry: Registry, run: Run, ticket: str)
     """
     expected = project.worktree_path(registry.defaults.worktree_subdir, ticket)
     recorded = Path(run.worktree) if run.worktree else None
+    # A `--clone` run records the project path itself: the branch is cut inside the VM
+    # and the host-side workdir *is* the repository. That is a workdir, never a worktree
+    # the factory created, and offering it here asked `git worktree remove` to delete the
+    # repository. `remove_worktree` refuses it too — this keeps it out of the candidate
+    # list so the refusal never has to fire.
+    if recorded is not None and recorded.resolve() == project.path.resolve():
+        recorded = None
     return [expected] if recorded in (None, expected) else [recorded, expected]
 
 

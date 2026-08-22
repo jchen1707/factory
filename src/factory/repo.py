@@ -301,7 +301,22 @@ def add_worktree(repo: Path, path: Path, branch: str, base_ref: str) -> None:
 
 
 def remove_worktree(repo: Path, path: Path, *, force: bool = False) -> None:
-    """Remove and prune. `unlock` first when git refuses — never `rm -rf`. F15."""
+    """Remove and prune. `unlock` first when git refuses — never `rm -rf`. F15.
+
+    Refuses the repository's own main working tree outright. `git worktree list` includes
+    it, so `worktree_exists` says yes and every caller downstream believes it found a
+    worktree it may remove — which is how `factory cancel FRO-6` came to run
+    `git worktree remove --force /Users/james/frontend-harness` on 2026-08-22. Git
+    declined ("is a main working tree") and the whole cancel aborted with it, leaving the
+    tracker un-restored. Refusing here makes the answer a named no rather than an
+    exception thrown from the middle of a rollback.
+    """
+    if path.resolve() == repo.resolve():
+        raise GitError(
+            f"refusing to remove {path}: that is the repository itself, not a worktree "
+            "the factory created. A `--clone` run records the project path as its "
+            "workdir because the branch lives inside the VM; that is not debris."
+        )
     if not worktree_exists(repo, path):
         prune_worktrees(repo)
         return

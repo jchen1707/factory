@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from factory import cli, repo
 from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
@@ -611,3 +612,34 @@ def test_a_second_run_does_not_read_the_first_runs_verdict(clone_ctx: Context) -
 
     assert not second_attempt.exit_file.exists()
     assert first_attempt.exit_file.exists()  # and the first run's record survives
+
+
+def test_cancel_never_offers_the_repository_itself_as_a_worktree(clone_ctx: Context) -> None:
+    """`factory cancel FRO-6`, 2026-08-22, ran
+    `git worktree remove --force /Users/james/frontend-harness`.
+
+    A `--clone` run records the project path as its workdir — the branch is cut inside
+    the VM, so the host side *is* the repository. `git worktree list` includes the main
+    working tree, so `worktree_exists` said yes and the rollback believed it had found
+    debris. Git declined and the whole cancel aborted with it, leaving the tracker
+    un-restored and the ticket stuck.
+    """
+    _to_worktree_ready(clone_ctx)
+    clone_ctx.store.update_run(clone_ctx.run.id, worktree=str(clone_ctx.project.path))
+    clone_ctx.refresh()
+
+    paths = cli._worktree_paths(
+        clone_ctx.project, clone_ctx.registry, clone_ctx.run, clone_ctx.run.linear_id
+    )
+
+    assert clone_ctx.project.path not in paths
+
+
+def test_removing_the_repository_itself_is_refused_by_name(clone_ctx: Context) -> None:
+    # The second lock on the same door. Whatever hands it a path, the primitive refuses
+    # the repository rather than throwing git's error from the middle of a rollback.
+    with pytest.raises(repo.GitError) as caught:
+        repo.remove_worktree(clone_ctx.project.path, clone_ctx.project.path, force=True)
+
+    assert "the repository itself" in str(caught.value)
+    assert clone_ctx.project.path.is_dir()
