@@ -199,8 +199,29 @@ dance; do not reimplement it.
 
 ## Next session
 
-**Phase 4 is complete except for one human decision.** Both open questions are resolved
-(PR #20) and the console is built (PR #21).
+**Phase 4's build is done; what remains is James's.** Both open questions are resolved
+(PR #20, merged) and the console is built (PR #21).
+
+Two things the first console commit claimed prematurely, both since fixed and worth
+recording because the same shortcut is easy to repeat:
+
+- **§19 names `console/templates/*.html` as files.** The first cut inlined every page in
+  `app.py`. Now extracted — `page.html`, `board.html`, `run_detail.html`, `runtimes.html`,
+  `config.html`, `controls.html`, `console.css` — as `string.Template` files, and they ship
+  in the wheel.
+- **"Tests: the whole of §22" means all thirty rows.** An audit found **F27, F28 and F30**
+  (the test-honesty rows) with no test at any level: `test_redphase.py` covered `_classify`,
+  which is a different claim from "`replay` raises". `tests/integration/test_redphase_gates.py`
+  adds seven, including §23's requirement that the two blocking cases be unreachable from
+  any config file. Nine further rows had the behaviour covered but no `F<n>` label, so §22
+  could not be audited at all; they are labelled now, and **all thirty are traceable**.
+  F5 also gained a real assertion — it wrote 60 stderr lines and never checked the 40-line
+  bound, and an unbounded tail in a Linear comment is how a secret reaches the tracker.
+
+Writing §19's "resume-from-planning works from the browser" test then found a third:
+`dispatch_control` hardcoded the real `sbx`/`codex` adapters, so no console control could
+be tested without a Docker login (§21.3 says the whole machine runs against fakes). It
+takes `tick_once`'s `context_factory` seam now.
 
 1. ~~**The §18.5 console**~~ — **built, PR #21.** CLI forms first as §18.5 requires, then
    `factory serve`: FastAPI, loopback-only (a non-loopback `--host` is refused), five views,
