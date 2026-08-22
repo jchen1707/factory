@@ -58,22 +58,25 @@ reachable in practice:
 | Tier-1 critical/high | not controllable on demand |
 | Bug label without test | only for a Bug whose fix honestly adds no test **and** reports `behaviour_changed: false` — otherwise redphase blocks first with `behaviour-change-without-test` |
 
-So the intended route is **FRO-5** (`See your Projects at /projects`). Its existing
-unmerged branch `origin/feat/FRO-5-projects-list` is **35 files**, so the ≥10 rule fires
-deterministically, and landing it also unblocks FRO-6 and FRO-7.
+So it needs a large diff. **FRO-5 has since landed** ([frontend-harness#40](https://github.com/jchen1707/frontend-harness/pull/40), merged 2026-08-22), which changes the picture:
 
-**FRO-5 is blocked by one small defect, and fixing it is the cheapest path to a proven
-Tier 2.** `repo.identifier_on_base` matches any commit **subject** naming the ticket, so
-`8a40c83 chore: close the gate and process gaps the FRO-5 run exposed` — a commit *about* a
-past run — reads as "FRO-5 is already implemented" and intake condition 10 refuses the run.
-The docstring already argues that a false `already-implemented` is worse than a missed one
-and narrowed body→subject for exactly this reason; it needs narrowing one step further
-(the identifier at the start of the conventional-commit description, not anywhere in the
-subject). It is a small fix with an obvious test.
+- **FRO-7** (`Filter your Projects by status, including archived`) is `Todo`, passes intake
+  today, and needs no fix to run. It is the obvious next candidate.
+- **FRO-6** (`Search your Projects by name`) is unblocked too, but is parked at
+  `In Progress` with a `needs-info` label from the run that blocked on FRO-5. **A human has
+  to clear that label** — holding a blocked ticket at intake until someone does is the
+  designed behaviour, not a bug.
 
-One judgement belongs to James before that runs: FRO-5 already has an implementation on
-that branch. Either let the factory redo it — intake's own note calls the branch "a free
-oracle to diff against" — or merge the branch and find a different large ticket for Tier 2.
+Neither is guaranteed to fire Tier 2: they are single-slice tickets and may land under both
+the 10-file and 400-line thresholds. Run FRO-7 and look at the diff size — if Tier 2 fires,
+the gap closes as a by-product and the PR body will say `Tier 2 ran` instead of naming a skip
+rule.
+
+**If it does not fire, do not go hunting for a big enough ticket.** The better fix is a
+`factory run --full-review` override that forces the fan-out for one run. An unproven code
+path that can only be exercised by getting lucky with a diff size is a path that will stay
+unproven; a flag makes it testable on demand, and it is a few lines in `cli.py` plus a
+parameter through `review._tier2_trigger`. That is the recommendation.
 
 ## Two defects worth knowing about, not yet fixed
 
@@ -134,10 +137,13 @@ before spending a model run, and each would have cost a ~20-minute run to find o
 - **BAC** — done and archived. Nothing pending.
 - **FRO-10 / FRO-9** — FRO-10 Done. FRO-9 is the parent spec I filed for it; it is a spec,
   not a work item, and carries no `ready-for-agent` label. Move it to Backlog if it clutters.
-- **FRO-6** — `In Progress` with `needs-info`, blocked on FRO-5. The label write worked,
-  which is the designed hold-at-intake behaviour. It needs a human to clear it once FRO-5
-  lands.
-- **FRO-5, FRO-7** — Todo, both waiting on the intake fix / FRO-5 landing.
+- **FRO-6** — `In Progress` with `needs-info`. Its blocker (FRO-5) is gone, so the ticket is
+  ready, but the label still holds it at intake by design and a human must remove it. Its
+  `blocked` run row is also the natural first test subject for Phase 4's `resume`.
+- **FRO-5** — Done. Landed by frontend-harness#40, a merge-forward of the long-closed
+  `feat/FRO-5-projects-list` across 64 commits of drift, with three conflicts resolved and
+  all seven CI checks green. Linear moved it to Done off the `Fixes FRO-5` line.
+- **FRO-7** — Todo, unblocked, passes intake, nothing in its way. The Tier-2 candidate.
 - **FRO-8** — Todo, refused by intake for having no parent spec. It is the same defect
   FRO-10 fixed; it should probably be closed as duplicate.
 - **FRO-1** — the parent of FRO-2..7. Intake refuses it correctly; it is a spec.
