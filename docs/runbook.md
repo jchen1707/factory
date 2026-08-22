@@ -139,10 +139,26 @@ Common causes:
 ## It is stuck and I am not sure why
 
 ```
-factory status <TICKET> --evidence      # transitions, checks, effects
-tail -f ~/factory/logs/factory-$(date +%Y-%m-%d).jsonl   # the structured control-plane log
+factory status                          # the board: every non-terminal run, live
+factory status <TICKET> --evidence      # transitions, gate table, review findings, artifacts
+factory logs <TICKET> --follow          # tail the agent's own event stream
+factory runtimes                        # sandboxes joined to the runs using them
 uv run factory doctor --deep            # includes a live codex hook canary (costs a model call)
+
+tail -f ~/factory/logs/factory-$(date +%Y-%m-%d).jsonl   # the structured control-plane log
 ```
+
+`factory serve` opens the same five views in a browser at <http://127.0.0.1:7717> — the
+board and the run detail refresh without a reload, and the per-run controls (Suspend,
+Resume, Resume from planning, Cancel, Retry now) are the same code paths as the commands
+above. It binds loopback only and holds no credential of its own. **There is no Merge
+button**: merging is James's, on GitHub, and the console links out to the pull request.
+
+The context percentage is shown only when it can be defended — the agent's completed-turn
+`input_tokens` over the routed model's window from `~/.codex/models_cache.json`. Where
+either is missing the column shows `—` and names the reason on hover; it is never
+estimated. A run above ~70% that is still failing gates is one to rewind to `planning`
+(§16.3a) rather than retry.
 
 The transition `rule` on each hop is the named reason the factory took it. An unexplained
 hop is a bug; a hop with `rule="backoff"` is the daemon waiting §16.4's schedule. When in

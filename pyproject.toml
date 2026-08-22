@@ -10,18 +10,30 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "jchen" }]
-# Stdlib only, deliberately, for everything Phase 1 does. The control plane shells
-# out to `git`, `gh`, `sbx` and `security`, reads TOML with `tomllib` and speaks
-# Linear's GraphQL over `urllib`. Adding a dependency here is a decision to review,
-# not a convenience: this process holds the keychain credential and runs unattended.
-# FastAPI/uvicorn arrive with `factory serve` in Phase 4 (§18.5) and not before.
-dependencies = []
+# Stdlib only, deliberately, for everything that drives a run. The control plane
+# shells out to `git`, `gh`, `sbx` and `security`, reads TOML with `tomllib` and
+# speaks Linear's GraphQL over `urllib`. Adding a dependency here is a decision to
+# review, not a convenience: this process holds the keychain credential and runs
+# unattended. The one exception is the §18.5 operator console (`factory serve`),
+# a loopback-only, read-mostly web view that holds no credential of its own — it
+# reads the same SQLite file the daemon writes and shells out to the same `sbx`/
+# `gh`. FastAPI/uvicorn/pydantic/structlog arrive with it and not before.
+dependencies = [
+    # `factory serve` (§18.5) — the loopback operator console only.
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.7",
+    "structlog>=24.1",
+]
 
 [dependency-groups]
 dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pytest>=8.3",
+    # `fastapi.testclient` only — it drives the §18.5 console's routes in-process. A test
+    # dependency, deliberately not a runtime one: the console itself makes no HTTP calls.
+    "httpx2",
 ]
 
 [project.scripts]
