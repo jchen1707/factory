@@ -15,7 +15,14 @@ import pytest
 
 from factory.harness import HarnessConfig
 from factory.machine import Blocked
-from factory.steps.review import _axis_prompt, _decide_tier2, _matches_any, _review_argv
+from factory.steps.review import (
+    _axis_prompt,
+    _decide_tier2,
+    _matches_any,
+    _review_argv,
+    _review_scratch,
+    _review_spec,
+)
 
 # -- _decide_tier2 (§15.2's trigger table) -------------------------------------
 
@@ -209,6 +216,23 @@ def _ctx_for_argv() -> Any:
     return SimpleNamespace(routing=SimpleNamespace(role=lambda _name: role))
 
 
+def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
+    """The four things `_review_spec` and `_review_scratch` read off a context."""
+    project = SimpleNamespace(
+        name="python-harness",
+        path=tmp_path / "python-harness",
+        review_sandbox="factory-review-python-harness",
+        template="",
+    )
+    return SimpleNamespace(
+        home=tmp_path / "factory",
+        project=project,
+        run=SimpleNamespace(id=run_id, linear_id=ticket),
+        worktree=project.path / ".factory/worktrees" / ticket,
+        registry=SimpleNamespace(defaults=SimpleNamespace(deny_network=("mcp.linear.app",))),
+    )
+
+
 def test_the_review_invocation_never_pairs_base_with_a_prompt() -> None:
     """codex refuses the combination — `the argument '--base <BRANCH>' cannot be used with
     '[PROMPT]'` — and the prompt is the axis, so the prompt is what stays. BAC-4's run
@@ -220,3 +244,25 @@ def test_the_review_invocation_never_pairs_base_with_a_prompt() -> None:
     assert argv[:2] == ["codex", "exec"]
     assert "review" not in argv  # not the `review` subcommand, which owns `--base`
     assert "sandbox_mode=read-only" in argv
+
+
+def test_the_review_sandbox_spec_does_not_move_between_runs(tmp_path: Path) -> None:
+    """§9.1 fixes a sandbox's workspace set at creation and the reviewer is named once per
+    project, so nothing in its spec may carry a run id or a ticket. Two contexts differing
+    only in those must produce the identical workspace set.
+
+    BAC-4 measured the failure: the sandbox created on run `1effc543d83a459a`'s own review
+    directory was refused for run `73f500d22e894d9a`, which is `_assert_spec_matches` doing
+    its job against a spec that should never have varied.
+    """
+    first = _ctx_for_spec(tmp_path, run_id="1effc543d83a459a", ticket="BAC-4")
+    second = _ctx_for_spec(tmp_path, run_id="73f500d22e894d9a", ticket="BAC-9")
+
+    one = _review_spec(first, _review_scratch(first))
+    two = _review_spec(second, _review_scratch(second))
+
+    assert [w.as_argument() for w in one.workspaces] == [w.as_argument() for w in two.workspaces]
+    # And the shape is what sbx will accept: writable scratch first, code read-only after.
+    assert not one.workspaces[0].readonly
+    assert one.workspaces[1].readonly
+    assert str(one.workspaces[1].path) == str(tmp_path / "python-harness")

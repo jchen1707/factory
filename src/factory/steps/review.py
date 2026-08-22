@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -165,19 +166,26 @@ def _tier1(
             )
         return [], False
 
-    spec = _review_spec(ctx, review_dir)
+    scratch = _review_scratch(ctx)
+    spec = _review_spec(ctx, scratch)
     ctx.sandbox.ensure(spec)
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     schema_path = ctx.worktree / _FINDINGS_SCHEMA
+    review_dir.mkdir(parents=True, exist_ok=True)
 
     findings: list[dict[str, Any]] = []
     has_human = False
     for label, agent in _TIER1_AXES:
         prompt = _axis_prompt(ctx.worktree, harness, agent, base_ref)
+        # The reviewer writes into the project-stable scratch, because that is what it can
+        # reach; the run's own directory is where the evidence lives, so the file moves
+        # there the moment the axis returns.
+        scratch_out = scratch / f"review-{label}.json"
+        scratch_out.unlink(missing_ok=True)
         out_path = review_dir / f"review-{label}.json"
         events_path = review_dir / f"review-{label}.events.jsonl"
         stderr_path = review_dir / f"review-{label}.stderr.log"
-        argv = _review_argv(ctx, schema_path, out_path)
+        argv = _review_argv(ctx, schema_path, scratch_out)
         completed = ctx.sandbox.exec_sync(
             ctx.project.review_sandbox,
             argv,
@@ -188,6 +196,8 @@ def _tier1(
         )
         events_path.write_text(completed.stdout, encoding="utf-8")
         stderr_path.write_text(completed.stderr, encoding="utf-8")
+        if scratch_out.exists():
+            shutil.move(str(scratch_out), out_path)
         axis_findings = _validated_findings(ctx, out_path, completed, label)
         artifacts.scan_for_secrets(completed.stdout + completed.stderr, f"review {label} stdout")
         findings += axis_findings
@@ -240,14 +250,35 @@ def _review_argv(ctx: Context, schema_path: Path, out_path: Path) -> list[str]:
     ]
 
 
-def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
-    """The read-only review sandbox: worktree `:ro` + a `rw` scratch for prompts/findings.
+def _review_scratch(ctx: Context) -> Path:
+    """The reviewer's writable ground: one directory per **project**, not per run.
+
+    §9.1 fixes a sandbox's workspace set at creation, and the reviewer sandbox is named
+    once per project, so every path in its spec has to outlive the run that first created
+    it. A per-run directory does not: the second run finds the sandbox mounted on the
+    first run's path and `_assert_spec_matches` refuses it, correctly. BAC-4 measured
+    exactly that. The axis outputs are moved into the run's own directory as soon as they
+    land, so the evidence is still per-run — only the mount is shared.
+    """
+    scratch = ctx.home / "state" / "review" / ctx.project.name
+    scratch.mkdir(parents=True, exist_ok=True)
+    return scratch
+
+
+def _review_spec(ctx: Context, scratch: Path) -> SandboxSpec:
+    """The read-only review sandbox: the project `:ro` + a `rw` scratch for findings.
+
+    The read-only mount is the **project root**, not the worktree, for the same reason the
+    scratch is per-project: a worktree path contains the ticket, and a spec that changes
+    per ticket cannot be satisfied by a sandbox named per project. The build sandbox has
+    always mounted the root for this reason — worktrees live inside it at
+    `.factory/worktrees/<TICKET>`, so mounting the root reaches every one of them, and
+    `exec_sync(workdir=...)` still puts the reviewer in the worktree it is reviewing.
 
     `--no-share-skills` (§19 Phase 3 checklist): the reviewer has no skills store, so the
     portable `full-review` skill is reached by inlining it (Tier 2), not by loading a shared
     store a build sandbox could have polluted (R5).
     """
-    review_dir.mkdir(parents=True, exist_ok=True)
     return SandboxSpec(
         project=ctx.project.name,
         role="review",
@@ -259,8 +290,8 @@ def _review_spec(ctx: Context, review_dir: Path) -> SandboxSpec:
         # findings to, and the code under review comes in beside it, read-only, at the
         # identical path. The boundary §15.2 asks for is unchanged; only the order is.
         workspaces=(
-            Workspace(review_dir),
-            Workspace(ctx.worktree, readonly=True),
+            Workspace(scratch),
+            Workspace(ctx.project.path, readonly=True),
         ),
         template=ctx.project.template or None,
         kits=(),
