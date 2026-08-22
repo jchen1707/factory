@@ -42,6 +42,7 @@ from pathlib import Path
 
 from factory import repo
 from factory.machine import Blocked
+from factory.repo import GitError
 from factory.sandbox.base import Completed
 from factory.sandbox.sbx import SbxError
 from factory.steps import Context
@@ -185,7 +186,7 @@ def fetch_back(ctx: Context) -> Path:
     remote = remote_name(ctx.project.build_sandbox)
     path = host_worktree_path(ctx)
 
-    repo.fetch_from(ctx.project.path, remote, branch)
+    _fetch_with_the_sandbox_running(ctx, remote, branch)
 
     # Torn down and rebuilt rather than updated in place. The mirror holds nothing: every
     # byte of it comes from `FETCH_HEAD`, and the host never commits to it. So a
@@ -218,6 +219,48 @@ def fetch_back(ctx: Context) -> Path:
         head=repo.head_sha(path),
     )
     return path
+
+
+def _fetch_with_the_sandbox_running(ctx: Context, remote: str, branch: str) -> None:
+    """Fetch the branch, having first made sure the daemon on the other end is up.
+
+    Measured 2026-08-22, and not something the earlier calibration could see because it
+    never let the sandbox stop between the commit and the fetch: **`sbx` owns the
+    `sandbox-<name>` remote's lifecycle.** It registers the remote on the host when the
+    sandbox starts, rewrites the URL with a *new* Docker-assigned port each time, and
+    removes the remote entirely when the sandbox stops. `sbx inspect --json` does not
+    report the daemon URL at all, so there is nothing to read back.
+
+    That matters here specifically. The build sandbox's last session is the implement
+    step's detached exec, so by the time the run reaches `reviewing` the sandbox has very
+    likely auto-stopped (30 s after the last session ends, §4.2) and the remote is gone —
+    which is exactly how a real FRO-6 run failed with "does not appear to be a git
+    repository" against a remote `git remote -v` had listed a minute earlier.
+
+    So: start it, confirm the remote is back, fetch. The retry is not superstition — the
+    first attempt can lose a race against a sandbox that stopped between the check and the
+    fetch, and restarting is the entire repair.
+    """
+    last: GitError | None = None
+    for attempt in (1, 2):
+        # An `exec_sync` on a stopped sandbox starts it, and starting is what re-registers
+        # the remote. `/bin/true` is the cheapest thing that does it.
+        ctx.sandbox.exec_sync(ctx.project.build_sandbox, ["/bin/true"], timeout=300)
+        if not repo.remote_exists(ctx.project.path, remote):
+            continue
+        try:
+            repo.fetch_from(ctx.project.path, remote, branch)
+            return
+        except GitError as exc:
+            last = exc
+            ctx.log("clone.fetch_retry", level="warning", attempt=attempt, detail=str(exc)[:300])
+    raise Blocked(
+        "clone-remote-unreachable",
+        f"the branch could not be fetched out of {ctx.project.build_sandbox}. `sbx` "
+        f"registers `{remote}` on the host only while that sandbox is running, and "
+        "rewrites its port on every start, so a stopped sandbox leaves nothing to fetch "
+        f"from. The agent's commits are still in the VM. Last error: {last}",
+    )
 
 
 # -- reviewing: the red-phase replay's scratch stays in the VM -------------------------

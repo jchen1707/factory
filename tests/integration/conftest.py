@@ -148,6 +148,13 @@ class FakeSandbox:
     #: `rw` mounts are shared, and `git` inside the sandbox is acting on a different
     #: repository from the one the host reads. All three are why the clone path exists.
     clone_root: Path | None = None
+    #: Which sandboxes are *running*. Modelled because `sbx` ties the `sandbox-<name>` git
+    #: remote to it: the remote is registered on the host when the sandbox starts, given a
+    #: new port every time, and **removed when it stops**. A clone run reaches `reviewing`
+    #: with its build sandbox long since auto-stopped, so a `fetch_back` that does not
+    #: start it first fetches from a remote that is not there. That is how a real FRO-6 run
+    #: failed, against a remote `git remote -v` had listed a minute earlier.
+    running: set[str] = field(default_factory=set)
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
@@ -182,7 +189,38 @@ class FakeSandbox:
         )
         git(target, "config", "user.email", "agent@example.invalid")
         git(target, "config", "user.name", "the agent")
-        git(source, "remote", "add", remote_name(spec.name), str(target))
+        # Not added here: `sbx` registers the remote when the sandbox *starts*, and a
+        # freshly created sandbox is not running. `_start` is the only thing that adds it.
+
+    def _start(self, name: str) -> None:
+        """What `sbx` does on start: bring the sandbox up and register its git daemon on
+        the host under a fresh URL. Idempotent, like the real one."""
+        self.running.add(name)
+        clone = self.clone_dir(name)
+        spec = self._spec(name)
+        if clone is None or spec is None:
+            return
+        source = spec.workspaces[0].path
+        remote = remote_name(name)
+        subprocess.run(
+            ["git", "-C", str(source), "remote", "remove", remote],
+            capture_output=True,
+            check=False,
+        )
+        git(source, "remote", "add", remote, str(clone))
+
+    def stop_sandbox(self, name: str) -> None:
+        """The auto-stop, on demand. Tests call it to put a sandbox back where a real run
+        finds it at the `reviewing` entry: stopped, with its remote withdrawn."""
+        self.running.discard(name)
+        spec = self._spec(name)
+        if spec is None or not spec.clone:
+            return
+        subprocess.run(
+            ["git", "-C", str(spec.workspaces[0].path), "remote", "remove", remote_name(name)],
+            capture_output=True,
+            check=False,
+        )
 
     def _vm_path(self, name: str, path: str) -> str:
         """Rewrite a host path under the project root into the clone. A no-op elsewhere —
@@ -242,6 +280,7 @@ class FakeSandbox:
         stdin: str | None = None,
     ) -> Completed:
         self.sync_calls.append((name, tuple(argv)))
+        self._start(name)
         if argv and argv[0] == "git" and self.clone_dir(name) is not None:
             # Run it, for real, against the clone. Faking git here would fake exactly the
             # thing the clone path is made of: cutting the branch inside the VM, and the
@@ -309,6 +348,7 @@ class FakeSandbox:
         return Completed(tuple(argv), 0, "/usr/bin/node\n/usr/bin/git\nv22.22.1", "")
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
+        self._start(handle.sandbox)
         clone = self.clone_dir(handle.sandbox)
         if clone is not None:
             # The agent's commits land in the clone and nowhere else, which is what makes
@@ -358,7 +398,7 @@ class FakeSandbox:
         return None
 
     def stop(self, name: str) -> None:
-        return None
+        self.stop_sandbox(name)
 
     def remove(self, name: str) -> None:
         return None

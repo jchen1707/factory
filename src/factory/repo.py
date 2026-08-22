@@ -119,6 +119,10 @@ def fetch_from(repo: Path, remote: str, branch: str) -> None:
     _git(repo, "fetch", remote, branch)
 
 
+def remote_exists(repo: Path, remote: str) -> bool:
+    return _git_ok(repo, "remote", "get-url", remote)
+
+
 def local_branch_exists(repo: Path, branch: str) -> bool:
     return _git_ok(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
 

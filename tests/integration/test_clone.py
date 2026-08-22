@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from factory import repo
 from factory.machine import Blocked, State
 from factory.sandbox.base import SandboxSpec
 from factory.sandbox.sbx import create_argv
@@ -292,6 +293,48 @@ def test_fetch_back_picks_up_a_commit_the_vm_made_after_the_first_fetch(
 
     assert git(path, "rev-parse", "HEAD") == git(clone, "rev-parse", "HEAD")
     assert (path / "later.py").exists()
+
+
+def test_fetch_back_starts_a_stopped_sandbox_before_fetching(clone_ctx: Context) -> None:
+    """The shape a real run is actually in at the `reviewing` entry, and the one that broke.
+
+    `sbx` registers the `sandbox-<name>` remote when the sandbox starts, gives it a new
+    port every time, and removes it when the sandbox stops. The build sandbox's last
+    session is the implement step's detached exec, so by `reviewing` it has auto-stopped
+    and the remote is gone — a real FRO-6 run failed exactly here, with "does not appear
+    to be a git repository" against a remote that `git remote -v` had listed a minute
+    earlier. `fetch_back` has to start it first.
+    """
+    _to_verifying(clone_ctx)
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    vm_head = git(clone, "rev-parse", "HEAD")
+
+    _fake(clone_ctx).stop_sandbox(clone_ctx.project.build_sandbox)
+    assert not repo.remote_exists(
+        clone_ctx.project.path, clone_step.remote_name(clone_ctx.project.build_sandbox)
+    )
+
+    path = clone_step.fetch_back(clone_ctx)
+
+    assert git(path, "rev-parse", "HEAD") == vm_head
+    assert clone_ctx.project.build_sandbox in _fake(clone_ctx).running
+
+
+def test_a_sandbox_that_will_not_start_blocks_with_the_commits_named_as_safe(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure has to be legible: the work is not lost, it is still in the VM, and the
+    reason is the remote's lifecycle rather than anything about the branch."""
+    _to_verifying(clone_ctx)
+    _fake(clone_ctx).stop_sandbox(clone_ctx.project.build_sandbox)
+    monkeypatch.setattr(_fake(clone_ctx), "_start", lambda name: None)
+
+    with pytest.raises(Blocked) as caught:
+        clone_step.fetch_back(clone_ctx)
+
+    assert caught.value.reason == "clone-remote-unreachable"
+    assert "still in the VM" in caught.value.detail
 
 
 def test_the_evidence_stays_on_the_mount_after_the_branch_comes_home(
