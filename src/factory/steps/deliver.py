@@ -146,7 +146,7 @@ def run(ctx: Context) -> None:
 
 def _render_body(ctx: Context) -> str:
     """Assemble the §13.2 PR body from the evidence the run recorded."""
-    attempt_dir = ctx.worktree / ".factory" / "run" / str(ctx.run.attempt)
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     result = _read_json(attempt_dir / "last-message.json")
     gates_doc = _read_json(attempt_dir / "gates.json")
     review_summary = _read_json(ctx.state_dir / "review" / "review-summary.json")
@@ -168,7 +168,7 @@ def _render_body(ctx: Context) -> str:
 
 
 def _gate_summary(ctx: Context) -> str:
-    attempt_dir = ctx.worktree / ".factory" / "run" / str(ctx.run.attempt)
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     gates_doc = _read_json(attempt_dir / "gates.json")
     verdict = gates_doc.get("verdict", "?")
     rows = [f"{g.get('name', '?')}={g.get('status', '?')}" for g in gates_doc.get("gates", [])]
@@ -201,7 +201,7 @@ def _redphase_row(ctx: Context) -> dict[str, str] | None:
 
 def _archive(ctx: Context) -> None:
     """Copy the attempt directory out to `artifacts/`, scanning for secrets first (§14.1, F18)."""
-    attempt_dir = ctx.worktree / ".factory" / "run" / str(ctx.run.attempt)
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     if not attempt_dir.is_dir():
         return
     extra = list(ctx.harness.secret_vars) if ctx.harness else []

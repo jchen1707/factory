@@ -495,7 +495,7 @@ def _bug_without_test(ctx: Context) -> bool:
     labels = {label.lower() for label in ctx.issue.labels}
     if "bug" not in labels:
         return False
-    attempt_dir = ctx.worktree / ".factory" / "run" / str(ctx.run.attempt)
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     if not attempt_dir.exists():
         return True
     try:
