@@ -95,6 +95,12 @@ class Issue:
     parent_description: str
     comments: tuple[tuple[str, str, str], ...] = ()  # (author, created_at, body)
     siblings: tuple[tuple[str, str, str], ...] = ()  # (identifier, state, title)
+    #: The tickets Linear records as blocking this one: `(identifier, state_type)`.
+    #: Read from `inverseRelations`, which is the direction that means "blocks me" —
+    #: `relations` is the tickets *this* one blocks, and reading the wrong one would
+    #: hold a ticket open on its own dependents. Measured against the live API on
+    #: 2026-08-22: FRO-7's `inverseRelations` names FRO-6 and its `relations` is empty.
+    blocked_by: tuple[tuple[str, str], ...] = ()
 
     @property
     def acceptance_criteria(self) -> list[str]:
@@ -129,6 +135,7 @@ query($id: String!) {
       children { nodes { identifier title state { name } } }
     }
     comments { nodes { body createdAt user { name } } }
+    inverseRelations { nodes { type issue { identifier state { name type } } } }
   }
 }
 """
@@ -251,6 +258,11 @@ class LinearClient:
             ((c.get("user") or {}).get("name", "unknown"), c["createdAt"], c["body"])
             for c in (node.get("comments") or {}).get("nodes", [])
         )
+        blocked_by = tuple(
+            (relation["issue"]["identifier"], relation["issue"]["state"]["type"])
+            for relation in (node.get("inverseRelations") or {}).get("nodes", [])
+            if relation.get("type") == "blocks" and relation.get("issue")
+        )
         return Issue(
             identifier=node["identifier"],
             title=node["title"],
@@ -266,6 +278,7 @@ class LinearClient:
             parent_description=parent.get("description") or "",
             comments=comments,
             siblings=siblings,
+            blocked_by=blocked_by,
         )
 
     def ready_issues(self, team_keys: Sequence[str]) -> list[str]:
@@ -397,7 +410,8 @@ class RepoFacts:
 
 
 def evaluate_eligibility(issue: Issue, facts: RepoFacts) -> list[Condition]:
-    """§7.1's nine conditions, plus the tenth P0-11 measured into the plan.
+    """§7.1's nine conditions, plus the tenth P0-11 measured into the plan and the
+    eleventh a real run paid to discover.
 
     Conditions 4 to 6 are the operational form of "the factory must not start from an
     unreviewed issue": cheap, deterministic, and they fail loudly.
@@ -465,8 +479,48 @@ def evaluate_eligibility(issue: Issue, facts: RepoFacts) -> list[Condition]:
             not facts.base_ref_subjects,
             "already-implemented",
         ),
+        # Condition 11, added after `factory run FRO-7 --full-review` on 2026-08-22 spent
+        # a model run learning it. FRO-7 reached `implementing` and the agent stopped
+        # itself: it is blocked by FRO-6 and would have had to invent FRO-6's seams to
+        # proceed. Linear knew that the whole time, structurally.
+        #
+        # Read from the relation rather than from the `## Blocked by` prose the ticket
+        # also carries. The relation is exact and carries the blocker's state with it; a
+        # prose scan would match a ticket merely *mentioned* in a sentence, which is the
+        # same false-positive shape condition 10's docstring already argues against.
+        #
+        # **Reasonless on purpose** — no `block_reason`, so a dependent ticket is skipped
+        # rather than blocked. Every other reasoned failure needs a human to clear
+        # `needs-info` afterwards, and this is the one condition that resolves *itself*:
+        # when the blocker reaches Done the next tick picks the ticket up with no
+        # intervention. Writing `needs-info` here would freeze a ticket that was about to
+        # become ready, which is the opposite of what a poller is for.
+        Condition(
+            11,
+            f"every blocking ticket is Done ({_blocker_summary(issue) or 'none'})",
+            not open_blockers(issue),
+            None,
+        ),
     ]
     return conditions
+
+
+#: The one Linear state type that means the blocker's work exists. `cancelled` does not
+#: clear a block: the dependent slice needs the seams to have been *built*, and a ticket
+#: nobody implemented has none. A stale relation to a cancelled blocker is a relation for
+#: a human to remove, and the condition names it every time it fires so it is visible.
+DONE_STATE_TYPE = "completed"
+
+
+def open_blockers(issue: Issue) -> list[str]:
+    """The identifiers of every ticket Linear says blocks this one and is not yet Done."""
+    return [
+        identifier for identifier, state_type in issue.blocked_by if state_type != DONE_STATE_TYPE
+    ]
+
+
+def _blocker_summary(issue: Issue) -> str:
+    return ", ".join(f"{identifier} is {state}" for identifier, state in issue.blocked_by)
 
 
 def eligibility_verdict(conditions: Sequence[Condition]) -> tuple[bool, str | None, list[str]]:

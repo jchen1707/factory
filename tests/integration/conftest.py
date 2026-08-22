@@ -446,6 +446,9 @@ class FakeLinear:
     #: Set to raise from every write, to prove an announcement failure cannot mask the
     #: block that caused it.
     fail_with: Exception | None = None
+    #: What the poller's `ready_issues` query answers. Empty by default, so a test that
+    #: does not opt in cannot accidentally have the tick claim new work.
+    ready: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.labels is None:
@@ -454,6 +457,9 @@ class FakeLinear:
     def _check(self) -> None:
         if self.fail_with is not None:
             raise self.fail_with
+
+    def ready_issues(self, team_keys: Sequence[str]) -> list[str]:
+        return list(self.ready)
 
     def issue(self, identifier: str) -> Issue:
         return self.issue_data

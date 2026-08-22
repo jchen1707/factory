@@ -22,12 +22,15 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, gc, machine, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import (
+    Condition,
+    Issue,
     LinearClient,
     LinearError,
     RepoFacts,
@@ -70,6 +73,60 @@ def factory_home() -> Path:
 
 
 # --------------------------------------------------------------------------------
+# Intake, in one place
+# --------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """§7.1's verdict on one ticket, plus the branch name the conditions were judged against.
+
+    One function, two callers. `factory run` prints it and `factory tick` acts on it —
+    and it exists as a function at all because the tick did not have one: `claim_step`
+    performs the claim but evaluates no condition, so a poller that only called it would
+    have started a run on any ticket carrying the label and discovered the rest by
+    spending a model run on it. That is the whole class of failure this project cares
+    about, arriving through the component meant to prevent it.
+    """
+
+    conditions: list[Condition]
+    eligible: bool
+    block_reason: str | None
+    failures: list[str]
+    branch: str
+    stale_branches: tuple[str, ...]
+
+
+def assess(registry: Registry, project: Project, issue: Issue) -> Assessment:
+    """Evaluate every intake condition for one ticket. Reads only; writes nothing."""
+    harness = load_harness_config(project.path)
+    identifier = issue.identifier
+    branch = repo.branch_name(
+        repo.branch_type_for_labels(list(issue.labels)), identifier, issue.title
+    )
+    facts = RepoFacts(
+        tracker_team=harness.team,
+        open_pr_heads=_open_pr_heads(project.path),
+        base_ref_subjects=tuple(
+            repo.identifier_on_base(project.path, identifier, project.base_ref)
+        ),
+        remote_branches=tuple(repo.remote_branches_matching(project.path, identifier)),
+        expected_branch=branch,
+        known_teams=frozenset(p.team for p in registry.projects.values()),
+    )
+    conditions = evaluate_eligibility(issue, facts)
+    eligible, block_reason, failures = eligibility_verdict(conditions)
+    return Assessment(
+        conditions=conditions,
+        eligible=eligible,
+        block_reason=block_reason,
+        failures=failures,
+        branch=branch,
+        stale_branches=tuple(b for b in facts.remote_branches if b != f"origin/{branch}"),
+    )
+
+
+# --------------------------------------------------------------------------------
 # factory run
 # --------------------------------------------------------------------------------
 
@@ -86,20 +143,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     issue = linear.issue(ticket)
 
     harness = load_harness_config(project.path)
-    branch = repo.branch_name(
-        repo.branch_type_for_labels(list(issue.labels)), issue.identifier, issue.title
+    assessment = assess(registry, project, issue)
+    branch = assessment.branch
+    conditions = assessment.conditions
+    eligible, block_reason, failures = (
+        assessment.eligible,
+        assessment.block_reason,
+        assessment.failures,
     )
-    facts = RepoFacts(
-        tracker_team=harness.team,
-        open_pr_heads=_open_pr_heads(project.path),
-        base_ref_subjects=tuple(repo.identifier_on_base(project.path, ticket, project.base_ref)),
-        remote_branches=tuple(repo.remote_branches_matching(project.path, ticket)),
-        expected_branch=branch,
-        known_teams=frozenset(p.team for p in registry.projects.values()),
-    )
-
-    conditions = evaluate_eligibility(issue, facts)
-    eligible, block_reason, failures = eligibility_verdict(conditions)
 
     print(f"{ticket} — {issue.title}")
     print(f"  project {project.name}   base {project.base_ref}   branch {branch}")
@@ -113,7 +164,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     # base-ref check cannot see. It blocks the *branch name* — which `add_worktree`
     # enforces exactly — and it is worth reading before the run, but the work is
     # unlanded and may well be worth redoing.
-    stale = [b for b in facts.remote_branches if b != f"origin/{branch}"]
+    stale = list(assessment.stale_branches)
     if stale:
         print(f"  NOTE  a remote branch already mentions {ticket}: {', '.join(stale)}")
         print("        the factory will not reuse it; it is also a free oracle to diff against")
@@ -542,10 +593,16 @@ def _claim_new_work(
 ) -> list[str]:
     """§7.1 — every `ready-for-agent` ticket the registry claims a team for.
 
-    Eligibility is not re-implemented here: a new row is created at `approved` and the
-    forward dispatch runs the same `claim` step `factory run` does, so the intake
-    conditions are evaluated in exactly one place whether a human typed the command or
-    the timer did.
+    The intake conditions are evaluated **here**, through the same `assess` that
+    `factory run` prints, before any row is created. `claim_step` performs the claim; it
+    judges nothing, so a poller that trusted it would start a run on any ticket carrying
+    the label and learn the rest by spending a model run.
+
+    The two failure shapes are treated as differently as §7.1 means them to be. A
+    reasonless failure is a ticket that was never the factory's — no row, no comment, one
+    line — and it is re-examined free on every tick, so a dependency that resolves gets
+    picked up with no intervention. A reasoned failure is the factory's ticket and not
+    ready, so it becomes a `blocked` run a human can see.
     """
     lines: list[str] = []
     teams = sorted({p.team for p in registry.projects.values()})
@@ -567,7 +624,21 @@ def _claim_new_work(
             continue
 
         issue = linear.issue(ticket)
+        verdict = assess(registry, project, issue)
+        if not verdict.eligible and verdict.block_reason is None:
+            # Not the factory's ticket, or not the factory's yet. Costs one line and is
+            # reconsidered on the next tick for free.
+            if verbose:
+                lines.append(f"{ticket:<10} not eligible: {'; '.join(verdict.failures)}")
+            continue
+
         run = store.insert_run(linear_id=ticket, project=project.name, team=issue.team_key)
+        if verdict.block_reason:
+            lines.append(f"{ticket:<10} blocked at intake: {verdict.block_reason}")
+            ctx = build(run)
+            _block(ctx, verdict.block_reason, "; ".join(verdict.failures))
+            continue
+
         lines.append(f"{ticket:<10} claimed as run {run.id}")
         line = _work_on(store, run, build, verbose=verbose)
         if line:

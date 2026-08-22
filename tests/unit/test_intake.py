@@ -145,3 +145,63 @@ def test_acceptance_criteria_are_extracted_in_order() -> None:
     )
     assert len(issue.acceptance_criteria) == 2
     assert issue.acceptance_criteria[0].endswith("one")
+
+
+# -- condition 11: the blockers Linear already knows about ---------------------
+
+
+def _condition(conditions: list, number: int):  # type: ignore[no-untyped-def]
+    return next(c for c in conditions if c.number == number)
+
+
+def test_a_ticket_with_no_recorded_blockers_passes_condition_eleven() -> None:
+    conditions = evaluate_eligibility(_issue(), _facts())
+
+    assert _condition(conditions, 11).passed
+    assert eligibility_verdict(conditions)[0]
+
+
+def test_a_blocker_that_is_not_done_makes_the_ticket_ineligible() -> None:
+    # The FRO-7 case, exactly: Linear recorded FRO-6 as blocking it the whole time, and
+    # the factory spent a model run finding out.
+    issue = _issue(blocked_by=(("FRO-6", "started"),))
+
+    conditions = evaluate_eligibility(issue, _facts())
+
+    assert not _condition(conditions, 11).passed
+    assert "FRO-6" in _condition(conditions, 11).label
+
+
+def test_a_done_blocker_does_not_hold_the_ticket() -> None:
+    issue = _issue(blocked_by=(("FRO-5", "completed"),))
+
+    assert _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_one_open_blocker_among_several_is_enough_to_hold_it() -> None:
+    issue = _issue(blocked_by=(("FRO-5", "completed"), ("FRO-6", "started")))
+
+    assert not _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_a_cancelled_blocker_still_blocks() -> None:
+    # The dependent slice needs the blocker's seams to have been *built*, and a ticket
+    # nobody implemented has none. A stale relation to a cancelled ticket is a relation
+    # for a human to remove, and the condition names it every time it fires.
+    issue = _issue(blocked_by=(("FRO-6", "canceled"),))
+
+    assert not _condition(evaluate_eligibility(issue, _facts()), 11).passed
+
+
+def test_a_blocked_ticket_is_skipped_rather_than_blocked() -> None:
+    """Reasonless on purpose. Every reasoned failure needs a human to clear `needs-info`
+    afterwards, and this is the one condition that resolves itself: when the blocker
+    reaches Done the next tick picks the ticket up with no intervention. Writing
+    `needs-info` here would freeze a ticket that was about to become ready."""
+    issue = _issue(blocked_by=(("FRO-6", "started"),))
+
+    eligible, block_reason, failures = eligibility_verdict(evaluate_eligibility(issue, _facts()))
+
+    assert not eligible
+    assert block_reason is None
+    assert any("11." in f for f in failures)

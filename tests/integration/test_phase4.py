@@ -334,3 +334,55 @@ def test_a_blocked_run_is_recorded_and_the_pass_keeps_going(ctx: Context) -> Non
     assert run is not None
     assert run.state is State.BLOCKED
     assert run.blocked_reason
+
+
+# --------------------------------------------------------------------------------
+# The poller evaluates intake — it does not delegate that to the claim step
+# --------------------------------------------------------------------------------
+
+
+def _ready(ctx: Context, *tickets: str) -> None:
+    """Make the fake Linear answer the poller's `ready_issues` query."""
+    ctx.linear.ready = list(tickets)  # type: ignore[attr-defined]
+
+
+def test_the_poller_refuses_a_ticket_that_fails_an_intake_condition(ctx: Context) -> None:
+    # `claim_step` performs the claim and judges nothing, so a poller that trusted it
+    # would start a run on any ticket carrying the label and learn the rest by spending
+    # a model run. This is the ticket FRO-7 was.
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.state, to_state=State.CANCELLED, actor="human"
+    )
+    ctx.linear.issue_data = replace(  # type: ignore[attr-defined]
+        ctx.linear.issue_data,  # type: ignore[attr-defined]
+        blocked_by=(("BAC-3", "started"),),
+    )
+    _ready(ctx, "BAC-4")
+
+    lines = _tick(ctx, claim=True, verbose=True)
+
+    assert ctx.store.live_run_for_ticket("BAC-4") is None
+    assert any("not eligible" in line and "11." in line for line in lines)
+
+
+def test_a_ticket_whose_blocker_lands_is_picked_up_with_no_intervention(ctx: Context) -> None:
+    # The whole reason condition 11 is reasonless. A `needs-info` write here would
+    # freeze a ticket that was about to become ready, and a human would have to clear a
+    # label the factory had no business applying.
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.state, to_state=State.CANCELLED, actor="human"
+    )
+    ctx.linear.issue_data = replace(  # type: ignore[attr-defined]
+        ctx.linear.issue_data,  # type: ignore[attr-defined]
+        blocked_by=(("BAC-3", "completed"),),
+    )
+    _fake(ctx).detach_without_finishing = True
+    _ready(ctx, "BAC-4")
+
+    _tick(ctx, claim=True)
+
+    run = ctx.store.live_run_for_ticket("BAC-4")
+    assert run is not None
+    assert run.state is State.IMPLEMENTING
+    # And no label was ever written on the way through.
+    assert "needs-info" not in (ctx.linear.labels or [])  # type: ignore[attr-defined]
