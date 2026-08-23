@@ -510,15 +510,15 @@ def suspend(ctx: Context, *, reason: str) -> State:
 
     _stop_sandbox_if_idle(ctx)
 
-    ctx.store.record_transition(
-        ctx.run.id,
-        from_state=origin,
-        to_state=State.SUSPENDED,
-        actor="human",
-        rule="suspend-is-james",
-        detail=reason,
-    )
-    ctx.refresh()
+    # Through `advance`, not `record_transition`. This wrote its own row until
+    # 2026-08-23, which put it around every §5.4 guard — and the console's Suspend
+    # control, clicked on a run sitting at `resumable`, duly recorded
+    # `resumable -> suspended`, an edge the table does not have. The run was then stuck:
+    # `resume` will not re-enter `resumable`, so only `--from` could move it. "The only
+    # way a run changes state" has to have no exceptions to be worth anything.
+    from factory.steps import advance
+
+    advance(ctx, State.SUSPENDED, actor="human", rule="suspend-is-james", detail=reason)
     _suspend_announce(ctx, reason, origin)
     return origin
 

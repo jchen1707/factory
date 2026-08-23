@@ -1235,6 +1235,17 @@ def cmd_suspend(args: argparse.Namespace) -> int:
     if run.state in machine.TERMINAL:
         print(f"{ticket} is at {run.state}; nothing to suspend")
         return 1
+    if not machine.can(run.state, State.SUSPENDED):
+        # Said here rather than left to `advance`, so a human who asked for something the
+        # table forbids gets a sentence instead of a `blocked` run. §16.3b: suspend parks
+        # a run that is *going*; a `resumable` or `blocked` one has already stopped, and
+        # `resume` is the command for those.
+        print(
+            f"{ticket} is at {run.state}, which has no edge to {State.SUSPENDED}; "
+            f"nothing to park. `factory resume {ticket}` is the command for a run that "
+            "has already stopped."
+        )
+        return 1
     if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
         print(
             f"\n{ticket} is leased by another process ({run.lease_owner}); wait for it to "
@@ -1374,6 +1385,15 @@ def dispatch_control(
         if action == "suspend":
             if run.state in machine.TERMINAL:
                 return 1, f"{run.linear_id} is at {run.state}; nothing to suspend"
+            if not machine.can(run.state, State.SUSPENDED):
+                # The same refusal as `cmd_suspend`'s, because §18.5 says the control and
+                # the command share a path — and because this is the one that fired: the
+                # console suspended a `resumable` BAC-6 and recorded an edge that does
+                # not exist.
+                return 1, (
+                    f"{run.linear_id} is at {run.state}, which has no edge to "
+                    f"{State.SUSPENDED}; use Resume, not Suspend"
+                )
             origin = recovery.suspend(ctx, reason="suspended via console")
             return 0, f"{run.linear_id} suspended from {origin}"
         if action == "cancel":

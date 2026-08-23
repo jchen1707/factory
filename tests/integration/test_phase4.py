@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from factory import cli, recovery
+from factory import cli, machine, recovery
 from factory.intake.linear import LinearError
 from factory.machine import Blocked, State
 from factory.recovery import Disposition
@@ -1085,3 +1085,28 @@ def test_f25_a_bad_routing_table_refuses_the_tick(
     rc = cli.main(["tick", "--once"])
 
     assert rc == 2  # refused, not fallen back
+
+
+def test_suspend_refuses_a_state_the_transition_table_has_no_edge_from(ctx: Context) -> None:
+    """§5.4's guards live in `advance`, and `suspend` used to write its transition with a
+    bare `record_transition` — around every one of them.
+
+    Measured live on BAC-6: the console's Suspend control was clicked on a run sitting at
+    `resumable`, and `resumable -> suspended` went into the audit log even though
+    `RESUMABLE`'s edge set does not contain `SUSPENDED`. The run was then unresumable —
+    `resume` refused to re-enter `resumable` — so a control that should have been refused
+    produced a state only `--from` could get out of.
+    """
+    _start_an_attempt(ctx, finish=False)
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+    reap_step.reap(ctx)
+    assert ctx.state is State.RESUMABLE
+    assert not machine.can(State.RESUMABLE, State.SUSPENDED)
+
+    with pytest.raises(Blocked) as caught:
+        recovery.suspend(ctx, reason="park it while I look")
+
+    assert caught.value.reason == "illegal-transition"
+    ctx.refresh()
+    assert ctx.state is State.RESUMABLE
+    assert all(row["to_state"] != str(State.SUSPENDED) for row in ctx.store.transitions(ctx.run.id))
