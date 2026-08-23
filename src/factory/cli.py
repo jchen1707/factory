@@ -28,6 +28,7 @@ from pathlib import Path
 from factory import artifacts, gc, machine, policy, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
+from factory.delivery import github
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import (
     Condition,
@@ -48,6 +49,7 @@ from factory.steps import Context, advance, factory_dir_for
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
+from factory.steps import complete as complete_step
 from factory.steps import context as context_step
 from factory.steps import deliver as deliver_step
 from factory.steps import implement as implement_step
@@ -1214,6 +1216,85 @@ def _cancel_run(
 
 
 # --------------------------------------------------------------------------------
+# factory complete
+# --------------------------------------------------------------------------------
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    """§5.3 — record that James merged the PR, so `gc` can reclaim the run.
+
+    The one edge out of `awaiting_human` that finishes a run. `merge-is-james` reserves it,
+    so this is a human command by construction; what the command adds is the evidence.
+    `gh pr view --json state` must say `MERGED` before the transition is taken, because an
+    unverified `completed` is worse than no command at all: it makes `gc` delete the
+    worktree and branch of a run whose PR is still open.
+    """
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home, dry_run=False)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    if run.state is State.COMPLETED:
+        print(f"{ticket} is already completed; `factory gc` reclaims it")
+        return 0
+    if run.state is not State.AWAITING_HUMAN:
+        print(
+            f"{ticket} is at {run.state}, not {State.AWAITING_HUMAN}; only a run that has "
+            "delivered a PR can be completed."
+        )
+        return 1
+    if not run.pr_url:
+        print(
+            f"{ticket} reached {State.AWAITING_HUMAN} without opening a PR, so there is no "
+            "merge to record. `factory cancel` is the command that ends it."
+        )
+        return 1
+
+    project = registry.resolve(run.linear_id)
+    state = github.pr_state(project.path, run.pr_url)
+    if state is None:
+        print(
+            f"could not read {run.pr_url} with `gh` (unauthenticated, offline, or no repo "
+            f"at {project.path}). Nothing was changed; this is worth retrying."
+        )
+        return 1
+    if state != "MERGED":
+        print(
+            f"{run.pr_url} is {state}, not MERGED. {ticket} stays at "
+            f"{State.AWAITING_HUMAN} — merging is yours (§13.2), and `completed` is only "
+            "the record of it."
+        )
+        return 1
+
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        print(f"\n{ticket} is leased by another process ({run.lease_owner}); wait for it.")
+        return 1
+
+    ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+    try:
+        advance(
+            ctx,
+            State.COMPLETED,
+            actor="human",
+            rule="merge-is-james",
+            detail=f"{run.pr_url} merged",
+        )
+        complete_step.announce_completed(ctx, pr_url=run.pr_url)
+    finally:
+        store.release_lease(run.id)
+
+    print(
+        f"{ticket} completed; {run.pr_url} is merged. Its worktree, branch and artifacts "
+        f"are now collectable — `factory gc --dry-run` shows what that would reclaim."
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------------
 # factory suspend
 # --------------------------------------------------------------------------------
 
@@ -1885,6 +1966,12 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("ticket")
     cancel.add_argument("--reason", default="cancelled by hand")
     cancel.set_defaults(func=cmd_cancel)
+
+    complete = sub.add_parser(
+        "complete", help="record that the PR was merged; lets `gc` reclaim the run"
+    )
+    complete.add_argument("ticket")
+    complete.set_defaults(func=cmd_complete)
 
     suspend = sub.add_parser("suspend", help="park a run; keep its worktree, branch and session")
     suspend.add_argument("ticket")
