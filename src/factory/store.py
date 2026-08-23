@@ -635,11 +635,32 @@ class Store:
         `from_state -> resumable` row every time reap orphans or times out an attempt,
         so counting those is the re-run ceiling that actually increments. Used by
         `recovery.resume_run` to bound a hanging verify/review re-run to `failed`.
+
+        Counted **since the last re-authorisation**, not for all time. `--authorise` is
+        §16.4's explicit human act — "spend again on this run" — and the only way this
+        ceiling ever produces `failed` is by being reached, so an all-time count made the
+        flag inert in exactly the case it names: a run failed on `max-reruns-<state>`
+        bounced `failed -> resumable -> failed` on the next tick, forever, and the work it
+        was carrying could never be recovered. Measured on FRO-7 run `b1aa9785bbe44663`.
+
+        A re-authorisation is a `-> resumable` transition with rule `reauthorise-spend`;
+        rows at or before the most recent one are the previous budget and are not this
+        one's. With no such row the count is every re-entry, which is the original
+        behaviour and the right one for a run no human has re-authorised.
         """
         row = self._conn.execute(
             "SELECT COUNT(*) AS n FROM transitions "
-            "WHERE run_id = ? AND from_state = ? AND to_state = ?",
-            (run_id, str(from_state), str(State.RESUMABLE)),
+            "WHERE run_id = ? AND from_state = ? AND to_state = ? "
+            "AND rowid > COALESCE("
+            "  (SELECT MAX(rowid) FROM transitions "
+            "    WHERE run_id = ? AND to_state = ? AND rule = 'reauthorise-spend'), 0)",
+            (
+                run_id,
+                str(from_state),
+                str(State.RESUMABLE),
+                run_id,
+                str(State.RESUMABLE),
+            ),
         ).fetchone()
         return int(row["n"]) if row else 0
 
