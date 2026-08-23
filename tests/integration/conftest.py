@@ -369,6 +369,13 @@ class FakeSandbox:
             directory = handle.attempt_dir
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "heartbeat").write_text(str(int(time.time())))
+            # A running attempt has already streamed `thread.started` — it is the first
+            # line codex writes, long before the first turn ends. Measured on BAC-6
+            # attempt 1, suspended nine minutes in: `events.jsonl` 120 KB, heartbeat
+            # fresh, no `exit`. A fake that wrote only the heartbeat modelled a
+            # sessionless agent that does not exist, and hid the fact that nothing on
+            # the detached path ever captured the id.
+            (directory / "events.jsonl").write_text(json.dumps(HELLO_EVENTS[0]) + "\n")
             return
         clone = self.clone_dir(handle.sandbox)
         is_verify = "gate_report.mjs" in script

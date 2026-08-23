@@ -360,3 +360,77 @@ def test_the_writable_scratch_leads_and_the_code_under_review_follows_read_only(
         "/Users/james/factory/state/runs/abc/review",
         "/Users/james/python-harness:ro",
     ]
+
+
+# --------------------------------------------------------------------------------
+# The kill must not select the process that writes the terminal record
+# --------------------------------------------------------------------------------
+
+
+#: `pkill` semantics, measured inside `factory-build-python-harness-2` on 2026-08-22
+#: rather than read off a man page: `-f` matches the **whole command line**, `-x`
+#: matches the **process name** exactly. The measurement that matters is that a
+#: `-f "codex exec"` pattern selected three processes — the agent, the wrapper
+#: `/bin/sh -lc` whose command line embeds the agent's argv, and the wrapper's
+#: heartbeat subshell — and killing the wrapper is what leaves an attempt with no
+#: `exit` file at all.
+def _pkill_selects(argv: list[str], *, process_name: str, cmdline: str) -> bool:
+    flags = {part for part in argv if part.startswith("-")}
+    pattern = argv[-1]
+    if "-f" in flags:
+        return pattern in cmdline
+    if "-x" in flags:
+        return process_name == pattern
+    return pattern in process_name
+
+
+def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§16.3b's suspend and §16.1's timeout both promise a real terminal record after
+    the kill. They cannot have one if the kill selects the wrapper: the `exit` file is
+    written by the wrapper, *after* the body returns.
+
+    Measured on BAC-6 run `3f03240cd3bc4bd0`: suspend killed the agent and waited out
+    `KILL_GRACE_SECONDS`, and no `exit` file ever appeared — because
+    `pkill -f "codex exec"` had killed the shell that would have written it.
+    """
+    from factory.agent.base import AgentInvocation
+    from factory.agent.codex import CodexAdapter
+
+    invocation = AgentInvocation(
+        model="gpt-5.6-sol",
+        effort="xhigh",
+        workdir="/repo/wt",
+        prompt_path=tmp_path / "prompt.md",
+        schema_path=tmp_path / "schema.json",
+        output_path=tmp_path / "last-message.json",
+        events_path=tmp_path / "events.jsonl",
+        stderr_path=tmp_path / "stderr.log",
+        exit_path=tmp_path / "exit",
+        heartbeat_path=tmp_path / "heartbeat",
+        vault_directory="/Users/james/Documents/Obsidian Vault",
+    )
+    script = CodexAdapter().wrapper_script(invocation)
+    wrapper_cmdline = f"/bin/sh -lc {script}"
+
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        SbxAdapter,
+        "_run",
+        lambda self, argv, **kw: captured.append(list(argv)),  # type: ignore[misc]
+    )
+    SbxAdapter().kill_agent("factory-build-python-harness")
+
+    argv = captured[0]
+    assert argv[:3] == ["sbx", "exec", "factory-build-python-harness"]
+    pkill = argv[3:]
+    assert pkill[0] == "pkill"
+
+    # The agent itself must die: `codex exec ...` runs as a process named `codex`.
+    assert _pkill_selects(
+        pkill, process_name="codex", cmdline=" ".join(CodexAdapter().command(invocation))
+    )
+    # The wrapper must not, and neither must its heartbeat subshell. Both are `/bin/sh`
+    # processes whose command line contains the agent's argv verbatim.
+    assert not _pkill_selects(pkill, process_name="sh", cmdline=wrapper_cmdline)

@@ -395,9 +395,29 @@ class SbxAdapter:
 
         A timeout is never silently a success: the wrapper's `exit` file still lands
         after the kill, which is what turns "we gave up" into a recorded exit code.
+
+        **The match is on the process name, never the command line.** This read
+        `pkill -f "codex exec"` until 2026-08-22, and that pattern selects three
+        processes inside the sandbox, not one — measured on
+        `factory-build-python-harness-2`:
+
+            305 /bin/sh -lc set -u ( while :; do date -u +%s > …/heartbeat; …
+            309 /bin/sh -lc set -u ( while :; do date -u +%s > …/heartbeat; …
+            310 …/bodyproc …
+
+        The wrapper's command line *contains* the agent's argv, so `-f` kills the
+        wrapper and its heartbeat subshell along with the agent — and the wrapper is
+        the process that writes `exit`, after the body returns. The promise in the
+        paragraph above was therefore false in every case it was made: BAC-6 run
+        `3f03240cd3bc4bd0` was suspended from `implementing`, waited out
+        `KILL_GRACE_SECONDS`, and recorded `exit_code = NULL`.
+
+        `-x codex` selects the agent alone (`command()` puts `codex` at argv[0]); the
+        wrapper, named `sh`, survives to write `143`. Measured both ways on the same
+        sandbox with the real envelope.
         """
         assert_factory_sandbox(name)
-        self._run(["sbx", "exec", name, "pkill", "-f", "codex exec"], timeout=60)
+        self._run(["sbx", "exec", name, "pkill", "-x", "codex"], timeout=60)
 
     # -- observation --------------------------------------------------------------
 

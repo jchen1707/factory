@@ -60,8 +60,16 @@ class CodexAdapter:
             str(invocation.schema_path),
             "-o",
             str(invocation.output_path),
-            "-C",
-            invocation.workdir,
+        ]
+        # `-C` is `codex exec`'s alone. `codex exec resume` is a different clap command
+        # and rejects it outright — `error: unexpected argument '-C'`, exit 2 in under a
+        # second, which is how BAC-6 attempt 3 died on 2026-08-23, the first resume-by-id
+        # ever run against the real binary. Nothing is lost by omitting it: the worktree
+        # is already the process's working directory, because `exec_argv` passes
+        # `sbx exec -w <worktree>` for every detached run.
+        if not invocation.resume_session:
+            argv += ["-C", invocation.workdir]
+        argv += [
             # Mandatory, not prudent. P0-6 measured a protected-path edit succeeding at
             # exit 0, in silence, without it: at an untrusted path the enforcement layer
             # is not merely inert, it is invisible. Paired with vendor_sync's integrity

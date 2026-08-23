@@ -2270,7 +2270,27 @@ re-derive it: run `0d53f96c918a4d8e`, `blocked`, attempt 1, **no PR**, no host w
 half is already where cancel would put it (`Todo`, no `needs-info`), so that step is a
 no-op. This is a database cleanup wearing a rollback's name.
 
-**Steps**
+**Steps — two independent tracks, on two tickets.** The steps are *not* ordered
+4 → 5 → 6 on one subject: `suspend` is legal only from `planning`, `implementing`,
+`verifying` and `reviewing`, so it needs a run in flight — and suspending the acceptance
+run writes the `actor = "human"` hop that voids it. After that run lands there is no
+`awaiting_human -> suspended` edge at all. The plan's own wording already separates them:
+the unattended run is *"the one thing that closes this phase"*, and 5/6 are *"confirmation
+on the real adapters, not first proof."*
+
+| track | ticket | steps | why |
+| --- | --- | --- | --- |
+| **acceptance** | FRO-7 | 4.5-1 … 4.5-4 | the exit criterion; must stay free of human hops |
+| **control validation** | BAC-6 | 4.5-5a … 4.5-6 | needs a run in flight to suspend, which the acceptance run cannot be |
+
+BAC-6 is preferred over a second FRO ticket for two reasons: python-harness is
+**bind-mounted, not `--clone`**, so it is the cheapest coverage of the other project shape
+(`_review_spec`'s read-only worktree had never run live), and it leaves FRO-7 alone.
+`recovery.resume` writes `actor = "human"` on every entry, so each control step permanently
+disqualifies its ticket from ever being an acceptance run — pick one you are willing to
+spend.
+
+**Track A — acceptance**
 
 | # | Step | Command | Expected |
 | --- | --- | --- | --- |
@@ -2278,12 +2298,26 @@ no-op. This is a database cleanup wearing a rollback's name.
 | 4.5-2 | Confirm the poller now sees it | `uv run factory tick --once --verbose` | FRO-7 is claimed; it no longer prints `already has a live run` |
 | 4.5-3 | **Load the timer** | `launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist` | **James's decision (§19).** `launchctl print gui/$(id -u)/com.jchen.factory` shows it loaded |
 | 4.5-4 | Watch it run unattended | `uv run factory serve --port 7717`, or `factory status` | FRO-7 walks `approved → awaiting_human` **with no keystroke**. This is Phase 4's expected output |
-| 4.5-5 | Live suspend / resume | `factory suspend FRO-7 --reason "…"` then `factory resume FRO-7`, and the same two from the browser | Both write an `actor = "human"` transition; the Codex session resumes **by id**; no Linear comment repeats |
-| 4.5-6 | Live resume-from-planning | `factory resume FRO-7 --from planning` | Rewinds to a fresh plan without resetting the worktree |
 
-Steps 4.5-5 and 4.5-6 are the two §19 validation commands never run against real
-infrastructure. They are covered by tests and by the console's POST path, so this is
-confirmation on the real adapters, not first proof.
+**Track B — control validation.** Claim the second ticket by hand with `factory run
+<TICKET>` and drive it deliberately: both steps begin with a human typing a command, so
+there is nothing to prove about the poller here, and driving it by hand keeps the daemon
+from racing the suspend.
+
+| # | Step | Command | Expected |
+| --- | --- | --- | --- |
+| 4.5-5a | Live suspend | `uv run factory suspend BAC-6 --reason "…"` **while it is `implementing`** | an `actor="human"` transition to `suspended`; the sandbox stops; the attempt keeps a real terminal record (`kill_agent` signals, the wrapper writes `exit`) |
+| 4.5-5b | Live resume | `uv run factory resume BAC-6` | `actor="human"`; the Codex session resumes **by id**, never `--last`; **no Linear comment repeats** — check the effects ledger, that is what §16.2 is for |
+| 4.5-5c | The same two from the browser | `uv run factory serve --port 7717`, then the Suspend and Resume controls | identical transitions and rules to the CLI; the console POST path shares `_cancel_run`/`recovery.resume`, so a divergence here is a real defect |
+| 4.5-6 | Live resume-from-planning | `uv run factory resume BAC-6 --from planning` | rewinds to a fresh plan **without resetting the worktree** — check the branch head is unchanged and the agent's commits survive |
+
+**Phase 4.5 — closed 2026-08-23.** Track A: acceptance run `40d1d56205f64361`, ten
+transitions, `approved -> awaiting_human` in 17 minutes, draft PR frontend-harness#45, and
+`select count(*) … actor='human'` → **0**. Track B: all four validations passed on BAC-6,
+after four defects found by executing them (`pkill -f` killed the wrapper that writes the
+terminal record; the session id was never captured on the detached path; `codex exec
+resume` rejects `-C`; `suspend` wrote its transition around every §5.4 guard). A `Canceled`
+parent does satisfy the parent-spec condition — measured, not inferred.
 
 **A caution the daemon makes sharper.** Under the timer, a mistake is unattended. The three
 loops that could burn the attempt budget are bounded — `env-gate-failed` (a caveated gate
