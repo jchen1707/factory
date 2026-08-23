@@ -28,8 +28,9 @@ Re-measured 2026-08-23, later the same day. **Item 2 is closed**: both consumer 
 | re-vendor | `frontend-harness#47` **7/7 green**, `python-harness#69` **5/5 green**, both unmerged |
 | `factory#37` | open — recovers `9663a1b`, stranded when `#36` merged. The **fourth** instance of this race |
 | BAC-6 | `blocked` at `review-finding`, two `high` findings. **Waiting on James**, unchanged |
-| FRO-11 | `resumable`, **two of three re-entries spent** on a sleeping host and a recovered reconnect; see below |
-| `factory#38` | open — the reconnect fix. Its absence is what spent the second re-entry |
+| FRO-11 | **`failed`** — `ladder-exhausted`. All three rungs went to control-plane defects, not to the work |
+| `factory#38` | open — the reconnect fix (rung 2's cause) |
+| `factory#39` | open, **stacked on #38** — the rewind fix (rung 3's cause) |
 
 **The only thing left for James on item 2 is merging `#47` and `#69`.** Both are two vendored
 JSON files, both fully green, and neither touches a source file.
@@ -150,6 +151,51 @@ tried, three caught. Suite 533 -> 535.
 runs. This document was edited from a temporary `git worktree` for exactly that reason, and
 anyone doing control-plane work while a run is live should do the same.
 
+### And the rung-3 rewind has never worked — fixed, `factory#39`
+
+Attempt 3 was the rewind, and it died 64 seconds after it started. `plan-stderr.log`, in
+full:
+
+```
+Failed to read output schema file /Users/james/factory/schemas/implement_result.schema.json: No such file or directory (os error 2)
+```
+
+`plan.start` handed codex `--output-schema <ctx.home>/…`. The plan runs **in the build
+sandbox**, which mounts the target repo and not the factory, so that path does not exist
+where codex reads it. The step had already copied the schema into the attempt directory and
+then passed the original; `implement.start` has always pointed at its copy. One line.
+
+**Nobody could see that, and that is the second half.** A rewind is one attempt with two
+phases sharing one attempt directory, so the plan wrapper writes `plan-exit` — `exit` belongs
+to the implement phase that follows. `sbx.poll` looked only for `exit`, found none, saw the
+holder gone, and called a collectable failure `attempt-orphaned`. `RunHandle` now carries
+`exit_name` and `reap` passes it, so the same run reaches `blocked [plan-incomplete]` — a
+state that names its cause — instead of spending a rung on silence.
+
+### FRO-11 is `failed`, and all three rungs went to things that were not the work
+
+```
+implementing (67 min, work committed) -> resumable   [host asleep]
+implementing (resumed, exit 0, e00002b) -> resumable [recovered reconnect]
+planning (64 s, exit 1) -> resumable                 [rewind schema path]
+resumable -> failed                                  [ladder-exhausted, rung 4]
+```
+
+`ladder-exhausted` at 18:10:56 UTC. §5.3 gives `failed` exactly one edge and it is James
+re-authorising spend. **The work is not lost**: a rewind does not reset the worktree, so
+commit `e00002b` — the full detail route, its tests, and both reviews clean — is still in
+the clone at `state/clone/frontend-harness/FRO-11/9bf53c8021a14b2f`.
+
+**`factory resume FRO-11` once `#38` and `#39` are in.** Two of the three failure modes that
+consumed this run cannot recur after those merge; the third is host sleep, which is still
+unfixed and is held off manually with `caffeinate` for now.
+
+**This is what item 4's frontend half actually bought.** Not a green pipeline — three
+control-plane defects, each of which needed an unattended multi-hour run in a real sandbox to
+show itself, and none of which any unit test in this repo could have produced. The python
+half found none of them because BAC-6 happened to run while the laptop was awake and the
+network held.
+
 ### One small follow-up taken
 
 `.DS_Store` is now in `.gitignore` — it was the third session with two untracked files in
@@ -167,8 +213,10 @@ anyone doing control-plane work while a run is live should do the same.
    two `high` findings, and both exits from `blocked` are `unblock-is-a-judgement`. An agent
    can read the findings and propose a repair; it cannot take the edge. Do not try.
 
-3. **Watch FRO-11 to `awaiting_human`, and expect more sleep-reaps.** Each one costs a
-   `resumable` re-entry and the ceiling is three. It is the first unattended run to put the new
+3. **Merge `#38` then `#39`, then `factory resume FRO-11`.** The run is `failed` and only
+   James can re-authorise it. Its commit `e00002b` survives in the clone, so a resumed run
+   starts from finished work rather than from nothing. Expect more sleep-reaps until the
+   `poll` question below is decided — `caffeinate` is the stopgap. It is the first unattended run to put the new
    `playwright` `requires` probe through a sandbox, and item 4's frontend half turns on it.
    Read its gate report the way BAC-6's was read: the `playwright` entry's `status` and its
    `outputTail` are the evidence, and a `pass` there is what four green unit tests could not
