@@ -328,12 +328,24 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         # An unavailable gate or a missing app is an environment/manifest problem, not a
         # code failure, so it does not loop back to the agent. `gates-incomplete` is a
         # new slug; `Blocked` accepts any, and `machine.py:179` lists the canonical ones.
+        #
+        # The caveat rides along on the gates that could not run, because this is a
+        # human-judgement state and the human's next act is to install something. Naming
+        # the gate says *that* it could not run; the caveat is the config author's own
+        # sentence saying *what to do about it*, which is the difference between a message
+        # that ends the search and one that starts it. `env-gate-failed` has always carried
+        # them for the same reason. Only on the gates that did not run: a caveat beside a
+        # green gate is a note about a vacuous pass, and repeating it here would pad a
+        # message about missing tools with gates that are fine.
+        unavailable = [g for g in report["gates"] if g.get("status") == "unavailable"]
+        needs = ", ".join(f"{g['name']} ({g['caveat']})" for g in unavailable if g.get("caveat"))
         raise Blocked(
             "gates-incomplete",
             "the gate report is incomplete: a gate could not start or an app had no "
             f"config of its own. verdict={verdict}; gates="
             + ", ".join(f"{g['name']}={g['status']}" for g in report["gates"])
-            + (f"; missingApps={report['missingApps']}" if report.get("missingApps") else ""),
+            + (f"; missingApps={report['missingApps']}" if report.get("missingApps") else "")
+            + (f"; install what these name: {needs}" if needs else ""),
         )
 
 

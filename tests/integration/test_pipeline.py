@@ -680,6 +680,37 @@ def test_an_incomplete_report_blocks_without_evidence_mismatch(ctx: Context) -> 
     assert "playwright smoke" in caught.value.detail  # the unavailable gate is named
 
 
+def test_an_unavailable_gate_names_what_it_needs_not_only_that_it_is_missing(
+    ctx: Context,
+) -> None:
+    """`gates-incomplete` is a human-judgement state, so it has to say what the human does.
+
+    The block names the gate and its status, which tells a reader *that* something could
+    not run and not *what to install*. `env-gate-failed` — the reactive half of the same
+    problem — has always carried the caveats for exactly this reason; this is the same
+    courtesy on the path a missing tool now takes.
+
+    That path changed with layer A's `requires` probe (harness#18): a gate whose tool is
+    absent used to exit non-zero and arrive as `fail`, and now it is never run and arrives
+    as `unavailable`. So this message is the one a missing chromium reaches, and reading
+    the artifact to find out which requirement failed is a step the message can save.
+    """
+    _to_verifying(ctx)
+    _fake(ctx).gate_report = _fixture("gate-report-unavailable.json")
+    with pytest.raises(Blocked) as caught:
+        verify_step.run(ctx)
+    assert caught.value.reason == "gates-incomplete"
+    # The caveat is the config author's own sentence naming the environment condition.
+    assert "binary not on PATH" in caught.value.detail
+    # And it is attached to the gate it belongs to, not dumped as a loose list — a report
+    # with two unavailable gates must not leave the reader pairing them up by guess.
+    assert "playwright smoke (binary not on PATH)" in caught.value.detail
+    # A gate that *passed* carries a caveat too — it names a vacuous pass, not a missing
+    # tool — and it has no business in a message about what could not run. The fixture's
+    # mypy row is green and caveated precisely so this assertion is not vacuous.
+    assert "mypy (" not in caught.value.detail
+
+
 def test_a_disabled_gate_passes_the_report_schema_and_advances(ctx: Context) -> None:
     """`disabled` has to survive the *schema* before `_evidence_mismatch` ever sees it.
 

@@ -20,7 +20,7 @@
       "status": "pass",
       "exit": 0,
       "durationMs": 340,
-      "caveat": null,
+      "caveat": "mypy checks only the paths in pyproject.toml's `files`",
       "when": null,
       "outputTail": ""
     },
