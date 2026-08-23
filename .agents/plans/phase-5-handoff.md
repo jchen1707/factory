@@ -103,6 +103,15 @@ same hole: `ruff` and `mypy` both skip dot-directories.
 has no such job — the asymmetry is real, and the frontend template is the stricter one.
 **Write the frontend PR body from the template, first time.**
 
+**And a second round trip, in `harness`, for a different reason than the one this document
+warned about.** Prettier passed. `generate` failed on `check_version_bump`: a layer A file
+changed while `plugins/harness/.claude-plugin/plugin.json` stayed at its version, and
+`claude plugin update` compares the **version field, not the sha**, so consumers would have
+been told they were already up to date. The local run missed it because **`scripts/check.py`
+skips that check entirely without `--since`**. The plan's own command is
+`python3 scripts/check.py --since=<base>` — run it that way, and bump the plugin version in
+the same commit as any layer A content change.
+
 ---
 
 ## The next session's first job
@@ -121,7 +130,11 @@ has no such job — the asymmetry is real, and the frontend template is the stri
    The order is: **FRO-11's PR lands → merge `harness#19` → re-vendor both consumers as their
    own pair of PRs.** `factory#36` is independent and can merge whenever.
 
-2. **Check the branch tip, not the PR state.** `factory#35` merged while two commits were still
+2. **BAC-6 is waiting on James, not on an agent.** It is `blocked` at `review-finding` with
+   two `high` findings, and both exits from `blocked` are `unblock-is-a-judgement`. An agent
+   can read the findings and propose a repair; it cannot take the edge. Do not try.
+
+3. **Check the branch tip, not the PR state.** `factory#35` merged while two commits were still
    in flight to its branch, and both were stranded — the third time this session's family of
    races has appeared. `git merge-base --is-ancestor <sha> origin/main` answers it in one
    command, and the remote ref is what makes recovery possible.
