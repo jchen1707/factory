@@ -57,6 +57,29 @@ def test_an_error_item_on_a_successful_run_is_not_a_failure() -> None:
     assert transcript.usage.input_tokens == 43205
 
 
+def test_a_reconnect_the_stream_recovered_from_is_not_a_failure() -> None:
+    # Measured on FRO-11 attempt 2, 2026-08-23: codex emitted one top-level
+    # `{"type": "error"}` carrying `Reconnecting... 1/5`, retried, finished the turn and
+    # exited 0 with a valid structured result. Classifying that as `agent-failed`
+    # discarded a completed attempt and burned one of the three `resumable` re-entries.
+    # `turn.completed` after the error is the stream saying the retry worked.
+    transcript = parse_events(_fixture("codex-exec-reconnect-recovered.jsonl"))
+    assert not transcript.failed
+    assert transcript.failure is None
+    # The notice is still evidence -- kept, not silently dropped.
+    assert any("Reconnecting" in item for item in transcript.error_items)
+    assert transcript.usage.input_tokens == 32791307
+
+
+def test_a_reconnect_the_stream_never_recovered_from_is_still_a_failure() -> None:
+    # The same fixture with the completion removed: the retry notice is the last word,
+    # so nothing says the turn ever finished.
+    transcript = parse_events(_fixture("codex-exec-reconnect-abandoned.jsonl"))
+    assert transcript.failed
+    assert transcript.failure is not None
+    assert "Reconnecting" in transcript.failure
+
+
 def test_turn_failed_is_a_failure_and_its_message_is_decoded_twice() -> None:
     transcript = parse_events(_fixture("codex-exec-turn-failed.jsonl"))
     assert transcript.failed

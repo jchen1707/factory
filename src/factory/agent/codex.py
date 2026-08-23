@@ -178,6 +178,14 @@ def parse_events(text: str) -> Transcript:
     usage = Usage()
     failed = False
     failure: str | None = None
+    # A top-level `error` is only a failure while it is the stream's last word on the
+    # turn. Codex retries a dropped connection itself and says so with
+    # `Reconnecting... N/5`; when the turn then completes, the retry worked and the
+    # attempt is good. Held separately from `failed` so that a `turn.failed` -- which is
+    # the model's own verdict and is never withdrawn -- cannot be cleared by a later
+    # completion. Measured on FRO-11 attempt 2, 2026-08-23: one recovered reconnect
+    # discarded a finished implement attempt and spent a `resumable` re-entry on it.
+    transport_error: str | None = None
     error_items: list[str] = []
     commands: list[str] = []
     files: list[str] = []
@@ -204,12 +212,16 @@ def parse_events(text: str) -> Transcript:
             session_id = event.get("thread_id")
         elif kind == "turn.completed":
             usage = usage + _usage_from(event)
+            transport_error = None
         elif kind == "turn.failed":
             failed = True
             failure = _failure_message(event)
         elif kind == "error":
-            failed = True
-            failure = failure or str(event.get("message", "error event"))
+            message = str(event.get("message", "error event"))
+            transport_error = transport_error or message
+            # Kept whatever the outcome: a run that reconnected four times succeeded on
+            # worse terms than one that never dropped, and the report should say so.
+            error_items.append(message)
         elif kind in {"item.started", "item.completed", "item.updated"}:
             item = event.get("item") or {}
             item_type = item.get("item_type") or item.get("type")
@@ -223,6 +235,10 @@ def parse_events(text: str) -> Transcript:
                     for change in item.get("changes", [])
                     if isinstance(change, dict)
                 ]
+
+    if transport_error is not None:
+        failed = True
+        failure = failure or transport_error
 
     return Transcript(
         session_id=session_id,
