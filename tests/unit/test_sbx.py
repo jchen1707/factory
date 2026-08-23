@@ -418,7 +418,7 @@ def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
     monkeypatch.setattr(
         SbxAdapter,
         "_run",
-        lambda self, argv, **kw: captured.append(list(argv)),  # type: ignore[misc]
+        lambda self, argv, **kw: captured.append(list(argv)),
     )
     SbxAdapter().kill_agent("factory-build-python-harness")
 

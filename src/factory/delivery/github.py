@@ -101,7 +101,20 @@ def find_pr(worktree: Path, branch: str) -> str | None:
 
 
 def create_pr(worktree: Path, *, base: str, head: str, title: str, body_file: Path) -> str:
-    """`gh pr create --draft`. The PR opens as a draft; James marks it ready (§13.2).
+    """`gh pr create`. The PR opens **ready for review**; merge is still James's (§24.8).
+
+    Not `--draft`. Draft is GitHub's word for "work in progress, do not review yet", and
+    that is not what arrives: the gates ran green and the two-tier review ran clean before
+    delivery is reached at all. A draft cannot take a review request and cannot be merged,
+    so the un-draft keystroke was a manual step carrying no information, sitting in front
+    of the two acts (review, merge) that are James's anyway.
+
+    Measured 2026-08-23, so it is not re-derived: draft-ness gates neither workflow in
+    either harness. `ci.yml` is `on: pull_request:` with no type filter and runs on drafts;
+    `agent-review.yml` is `on: pull_request: types: [labeled]` behind
+    `if label.name == 'agent-review'`, deliberately, because it is billed model spend. No
+    workflow fires on `ready_for_review` anywhere. Ready-for-review is therefore an honest
+    label on the PR, not a trigger — and §5.3's `merge-is-james` still keeps the merge his.
 
     `--base` is the project's base branch (`v2`, never `main`); `--head` is the run's branch.
     The body comes from a file (`--body-file`) so a long body never enters the process table.
@@ -111,7 +124,6 @@ def create_pr(worktree: Path, *, base: str, head: str, title: str, body_file: Pa
             "gh",
             "pr",
             "create",
-            "--draft",
             "--base",
             base,
             "--head",
@@ -259,7 +271,7 @@ def render_pr_body(
     cost = f"${usd:.2f}" if usd is not None else "token counts only (no price row)"
     lines.append(f"Tokens: in {tokens_in}, out {tokens_out} — {cost}")
     lines.append("")
-    lines.append("_This PR was opened by the factory as a **draft**. Merge is a human's._")
+    lines.append("_Opened by the factory, **ready for review**. Merge is a human's._")
     return "\n".join(lines) + "\n"
 
 

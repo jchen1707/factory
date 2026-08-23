@@ -108,7 +108,7 @@ and one thin stub per shared skill under `.agents/skills/`.
 | `REVIEW_BASE` selects the review base | `full-review.js` line 16 | The factory sets it from the project registry, never defaults to `main` |
 | `full-review.js` uses `agent()`/`pipeline()` globals | file body | It is **Claude Code only**. The Codex path must use the portable `full-review` SKILL.md |
 | Codex hook trust is keyed by absolute path | `~/.codex/config.toml` `[hooks.state]` | A worktree at a new path has **untrusted** hooks (§8.6) |
-| `frontend-harness` has `agent-review.yml`; `python-harness` does not | `.github/workflows/` on both `v2` | Asymmetry to close in Phase 5 |
+| Both harnesses have `agent-review.yml`, label-gated and identical in shape | `.github/workflows/` on both `v2` | **Closed 2026-08-21** (`python-harness@bc802ca`). No Phase 5 work. |
 | `frontend-harness` v2 sets `review.agentDir` to `.claude/agents` | its `harness.config.json` | Correct today (its own agents live there), but inconsistent with `python-harness`'s `.agents/agents`. Open question §24.7 |
 
 ---
@@ -1143,7 +1143,7 @@ Nothing else in layer A changes for the MVP.
 
 | Repo, branch | File | Change | Why it is layer B |
 | --- | --- | --- | --- |
-| `python-harness@v2` | `.github/workflows/agent-review.yml` | **New**, copied in shape from `frontend-harness@v2`'s, with `BAC` in the branch regex and `.agents/vendor/harness/agents/` paths | Closes the asymmetry; the prompt is stack-specific in its team key and its checklist paths |
+| `python-harness@v2` | `.github/workflows/agent-review.yml` | **Landed 2026-08-21** (`bc802ca`), shaped from `frontend-harness@v2`'s, with `BAC` in the branch regex and `.agents/vendor/harness/agents/` paths | Asymmetry closed in Phase 3, not Phase 5 |
 | `python-harness@v2` | `.github/PULL_REQUEST_TEMPLATE.md` | **New**, matching `frontend-harness`'s | The factory fills it; the template's content is the stack's |
 | both `@v2` | `harness.config.json` | Add `.factory/**` to `hooks.protected` with `why: "factory control-plane state; the control plane owns it"` | Stops an agent editing its own run record. Config, not code — exactly what layer B is for |
 | both `@v2` | `docs/agents/issue-tracker.md` (each repo's own) | One paragraph: when the factory runs a ticket, the control plane owns tracker writes; the agent must not comment | Stack-scoped tracker doctrine already lives here |
@@ -2158,7 +2158,7 @@ plugin for every Claude Code consumer at once, which is exactly why it is a huma
 | `factory` | `src/factory/delivery/github.py` | `gh` wrapper, PR body assembly |
 | `factory` | `src/factory/templates/pr_body.md.j2` | The evidence layout of §13.2 |
 | `factory` | `src/factory/artifacts.py` | Manifest, secret scan, quarantine |
-| `python-harness@v2` | `.github/workflows/agent-review.yml` | **New**, shaped from `frontend-harness`'s, with `BAC` |
+| `python-harness@v2` | `.github/workflows/agent-review.yml` | **Landed 2026-08-21** (`bc802ca`), shaped from `frontend-harness`'s, with `BAC` |
 | `python-harness@v2` | `.github/PULL_REQUEST_TEMPLATE.md` | **New** |
 | `frontend-harness@v2` | `.agents/agents/{a11y-reviewer,test-writer}.md`, `.claude/agents` symlink, `harness.config.json` | **The §24a layout fix.** Must land before the reviewer step ships, so the factory encodes no per-repo exception |
 | both `@v2` | `harness.config.json` | `.factory/**` in `hooks.protected`; plus the new `tests` pathspecs — `["tests"]` for python, `["tests","e2e","src/**/*.test.ts","src/**/*.test.tsx","src/**/*.spec.ts"]` for frontend |
@@ -2358,8 +2358,15 @@ its own reaches `awaiting_human` with a draft PR, and the transition log shows n
   before an `e2e` gate is required; otherwise the report says `unavailable`, not `pass`.
 - Python-specific: assert Docker is available in the sandbox before `integration` is
   required. `sbx` gives the VM its own Docker daemon, so this is a check, not a blocker.
-- **PRs move from draft to ready-for-review at this phase** (§24.8), which is also what
-  makes `agent-review.yml` fire on open rather than waiting for James to un-draft.
+- **PRs move from draft to ready-for-review at this phase** (§24.8). Not because it
+  triggers anything — measured 2026-08-23, draft-ness gates no workflow in either
+  harness: `agent-review.yml` is `types: [labeled]` behind an `agent-review` label
+  check in both (billed model spend, deliberately on demand), `ci.yml` is a bare
+  `on: pull_request:` and ran on drafts already, and nothing anywhere fires on
+  `ready_for_review`. The reason is that "draft" means work in progress, and by
+  delivery the gates are green and the two-tier review is clean. A draft takes no
+  review request and cannot be merged, so un-drafting was a manual step carrying no
+  information, in front of two acts that are James's regardless.
 - First layer-C product: `python3 /Users/james/harness/scripts/new_project.py create
   <name> --api python --web react --agnostic`, then a registry row with
   `stack = "monorepo"`.
@@ -2443,7 +2450,7 @@ edited**, because `hooks/` and `schema/` are already in it.
 
 | Path | Action |
 | --- | --- |
-| `.github/workflows/agent-review.yml` | new (mirror of the frontend one, `BAC`) |
+| `.github/workflows/agent-review.yml` | landed 2026-08-21 (`bc802ca`), mirror of the frontend one, `BAC` |
 | `.github/PULL_REQUEST_TEMPLATE.md` | new |
 | `harness.config.json` | add `.factory/**` to `hooks.protected`; add `"tests": ["tests"]` |
 | `docs/agents/issue-tracker.md` | one paragraph |

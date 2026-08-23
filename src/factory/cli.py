@@ -260,7 +260,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         ctx.refresh()
         if ctx.run.pr_url:
             print(
-                f"\nReview ran and a draft pull request is open: {ctx.run.pr_url}\n"
+                f"\nReview ran and a pull request is open for review: {ctx.run.pr_url}\n"
                 "Nothing has been merged — merge is a human's. "
                 "`factory status <TICKET> --evidence` reads the run back."
             )
@@ -283,7 +283,7 @@ def _drive(ctx: Context, *, force_plan: bool) -> None:
 
     Phase 3 extends the chain past `verifying`: the review step (which runs the red-phase
     replay and the two-tier review) advances to `pr_ready` on a clean review or
-    `awaiting_human` on a finding/escalation, and the deliver step opens the draft PR. A
+    `awaiting_human` on a finding/escalation, and the deliver step opens the PR. A
     `Blocked` from either propagates to `cmd_run`, which records it and announces.
 
     An adapter failure inside a step becomes a `Blocked` on the way out, so it takes that
@@ -1402,7 +1402,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     _report(ctx)
     if ctx.run.pr_url:
-        print(f"\nReview ran and a draft pull request is open: {ctx.run.pr_url}\n")
+        print(f"\nReview ran and a pull request is open for review: {ctx.run.pr_url}\n")
     elif ctx.state is State.AWAITING_HUMAN:
         print(f"\nThe run stopped at `{ctx.state}` for a human to look.")
     elif ctx.state in reap_step.DETACHED_STATES:
@@ -1506,7 +1506,7 @@ def dispatch_control(
         store.release_lease(run.id)
 
     if ctx.run.pr_url:
-        return 0, f"{run.linear_id} drove to {ctx.state}; draft PR: {ctx.run.pr_url}"
+        return 0, f"{run.linear_id} drove to {ctx.state}; PR: {ctx.run.pr_url}"
     return 0, f"{run.linear_id} drove to {ctx.state}"
 
 

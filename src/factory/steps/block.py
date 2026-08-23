@@ -187,7 +187,7 @@ def _awaiting_comment(ctx: Context, pr_url: str | None, sections: Sequence[str])
     marker = effect_marker(ctx, _AWAITING_STEP)
     issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
     link = (
-        f"**Pull request (draft):** {pr_url}\n\n"
+        f"**Pull request (ready for review):** {pr_url}\n\n"
         if pr_url
         else "No pull request was opened: the run stopped at review before delivery.\n\n"
     )
