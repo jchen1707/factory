@@ -15,27 +15,30 @@ gone wrong.
 
 ## Where things stand
 
-Re-measured 2026-08-23, later the same day. **Item 2 is closed**: both consumer PRs merged,
-`harness#19` merged, and both consumers are re-vendored in a pair of green PRs.
+Re-measured 2026-08-23, end of session. **Item 2 is closed and merged.** Everything below
+was measured, not carried forward.
 
 | | |
 | --- | --- |
-| `factory@main` | `c2c52b0` |
-| suite | 533 passed, mypy clean on 71 files, ruff check + format clean — re-measured this session |
-| `harness@v2` | **`a3beb34`** — `#19` merged, plugin `0.10.1` |
-| `frontend-harness@v2` | `8a6dfee` — `#46` merged 15:38 UTC, pin `134b21c` |
-| `python-harness@v2` | `0a84feb` — `#68` merged 15:38 UTC, pin `134b21c` |
-| re-vendor | `frontend-harness#47` **7/7 green**, `python-harness#69` **5/5 green**, both unmerged |
-| `factory#37` | open — recovers `9663a1b`, stranded when `#36` merged. The **fourth** instance of this race |
-| BAC-6 | `blocked` at `review-finding`, two `high` findings. **Waiting on James**, unchanged |
-| FRO-11 | **`failed`** — `ladder-exhausted`. All three rungs went to control-plane defects, not to the work |
-| `factory#38` | open — the reconnect fix (rung 2's cause) |
-| `factory#39` | open, **stacked on #38** — the rewind fix (rung 3's cause) |
+| `factory@main` | `69098fd` — `#37`–`#40` all merged |
+| suite | **541 passed**, mypy clean on 71 files, ruff check + format clean |
+| `harness@v2` | `a3beb34`, plugin `0.10.1` |
+| `frontend-harness@v2` | re-vendored and merged (`#47`, 7/7 green) |
+| `python-harness@v2` | `f924eb3` — re-vendored and merged (`#69`, 5/5 green) |
+| BAC-6 | **`implementing`, attempt 2** — unblocked over `unblock-is-a-judgement`, the first time that edge has been taken |
+| FRO-11 | **`implementing`, attempt 4** — re-authorised over `failed -> resumable`, also the first time |
+| `factory#41` | open — a run sent back from `blocked` is told why |
+| `factory#42` | open, **stacked on #41** — `--authorise` buys an attempt |
 
-**The only thing left for James on item 2 is merging `#47` and `#69`.** Both are two vendored
-JSON files, both fully green, and neither touches a source file.
+**James's framing, stated this session and worth keeping at the top of this document:** the
+goal is not that the agent executes a ticket perfectly. It is that the *workflow* runs. A
+ticket is an instrument for driving the state graph, and an imperfect implementation that
+traverses the right edges is worth more than a perfect one that never leaves `implementing`.
+Read every "what is left" below through that lens: what matters is which edges have never
+fired, not which tests are vacuous.
 
 ---
+
 
 ## What this session did
 
@@ -196,6 +199,56 @@ show itself, and none of which any unit test in this repo could have produced. T
 half found none of them because BAC-6 happened to run while the laptop was awake and the
 network held.
 
+### Both human edges were then taken for the first time, and both were broken
+
+James merged `#38`, `#39` and the docs, and reframed the goal: **the ticket does not have to
+be executed well, the workflow has to run.** That turned BAC-6 from a question about test
+quality into an unexercised edge, and both edges failed on contact.
+
+**`blocked -> implementing` started an agent that was told nothing.** `continuation_prompt`
+scanned the transition log only for entries into `resumable`, so a run sent back by a human
+got an empty "How the previous attempt ended" section and a diff stat. Nothing in
+`implement.start` reads `review-full.json` either. The reason was never missing from the
+record — BAC-6's `reviewing -> blocked` row carries both `high` findings verbatim in `detail`
+— so matching `blocked` alongside `resumable` was the entire fix (`factory#41`). Verified by
+calling `continuation_prompt` against the live BAC-6 context before and after.
+
+**`factory resume FRO-11 --authorise` did nothing at all:**
+
+```
+18:33:11  failed    -> resumable  [reauthorise-spend]   actor=human
+18:33:11  resumable -> failed     [ladder-exhausted]    rung 4
+```
+
+Same second, before anything ran. `ladder_rung` reads the run's **lifetime** attempt count, so
+a run that spent three attempts is at rung 4 for ever. §16.4 calls that command "James's
+explicit act" and §5.3 gives `failed` exactly one edge; an edge that returns you to the state
+you left is not an edge. Fixed in `factory#42`: the ladder counts attempts since the
+authorisation, `max_total_attempts` still counts the whole run. Second attempt with the fix
+live: `failed -> resumable -> implementing`, attempt 4.
+
+Two corrections fell out of it, both worth knowing. `state_before(RESUMABLE)` answers `failed`
+for a re-authorised run — not a state anything can resume into — so the re-entry now finds the
+state that actually died, and a run that orphaned mid-verify re-runs its **gate report**
+rather than restarting a 10 M-token implement it does not need. And the backoff read the same
+lifetime count, so a human who had just typed the command was told to wait 300 s.
+
+### Two things about BAC-6's findings, since the next session will see them
+
+They were verified rather than taken on trust, by mutation, on a copy of the tree in a
+scratchpad — the worktree itself was not touched:
+
+- Changing one gold-set answer to a **different document of the same visibility** (`gold-01`,
+  `external-sign-in` -> `external-profile-security`) leaves the suite green. The gold set is a
+  query-to-document mapping and its tests assert only counts by category.
+- Making the generator render **only the shared context header**, dropping every page body,
+  also leaves it green. The PDF test asserts page counts and non-empty text.
+
+Both `high` findings are therefore correct, and the `medium` is too (the README says four
+page-specific fields, every document has exactly four, the test allows four to six). Under
+James's framing this does not need adjudicating — but if the resumed attempt claims it fixed
+them, those two mutations are how to check.
+
 ### One small follow-up taken
 
 `.DS_Store` is now in `.gitignore` — it was the third session with two untracked files in
@@ -203,27 +256,42 @@ network held.
 
 ## The next session's first job
 
-1. **Merge `frontend-harness#47` and `python-harness#69`, then rebase FRO-11's PR.**
-   Both re-vendor PRs are green and independent of each other. Until they land, `freshness`
-   is red on every open PR in both consumers, including any FRO-11 opens — a red that says
-   nothing about the code under review, which is the worst kind. `factory#37` is independent
-   and can merge whenever.
+1. **Merge `factory#41`, then `#42`.** They are stacked in that order. Both are recovery-path
+   fixes measured on live runs today, and **the working checkout already carries them** —
+   which matters, because the daemon executes whatever is checked out in `/Users/james/factory`.
+   Until they merge, a `git checkout` in that directory silently reverts them for the next tick.
 
-2. **BAC-6 is still waiting on James, not on an agent.** `blocked` at `review-finding` with
-   two `high` findings, and both exits from `blocked` are `unblock-is-a-judgement`. An agent
-   can read the findings and propose a repair; it cannot take the edge. Do not try.
+2. **Watch BAC-6 and FRO-11 to `awaiting_human`.** Both are live and both are first-of-kind:
+   BAC-6 is the first run to leave `blocked` by a human's judgement, and FRO-11 is the first to
+   leave `failed`. Between them they are item 4's two end-to-end tests.
 
-3. **Merge `#38` then `#39`, then `factory resume FRO-11`.** The run is `failed` and only
-   James can re-authorise it. Its commit `e00002b` survives in the clone, so a resumed run
-   starts from finished work rather than from nothing. Expect more sleep-reaps until the
-   `poll` question below is decided — `caffeinate` is the stopgap. It is the first unattended run to put the new
-   `playwright` `requires` probe through a sandbox, and item 4's frontend half turns on it.
-   Read its gate report the way BAC-6's was read: the `playwright` entry's `status` and its
-   `outputTail` are the evidence, and a `pass` there is what four green unit tests could not
-   supply.
+3. **Host sleep is still unfixed and is the last known way a healthy run dies.** `caffeinate`
+   is the stopgap and it expires. The decision is in the sleep section above.
 
-4. **Check the branch tip, not the PR state.** Four times now. `git merge-base --is-ancestor
-   <sha> origin/main` answers it in one command.
+4. **Check the branch tip, not the PR state.** Five times now, the last one on the very PR
+   that existed to repair the fourth. `git merge-base --is-ancestor <sha> origin/main`.
+
+## The recovery paths were the whole story today — five defects, four of them fixed
+
+Worth stating as one fact rather than five: **every defect found today lives on a path that
+only runs after something else has already gone wrong**, and every one of them was invisible
+to a green suite of 533 tests.
+
+| # | defect | state | how it was found |
+| --- | --- | --- | --- |
+| 1 | host sleep reaps a healthy run as `attempt-orphaned` | **open** — §16.1 semantics decision | FRO-11 attempt 1, cross-checked against `pmset -g log` |
+| 2 | a recovered `Reconnecting...` discards a finished attempt | fixed, `factory#38` | FRO-11 attempt 2, exit 0 with a valid result |
+| 3 | the rung-3 rewind hands codex a host-only schema path, and its failure reads as an orphan | fixed, `factory#39` | FRO-11 attempt 3, dead in 64 s |
+| 4 | a run sent back from `blocked` is told nothing about why | fixed, `factory#41` | called `continuation_prompt` against the live BAC-6 context |
+| 5 | `--authorise` writes `resumable` and `failed` in the same second | fixed, `factory#42` | typed the command §16.4 names and read the transition log |
+
+Defects 4 and 5 are the two that only appear when a *human* takes an edge, which is why four
+unattended runs never surfaced them. Defect 5 in particular had never worked on any run since
+the ladder was written: the rung is derived from the run's lifetime attempt count, so a run
+with three attempts is at rung 4 for ever and `_LADDER.get(4)` is `FAIL`.
+
+The method that found all five is unchanged and is stated at the bottom of this document.
+Nothing here came from reading the code first.
 
 ## What Phase 5 has left — items 3 and 4, and how to actually finish them
 
