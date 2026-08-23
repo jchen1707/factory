@@ -95,6 +95,7 @@ def decide(
     interrupted_by: str | None,
     max_attempts: int,
     max_total_attempts: int,
+    total_attempts_spent: int | None = None,
 ) -> Verdict:
     """§16.3's three-branch choice, with §16.3a's ladder layered over it.
 
@@ -113,7 +114,13 @@ def decide(
     session for a third time is exactly the repetition the ladder exists to replace.
     """
     rung = ladder_rung(attempts_spent)
-    if rung > max_total_attempts:
+    # The rung and the run's lifetime attempt count are the same number until James
+    # re-authorises a `failed` run (§16.4). That act starts the ladder again — otherwise
+    # the next decision reads rung 4 and writes `ladder-exhausted` before anything runs,
+    # which is what FRO-11 measured — while `max_total_attempts` goes on counting the
+    # whole run, so a re-authorisation is another try and not a blank cheque.
+    lifetime = attempts_spent if total_attempts_spent is None else total_attempts_spent
+    if ladder_rung(lifetime) > max_total_attempts:
         return Verdict(Disposition.FAIL, "max-total-attempts", rung)
     if attempts_in_state >= max_attempts:
         return Verdict(Disposition.FAIL, "max-attempts-in-state", rung)
@@ -157,6 +164,36 @@ def state_before(ctx: Context, target: State) -> State:
     return State.IMPLEMENTING
 
 
+def reauthorised_at(ctx: Context) -> int | None:
+    """When James re-authorised this run, if that is why it is `resumable` now.
+
+    Only the *most recent* entry into `resumable` counts: a run that was re-authorised,
+    ran, and orphaned again is back on the ordinary ladder, and the authorisation it
+    already spent must not restart it a second time.
+    """
+    for row in reversed(ctx.store.transitions(ctx.run.id)):
+        if str(row["to_state"]) != str(State.RESUMABLE):
+            continue
+        if str(row["from_state"] or "") == str(State.FAILED):
+            return int(row["at"])
+        return None
+    return None
+
+
+def _died_in_before_the_failure(ctx: Context) -> State:
+    """The state that actually stopped, skipping the `failed -> resumable` hop.
+
+    `state_before(RESUMABLE)` answers `failed` for a re-authorised run, which is not a
+    state anything can be resumed into.
+    """
+    for row in reversed(ctx.store.transitions(ctx.run.id)):
+        if str(row["to_state"]) != str(State.RESUMABLE) or not row["from_state"]:
+            continue
+        if str(row["from_state"]) != str(State.FAILED):
+            return State(str(row["from_state"]))
+    return State.IMPLEMENTING
+
+
 def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     """Take one `resumable` run to its next attempt, or to `failed`.
 
@@ -177,15 +214,28 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     if ctx.run.state is not State.RESUMABLE:
         raise Blocked("not-resumable", f"{ctx.run.linear_id} is at {ctx.run.state}")
 
-    died_in = state_before(ctx, State.RESUMABLE)
+    authorised_at = reauthorised_at(ctx)
+    died_in = (
+        _died_in_before_the_failure(ctx)
+        if authorised_at is not None
+        else state_before(ctx, State.RESUMABLE)
+    )
+    # After a re-authorisation the ladder counts attempts made *since* it; before one it
+    # is the run's lifetime count, and the two are the same number until James types the
+    # command. `decide` still gets the lifetime total for §16.4's per-run ceiling.
+    spent = (
+        ctx.store.attempts_since(ctx.run.id, authorised_at)
+        if authorised_at is not None
+        else ctx.run.attempt
+    )
     # Before the backoff, not after it: a run that cannot afford another attempt should
     # say so now rather than wait five minutes to say it. Nothing is spent either way.
     _refuse_over_budget(ctx)
 
     waited = _seconds_since_last_transition(ctx)
-    wait_for = backoff_seconds(ctx.run.attempt)
+    wait_for = backoff_seconds(spent)
     if not skip_backoff and waited < wait_for:
-        return Verdict(Disposition.RESTART, "backoff", ladder_rung(ctx.run.attempt))
+        return Verdict(Disposition.RESTART, "backoff", ladder_rung(spent))
 
     if died_in in (State.VERIFYING, State.REVIEWING):
         # A verify/review that orphaned or timed out re-runs the step fresh. There is no
@@ -199,7 +249,8 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
         return _rerun_detached(ctx, died_in)
 
     verdict = decide(
-        attempts_spent=ctx.run.attempt,
+        attempts_spent=spent,
+        total_attempts_spent=ctx.run.attempt,
         attempts_in_state=ctx.store.attempts_in_state(ctx.run.id, died_in),
         session_id=ctx.store.session_id(ctx.run.id, ctx.run.attempt, died_in),
         interrupted_by=_interrupted_by(ctx),
@@ -535,8 +586,16 @@ def continuation_prompt(ctx: Context) -> str:
     from factory import repo
 
     lines = ["### How the previous attempt ended", ""]
+    # `blocked` as well as `resumable`, because both are ways an attempt stops and only
+    # one of them was ever read here. A run sent back over `unblock-is-a-judgement` is a
+    # human deciding the finding is worth another attempt, and the finding itself is on
+    # that transition's `detail` — measured on BAC-6, whose `reviewing -> blocked` row
+    # carries both `high` findings verbatim. Without this the next attempt is started
+    # with a diff stat and no reason, and nothing else in `implement.start` reads the
+    # review output.
+    stopped = (str(State.RESUMABLE), str(State.BLOCKED))
     for row in reversed(ctx.store.transitions(ctx.run.id)):
-        if str(row["to_state"]) == str(State.RESUMABLE):
+        if str(row["to_state"]) in stopped:
             lines += [f"- reason: `{row['rule'] or 'unknown'}`", ""]
             if row["detail"]:
                 lines += ["```", str(row["detail"])[:2000], "```", ""]
