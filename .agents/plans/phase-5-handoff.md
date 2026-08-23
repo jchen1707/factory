@@ -1,29 +1,15 @@
 # Phase 5 — where it stands, and what to do next
 
-Rewritten 2026-08-23, after item 2's mechanism landed in layer A. The previous version is in
-git history at `9cf57d2`.
+Rewritten 2026-08-23, after item 2 landed in both consumers. The previous version is in
+git history at `5eab90e`.
 
-**§19 Phase 5 in `SOFTWARE-FACTORY-PLAN.md` is the authority.** Everything here either points
-at it or records a fact measured on 2026-08-23 that §19 does not carry.
+**§19 Phase 5 in `SOFTWARE-FACTORY-PLAN.md` is the authority.** Everything here either
+points at it or records a fact measured on 2026-08-23 that §19 does not carry.
 
----
-
-## Read this before trusting any file path in this repo
-
-**There are two plan files, and one of them is stale.**
-
-| | |
-| --- | --- |
-| `SOFTWARE-FACTORY-PLAN.md` (repo root, 179k) | **the authority.** `AGENTS.md:4` names it; `harness.config.json` protects it |
-| `.agents/plans/software-factory-plan.md` (169k) | **a stale condensed copy.** Last written 2026-08-23 01:24, before the session's corrections |
-
-macOS is case-insensitive, so `SOFTWARE-FACTORY-PLAN.md` and `software-factory-plan.md` look
-like the same file and are not. This session read the stale copy first and concluded that the
-`agent-review.yml` corrections had never been applied — they had, to the authority. The
-previous handoff flagged this drift as "do this first"; it is still unreconciled, and it has
-now cost two sessions. **Decide: delete the condensed copy, or put a one-line "NOT CANONICAL —
-see /SOFTWARE-FACTORY-PLAN.md" header on it.** It is not a protected file, so an agent can do
-either on your word.
+There is no longer a second plan file. `.agents/plans/software-factory-plan.md` — the stale
+condensed copy that misled two sessions — was deleted this session on James's word. If you
+find yourself reading a plan whose path is not `/SOFTWARE-FACTORY-PLAN.md`, something has
+gone wrong.
 
 ---
 
@@ -31,166 +17,141 @@ either on your word.
 
 | | |
 | --- | --- |
-| `main` | `507363d`. Item 1 merged as factory#32; item 2's layer-D half as factory#33 |
-| `harness@v2` | `134b21c`. Item 2's mechanism merged as harness#18, all checks green |
-| suite | 533 passed, mypy clean on 71 files, ruff check + format clean |
-| consumers | both on `v2`, clean trees, vendor pin still `3248fbe` — **the re-vendor is step 1 below** |
-| `awaiting_human` | empty |
-| runs | 4 `completed`, 30 `cancelled`, 8 `blocked`, 1 `suspended` |
+| `factory@main` | `507363d`. This branch adds `9e33944` (the delete above) on top of the merged handoff commits |
+| suite | 533 passed, mypy clean on 71 files, ruff check + format clean — re-measured this session |
+| `harness@v2` | `134b21c`. Unchanged this session, deliberately — see the schema-example item below |
+| `frontend-harness` | PR **#46**, `chore/vendor-gate-requires`, 3 commits, **all 7 checks green**, unmerged |
+| `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
+| vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
 | BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
-| daemon | loaded, ticking every 60 s, running `main` |
+
+**Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
+closed.** Nothing else in this document depends on them.
+
+One host-state change to know about: **`uv sync --extra app` was run in `python-harness`**,
+because proving the new probe's *met* branch needed the extra actually installed. It is the
+repo's own documented setup command and it was the host venv, not a sandbox one, so it is
+the safe direction of the bind-mount hazard. It also removed two `mypy` "unused type: ignore"
+errors that were purely artifacts of the extra being absent.
 
 ---
 
-## What landed this session
+## What landed this session — item 2 is built, proved, and waiting on a merge
 
-### Item 1 is closed
+The mechanism (`harness#18`, `requires`) and layer D's block message (`factory#33`) were
+already in. This session did the three consumer steps the last handoff listed, and both
+of them turned out to need a different probe than the one that was prescribed.
 
-factory#32 merged. `main` carries it. Nothing left here.
+### The prescribed probes were wrong, and executing them is the only reason that is known
 
-### Item 2 — the two environment assertions: the mechanism is built
+**`frontend-harness`: `pnpm exec playwright --version` exits 0 with no browsers at all.**
+Measured against an empty `PLAYWRIGHT_BROWSERS_PATH`. It probes the npm package, and the npm
+package is never the missing half: `network_allow` for the frontend build sandbox is
+`registry.npmjs.org`, `*.npmjs.org`, `github.com` — **not `cdn.playwright.dev`** — so
+`pnpm install` always succeeds and the browsers can never arrive. That probe would have
+reported "environment met" in precisely the environment it was written to catch.
 
-**The design tension the previous handoff named is resolved, and the reasoning changed on one
-point worth keeping.** That handoff framed option (a) as "a machine-readable field in
-`harness.config.json` plus a generic probe in `steps/sandbox.py: preflight`". The field is
-right; **the preflight is the wrong home**, and reading §19's own sentence is what settles it:
+The gate now probes `pnpm exec playwright screenshot about:blank /tmp/playwright-probe.png`,
+which launches the browser and so answers the question actually being asked, in ~0.4 s. It
+writes to `/tmp` because the probe runs with cwd at the repo root and a probe that leaves a
+PNG in the tree shows up in the diff.
 
-> otherwise the report says `unavailable`, not `pass`
+**`python-harness`: `docker info` covers one of the gate's two requirements,** exactly as the
+last handoff suspected. It is not a theoretical gap — measured on this host with Docker
+running and the extra unsynced, `uv run pytest -m integration` errored on `import pydantic`
+in three files, because **pytest collects the whole `tests/` tree before any marker filter
+applies**, so a missing extra fails collection repo-wide rather than only in the integration
+tests. `docker info` would have called that environment met.
 
-Only layer A produces that report. `preflight` can record a ledger check by name — it cannot
-make a gate come back `unavailable`. So the probe went to `gate_report.mjs`.
+The probe is now `uv run python scripts/integration_env_probe.py`: `shutil.which` + `docker
+info` for the daemon, `importlib.util.find_spec` for `psycopg` and `pgvector`, and a stderr
+message naming both halves and the fix. Six tests, four mutations tried, all four caught.
+`scripts/` is a new directory, so it is named in mypy's `files` in the same change that
+created it — that gate's own caveat says to.
 
-**harness#18 — `requires`.** An optional argv beside `caveat`, run immediately before the gate
-and only when the gate was going to run anyway. Non-zero or unspawnable, and the gate is
-reported `unavailable` and **never runs**, feeding `verdict: incomplete` unchanged.
+### Proved end to end, in the real repos, not in fixtures
 
-```json
-{ "name": "playwright", "kind": "e2e", "run": ["pnpm", "test:e2e"],
-  "requires": ["pnpm", "exec", "playwright", "--version"],
-  "caveat": "needs browsers installed: pnpm exec playwright install chromium." }
-```
+| repo | environment | `--gate` result |
+| --- | --- | --- |
+| `frontend-harness` | browsers present | `pass`, exit 0, 2869 ms; verdict `pass` across all 7 gates |
+| `frontend-harness` | `PLAYWRIGHT_BROWSERS_PATH` empty | `unavailable`, `exit: null`, verdict `incomplete`, process exit 3 |
+| `python-harness` | Docker up + extra installed | `pass`, exit 0, 2009 ms; verdict `pass` across all 5 gates |
+| `python-harness` | `docker` off `PATH` | `unavailable`, `exit: null`, verdict `incomplete`, process exit 3 |
 
-Three judgments, each pinned by a test, each mutation-proved:
+In both `unavailable` cases the entry's `outputTail` carries the probe's own message, which
+is what a human reads out of the `gates-incomplete` block.
 
-- The probe runs **after** `disabled` / `skipped_unchanged` / `not_applicable`. Probing a gate
-  those already settled spends a subprocess on a question nobody asked — and on the opt-in
-  kinds that is the common case, not the rare one.
-- An **unspawnable probe is unmet, not met**. The probe is the cheaper of the two commands; if
-  it cannot start, the gate's toolchain is not there either.
-- A **met requirement leaves `fail` alone**, so real code defects still reach the agent.
-  Without that, this hides the failures it exists to distinguish itself from.
+### One defect found on the way, fixed in the same PR
 
-`probeGate` is injected beside `runGate` and defaults to met, so every config with no
-`requires` behaves exactly as before. `verify.mjs` needed no change — `STOP_KINDS` excludes
-`e2e`/`integration`, so the Stop hook never runs an opt-in gate.
+`.factory/worktrees/<TICKET>/` is a full second copy of the repository, so **every ignore in
+`eslint.config.js` and `.prettierignore` is defeated one level down inside it** and the other
+checkout's findings are reported as this one's. `vite.config.ts` learned this in
+`frontend-harness@47ca3b5`; the other two had not. Reproduced with the FRO-7 worktree
+present — 2 eslint errors, 1 warning, 1 prettier warning, all four in the other checkout —
+and clean afterwards with the worktree still there. `python-harness` does not have the
+same hole: `ruff` and `mypy` both skip dot-directories.
 
-Six mutations, all caught: removing the probe block, ignoring its result, treating an
-unspawnable probe as met, carrying the probe's exit code onto the entry, probing an empty
-`requires`, and hoisting the probe above the dispatch decisions.
+### A cost worth not repeating
 
-**One CI round trip was spent on formatting, and the cause is worth not repeating.** `harness`
-installs no `node_modules`, so `npx --no-install prettier` cannot run and reads like "tool
-unavailable" rather than "not checked". The Generate main job runs `npx --yes prettier@3
---check .` and fails the PR on formatting alone, and prettier always breaks a JSON array whose
-elements are themselves arrays regardless of `printWidth`. Neither `node --test` nor
-`scripts/check.py` covers formatting. **Run the CI command verbatim before pushing layer A.**
-
-**factory#33 — the block message names what to install.** `gates-incomplete` is a
-human-judgement state and the human's next act is to install something; the message named the
-gate and left the *what* in the artifact. It now carries the caveat, attached to its gate, and
-only for gates that did not run. This matters more now: a missing tool used to arrive as
-`fail` and now arrives as `unavailable`, so this is the message it actually reaches.
-
-**`src/factory/` needed no other change, and that was verified rather than assumed.**
-`unavailable` → `verdict: incomplete` → `Blocked("gates-incomplete")`, which blocks and does
-*not* loop back to the agent (`steps/verify.py:327`). That is already the wanted behaviour.
-
----
-
-## What item 2 has left — this is the next session's first job
-
-**`harness#18` is merged, so this is unblocked and nothing here waits on a decision.** It had
-to go first: adding `requires` to either config before the schema shipped would fail validation
-against the vendored copy.
-
-1. **Re-vendor into both consumers**, one at a time: `python3 /Users/james/harness/scripts/vendor_sync.py sync`
-   in the consumer, then commit the bumped pin. Both sit on `3248fbe`; `harness@v2` is now
-   `134b21c`.
-2. **Add the two `requires` argvs**, in the consumer repos, on `v2`:
-
-   | repo | gate | `requires` |
-   | --- | --- | --- |
-   | `frontend-harness` | `playwright` | `["pnpm", "exec", "playwright", "--version"]` |
-   | `python-harness` | `pytest -m integration` | `["docker", "info"]` |
-
-   Both gate names were verified against the live configs on 2026-08-23.
-   **Check the python one against the real config first.** `python-harness`'s integration
-   caveat says "needs Docker **and the app extra**", and `docker info` probes only the first
-   half. Either the probe covers both or the caveat should stop claiming it does.
-3. **Prove it end to end, not in a fixture.** The method section below is not decoration: run
-   `gate_report.mjs --json --gate playwright` in the frontend sandbox with chromium *actually
-   absent*, and read the status. That is the only evidence that the mechanism does what four
-   green unit tests claim.
+`frontend-harness` CI has a **`body` job that checks the PR body against
+`.github/PULL_REQUEST_TEMPLATE.md`** and fails the PR when `## Summary`, `## What changed`,
+`## How to demo` or `## Evidence` is missing. One round trip was spent on it. `python-harness`
+has no such job — the asymmetry is real, and the frontend template is the stricter one.
+**Write the frontend PR body from the template, first time.**
 
 ---
 
-## The authority edit — done
+## The next session's first job
 
-§19 carries the decision. James ran the prepared script on 2026-08-23; the two edits are in
-`0ad42cb` on this branch: the Phase 5 bullet gained a paragraph recording that the mechanism
-is layer A's `requires` and why not `src/factory/` or `preflight`, and §20.2's harness file
-table gained the schema's second optional key.
+1. **If #46 and #68 have merged, item 2 is closed.** Check with `gh pr view`, and check the
+   *branch tip* rather than the PR state — a previous session lost two commits to a merge
+   that raced the last push by 24 seconds.
+2. **Then fix layer A's schema example.** `plugins/harness/schema/harness.config.schema.json`
+   offers `["pnpm", "exec", "playwright", "--version"]` as an example `requires` value, and
+   this session measured that it does not detect a missing browser. It is a docstring
+   teaching the wrong probe. Two candidate replacements: the screenshot argv now in
+   `frontend-harness`, or dropping the example to the `docker info` one alone.
 
-The route is recorded because it works and cost one keystroke instead of a session: write the
-edits as a script that asserts each FIND string appears **exactly once** before touching
-anything — all-or-nothing, backs up first, no-op on re-run — validate it against a *copy* of
-the file, then hand James one `! python3 <path>` line.
-
-Do **not** try to route around the hook or the classifier. Silently defeating the enforcement
-layer is exactly `p0-6-codex-trust.md`.
+   **This was deliberately not done this session**, because `vendor-freshness.yml` in both
+   consumers compares the vendored pin against `harness@v2` HEAD; a harness commit pushed
+   while #46 and #68 were open would have made both PRs stale. Do it after they merge, and
+   re-vendor as its own pair of PRs.
 
 ---
 
-## What Phase 5 has left after item 2
+## What Phase 5 has left
 
-### 3. First layer-C product
+### 3. First layer-C product — not started, and it needs James twice
 
 `python3 /Users/james/harness/scripts/new_project.py create <name> --api python --web react
---agnostic`, then a registry row with `stack = "monorepo"`. Not started; `stack` is `python` /
-`frontend` only today.
+--agnostic`, then a registry row with `stack = "monorepo"`. §19's own approval boundary
+reserves **the first layer-C repository's creation** to James, and `stack` accepts only
+`python` / `frontend` today, so this is a real `src/factory/` change and not only scaffolding.
+Asked and answered on 2026-08-23: **not now.**
 
-### 4. Tests
+### 4. Tests — blocked, and only James can clear it
 
 One ticket per stack end to end, plus a monorepo dispatch test proving a CSS-only change runs
-no Python gate. **Blocked — see below.**
+no Python gate. Unchanged from the last handoff: Todo holds only BAC-1 and FRO-1, and both are
+correctly and permanently refused at intake with `no-parent-spec` because they *are* the parent
+specs. Moving a `Canceled` ticket to `Todo` works — BAC-6 did exactly that on 2026-08-23 and
+all 11 intake conditions passed, which settled that **a `Canceled` parent satisfies the
+parent-spec condition**. It is a Linear move, not a code problem: §24.1, the factory reads
+tickets and never files them.
 
----
-
-## The blocker only James can clear
-
-**Phase 5's end-to-end tests need one eligible ticket per stack, and none exists.** Todo holds
-only BAC-1 and FRO-1, and both are refused at intake with `no-parent-spec` — correctly and
-permanently, because they *are* the parent specs (`parent_identifier` is empty and every other
-ticket in their teams names one of them).
-
-Moving a `Canceled` ticket to `Todo` works: BAC-6 did exactly that on 2026-08-23 and all 11
-intake conditions passed, which settled the open question — **a `Canceled` parent does satisfy
-the parent-spec condition.** So this is a Linear move, not a code problem, and not work to code
-around: §24.1, the factory reads tickets and never files them.
-
-`needs-info` is currently **cleared** by James. Item 2's remaining steps need no ticket, so
-this does not block them.
+`needs-info` is currently cleared by James.
 
 ---
 
 ## Open decisions
 
 **Completing a run resets its `gc` clock, and nobody has decided whether that is right.**
-Carried forward unchanged — it is a decision, not a bug, and **nothing was changed**.
+Carried forward unchanged, third session running — it is a decision, not a bug, and
+**nothing was changed**.
 
 `gc.py:97` computes age from `run.updated_at`, and completing *writes* the run, so all four
-completed runs went to `0.0` days old and `worktree_days = 7` (`config/projects.toml:58`) holds
-them for a fresh week.
+completed runs went to `0.0` days old and `worktree_days = 7` (`config/projects.toml:58`)
+holds them for a fresh week.
 
 - *For:* the floor is a safety margin after a run becomes collectable, and it only becomes
   collectable at the merge. §16.5's opening line says every rule is a floor, never a promise.
@@ -199,14 +160,13 @@ them for a fresh week.
 
 Changing it means measuring from the `pr_ready -> awaiting_human` transition rather than
 `updated_at` — small in `_collect_run`, but it changes what §16.5 *means*. Two worktrees wait
-on it: `python-harness/.factory/worktrees/BAC-4` (latent — pytest does not glob into
-`.factory/`) and `frontend-harness/.factory/worktrees/FRO-7`.
+on it: `python-harness/.factory/worktrees/BAC-4` and `frontend-harness/.factory/worktrees/FRO-7`.
 
 ---
 
-## Defects carried into the rest of Phase 5
+## Defects carried forward
 
-None block the remaining item-2 steps. All four unchanged.
+None block the remaining Phase 5 work.
 
 1. **`cancel` cannot restore a tracker it did not set — which is the successful case.** A run
    that opened a PR has been moved to `In Review` by the GitHub integration, so cancelling it
@@ -215,14 +175,17 @@ None block the remaining item-2 steps. All four unchanged.
    unclaimable.
 2. **The re-run ceiling counts orphans, not attempts.** `resumable_reentries` counts
    `<state> -> resumable` transitions, so a deterministic environment failure burns the budget
-   in three ticks and fails a run whose work is good. An attempt that dies before its first
-   heartbeat never ran. **`requires` narrows this but does not close it** — a missing tool now
-   blocks at `gates-incomplete` instead of looping, but every other deterministic environment
-   failure still burns the budget.
+   in three ticks and fails a run whose work is good. `requires` narrows this — a missing tool
+   now blocks at `gates-incomplete` instead of looping — but every other deterministic
+   environment failure still burns the budget.
 3. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not
    codex, so neither `pkill -f "codex exec"` nor `pkill -x codex` matches it. Pre-existing.
 4. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when
    the attempt directory is missing.
+5. **New, and mild:** the frontend probe writes `/tmp/playwright-probe.png`, so it is POSIX-only.
+   Nothing in use runs `gate_report.mjs` on Windows — the Stop hook's `STOP_KINDS` excludes
+   `e2e` and the sandboxes are Linux — and a Windows run would report the gate `unavailable`
+   rather than falsely `pass`, so it fails safe. Recorded rather than fixed.
 
 ## Small follow-ups, deliberately not built
 
@@ -230,36 +193,24 @@ None block the remaining item-2 steps. All four unchanged.
   path share their machinery elsewhere, so the divergence is worth closing.
 - Nothing surfaces "PR merged — ready to complete" in `factory status`. The tick could notice
   and *say* so without taking the edge, which stays reserved to `merge-is-james`.
-- `.DS_Store` and `.agents/.DS_Store` are untracked in the working tree and probably want a
+- `.DS_Store` and `.agents/.DS_Store` are untracked in the working tree and still want a
   `.gitignore` line.
 
 ---
 
-## The method, unchanged — and it paid again this session
+## The method, unchanged — and item 2 is the strongest case for it yet
 
-Every defect in the last five sessions was found by executing the thing, never by reading about
-it. This session it caught three things the handoff would otherwise have carried forward:
+**Both prescribed probes passed their own unit tests and neither detected the condition it
+was written for.** Four green tests in `harness#18` proved the *mechanism*; nothing in them
+could have proved that `playwright --version` answers a different question than "are the
+browsers here". Only running it against an empty `PLAYWRIGHT_BROWSERS_PATH` did.
 
-- **The previous handoff's "first thing to decide" was already decided.** It said the item-1
-  branch was "local and unpushed, no PR". `gh pr list` said PR #32, `MERGED`. One command.
-- **The stale plan duplicate.** Reading `.agents/plans/software-factory-plan.md` produced a
-  confident, wrong conclusion that the `agent-review.yml` corrections had never landed. `git
-  show --stat` on the commit named a different filename, which is the only reason it surfaced.
-- **The handoff's own design recommendation was half wrong.** `preflight` is genuinely the
-  shaped home for a positive assertion — and it still cannot satisfy the bullet, because the
-  bullet is about the *report*. Re-reading the authority beat re-reading the summary of it.
+Two smaller instances from this session:
 
-- **Two commits missed their own PR by 24 seconds.** `0ad42cb` was the tip when factory#33
-  merged; `ff686e1` and `078e795` were pushed to the branch *after* and were never in it. The
-  branch looked merged, `git status` was clean, and both were still stranded. What surfaced it
-  was reading the file's content on `main` rather than trusting that "the PR merged" meant the
-  branch's tip merged. `git log --oneline -3 -- <file>` and `git merge-base --is-ancestor`
-  answer this in one command each. **Deleting the local branch before checking would have made
-  it much harder to find** — the remote ref is what saved it.
-
-**A green suite is a claim, not evidence.** Before believing a test, stash or mutate the source
-and watch it fail; check the test sits at the altitude the defect lives at. Watch for the
-vacuous assertion too — this session's "a passing gate contributes no caveat noise" passed
-before the fixture was changed to make it capable of failing.
+- **The local `v2` in `frontend-harness` was two commits behind `origin/v2`**, and the first
+  branch was cut from it. `git fetch` before branching, always; FRO-7 had merged since.
+- **A green suite is a claim, not evidence.** The four mutations against the python probe were
+  each tried and each caught, including the one that mattered most: treating an unfindable
+  Docker client as met.
 
 **And before believing a handoff — including this one — grep the tree it describes.**
