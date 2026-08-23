@@ -149,3 +149,45 @@ def test_render_pr_body_handles_a_missing_redphase_row() -> None:
 def test_pr_number_extracts_the_number_from_a_gh_url() -> None:
     assert pr_number("https://github.com/jchen1707/python-harness/pull/9") == 9
     assert pr_number("not a url") is None
+
+
+def test_a_cleared_escalation_is_named_in_the_body() -> None:
+    # A PR whose review ran only because a human overruled a §15.3 guard must say so. The
+    # section is the difference between "no guard fired" and "a guard fired and was cleared",
+    # which are indistinguishable from the Review section alone.
+    body = render_pr_body(
+        ticket="FRO-11",
+        title="t",
+        restatement="r",
+        gates=[],
+        gate_verdict="pass",
+        review_summary=REVIEW,
+        redphase=REDPHASE,
+        escalations=[{"rule": "test-weakening", "note": "the assertions asserted a deleted stub"}],
+        out_of_scope=[],
+        artifact_path="/a",
+        tokens_in=0,
+        tokens_out=0,
+        usd=None,
+    )
+    assert "Cleared escalations" in body
+    assert "`test-weakening`" in body
+    assert "the assertions asserted a deleted stub" in body
+
+
+def test_an_ordinary_run_has_no_cleared_escalations_section() -> None:
+    body = render_pr_body(
+        ticket="FRO-11",
+        title="t",
+        restatement="r",
+        gates=[],
+        gate_verdict="pass",
+        review_summary=REVIEW,
+        redphase=REDPHASE,
+        out_of_scope=[],
+        artifact_path="/a",
+        tokens_in=0,
+        tokens_out=0,
+        usd=None,
+    )
+    assert "Cleared escalations" not in body

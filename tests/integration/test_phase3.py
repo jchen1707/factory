@@ -9,6 +9,7 @@ assembly, PR-body layout) have their own unit tests.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import subprocess
@@ -18,12 +19,18 @@ import pytest
 
 from factory import cli, repo
 from factory.machine import Blocked, State
-from factory.steps import Context
+from factory.steps import Context, redphase
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
 from factory.store import Store
-from tests.integration.conftest import FakeLinear, FakeSandbox, _seed_vendored_review_tree, git
+from tests.integration.conftest import (
+    HOME,
+    FakeLinear,
+    FakeSandbox,
+    _seed_vendored_review_tree,
+    git,
+)
 from tests.integration.test_pipeline import _fake, _to_verifying
 
 # --------------------------------------------------------------------------------
@@ -143,6 +150,146 @@ def test_a_test_weakening_guard_routes_to_awaiting_human(
     assert ctx.state is State.AWAITING_HUMAN
     linear: FakeLinear = ctx.linear  # type: ignore[assignment]
     assert "test-weakening" in linear.comments[-1]
+
+
+def _accept(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> int:
+    """`factory accept <ticket>` against the fixture home, with only Linear faked."""
+    target = ctx.home / "config" / "models.toml"
+    if not target.exists():
+        target.write_text((HOME / "config" / "models.toml").read_text())
+    monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
+    monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
+    monkeypatch.setattr(cli, "LinearClient", lambda: ctx.linear)
+    return cli.cmd_accept(argparse.Namespace(ticket=ctx.run.linear_id, note=None))
+
+
+def test_a_cleared_weakening_escalation_lets_the_interrupted_review_run(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard still finds the same hunks; the acceptance is what lets the run past them.
+
+    This is the property, not the command: `weakening_guard` is left returning an offending
+    line, so a run that reaches `pr_ready` here can only have got there by reading the
+    acceptance. Without the check row it parks at `awaiting_human`, which the assertion
+    below the record proves in the same test.
+    """
+    _to_reviewing(ctx)
+    monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "proceed")
+    monkeypatch.setattr(
+        review_step.redphase, "weakening_guard", lambda ctx: ["assert result == 42"]
+    )
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+
+    # Unaccepted: parked.
+    review_step.run(ctx)
+    assert ctx.state is State.AWAITING_HUMAN
+
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        redphase.ESCALATION_ACCEPTED,
+        "accepted",
+        reason=redphase.TEST_WEAKENING,
+        detail="the removed assertions asserted a stub this ticket deletes",
+    )
+    from factory.steps import advance
+
+    advance(ctx, State.REVIEWING, actor="human", rule="escalation-cleared-is-james")
+
+    review_step.run(ctx)
+
+    assert ctx.state is State.PR_READY
+
+
+def test_a_cleared_redphase_escalation_lets_the_interrupted_review_run(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same property for the other §15.3 companion check, and the reason they are
+    recorded under separate rules: clearing one must not clear the other."""
+    _to_reviewing(ctx)
+    monkeypatch.setattr(review_step.redphase, "replay", lambda ctx: "awaiting_human")
+    monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+
+    # An acceptance of the *other* escalation does not clear this one.
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        redphase.ESCALATION_ACCEPTED,
+        "accepted",
+        reason=redphase.TEST_WEAKENING,
+        detail="wrong escalation",
+    )
+    review_step.run(ctx)
+    assert ctx.state is State.AWAITING_HUMAN
+
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        redphase.ESCALATION_ACCEPTED,
+        "accepted",
+        reason=redphase.REDPHASE_INCONCLUSIVE,
+        detail="the runner is not installed in this sandbox",
+    )
+    from factory.steps import advance
+
+    advance(ctx, State.REVIEWING, actor="human", rule="escalation-cleared-is-james")
+
+    review_step.run(ctx)
+
+    assert ctx.state is State.PR_READY
+
+
+def test_accept_refuses_a_run_that_already_delivered_a_pr(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`awaiting_human` with a PR is the ordinary end of a run, not an escalation. Accepting
+    it would re-enter `reviewing` on work that is already delivered."""
+    _to_reviewing(ctx)
+    ctx.store.update_run(ctx.run.id, pr_url="https://github.com/x/y/pull/1")
+    from factory.steps import advance
+
+    advance(ctx, State.AWAITING_HUMAN, actor="auto", rule="delivered")
+    code = _accept(ctx, monkeypatch)
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.AWAITING_HUMAN
+
+
+def test_accept_refuses_an_escalation_it_does_not_clear(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host-execution deny-list also parks at `awaiting_human`, and it is a security
+    boundary rather than a judgement about test quality. `accept` must not touch it."""
+    _to_reviewing(ctx)
+    from factory.steps import advance
+
+    advance(ctx, State.AWAITING_HUMAN, actor="auto", rule="host-execution-deny")
+    code = _accept(ctx, monkeypatch)
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.AWAITING_HUMAN
+
+
+def test_parked_on_reads_the_last_escalation_not_the_first(ctx: Context) -> None:
+    """A run can be parked, reopened and parked again; the rule being cleared is the one it
+    is sitting on now. The rows are written directly — this is a question about the log, and
+    `advance` would refuse the reopen hop from a state this fixture is not in."""
+    _to_reviewing(ctx)
+    for from_state, to_state, rule in (
+        (State.REVIEWING, State.AWAITING_HUMAN, "redphase-inconclusive"),
+        (State.AWAITING_HUMAN, State.IMPLEMENTING, "reopen-after-review-is-james"),
+        (State.REVIEWING, State.AWAITING_HUMAN, "test-weakening"),
+    ):
+        ctx.store.record_transition(
+            ctx.run.id, from_state=from_state, to_state=to_state, actor="human", rule=rule
+        )
+
+    assert cli._parked_on(ctx.store, ctx.run) == "test-weakening"
 
 
 # --------------------------------------------------------------------------------

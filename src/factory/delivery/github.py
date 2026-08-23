@@ -179,6 +179,7 @@ def render_pr_body(
     gate_verdict: str,
     review_summary: dict[str, Any] | None,
     redphase: dict[str, str] | None,
+    escalations: Sequence[dict[str, str]] = (),
     out_of_scope: Sequence[str],
     artifact_path: str,
     tokens_in: int,
@@ -189,8 +190,13 @@ def render_pr_body(
 
     `Fixes <TEAM-NUM>`, the one-paragraph restatement, the gate report table (every
     `not_applicable`/`unavailable`/`skipped` row with its caveat), the review summary (Tier-1
-    findings + the skipped-Tier-2 rule name), the red-phase replay result, out-of-scope notes,
-    the attempt artifact path, and the cost.
+    findings + the skipped-Tier-2 rule name), the red-phase replay result, any §15.3
+    escalation a human cleared to let the review run, out-of-scope notes, the attempt
+    artifact path, and the cost.
+
+    `escalations` is empty on the ordinary run — the guards did not fire — and a reader
+    should be able to tell the two apart without knowing the section exists, so the heading
+    is emitted only when there is something under it.
     """
     lines: list[str] = []
     lines.append(f"Fixes {ticket}")
@@ -254,6 +260,18 @@ def render_pr_body(
     else:
         lines.append("_Not run (no behaviour change reported)._")
     lines.append("")
+    if escalations:
+        lines.append("## Cleared escalations (§15.3)")
+        lines.append("")
+        lines.append(
+            "A guard stopped this run and a human cleared it. The review below ran "
+            "*after* that judgement, not instead of it."
+        )
+        lines.append("")
+        for esc in escalations:
+            note = esc.get("note", "").strip()
+            lines.append(f"- **`{esc.get('rule', '?')}`** cleared{f' — {note}' if note else ''}")
+        lines.append("")
     lines.append("## Out of scope")
     lines.append("")
     if out_of_scope:

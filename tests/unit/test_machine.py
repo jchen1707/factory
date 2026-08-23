@@ -172,3 +172,17 @@ def test_a_blocked_run_can_resume_into_the_state_that_blocked_it() -> None:
     assert can(State.BLOCKED, State.REVIEWING)
     assert requires_human_rule(State.BLOCKED, State.VERIFYING) == "unblock-is-a-judgement"
     assert requires_human_rule(State.BLOCKED, State.REVIEWING) == "unblock-is-a-judgement"
+
+
+def test_a_parked_escalation_can_be_cleared_back_into_reviewing() -> None:
+    # §15.3's two companion checks stop the run *before* the review fan-out and park it at
+    # `awaiting_human` for a judgement. Until this edge existed the judgement had nowhere to
+    # go: `completed` needs a PR the run never opened, and `implementing` sends back work a
+    # human has just approved. Re-entering `reviewing` — not `pr_ready` — is what keeps the
+    # review from being skipped rather than resumed.
+    assert can(State.AWAITING_HUMAN, State.REVIEWING)
+    assert (
+        requires_human_rule(State.AWAITING_HUMAN, State.REVIEWING) == "escalation-cleared-is-james"
+    )
+    # And it must not become a way to skip the review altogether.
+    assert not can(State.AWAITING_HUMAN, State.PR_READY)

@@ -210,6 +210,32 @@ def replay(ctx: Context) -> ReplayOutcome:
             repo.remove_worktree(ctx.project.path, scratch, force=True)
 
 
+#: `check_name` for a human's clearance of a §15.3 escalation. The `reason` column carries
+#: the escalation's own rule — `test-weakening` or `redphase-inconclusive` — so one run can
+#: have cleared one of them and still be stopped by the other. The row is the durable half
+#: of the judgement: `factory accept` writes it, `review.start` reads it, and the PR body
+#: names it, because a PR whose review ran only because a human overruled a guard should
+#: say so rather than look like a run that never tripped one.
+ESCALATION_ACCEPTED = "escalation_accepted"
+
+#: The two escalations `factory accept` can clear, and the rule each is recorded under.
+TEST_WEAKENING = "test-weakening"
+REDPHASE_INCONCLUSIVE = "redphase-inconclusive"
+
+
+def accepted(ctx: Context, rule: str) -> tuple[bool, str]:
+    """`(cleared, note)` — has a human cleared `rule` for this run?
+
+    Scoped to the run, not the attempt: the acceptance is a judgement about a diff, and a
+    diff that survives into another attempt is the same diff. A re-implement that changes
+    the tests again produces different hunks, and the guard flags those on their own.
+    """
+    for row in ctx.store.checks(ctx.run.id):
+        if row["check_name"] == ESCALATION_ACCEPTED and row["reason"] == rule:
+            return True, str(row["detail"] or "")
+    return False, ""
+
+
 def weakening_guard(ctx: Context) -> list[str]:
     """The test-weakening guard (§15.3's companion check). Returns the offending hunks, or
     empty. A diff that deletes or relaxes assertions in *existing* test files is the other

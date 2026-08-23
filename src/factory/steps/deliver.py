@@ -25,7 +25,7 @@ from typing import Any
 from factory import artifacts, policy, repo
 from factory.delivery import github
 from factory.machine import Blocked, State
-from factory.steps import Context, advance
+from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import review as review_step
 
@@ -162,12 +162,27 @@ def _render_body(ctx: Context) -> str:
         gate_verdict=str(gates_doc.get("verdict", "")),
         review_summary=review_summary,
         redphase=_redphase_row(ctx),
+        escalations=_cleared_escalations(ctx),
         out_of_scope=result.get("out_of_scope", []) or [],
         artifact_path=str(ctx.artifact_root / str(ctx.run.attempt)),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         usd=usd,
     )
+
+
+def _cleared_escalations(ctx: Context) -> list[dict[str, str]]:
+    """Every §15.3 escalation a human cleared on this run, in the order they were cleared.
+
+    Read from `checks` rather than from the transition log because the log records that the
+    run *entered* `awaiting_human`, not that anyone agreed with it. The clearance is the
+    fact the PR body is claiming.
+    """
+    return [
+        {"rule": str(row["reason"] or "?"), "note": str(row["detail"] or "")}
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == redphase.ESCALATION_ACCEPTED
+    ]
 
 
 def _gate_summary(ctx: Context) -> str:
