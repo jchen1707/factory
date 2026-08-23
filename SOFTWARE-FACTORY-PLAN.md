@@ -2358,6 +2358,30 @@ its own reaches `awaiting_human` with a draft PR, and the transition log shows n
   before an `e2e` gate is required; otherwise the report says `unavailable`, not `pass`.
 - Python-specific: assert Docker is available in the sandbox before `integration` is
   required. `sbx` gives the VM its own Docker daemon, so this is a check, not a blocker.
+- **Both are one mechanism, and it lives in layer A** — decided 2026-08-23, built in
+  `harness#18`. A gate declares `requires`: an argv beside its `caveat` that exits zero only
+  when the environment is really there. `gate_report.mjs` runs it immediately before the
+  gate, and only when the gate was going to run anyway; a non-zero or unspawnable probe
+  reports the gate `unavailable` and never runs it, which feeds `verdict: incomplete`
+  unchanged.
+
+  The alternative was hardcoding the two probes in `src/factory/`, and it is a review
+  failure by §3.2's own rule: the factory holds no gate command, and a gate name in `src/`
+  is exactly what `docker` and `chromium` would be. Both stacks already declared the
+  condition in `caveat` — "needs Docker and the app extra", "needs browsers installed:
+  pnpm exec playwright install chromium" — which is right for a human and unreadable to a
+  machine. `requires` is that same fact in a form something can check: generic mechanism in
+  layer A, stack-specific data in layer B, nothing in layer D.
+
+  Why layer A rather than the factory's `preflight`, which is also a list of positive
+  assertions: only layer A produces the report, and this bullet's requirement is about what
+  the *report* says. `preflight` could record a ledger check; it could not make a gate come
+  back `unavailable`.
+
+  Note what this is **not**. `verify.collect`'s `env-gate-failed` is *reactive* — it fires
+  after a caveated gate ran and failed. `requires` is the assertion before the fact, so the
+  gate never runs and the agent is never handed a `fail` it cannot fix by writing code. The
+  two are complementary and both stay.
 - **PRs move from draft to ready-for-review at this phase** (§24.8). Not because it
   triggers anything — measured 2026-08-23, draft-ness gates no workflow in either
   harness: `agent-review.yml` is `types: [labeled]` behind an `agent-review` label
@@ -2436,7 +2460,7 @@ rule, and the list of human-reserved decisions (§6.1).
 | `plugins/harness/hooks/gate_report.mjs` | new |
 | `plugins/harness/hooks/hooks.test.mjs` | extended |
 | `plugins/harness/schema/review-findings.schema.json` | new |
-| `plugins/harness/schema/harness.config.schema.json` | new optional `tests` key (§15.3) |
+| `plugins/harness/schema/harness.config.schema.json` | new optional `tests` key (§15.3); new optional per-gate `requires` argv (Phase 5, `harness#18`) |
 | `plugins/harness/workflows/full-review.js` | read the schema from the file |
 | `plugins/harness/skills/verify/SKILL.md` | one paragraph |
 | `plugins/harness/docs/agents/config.md` | one row (vault variable scopes) |
