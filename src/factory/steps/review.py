@@ -83,12 +83,6 @@ FORCED = "ran:forced"
 _TIER2_FILE_THRESHOLD = 10
 _TIER2_LINE_THRESHOLD = 400
 
-#: The directories whose own `AGENTS.md` exists — a Tier-2 trigger per stack.
-_SENSITIVE_DIRS: dict[str, tuple[str, ...]] = {
-    "python": ("src/app/ai/**",),
-    "frontend": ("src/**/routes/**",),
-}
-
 #: Severities that route to a human rather than a PR. `critical`/`high` only; a
 #: `medium`/`low` finding is recorded and carried in the PR body but does not stop delivery.
 _HUMAN_SEVERITIES = frozenset({"critical", "high"})
@@ -716,7 +710,7 @@ def _tier2_trigger(ctx: Context, harness: HarnessConfig, tier1_has_human: bool) 
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     paths = repo.changed_paths(worktree, base_ref)
     lines = repo.changed_lines(worktree, base_ref)
-    sensitive = _SENSITIVE_DIRS.get(ctx.project.stack, ())
+    sensitive = ctx.project.sensitive_paths
     return _decide_tier2(
         paths=paths,
         lines=lines,
@@ -747,11 +741,16 @@ def _decide_tier2(
     override rather than a seventh rule: it does not describe the diff, it says a human
     wants the fan-out on this run whatever the diff looks like. Four of the six real rules
     cannot be produced on demand — a protected path is refused by `protect_paths.mjs`
-    before it can reach a diff, the sensitive-directory globs match nothing in either
-    repository today, a Tier-1 critical is not orderable, and the Bug-without-test row is
-    blocked earlier by the red-phase replay — so without an override the fan-out is a code
-    path reachable only by getting lucky with a diff size, and a path like that stays
+    before it can reach a diff, a Tier-1 critical is not orderable, and the Bug-without-test
+    row is blocked earlier by the red-phase replay — so without an override the fan-out is a
+    code path reachable only by getting lucky with a diff size, and a path like that stays
     unproven.
+
+    `sensitive` now comes from the project registry rather than a table in this module. It
+    was the fourth un-producible rule until 2026-08-23, for a duller reason than the other
+    three: the `frontend` globs matched nothing in the repository they named. A stack fact
+    kept in layer D drifts from the repository it describes and nothing notices, which is
+    §3.2's argument for not keeping it here.
 
     Note: the two-phase `start` calls this with `tier1_has_human=False` because Tier-1 has
     not run yet at spawn time; see the module header. The rule stays here for the

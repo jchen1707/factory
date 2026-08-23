@@ -1750,6 +1750,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 f"vendored layer A in {project.name}", ok, detail.splitlines()[-1] if detail else ""
             )
 
+    if registry:
+        for project in registry.projects.values():
+            check(*_sensitive_paths_check(project))
+
     check(*_prices_check(home))
 
     if args.deep and registry:
@@ -1766,6 +1770,53 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print("All checks passed.")
     return 1 if failures else 0
+
+
+def _sensitive_paths_check(project: Project) -> tuple[str, bool, str]:
+    """Does this project's §15.2 sensitive-path list still match anything it names?
+
+    This check exists because the failure it catches is silent. `_SENSITIVE_DIRS` held
+    `src/**/routes/**` for the frontend stack and there has never been a `routes`
+    directory in that repository: measured 2026-08-23, the glob matched **0 of 192**
+    tracked files. A Tier-2 trigger that cannot fire and a Tier-2 trigger that happened
+    not to fire produce byte-identical evidence, so nothing in four phases of runs
+    noticed. Moving the list to the registry makes it editable; only this makes it
+    checkable.
+
+    An empty list is fine — a project that has not named any sensitive directory is
+    reporting a decision, not a drift. A non-empty list matching nothing is the bug.
+    """
+    name = f"sensitive paths in {project.name}"
+    if not project.sensitive_paths:
+        return name, True, "none declared"
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(project.path), "ls-files"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return name, False, str(exc)
+    if tracked.returncode != 0:
+        return (
+            name,
+            False,
+            (tracked.stderr or "").strip().splitlines()[:1][0]
+            if tracked.stderr
+            else "git ls-files failed",
+        )
+    files = tracked.stdout.split()
+    dead = [
+        glob
+        for glob in project.sensitive_paths
+        if not any(review_step._matches_any(f, (glob,)) for f in files)
+    ]
+    if dead:
+        return name, False, f"matches no tracked file: {', '.join(dead)}"
+    hits = sum(1 for f in files if review_step._matches_any(f, project.sensitive_paths))
+    return name, True, f"{len(project.sensitive_paths)} glob(s), {hits} files"
 
 
 def _tool_check(argv: Sequence[str]) -> tuple[str, bool, str]:

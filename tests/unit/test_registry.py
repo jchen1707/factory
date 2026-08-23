@@ -104,3 +104,63 @@ def test_deny_network_defaults_to_nothing_rather_than_to_a_guess(tmp_path: Path)
         TWO_TEAMS.replace('team = "BAC"\npath = "/tmp/two"', 'team = "FRO"\npath = "/tmp/two"')
     )
     assert load_registry(path).defaults.deny_network == ()
+
+
+SENSITIVE = """
+[vault]
+path = "/tmp/vault"
+
+[projects.declared]
+team = "AAA"
+path = "/tmp/declared"
+remote = "https://example.invalid/a.git"
+base_branch = "v2"
+stack = "python"
+build_sandbox = "factory-build-a"
+sensitive_paths = ["src/app/ai/**", "src/app/core/**"]
+
+[projects.silent]
+team = "BBB"
+path = "/tmp/silent"
+remote = "https://example.invalid/b.git"
+base_branch = "v2"
+stack = "monorepo"
+build_sandbox = "factory-build-b"
+"""
+
+
+def test_sensitive_paths_are_read_from_the_registry(tmp_path: Path) -> None:
+    # §15.2's Tier-2 sensitive-path trigger is a stack fact, and §3.2 gives layer D none of
+    # those. It lived in a dict in `steps/review.py` until 2026-08-23, where the frontend
+    # entry named a directory that has never existed in the repository it described.
+    config = tmp_path / "projects.toml"
+    config.write_text(SENSITIVE)
+
+    registry = load_registry(config)
+
+    assert registry.projects["declared"].sensitive_paths == ("src/app/ai/**", "src/app/core/**")
+
+
+def test_a_project_that_declares_no_sensitive_paths_gets_an_empty_tuple(tmp_path: Path) -> None:
+    # Empty is a real answer: the size and protected-path triggers still apply, and a
+    # project is not obliged to nominate directories. It must not be a parse error, and it
+    # must not fall back to some other project's list.
+    config = tmp_path / "projects.toml"
+    config.write_text(SENSITIVE)
+
+    registry = load_registry(config)
+
+    assert registry.projects["silent"].sensitive_paths == ()
+
+
+def test_the_real_registry_declares_sensitive_paths_that_match_something() -> None:
+    # The regression this whole change exists for. `doctor` runs the same check against the
+    # working copies; this one asserts the far cheaper half — that the globs are at least
+    # well-formed and non-empty for the two projects that declare them — without needing
+    # either repository to be checked out.
+    registry = load_registry(HOME / "config" / "projects.toml")
+
+    for project in registry.projects.values():
+        for glob in project.sensitive_paths:
+            assert glob.endswith("/**"), f"{project.name}: {glob} is not a directory glob"
+            assert not glob.startswith("/"), f"{project.name}: {glob} is not repo-relative"

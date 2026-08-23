@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -290,6 +291,44 @@ def test_parked_on_reads_the_last_escalation_not_the_first(ctx: Context) -> None
         )
 
     assert cli._parked_on(ctx.store, ctx.run) == "test-weakening"
+
+
+def test_the_tier2_trigger_reads_the_sensitive_paths_off_the_project(ctx: Context) -> None:
+    """The wiring, not the rule. `_decide_tier2`'s table has always been tested with a
+    `sensitive` argument passed straight in; nothing asserted where that argument comes
+    from, so the trigger could stop consulting the registry and every test would stay
+    green. Measured: a mutation replacing `ctx.project.sensitive_paths` with `()` broke no
+    test in the suite. That is the same silence the registry move exists to end.
+
+    The change is committed here rather than taken from the fixture so the two assertions
+    differ in exactly one thing — what the project declares.
+    """
+    _to_reviewing(ctx)
+    worktree = Path(ctx.run.worktree or "")
+    target = worktree / "src" / "app" / "ai" / "retrieval.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(
+        worktree,
+        "commit",
+        "-m",
+        "a one-file change inside a directory a project may call sensitive",
+    )
+    assert ctx.harness is not None
+
+    # Nothing declared: one small file trips no size rule, so Tier 2 is skipped.
+    ctx.project = replace(ctx.project, sensitive_paths=())
+    assert review_step._tier2_trigger(ctx, ctx.harness, False) == "no-trigger"
+
+    # The same diff, with the directory it touches declared sensitive: Tier 2 runs.
+    ctx.project = replace(ctx.project, sensitive_paths=("src/app/ai/**",))
+    assert review_step._tier2_trigger(ctx, ctx.harness, False) is None
+
+    # And a glob that names a directory this repository does not have changes nothing —
+    # which is precisely why `doctor` has to check the list separately.
+    ctx.project = replace(ctx.project, sensitive_paths=("src/**/routes/**",))
+    assert review_step._tier2_trigger(ctx, ctx.harness, False) == "no-trigger"
 
 
 # --------------------------------------------------------------------------------
