@@ -1,8 +1,16 @@
 # Phase 4.5 handoff — 2026-08-22
 
-**Phase 4 is closed. Phase 4.5 is not**, and what stands between them is one config
-flag, half-landed. Read §19 Phase 4.5 in `SOFTWARE-FACTORY-PLAN.md` for the authority;
-this file is what happened when it was actually run.
+**Phase 4 is closed. Phase 4.5 is not.** Read §19 Phase 4.5 in
+`SOFTWARE-FACTORY-PLAN.md` for the authority; this file is what happened when it was
+actually run.
+
+> **Current status, 2026-08-22 late.** Steps 1-4 are landed across five merged PRs. The
+> gate wall that stopped runs 2 and 3 is **down** — run 4 produced `verdict: pass` with
+> `lighthouse: disabled`. It then blocked at the same state on a *different* defect, a
+> stale enum in layer D's copy of the report schema, fixed in factory#27. **Run 5 is the
+> next attempt**, and no FRO-7 run has yet reached `reviewing`. Start at
+> "the acceptance run" below; the two sections before it are session 1's diagnosis, kept
+> because the measurements in them are still the only ones anyone has taken.
 
 **The method, before anything else.** Every defect below was found by executing the thing,
 never by reading about it. Three of them sat behind a §19 row that said **built** — the
@@ -110,7 +118,7 @@ not.
 | 2. vendor sync both consumers | frontend-harness#43 and python-harness#67 **merged**, both on `harness@3248fbe` |
 | 3. lighthouse off in config | **merged** in #43; `gate_report` returns `disabled` even for an explicit `--gate lighthouse` |
 | 4. teach the factory `disabled` | factory#25 **merged** |
-| 5. re-run FRO-7 | **claimed unattended** as run `4d2faf24b79a4094`; in flight at hand-off |
+| 5. re-run FRO-7 | **claimed unattended** as run `4d2faf24b79a4094`; cleared the gate wall, blocked at `verifying` on `schema-invalid`; fixed in factory#27, awaiting a fifth run |
 | 6. suspend / resume | **no subject exists**, now verified — see below |
 
 **Lighthouse still runs in CI, and the last handoff did not say so.** `ci.yml` has its own
@@ -169,7 +177,7 @@ So steps 4.5-5 and 4.5-6 need a ticket that does not exist. Writing one is not t
 factory's job — §24.1, it reads tickets and never files them — so this is a hand-off to
 whoever runs the ticket-generation system, not a task for the next session to code around.
 
-### the acceptance run, in flight
+### the acceptance run — run 4, blocked at `verifying` on a new defect
 
 FRO-7 was cancelled and **left alone**, which is the whole point: the claim must not be a
 keystroke. The daemon took it 3 ticks later.
@@ -178,9 +186,51 @@ keystroke. The daemon took it 3 ticks later.
 | --- | --- |
 | run | `4d2faf24b79a4094` — the **fourth** FRO-7 run; the three before it are `cancelled` |
 | claimed by | the launchd timer, unattended, at tick 149 |
-| transitions to `implementing` | six, all `actor = auto` |
+| transitions | **seven, all `actor = auto`**, through to `verifying` |
+| the old wall | **down.** Six gates `pass`, `lighthouse: disabled`, `verdict: pass` |
+| the new wall | `schema-invalid` at the `verifying` exit |
 
-**Both clone fixes are proved in production by this run, not only against the fake.** The
+**The lighthouse fix worked, completely.** This is the first FRO-7 run to produce a
+passing verdict at `verifying`; the two before it died there with `env-gate-failed`. The
+report is on disk at
+`state/clone/frontend-harness/FRO-7/4d2faf24b79a4094/.factory/run/1/gates.stdout.txt`.
+
+Worth noting *which way* it worked: this agent claimed six gates and **not** lighthouse —
+run 1's shape, not run 2's. So only `--gate playwright` was asserted, and lighthouse came
+back `disabled` rather than `not_applicable`, because `disabled` outranks the assertion.
+Had the agent claimed it, `_CLAIM_SATISFIED` would have absorbed it instead. Both paths
+land in the same place, which is the entire reason the gate was switched off in config
+rather than kept unasserted.
+
+**Then it blocked on the same fix, one layer down.**
+
+```
+verifying -> blocked   actor=auto
+  gate report failed schema validation: $.gates[6].status: 'disabled' is not one of
+  ['pass', 'fail', 'unavailable', 'not_applicable', 'skipped_unchanged']
+```
+
+`disabled` was taught to the step and not to the document. `_validated_report` checks the
+report against `schemas/gate_report.schema.json` — **layer D keeps its own copy of layer
+A's output contract** — *before* `_evidence_mismatch` ever runs, so the status factory#25
+added was unreachable. The wall moved instead of coming down. Fixed in factory#27, one
+line plus the tests that should have caught it.
+
+**The lesson is the altitude of the tests, not the enum.** factory#25's unit tests called
+`_evidence_mismatch` and `_asserted_opt_in_gates` directly and passed, which is exactly
+why a defect sitting *between* the schema and the step survived a green suite. The rule at
+the top of this document — *the code passing its tests is a third claim again* — applied
+to the change that was supposed to be the fix, and was not applied to it. A new gate
+status needs a test through `verify_step.run`, not against the predicate. factory#27 adds
+those, plus a drift guard asserting `_CLAIM_SATISFIED` is a subset of the schema's enum.
+
+**Recovery: cancel, never resume.** `factory resume` writes an `actor = "human"`
+transition, which voids the exit criterion for that run. A cancel puts the human row on
+the dead run row and lets the daemon claim a clean one — the pattern that produced run 4
+in the first place.
+
+**Both clone fixes are proved in production by this run, not only against the fake**, and
+that survives the block — they did their work before `verifying`. The
 branch was cut from `d574788` — the merge of #43, which did not exist when the sandbox was
 created — and `git show <branch>:harness.config.json` in the clone carries `"enabled":
 false`. Before `refresh_base` the cut would have come off the sandbox's frozen
@@ -191,8 +241,19 @@ run's commits and reported them as this run's work.
 
 ### the one thing still unproven
 
-The exit criterion itself — the destination. What the next session must check first,
-before anything else:
+The exit criterion itself — the destination. **No FRO-7 run has ever reached `reviewing`**,
+so the whole `reviewing -> pr_ready -> awaiting_human` tail is untested against real
+infrastructure for this ticket. Expect the next defect to be there, and expect it to be a
+new one: four runs have now blocked at three different causes, all at `verifying`.
+
+factory#27 is merged, so the sequence is:
+
+```sh
+uv run factory cancel FRO-7    # the human row lands on the dead run, not the new one
+                               # then leave it alone: the daemon claims it
+```
+
+What to check first when it lands, and note it names the **run id** — see footgun 1:
 
 ```sh
 uv run factory status
@@ -375,7 +436,7 @@ nothing, and `deliver._archive` returns silently when the attempt directory is m
 
 ## Footguns session 2 added
 
-1. **FRO-7 now has four run rows, three of them `cancelled`.** Any query that says "the
+1. **FRO-7 now has four run rows, and after the next cancel, four `cancelled` ones.** Any query that says "the
    latest FRO-7 run" and orders by `created_at` picks up a dead one, and the dead ones are
    `cancelled` with `blocked_reason = env-gate-failed` — which reads exactly like the live
    run having failed the way the last two did. A watch armed that way reported the
@@ -389,6 +450,16 @@ nothing, and `deliver._archive` returns silently when the attempt directory is m
    its own commit — but check `vendor_sync.py check` after committing a sync rather than
    before, because a formatter that did reach those files would break the sha check
    silently.
+4. **A gate status lives in two places, and only one of them is obvious.** `verify.py`
+   decides what a status *means*; `schemas/gate_report.schema.json` decides whether the
+   document may carry it at all, and it is checked first. Layer A's own schema
+   (`plugins/harness/schema/`) does **not** contain the gate report contract — layer D
+   keeps its own copy — so a `grep` in the harness repo finds nothing and the second place
+   is easy to miss. The drift guard in factory#27 now fails loudly if they separate.
+5. **Blocking at the same state twice does not mean the same defect** — the sharper form
+   of session 1's footgun 4. FRO-7 has blocked at `verifying` four times for three
+   distinct reasons: over-assertion (`--all`), an unrunnable gate, and a stale schema
+   enum. Read the `detail` on the transition, never the state.
 
 ## State of the board
 
@@ -417,6 +488,8 @@ nothing, and `deliver._archive` returns silently when the attempt directory is m
 | frontend-harness | [#43](https://github.com/jchen1707/frontend-harness/pull/43) — vendor 0.9.0, lighthouse off, Vitest exclude | merged |
 | python-harness | [#67](https://github.com/jchen1707/python-harness/pull/67) — vendor 0.9.0 | merged |
 | factory | [#25](https://github.com/jchen1707/factory/pull/25) — `disabled`, `refresh_base`, `release_branch`, ruff pin | merged |
+| factory | [#26](https://github.com/jchen1707/factory/pull/26) — handoff, steps 1-5 | merged |
+| factory | [#27](https://github.com/jchen1707/factory/pull/27) — `disabled` in the report **schema** | merged |
 
 ## Landed session 1
 
