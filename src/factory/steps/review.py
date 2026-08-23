@@ -152,13 +152,23 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     #    behaviour-change-without-test, inconclusive:block) or return "awaiting_human"
     #    (inconclusive:escalate). Either way the run leaves `reviewing` here, without a
     #    detached spawn, so `start` returns None and `run` returns.
-    if not ctx.dry_run and redphase.replay(ctx) == "awaiting_human":
-        _awaiting_human(ctx, "redphase-inconclusive", "the red-phase replay was inconclusive")
-        return None
+    #    A human who has already read this escalation and cleared it with `factory accept`
+    #    passes through: the replay still runs (its check row is the PR body's evidence and
+    #    its two non-configurable Blocked outcomes are not clearable), only the escalation
+    #    is spent. Ordering matters — `replay` must be called before `accepted` is consulted.
+    if not ctx.dry_run:
+        outcome = redphase.replay(ctx)
+        cleared, _ = redphase.accepted(ctx, redphase.REDPHASE_INCONCLUSIVE)
+        if outcome == "awaiting_human" and not cleared:
+            _awaiting_human(ctx, "redphase-inconclusive", "the red-phase replay was inconclusive")
+            return None
 
-    # 2. The test-weakening guard — a judgement, so it escalates rather than blocks.
+    # 2. The test-weakening guard — a judgement, so it escalates rather than blocks. Once
+    #    that judgement has been made and recorded, the same hunks must not park the run a
+    #    second time; the acceptance is what makes the escalation an edge rather than a wall.
     offending = redphase.weakening_guard(ctx)
-    if offending:
+    cleared_weakening, _ = redphase.accepted(ctx, redphase.TEST_WEAKENING)
+    if offending and not cleared_weakening:
         _awaiting_human(
             ctx,
             "test-weakening",

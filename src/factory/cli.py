@@ -45,7 +45,7 @@ from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import MODEL_CACHE, Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
-from factory.steps import Context, advance, factory_dir_for
+from factory.steps import Context, advance, factory_dir_for, redphase
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
@@ -1295,6 +1295,119 @@ def cmd_complete(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------------
+# factory accept
+# --------------------------------------------------------------------------------
+
+
+#: The escalations a human can clear, mapped from the transition rule that parked the run.
+#: Both are §15.3 companion checks, both fire before the review fan-out, and both are
+#: documented there as judgement calls rather than blocks. Nothing else that reaches
+#: `awaiting_human` is clearable: a host-execution deny-list hit is a security boundary,
+#: and a delivered run with a review finding is completed or reopened, not accepted.
+_CLEARABLE: dict[str, str] = {
+    redphase.TEST_WEAKENING: "the removed assertions are accepted",
+    redphase.REDPHASE_INCONCLUSIVE: "the inconclusive red-phase replay is accepted",
+}
+
+
+def cmd_accept(args: argparse.Namespace) -> int:
+    """Clear a §15.3 escalation and let the review the guard interrupted actually run.
+
+    The guards in `review.start` stop the run *before* Tier 1 and Tier 2, quote the hunks,
+    and park at `awaiting_human`. Until this command existed the judgement they asked for
+    had nowhere to go: `factory complete` refuses a run with no PR, `factory resume` refuses
+    a run at `awaiting_human`, and the one built edge out of it sends the work back to
+    `implementing` — which is the wrong answer when a human has just read the diff and said
+    it is fine. Measured on FRO-11, 2026-08-23.
+
+    It re-enters `reviewing`, not `pr_ready`. The escalation is spent, the review is not:
+    a PR opened by skipping ahead would carry an empty Review section and claim by omission
+    that the fan-out had found nothing.
+    """
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home, dry_run=False)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    if run.state is not State.AWAITING_HUMAN:
+        print(
+            f"{ticket} is at {run.state}, not {State.AWAITING_HUMAN}; `accept` clears an "
+            "escalation the review raised, and only a parked run has one."
+        )
+        return 1
+    if run.pr_url:
+        print(
+            f"{ticket} already delivered {run.pr_url}, so it is not parked on an "
+            "escalation. `factory complete` records the merge; `factory cancel` ends it."
+        )
+        return 1
+
+    rule = _parked_on(store, run)
+    if rule not in _CLEARABLE:
+        print(
+            f"{ticket} is parked on `{rule or 'nothing recorded'}`, which `accept` does not "
+            f"clear (it clears {', '.join(sorted(_CLEARABLE))}). Nothing was changed."
+        )
+        return 1
+
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        print(f"\n{ticket} is leased by another process ({run.lease_owner}); wait for it.")
+        return 1
+
+    ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+    note = args.note or _CLEARABLE[rule]
+    try:
+        # The record first, then the edge. `review.start` reads the check row on its way
+        # back through the guard, so an advance that landed without one would re-escalate
+        # on the same hunks and park the run again — the crash-safe order is this one.
+        store.record_check(
+            run.id,
+            run.attempt,
+            redphase.ESCALATION_ACCEPTED,
+            "accepted",
+            reason=rule,
+            detail=note,
+        )
+        advance(
+            ctx,
+            State.REVIEWING,
+            actor="human",
+            rule="escalation-cleared-is-james",
+            detail=f"{rule} cleared: {note}",
+        )
+        _drive_from_here(ctx)
+    except Blocked as exc:
+        _block(ctx, exc.reason, exc.detail)
+        _report(ctx)
+        return 2
+    finally:
+        store.release_lease(run.id)
+
+    ctx.refresh()
+    print(
+        f"\n{ticket}: `{rule}` cleared, and the review it interrupted is running. "
+        f"The run is at `{ctx.state}`; `factory tick` carries it to a PR."
+    )
+    return 0
+
+
+def _parked_on(store: Store, run: Run) -> str:
+    """The rule on the transition that put this run at `awaiting_human`.
+
+    The last one, not the first: a run can be parked, reopened and parked again, and the
+    escalation being cleared is the one it is sitting on now.
+    """
+    for row in reversed(store.transitions(run.id)):
+        if State(row["to_state"]) is State.AWAITING_HUMAN:
+            return str(row["rule"] or "")
+    return ""
+
+
+# --------------------------------------------------------------------------------
 # factory suspend
 # --------------------------------------------------------------------------------
 
@@ -1972,6 +2085,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     complete.add_argument("ticket")
     complete.set_defaults(func=cmd_complete)
+
+    accept = sub.add_parser(
+        "accept", help="clear a §15.3 escalation and let the interrupted review run"
+    )
+    accept.add_argument("ticket")
+    accept.add_argument(
+        "--note",
+        default=None,
+        help="why it is accepted; carried into the PR body's cleared-escalations section",
+    )
+    accept.set_defaults(func=cmd_accept)
 
     suspend = sub.add_parser("suspend", help="park a run; keep its worktree, branch and session")
     suspend.add_argument("ticket")

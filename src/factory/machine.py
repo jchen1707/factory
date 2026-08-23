@@ -100,7 +100,21 @@ _WORKFLOW: dict[State, frozenset[State]] = {
         }
     ),
     State.PR_READY: frozenset({State.AWAITING_HUMAN, State.BLOCKED, State.CANCELLED}),
-    State.AWAITING_HUMAN: frozenset({State.COMPLETED, State.CANCELLED, State.IMPLEMENTING}),
+    #: `reviewing` is the edge back out of an escalation the review itself raised. §15.3's
+    #: two companion checks stop the run *before* the fan-out — the red-phase replay when it
+    #: is inconclusive, the test-weakening guard when the diff deletes an assertion — and
+    #: both are judgement calls, so both park at `awaiting_human` with the hunks quoted.
+    #: Until this edge existed there was nothing to do with the judgement once it was made:
+    #: `completed` refuses a run with no PR, `resume` refuses a run at `awaiting_human`, and
+    #: `implementing` sends work back that a human has just said is fine. Measured on FRO-11,
+    #: 2026-08-23, which stopped on three assertions the ticket itself had deleted the
+    #: subject of. Re-entering `reviewing` rather than jumping to `pr_ready` is deliberate:
+    #: the guard fires before Tier 1 and Tier 2 run, so skipping ahead would open a PR whose
+    #: Review section was empty. Clearing the escalation resumes the review; it does not
+    #: replace it.
+    State.AWAITING_HUMAN: frozenset(
+        {State.COMPLETED, State.CANCELLED, State.IMPLEMENTING, State.REVIEWING}
+    ),
     #: `verifying` and `reviewing` are the two edges the live resume case needs: FRO-6 was
     #: blocked *at* `verifying` with a complete, gate-passing implementation, and the cheap
     #: repair is to re-enter the state that blocked rather than spend another 10 M-token
@@ -165,6 +179,7 @@ HUMAN_ONLY: dict[tuple[State, State], str] = {
     (State.BLOCKED, State.VERIFYING): "unblock-is-a-judgement",
     (State.BLOCKED, State.REVIEWING): "unblock-is-a-judgement",
     (State.AWAITING_HUMAN, State.IMPLEMENTING): "reopen-after-review-is-james",
+    (State.AWAITING_HUMAN, State.REVIEWING): "escalation-cleared-is-james",
     (State.FAILED, State.RESUMABLE): "reauthorise-spend",
 }
 
