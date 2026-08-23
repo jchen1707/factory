@@ -24,7 +24,10 @@ gone wrong.
 | `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
 | vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
 | BAC-6 | **running.** Old `suspended` run cancelled by James 2026-08-23; the daemon re-claimed it and it is at `implementing`, attempt 1 |
-| FRO-10 | tried as the frontend test and refused at intake, `already-implemented` — 0 tokens spent. The whole FRO backlog is exhausted; see item 4 |
+| FRO-10 | tried as the frontend test and refused at intake, `already-implemented` — 0 tokens spent. The whole FRO backlog was exhausted; see item 4 |
+| FRO-11 | **new ticket, filed 2026-08-23**, all 11 intake conditions pass. Claimed by the daemon and `implementing` |
+| `harness#19` | open — the `requires` examples fix. **Do not merge before FRO-11's PR lands**; see below |
+| `factory#36` | open — two handoff commits stranded when #35 merged ahead of a push |
 
 **Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
 closed.** Nothing else in this document depends on them.
@@ -104,21 +107,24 @@ has no such job — the asymmetry is real, and the frontend template is the stri
 
 ## The next session's first job
 
-1. **If #46 and #68 have merged, item 2 is closed.** Check with `gh pr view`, and check the
-   *branch tip* rather than the PR state — a previous session lost two commits to a merge
-   that raced the last push by 24 seconds.
-2. **Then fix layer A's schema example.** `plugins/harness/schema/harness.config.schema.json`
-   offers `["pnpm", "exec", "playwright", "--version"]` as an example `requires` value, and
-   this session measured that it does not detect a missing browser. It is a docstring
-   teaching the wrong probe. Two candidate replacements: the screenshot argv now in
-   `frontend-harness`, or dropping the example to the `docker info` one alone.
+1. **Merge order matters now, and getting it wrong red-lines two repositories.**
 
-   **This was deliberately not done this session**, because `vendor-freshness.yml` in both
-   consumers compares the vendored pin against `harness@v2` HEAD; a harness commit pushed
-   while #46 and #68 were open would have made both PRs stale. Do it after they merge, and
-   re-vendor as its own pair of PRs.
+   `harness#19` fixes the `requires` examples in `plugins/harness/schema/harness.config.schema.json`
+   — both of the ones `harness#18` shipped were measured this session to pass in the very
+   environment they exist to catch. It is documentation only, all three harness gates green.
 
----
+   **But `schema/` is vendored.** `vendor_sync.py check` compares vendored *content*, not the
+   sha: a commit that changes a vendored file is a **`stale pin` failure**, not the "behind but
+   nothing changed" note. So merging #19 turns the `freshness` job red on every open PR in both
+   consumers until each re-vendors.
+
+   The order is: **FRO-11's PR lands → merge `harness#19` → re-vendor both consumers as their
+   own pair of PRs.** `factory#36` is independent and can merge whenever.
+
+2. **Check the branch tip, not the PR state.** `factory#35` merged while two commits were still
+   in flight to its branch, and both were stranded — the third time this session's family of
+   races has appeared. `git merge-base --is-ancestor <sha> origin/main` answers it in one
+   command, and the remote ref is what makes recovery possible.
 
 ## What Phase 5 has left — items 3 and 4, and how to actually finish them
 
@@ -126,82 +132,74 @@ Read this whole section before touching either. Both were re-measured against th
 2026-08-23, and the previous handoff's framing of item 3 was **wrong in James's favour**:
 less of it is missing than that document claimed.
 
-### 4. The end-to-end tests — one ticket per stack
+### 4. The end-to-end tests — both stacks are now running
 
-**The python half is running.** James cancelled BAC-6's `suspended` run on 2026-08-23; the
-launchd daemon claimed the freed ticket within a minute and it is live at `implementing`,
-attempt 1. Nothing more is needed from anyone until it reaches `awaiting_human`, where merge
-is James's.
-
-The mechanism worth remembering, because it is not obvious from the board: only `completed`
-and `cancelled` are terminal (`machine.py:57`), `_LIVE_RUN_INDEX` (`store.py:87`) is derived
-from that set, and intake skips any ticket that has a live run (`cli.py:703`). So a
-`suspended` **or** `blocked` row holds its ticket against every future tick, and moving the
-ticket in Linear changes nothing until the row is cancelled. `store.py:80` says so on
-purpose: "`blocked` is deliberately live: it is a stop, not an end". `cancelled` is
-`abandon-is-james`, so an agent cannot clear one.
-
-**The frontend half has no usable ticket, and this is now measured rather than assumed.**
-
-FRO-10 was tried on 2026-08-23 — the smallest candidate, 5 acceptance criteria, one method in
-one file. James cleared `needs-info`, moved it to `Todo`, and cancelled its blocked run; the
-daemon claimed it and intake stopped it in 0 tokens:
+**The python half ran end to end and is the strongest evidence Phase 5 has produced.**
+BAC-6, attempt 1, unattended, 2026-08-23:
 
 ```
-approved -> blocked  (auto)  [already-implemented]
+approved -> claimed -> context_loaded -> sandbox_creating -> sandbox_ready
+  -> worktree_ready -> implementing (25 min) -> verifying -> reviewing -> blocked
 ```
 
-That is **condition 10** (`intake/linear.py:476`), the one P0-11 added: "the identifier does
-not appear in a commit subject on the base ref". FRO-10's work is already on `v2`. Intake
-caught it before any model spend, which is the condition doing exactly its job.
+Gate report **verdict: pass**, all five gates. It stopped at `review-finding` on two `high`
+findings, both of them the reviewer catching vacuous tests — gold-set tests asserting label
+counts rather than query-to-document mapping, and PDF tests asserting page counts rather than
+page content. That is the pipeline working, not failing: the stop is a human judgement, and
+`unblock-is-a-judgement` reserves both exits from `blocked`.
 
-Two facts fall out of that run and both matter:
+**Read the gate report on that run before anything else.** `pytest -m integration` came back
+`pass`, and the worktree's vendored pin is `134b21c` with `requires` at line 77 of its
+`harness.config.json` — python-harness#68 merged at 15:38 UTC and the run claimed at 15:44.
+So **item 2's probe was exercised inside a real unattended sandbox and its requirement was
+met**: `sbx` gives the VM its own Docker daemon, exactly as §19 predicted. Four green unit
+tests and two hand measurements did not prove that. This run did.
 
-- **The block re-applied `needs-info`.** `steps/block.py` adds it by design (§13.1). It is
-  also a *reasonless* condition (7), and `eligibility_verdict` makes a reasonless failure
-  win — which produces **no run row at all**, just a log line. A run row with a reason is
-  therefore proof the label was absent at intake. Do not read the label now on the ticket as
-  evidence that James left it there.
-- **The previous handoff's "`needs-info` is currently cleared" was wrong** for FRO. It was
-  true of BAC-6 only. Every `Done` FRO ticket carries it.
+**The frontend half needed a ticket that did not exist, and now has one.**
 
-**The whole FRO backlog was then surveyed against the base ref. None of it can serve:**
+The FRO backlog was surveyed against the base ref and none of it could serve — recorded
+below because the survey is what cost the time, not the conclusion:
 
-| ticket | state | on `v2`? | why it cannot be the test |
+| ticket | state | on `v2`? | why it could not be the test |
 | --- | --- | --- | --- |
 | FRO-1 | Todo | yes | parent spec — `no-parent-spec`, permanently and correctly |
 | FRO-2, 3, 4 | Canceled | no | `wontfix` (reasonless); superseded by FRO-5/6/7 |
 | FRO-5, 6, 7, 10 | Done | yes | `already-implemented` at condition 10 |
-| FRO-8 | Todo | no | `wontfix`, no `ready-for-agent`; duplicate of FRO-10, so the work is in the tree anyway |
+| FRO-8 | Todo | no | `wontfix`, no `ready-for-agent`; duplicate of FRO-10, work already in the tree |
 | FRO-9 | Todo | no | no labels at all, and it is FRO-10's parent spec |
 
-FRO-11 does not exist. **So item 4's frontend half needs a ticket that does not exist yet,
-describing work that is not on `v2`.** §24.1 reserves that: the factory never files a ticket,
-and §13.1 makes it true at the credential layer — the `factory-linear` keychain key is scoped
-to read, comment, and update state and labels, with **no create-issue scope**. Tickets come
-from the separate system James runs on `mattpocock-skills`.
+FRO-10 was tried first, as the smallest candidate, and intake refused it in **0 tokens**:
+`approved -> blocked (auto) [already-implemented]` — condition 10
+(`intake/linear.py:476`), the one P0-11 added. Two things that run settled:
 
-**What that new ticket has to satisfy** — all 11 conditions, from `evaluate_eligibility`:
+- **A run row with a reason proves `needs-info` was absent at intake.** It is a *reasonless*
+  condition, and `eligibility_verdict` makes a reasonless failure win, which produces no run
+  row at all — just a log line. The label now on FRO-10 was written back by `steps/block.py`
+  (§13.1), not left there by a human. Do not misread it.
+- The previous handoff's "`needs-info` is currently cleared" was true of **BAC-6 only**.
 
-| # | requirement | how to meet it |
-| --- | --- | --- |
-| 1 | label `ready-for-agent` | add it; it is the signature that starts the factory and nothing else is |
-| 2 | state `Todo` | — |
-| 3 | team `FRO` in the registry | automatic |
-| 4 | has a parent issue | **FRO-9** is the natural parent and is not itself claimable |
-| 5 | parent description ≥ 200 chars | FRO-9 already passes — FRO-10 got past this condition to reach 10 |
-| 6 | own description has an acceptance-criteria section | matched by `##\s*Acceptance` or "Acceptance criteria" |
-| 7 | no `needs-info` / `needs-triage` / `ready-for-human` / `wontfix` | reasonless — one of these produces no run row at all |
-| 8 | no open PR on `feat/FRO-<n>-<slug>` | automatic for new work |
-| 9 | repo `tracker.team` equals `FRO` | automatic |
-| 10 | identifier absent from every commit subject on `v2` | **automatic only if the work is genuinely unbuilt** — this is what killed every existing candidate |
-| 11 | every blocking ticket is `Done` | do not add a `blocked_by` relation |
+**FRO-11, "See one project at `/projects/:id`", was filed 2026-08-23 and all 11 conditions
+pass** — checked against the live ticket and the real repo *before* the daemon saw it, with
+`evaluate_eligibility` called directly. The daemon claimed it and it is `implementing`.
 
-`needs-info` is cleared on BAC-6 and present on every `Done` FRO ticket.
+The work is real rather than invented: FRO-1 put the detail screen out of scope and said the
+link target "can be a stub route", and it still is one — `ProjectDetailStub.tsx` renders the
+id back at the user and reads nothing, `ProjectsRepository` declares `listProjects` only, and
+`src/test/msw/handlers.ts` serves `/projects` only. So condition 10 is safe by construction,
+and the slice exercises the full frontend gate set **including the browser suite** — which
+makes FRO-11 the first run to put the new `playwright` `requires` probe through an unattended
+sandbox.
 
-**The third test still cannot be written until item 3 exists.** "A monorepo dispatch test
-proving a CSS-only change runs no Python gate" needs a monorepo. Deliver item 4's two stack
-tickets and say plainly that the dispatch test is outstanding, or do 3 first.
+**Recorded honestly: the factory did not file it, and neither did the `mattpocock-skills`
+system.** James authenticated the personal Linear MCP and asked for it directly, and it was
+created through that. §24.1 and §13.1's create-issue-less keychain key are both intact — the
+factory still cannot file a ticket, and did not. But the ticket in front of the frontend
+stack's first end-to-end run came from an agent, not from the ticket system, and a reader
+comparing this to §24.1 deserves to know that rather than infer it.
+
+**What is left on item 4:** BAC-6 needs a human on its two `high` findings, and FRO-11 needs
+to reach `awaiting_human`. Then the monorepo dispatch test, which still cannot be written
+until item 3 exists.
 
 ### 3. First layer-C product — less is missing than the last handoff said
 
