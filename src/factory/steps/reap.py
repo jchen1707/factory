@@ -129,6 +129,9 @@ def reap(ctx: Context) -> Verdict:
         workdir=ctx.run.worktree or str(ctx.project.path),
         attempt_dir=attempt_dir.root,
         session_id=row["session_id"],
+        # The plan phase writes `plan-exit`; polling for `exit` reads its failure as an
+        # orphan and spends a ladder rung on a collectable result (FRO-11 attempt 3).
+        exit_name=plan_step.PLAN_EXIT_NAME if state is State.PLANNING else "exit",
     )
 
     # Before the verdict, not after it: an orphaned or killed attempt is exactly the one
@@ -141,8 +144,11 @@ def reap(ctx: Context) -> Verdict:
 
     status = ctx.sandbox.poll(handle)
     if status is RunStatus.EXITED:
+        # Read before `_collect`, which may raise: the exit code is the one thing this
+        # verdict has to say, and it belongs to the file the phase actually wrote.
+        code = _exit_code(attempt_dir, handle.exit_name)
         _collect(ctx, state, attempt_dir)
-        return Verdict(Outcome.COLLECTED, f"exit {attempt_dir.exit_code()}")
+        return Verdict(Outcome.COLLECTED, f"exit {code}")
 
     if status is RunStatus.ORPHANED:
         return _orphan(ctx, "attempt-orphaned", f"{state} attempt {ctx.run.attempt} is not running")
@@ -168,6 +174,14 @@ def reap(ctx: Context) -> Verdict:
         )
 
     return Verdict(Outcome.RUNNING, f"{state} attempt {ctx.run.attempt}")
+
+
+def _exit_code(attempt_dir: AttemptDir, exit_name: str) -> int | None:
+    """The phase's own exit file, which is `plan-exit` for a plan and `exit` otherwise."""
+    try:
+        return int(attempt_dir.path(exit_name).read_text().strip())
+    except (OSError, ValueError):
+        return None
 
 
 def _collect(ctx: Context, state: State, attempt_dir: AttemptDir) -> None:

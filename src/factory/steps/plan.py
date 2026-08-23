@@ -34,6 +34,13 @@ STEP = "plan"
 
 PLAN_FILES = ("plan.md", "test-plan.md")
 
+#: The plan phase's terminal file. Not `exit`: a rung-3 rewind is **one** attempt with
+#: two phases sharing one attempt directory, so the plan's exit code cannot occupy the
+#: name the implement phase is about to write. Every reader that asks "has this phase
+#: finished?" — `sbx.poll` through `RunHandle.exit_name`, and `_exit_code` below — must
+#: be told this name, or a finished plan reads as an attempt that never ended.
+PLAN_EXIT_NAME = "plan-exit"
+
 POLL_INTERVAL_SECONDS = 10
 
 
@@ -86,6 +93,11 @@ def plan_dir(ctx: Context) -> Path:
     return ctx.worktree / ".agents" / "plans" / branch_slug
 
 
+def _schema_source(ctx: Context) -> Path:
+    """The control-plane original, which is copied into the attempt directory."""
+    return ctx.home / "schemas" / "implement_result.schema.json"
+
+
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle, Path] | None:
     """Write the plan prompt and spawn the detached agent. `None` for a dry run.
 
@@ -108,13 +120,20 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         prompt_path=prompt_path,
         # `/plan` writes files; its final message is prose, so there is no result
         # schema to hand it. The schema file still has to exist for `--output-schema`,
-        # so the step points at the same one and ignores the answer: the evidence that
-        # planning happened is `plan.md` and `test-plan.md`, not a JSON blob.
-        schema_path=ctx.home / "schemas" / "implement_result.schema.json",
+        # so the step points at the implement one and ignores the answer: the evidence
+        # that planning happened is `plan.md` and `test-plan.md`, not a JSON blob.
+        #
+        # The *staged copy*, not `ctx.home`'s original. The agent runs inside the build
+        # sandbox and the control plane's home is not mounted there, so a home path is a
+        # path codex cannot open: measured on FRO-11 attempt 3, `codex exec` died in
+        # under a second with "Failed to read output schema file". The attempt directory
+        # resolves to the identical string on both sides -- §14.1's protocol -- which is
+        # why `implement.start` has always pointed at its own copy.
+        schema_path=attempt_dir.schema,
         output_path=attempt_dir.path("plan-last-message.json"),
         events_path=attempt_dir.path("plan-events.jsonl"),
         stderr_path=attempt_dir.path("plan-stderr.log"),
-        exit_path=attempt_dir.path("plan-exit"),
+        exit_path=attempt_dir.path(PLAN_EXIT_NAME),
         heartbeat_path=attempt_dir.heartbeat,
         vault_directory=str(ctx.registry.vault.path),
         env=dict(ctx.project.env),
@@ -140,7 +159,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         return None
 
     prompt_path.write_text(prompt, encoding="utf-8")
-    shutil.copyfile(invocation.schema_path, attempt_dir.schema)
+    shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
     # Recorded under the same attempt number the implement phase will use, which is why
     # both write into one attempt directory under `plan-` and bare prefixes: a rewind is
     # one attempt with two phases, not two attempts. `steps/reap.py` needs the row to
@@ -162,6 +181,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         sandbox=ctx.project.build_sandbox,
         workdir=str(worktree),
         attempt_dir=attempt_dir.root,
+        exit_name=PLAN_EXIT_NAME,
     )
     ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
     ctx.log("plan.started", model=role.model, effort=role.effort)
@@ -203,7 +223,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
 
 def _exit_code(attempt_dir: AttemptDir) -> int | None:
     try:
-        return int(attempt_dir.path("plan-exit").read_text().strip())
+        return int(attempt_dir.path(PLAN_EXIT_NAME).read_text().strip())
     except (OSError, ValueError):
         return None
 

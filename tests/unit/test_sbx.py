@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -320,6 +321,23 @@ def test_poll_still_reports_a_live_holder_as_running(tmp_path: Path) -> None:
     (tmp_path / "heartbeat").write_text(str(int(time.time())))
 
     assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
+
+
+def test_poll_reads_the_exit_file_the_phase_actually_writes(tmp_path: Path) -> None:
+    """A plan attempt's wrapper writes `plan-exit`, not `exit`.
+
+    Measured on FRO-11 attempt 3, 2026-08-23: the rung-3 rewind's `codex exec` failed in
+    under a second and wrote `plan-exit` with `1`. `poll` looked only for `exit`, found
+    none, saw the holder gone and called the attempt **orphaned** -- so the run spent its
+    last ladder rung on what was really a collectable failure with a one-line cause in
+    `plan-stderr.log`. A phase names its own exit file, and `poll` reads that one.
+    """
+    (tmp_path / "plan-exit").write_text("1\n")
+    handle = replace(_handle(tmp_path), exit_name="plan-exit")
+
+    assert SbxAdapter().poll(handle) is sbx_module.RunStatus.EXITED
+    # The default is unchanged for every phase that writes `exit`.
+    assert SbxAdapter().poll(_handle(tmp_path)) is not sbx_module.RunStatus.EXITED
 
 
 def test_poll_without_a_pid_file_falls_back_to_the_heartbeat(tmp_path: Path) -> None:
