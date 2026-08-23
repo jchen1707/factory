@@ -34,7 +34,7 @@ either on your word.
 | `main` | `1abfc83`, **pushed**. Item 1 merged as factory#32 |
 | suite | 533 passed, mypy clean on 71 files, ruff check + format clean |
 | open PR (factory) | **#33** — `feat/unavailable-gate-names-its-requirement`, pushed, ready. 3 commits: the fix, this handoff, the §19 edit |
-| open PR (harness) | **#18** — `feat/gate-requires-probe` on `v2`, pushed, ready. **Yours to merge** |
+| open PR (harness) | **#18** — `feat/gate-requires-probe` on `v2`. All three checks green (generate, cross-stack, submodules). **Yours to merge** |
 | `awaiting_human` | empty |
 | runs | 4 `completed`, 30 `cancelled`, 8 `blocked`, 1 `suspended` |
 | BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
@@ -87,6 +87,13 @@ Three judgments, each pinned by a test, each mutation-proved:
 Six mutations, all caught: removing the probe block, ignoring its result, treating an
 unspawnable probe as met, carrying the probe's exit code onto the entry, probing an empty
 `requires`, and hoisting the probe above the dispatch decisions.
+
+**One CI round trip was spent on formatting, and the cause is worth not repeating.** `harness`
+installs no `node_modules`, so `npx --no-install prettier` cannot run and reads like "tool
+unavailable" rather than "not checked". The Generate main job runs `npx --yes prettier@3
+--check .` and fails the PR on formatting alone, and prettier always breaks a JSON array whose
+elements are themselves arrays regardless of `printWidth`. Neither `node --test` nor
+`scripts/check.py` covers formatting. **Run the CI command verbatim before pushing layer A.**
 
 **factory#33 — the block message names what to install.** `gates-incomplete` is a
 human-judgement state and the human's next act is to install something; the message named the
