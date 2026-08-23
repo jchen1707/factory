@@ -261,3 +261,28 @@ def render_pr_body(
     lines.append("")
     lines.append("_This PR was opened by the factory as a **draft**. Merge is a human's._")
     return "\n".join(lines) + "\n"
+
+
+def pr_state(cwd: Path, url: str) -> str | None:
+    """`OPEN`, `MERGED`, `CLOSED` — or None when `gh` could not answer.
+
+    The evidence behind `awaiting_human -> completed`. None is deliberately not
+    "not merged": a `gh` that is unauthenticated, offline or pointed at no repo must not
+    look the same as a PR James has not merged, because the caller refuses to complete a
+    run on either — but only one of them is worth retrying.
+    """
+    proc = subprocess.run(
+        ["gh", "pr", "view", url, "--json", "state"],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        row = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    state = row.get("state")
+    return str(state) if state else None
