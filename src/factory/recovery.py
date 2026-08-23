@@ -372,6 +372,8 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
     from factory.steps import advance
     from factory.steps import implement as implement_step
     from factory.steps import plan as plan_step
+    from factory.steps import review as review_step
+    from factory.steps import verify as verify_step
 
     state = ctx.run.state
     if state is State.FAILED:
@@ -410,9 +412,28 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
     rule = requires_human_rule(state, target)
 
     if target in (State.VERIFYING, State.REVIEWING):
-        # No agent, no increment: re-enter and let the forward dispatch re-run the gate
-        # report / review against the attempt directory the implementer already wrote.
+        # No agent, no increment: re-enter and re-run the gate report / review against the
+        # attempt directory the implementer already wrote.
+        #
+        # The `start` call is the whole fix. This used to advance and stop, on the reasoning
+        # that the tick's forward dispatch would spawn the step — and it does, but only when
+        # there is no attempt row to find. A verify or review that already *ran* and failed
+        # leaves a finished row, and `reap` sends a finished row to `collect`, which
+        # re-derives the same failure from the same files on every tick for ever. The run
+        # cannot move, and each attempt to move it records the identical block.
+        #
+        # Measured 2026-08-23 on FRO-11: a review whose codex credential had expired was
+        # resumed after the credential was renewed, and re-collected byte-identical
+        # evidence — same `cf-ray`, same five reconnects, no new process. `start_attempt`
+        # is `INSERT OR REPLACE` on `(run, attempt, state)`, so spawning here replaces the
+        # dead row rather than accumulating one, which is exactly what the automatic path
+        # in `_rerun_detached` has always done. The two paths now differ in nothing but
+        # who asked.
         advance(ctx, target, actor="human", rule=rule)
+        if target is State.VERIFYING:
+            verify_step.start(ctx, actor="human")
+        else:
+            review_step.start(ctx, actor="human")
         return target
 
     if target is State.PLANNING:

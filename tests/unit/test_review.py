@@ -15,6 +15,7 @@ import pytest
 
 from factory.harness import HarnessConfig
 from factory.machine import Blocked
+from factory.steps import review
 from factory.steps.review import (
     _axis_prompt,
     _decide_tier2,
@@ -300,3 +301,86 @@ def test_the_review_sandbox_spec_does_not_move_between_runs(tmp_path: Path) -> N
     assert not one.workspaces[0].readonly
     assert one.workspaces[1].readonly
     assert str(one.workspaces[1].path) == str(tmp_path / "python-harness")
+
+
+# -- a reviewer that never finished its turn ----------------------------------
+
+#: The real FRO-11 transcript, trimmed. An expired codex credential: five reconnects that
+#: codex made on its own, then the turn's own verdict. `stderr` was empty — the whole
+#: account of what happened was in here, and the block that fired named the schema.
+_EXPIRED_TOKEN = "\n".join(
+    [
+        '{"type": "thread.started", "thread_id": "01a0307c"}',
+        '{"type": "turn.started"}',
+        '{"type": "error", "message": "Reconnecting... 1/5 (unexpected status 401 Unauthorized: '
+        'Provided authentication token is expired., auth error code: token_expired)"}',
+        '{"type": "error", "message": "unexpected status 401 Unauthorized: Provided '
+        'authentication token is expired., auth error code: token_expired"}',
+        '{"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized: '
+        'Provided authentication token is expired., auth error code: token_expired"}}',
+    ]
+)
+
+
+def test_a_reviewer_whose_turn_failed_is_named_as_such(tmp_path: Path) -> None:
+    out = tmp_path / "review-standards.json"  # deliberately never written
+    (tmp_path / "review-standards.events.jsonl").write_text(_EXPIRED_TOKEN, encoding="utf-8")
+    (tmp_path / "review-standards.stderr.log").write_text("", encoding="utf-8")
+
+    with pytest.raises(Blocked) as caught:
+        review._validated_findings(
+            None,  # type: ignore[arg-type]
+            out,
+            tmp_path / "review-standards.stderr.log",
+            "standards",
+        )
+
+    assert caught.value.reason == "review-agent-failed"
+    assert "token_expired" in caught.value.detail
+
+
+def test_a_missing_file_with_no_transcript_still_blames_the_schema(tmp_path: Path) -> None:
+    """The fallback must survive: an axis that wrote neither a findings file nor a
+    transcript is the case the original message was written for, and it keeps it."""
+    out = tmp_path / "review-spec.json"
+    (tmp_path / "review-spec.stderr.log").write_text("boom", encoding="utf-8")
+
+    with pytest.raises(Blocked) as caught:
+        review._validated_findings(
+            None,  # type: ignore[arg-type]
+            out,
+            tmp_path / "review-spec.stderr.log",
+            "spec",
+        )
+
+    assert caught.value.reason == "review-schema-invalid"
+    assert "boom" in caught.value.detail
+
+
+def test_a_transcript_that_completed_does_not_invent_a_failure(tmp_path: Path) -> None:
+    """A reviewer that finished its turn and still wrote no file is a schema problem, not
+    an agent problem — and a recovered reconnect must not be read as a failure (the
+    correction `factory#38` made for the implement path applies here unchanged)."""
+    out = tmp_path / "review-standards.json"
+    (tmp_path / "review-standards.events.jsonl").write_text(
+        "\n".join(
+            [
+                '{"type": "thread.started", "thread_id": "01a0307c"}',
+                '{"type": "turn.started"}',
+                '{"type": "error", "message": "Reconnecting... 1/5 (transport)"}',
+                '{"type": "turn.completed"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "review-standards.stderr.log").write_text("", encoding="utf-8")
+
+    with pytest.raises(Blocked) as caught:
+        review._validated_findings(
+            None,  # type: ignore[arg-type]
+            out,
+            tmp_path / "review-standards.stderr.log",
+            "standards",
+        )
+
+    assert caught.value.reason == "review-schema-invalid"

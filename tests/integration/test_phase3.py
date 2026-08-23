@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from factory import cli, repo
+from factory import cli, recovery, repo
 from factory.machine import Blocked, State
-from factory.steps import Context, redphase
+from factory.steps import Context, advance, redphase
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
@@ -329,6 +329,54 @@ def test_the_tier2_trigger_reads_the_sensitive_paths_off_the_project(ctx: Contex
     # which is precisely why `doctor` has to check the list separately.
     ctx.project = replace(ctx.project, sensitive_paths=("src/**/routes/**",))
     assert review_step._tier2_trigger(ctx, ctx.harness, False) == "no-trigger"
+
+
+def test_a_human_resume_into_reviewing_re_runs_it_rather_than_re_collecting(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A review that already ran and failed leaves a *finished* attempt row, and `reap`
+    sends a finished row to `collect` — which re-derives the same failure from the same
+    files on every tick for ever. `resume --from reviewing` used to advance and stop, so
+    the run could not be moved at all: each attempt to move it recorded an identical block.
+
+    Measured 2026-08-23 on FRO-11, whose reviewer had died on an expired credential. After
+    the credential was renewed the resume re-collected byte-identical evidence — same
+    `cf-ray`, same five reconnect lines, no new process.
+
+    The property is that the resume leaves a **live** attempt: `ended_at` cleared, because
+    `start_attempt` replaced the dead row rather than the tick reading it again.
+    """
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+
+    # A review that ran and died, exactly as the reaper would have left it.
+    ctx.store.start_attempt(
+        ctx.run.id,
+        ctx.run.attempt,
+        State.REVIEWING,
+        sandbox=ctx.project.review_sandbox,
+        artifact_dir=str(ctx.state_dir / "review"),
+    )
+    ctx.store.finish_attempt(
+        ctx.run.id, ctx.run.attempt, State.REVIEWING, exit_code=1, outcome="failed"
+    )
+    advance(ctx, State.BLOCKED, actor="auto", rule="review-agent-failed")
+    ctx.refresh()
+    dead = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.REVIEWING)
+    assert dead is not None
+    assert dead["ended_at"] is not None
+
+    recovery.resume(ctx, from_state="reviewing")
+
+    ctx.refresh()
+    assert ctx.state is State.REVIEWING
+    live = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.REVIEWING)
+    assert live is not None
+    assert live["ended_at"] is None, (
+        "the resume re-collected the dead attempt instead of re-running"
+    )
 
 
 # --------------------------------------------------------------------------------

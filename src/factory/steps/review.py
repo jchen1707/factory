@@ -54,6 +54,7 @@ from typing import Any
 
 from factory import artifacts, repo
 from factory.agent.base import SchemaInvalid, validate_against_schema
+from factory.agent.codex import TranscriptError, parse_events
 from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
@@ -667,6 +668,26 @@ def _body(path: Path) -> str:
     return raw.strip()
 
 
+def _transcript_failure(out_path: Path) -> str:
+    """The axis transcript's own account of why it stopped, or `""`.
+
+    The events file sits beside the findings file under the axis's name, so it is derived
+    from `out_path` rather than threaded through every caller. A transcript that cannot be
+    read is not a failure to report — it is simply no evidence, and the caller falls back
+    to the stderr message it always used.
+    """
+    events = out_path.with_suffix("").with_suffix(".events.jsonl")
+    if not events.exists():
+        events = out_path.parent / f"{out_path.stem}.events.jsonl"
+    if not events.exists():
+        return ""
+    try:
+        transcript = parse_events(events.read_text(encoding="utf-8"))
+    except (OSError, TranscriptError):
+        return ""
+    return transcript.failure or ""
+
+
 def _validated_findings(
     ctx: Context, out_path: Path, stderr_path: Path, label: str
 ) -> list[dict[str, Any]]:
@@ -676,6 +697,20 @@ def _validated_findings(
     produced nothing the schema recognises is not the same as an axis that found nothing.
     """
     if not out_path.exists():
+        # Ask the transcript why before blaming the schema. A reviewer whose *turn* failed
+        # wrote no file for a reason that has nothing to do with the findings format, and
+        # `review-schema-invalid` sends the reader to the schema, the prompt and the
+        # output path — none of which is where the answer is. Measured 2026-08-23: an
+        # expired codex credential produced five `Reconnecting…` lines, a `turn.failed`
+        # carrying `401 … token_expired`, an *empty* stderr, and a block that said the
+        # findings file was malformed. The cause was one line down in `events.jsonl` and
+        # nothing read it.
+        failure = _transcript_failure(out_path)
+        if failure:
+            raise Blocked(
+                "review-agent-failed",
+                f"the {label} review never finished its turn: {failure}",
+            )
         stderr_tail = _read_text(stderr_path)[:500]
         raise Blocked(
             "review-schema-invalid",
