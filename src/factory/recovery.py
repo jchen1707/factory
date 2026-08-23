@@ -489,6 +489,15 @@ def suspend(ctx: Context, *, reason: str) -> State:
         row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
         if row and row["artifact_dir"]:
             attempt_dir = Path(str(row["artifact_dir"]))
+            # Before the kill, because after it the stream stops and nothing else on this
+            # path reads it. The announcement promises the Codex session is kept, and a
+            # session whose id was never recorded is not kept — `resume` would find NULL
+            # and start a fresh attempt, which is the opposite of what a park means.
+            if origin in reap_step.AGENT_SESSION_STATES:
+                from factory.artifacts import AttemptDir
+                from factory.steps.implement import capture_session_id
+
+                capture_session_id(ctx, AttemptDir(attempt_dir), ctx.run.attempt, origin)
             kill = getattr(ctx.sandbox, "kill_agent", None)
             if kill is not None:
                 kill(str(row["sandbox"] or ctx.project.build_sandbox))

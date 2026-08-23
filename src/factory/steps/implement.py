@@ -248,7 +248,7 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
         if attempt_dir.exit_file.exists():
             return
         ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        _capture_session_id(ctx, attempt_dir, handle.attempt)
+        capture_session_id(ctx, attempt_dir, handle.attempt)
         time.sleep(POLL_INTERVAL_SECONDS)
 
     ctx.log("implement.timeout", level="warning", seconds=timeout)
@@ -262,14 +262,22 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
     raise Resumable("implement-timeout", f"no exit file after {timeout}s; the agent was signalled")
 
 
-def _capture_session_id(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
+def capture_session_id(
+    ctx: Context, attempt_dir: AttemptDir, attempt: int, state: State = State.IMPLEMENTING
+) -> None:
     """Store the session id before the run is considered started (§16.3).
 
     Parsed from `thread.started`, which P0-7 confirmed carries `thread_id` and nothing
     else. Never `codex exec resume --last`: with several tickets on one machine that
     picks a session at random.
+
+    Called from two places, and the second one is why this is not private: the
+    foreground watch loop below, and `reap` on every tick that finds the attempt still
+    running. Under the daemon the foreground loop does not exist, so without the reap
+    call the column stays NULL for the whole of `implementing` — and `recovery` reads
+    it, finds nothing, and restarts a session it could have resumed.
     """
-    if ctx.store.session_id(ctx.run.id, attempt, State.IMPLEMENTING):
+    if ctx.store.session_id(ctx.run.id, attempt, state):
         return
     if not attempt_dir.events.exists():
         return
@@ -281,7 +289,7 @@ def _capture_session_id(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> 
     except json.JSONDecodeError:
         return
     if event.get("type") == "thread.started" and event.get("thread_id"):
-        ctx.store.set_session_id(ctx.run.id, attempt, State.IMPLEMENTING, str(event["thread_id"]))
+        ctx.store.set_session_id(ctx.run.id, attempt, state, str(event["thread_id"]))
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:

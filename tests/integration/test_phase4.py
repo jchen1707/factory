@@ -116,6 +116,28 @@ def test_an_attempt_still_running_is_left_alone(ctx: Context) -> None:
     assert ctx.state is State.IMPLEMENTING
 
 
+def test_reaping_a_running_attempt_captures_its_session_id(ctx: Context) -> None:
+    """§16.3's "resume by id, never `--last`" needs the id to have been *captured*, and
+    the only code that captured it ran in `factory run`'s foreground watch loop. Under
+    the daemon nothing does, so the column stayed NULL for the whole of `implementing`
+    and every recovery decision for a live run — suspend/resume included — degraded to
+    `RESTART (no-session-id)`, throwing away a session that was sitting in
+    `events.jsonl` line 1 the entire time.
+
+    Measured on BAC-6 run `3f03240cd3bc4bd0`: suspended from `implementing` with
+    `thread_id 01a02c50-a4e2-76d0-8d97-67959c9ec813` on disk and `session_id` NULL in
+    the attempts row.
+    """
+    _start_an_attempt(ctx, finish=False)
+    assert ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) is None
+
+    reap_step.reap(ctx)
+
+    assert (
+        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == "01a0-fake-thread"
+    )
+
+
 def test_start_after_a_verify_fail_loopback_does_not_illegally_re_enter_implementing(
     ctx: Context,
 ) -> None:
@@ -580,8 +602,12 @@ def _block_at(ctx: Context, state: State, reason: str) -> None:
 
 
 def test_suspend_parks_a_running_agent_and_keeps_everything(ctx: Context) -> None:
+    # No `set_session_id` here on purpose. This test used to write the id itself and then
+    # assert it survived, which proves only that the store round-trips a string: the
+    # suspend path never captured one, and on the live BAC-6 suspend the column was NULL.
+    # "The Codex session is kept" is a claim about the *system*, so the system has to be
+    # the thing that records it.
     _start_an_attempt(ctx, finish=False)
-    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
     worktree = Path(ctx.run.worktree or "")
     branch = ctx.run.branch
     sandbox = ctx.project.build_sandbox

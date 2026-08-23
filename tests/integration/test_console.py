@@ -141,18 +141,24 @@ def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Con
     # The run is `implementing` and the agent has only just been spawned, so there is no
     # numerator to divide. The page must say why rather than show a number, and must not
     # invent one — the estimate is the thing §18.5 rules out.
+    #
+    # The reason is the *turn* one, not the *stream* one: a spawned agent has already
+    # written `thread.started`, so the file exists and carries no completed turn. This is
+    # verbatim what the board printed for the live FRO-7 run on 2026-08-22 —
+    # `ctx — (the agent has not completed a turn yet)`.
+    reason = "the agent has not completed a turn yet"
     _to_implementing(ctx)
 
     rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
 
     row = next(r for r in rows if r.ticket == "BAC-4")
     assert row.context_pct is None
-    assert row.context_reason == "no event stream for this attempt yet"
+    assert row.context_reason == reason
     # And the page renders the em dash carrying the reason, never a figure.
     page = _client(ctx).get("/").text
-    assert 'title="no event stream for this attempt yet"' in page
+    assert f'title="{reason}"' in page
     # The context cell is the em dash and the reason — no figure of any kind beside it.
-    context_cell = page.split('title="no event stream for this attempt yet"')[1].split("</td>")[0]
+    context_cell = page.split(f'title="{reason}"')[1].split("</td>")[0]
     assert "%" not in context_cell
 
 

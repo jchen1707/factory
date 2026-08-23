@@ -28,7 +28,7 @@ from factory.steps import plan as plan_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
 
-__all__ = ["DETACHED_STATES", "Outcome", "Verdict", "reap"]
+__all__ = ["AGENT_SESSION_STATES", "DETACHED_STATES", "Outcome", "Verdict", "reap"]
 
 #: The states whose entry action spawns a detached run inside a sandbox — a codex
 #: agent (planning, implementing, the review fan-out) or a node gate report (verify).
@@ -42,6 +42,11 @@ DETACHED_STATES: tuple[State, ...] = (
     State.VERIFYING,
     State.REVIEWING,
 )
+
+#: The subset of `DETACHED_STATES` whose attempt is a single codex session with an id
+#: worth resuming. `verifying` is a node gate report and has none; `reviewing` is a
+#: fan-out of several sessions, so there is no one id for the row to hold.
+AGENT_SESSION_STATES: frozenset[State] = frozenset({State.PLANNING, State.IMPLEMENTING})
 
 #: How long after the wrapper is signalled the tick waits for its `exit` file. The
 #: wrapper writes `exit` last and atomically, so this is bounded by one `mv`; a run
@@ -125,6 +130,14 @@ def reap(ctx: Context) -> Verdict:
         attempt_dir=attempt_dir.root,
         session_id=row["session_id"],
     )
+
+    # Before the verdict, not after it: an orphaned or killed attempt is exactly the one
+    # whose session id recovery is about to ask for, and by then nothing will write it.
+    # The id is on disk in `events.jsonl` line 1 from the agent's first second; under the
+    # daemon this is the only code that reads it, because `implement`'s foreground watch
+    # loop never runs.
+    if state in AGENT_SESSION_STATES:
+        implement_step.capture_session_id(ctx, attempt_dir, ctx.run.attempt, state)
 
     status = ctx.sandbox.poll(handle)
     if status is RunStatus.EXITED:
