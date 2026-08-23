@@ -56,8 +56,15 @@ def _delivered(ctx: Context, *, aged: bool = False) -> None:
 
 
 def _age(ctx: Context) -> None:
+    """Make the run look old to `gc`, by both clocks.
+
+    §16.5's floor counts from the transition that parked the run, so ageing `updated_at`
+    alone no longer ages anything — which is the point of the change, and the reason this
+    helper had to grow a second statement rather than being deleted.
+    """
     with ctx.store.transaction() as conn:
         conn.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (int(WEEKS_AGO), ctx.run.id))
+        conn.execute("UPDATE transitions SET at = ? WHERE run_id = ?", (int(WEEKS_AGO), ctx.run.id))
     ctx.refresh()
 
 
@@ -249,7 +256,7 @@ def test_gc_reclaims_only_once_the_run_is_completed(
     assert [a for a in before if a.target == str(worktree)] == []
 
     _complete(ctx, monkeypatch, pr_state="MERGED")
-    _age(ctx)  # completing refreshes updated_at; §16.5 collects on age, not on state alone
+    _age(ctx)  # §16.5 collects on age, not on state alone
 
     after = gc.sweep(ctx.home, ctx.registry, ctx.store, ctx.sandbox, dry_run=True)
     assert [a for a in after if a.kind == "worktree-remove" and a.target == str(worktree)]
