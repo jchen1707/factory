@@ -16,3 +16,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# macOS writes these into any directory Finder has opened, including .agents/.
+.DS_Store
