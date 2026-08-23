@@ -89,7 +89,7 @@ _SENSITIVE_DIRS: dict[str, tuple[str, ...]] = {
     "frontend": ("src/**/routes/**",),
 }
 
-#: Severities that route to a human rather than a draft PR. `critical`/`high` only; a
+#: Severities that route to a human rather than a PR. `critical`/`high` only; a
 #: `medium`/`low` finding is recorded and carried in the PR body but does not stop delivery.
 _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 

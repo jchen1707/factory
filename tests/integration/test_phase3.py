@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -51,9 +52,10 @@ def test_the_drive_calls_review_then_deliver_after_verify(
     planned = "\n".join(ctx.planned)
     # review ran (red-phase + Tier 1 would-prints)
     assert "review" in planned.lower() or "tier 1" in planned.lower()
-    # deliver ran (push + draft PR + the awaiting_human transition)
+    # deliver ran (push + the PR + the awaiting_human transition)
     assert "push" in planned
-    assert "gh pr create --draft" in planned
+    assert "gh pr create --base" in planned
+    assert "--draft" not in planned
     assert f"transition {State.REVIEWING} -> {State.PR_READY}" in planned or "pr_ready" in planned
 
 
@@ -157,6 +159,46 @@ def _to_pr_ready(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     assert ctx.state is State.PR_READY
 
 
+def _capture(sink: list[list[str]], *, stdout: str = "") -> object:
+    """Stand in for `subprocess.run` and keep the argv the delivery module built."""
+
+    def run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        sink.append(list(argv))
+        return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
+
+    return run
+
+
+def test_the_dry_run_preview_names_the_flags_gh_pr_create_actually_carries(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview is worth reading only while it describes the command that runs.
+
+    `--draft` lived in six places and moved out of all six at once; equality here is what
+    stops the *next* flag moving in one of them only. Both halves are measured — the argv
+    from `create_pr`, the preview from a real dry run — so neither can be restated.
+    """
+    _to_pr_ready(ctx, monkeypatch)
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
+
+    argv: list[list[str]] = []
+    monkeypatch.setattr(deliver_step.github.subprocess, "run", _capture(argv, stdout="url\n"))
+    deliver_step.github.create_pr(
+        Path(ctx.run.worktree or "."),
+        base="v2",
+        head="feat/x",
+        title="t",
+        body_file=Path("body.md"),
+    )
+    real = {token for token in argv[0] if token.startswith("--")}
+
+    ctx.dry_run = True
+    deliver_step.run(ctx)
+    start = next(i for i, line in enumerate(ctx.planned) if "gh pr create" in line)
+    preview = " ".join(ctx.planned[start : start + 2])
+    assert real == set(re.findall(r"--[a-z-]+", preview))
+
+
 def test_deliver_blocks_on_a_vendored_tree_edit(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -188,21 +230,27 @@ def test_deliver_routes_a_deny_list_path_to_awaiting_human_without_pushing(
     assert ".husky/pre-commit" in linear.comments[-1]
 
 
-def test_deliver_opens_a_draft_pr_and_announces(
+def test_deliver_opens_a_ready_for_review_pr_and_announces(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
     monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: None)
     monkeypatch.setattr(deliver_step.github, "find_pr", lambda wt, b: None)
+    # `create_pr` is the seam the whole item turns on, so the real argv is captured
+    # rather than the wrapper stubbed away — the draft flag is the one token that has to
+    # be gone, and a stub that swallows argv could not tell you (§24.8).
+    argv: list[list[str]] = []
     monkeypatch.setattr(
-        deliver_step.github,
-        "create_pr",
-        lambda wt, **kw: "https://github.com/jchen1707/python-harness/pull/11",
+        deliver_step.github.subprocess,
+        "run",
+        _capture(argv, stdout="https://github.com/jchen1707/python-harness/pull/11\n"),
     )
 
     deliver_step.run(ctx)
 
+    create = next(a for a in argv if a[:3] == ["gh", "pr", "create"])
+    assert "--draft" not in create
     assert ctx.state is State.AWAITING_HUMAN
     assert ctx.run.pr_url == "https://github.com/jchen1707/python-harness/pull/11"
     linear: FakeLinear = ctx.linear  # type: ignore[assignment]

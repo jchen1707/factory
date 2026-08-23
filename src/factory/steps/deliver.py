@@ -1,7 +1,9 @@
-"""`pr_ready -> awaiting_human` — host-execution guard, push, draft PR (§13.2, §17.4).
+"""`pr_ready -> awaiting_human` — host-execution guard, push, PR (§13.2, §17.4, §24.8).
 
 The last automatic step. The factory pushes from the host (the sandbox has no remote
-credential) and opens the PR as a **draft**; James marks it ready, and merge is always his.
+credential) and opens the PR **ready for review** — the gates and the review have already
+run, so "draft" was the wrong word for it (`delivery/github.py: create_pr` argues this in
+full). Merge is always his.
 Before any host-side command runs, the host-execution guard inspects the diff: a touch of
 the vendored tree is a block (the enforcement layer is broken), a touch of a host-execution
 deny-list path (`.husky`, `.github`, …) routes to `awaiting_human` rather than a push, and
@@ -77,7 +79,7 @@ def run(ctx: Context) -> None:
         ctx.would(f"git -C {worktree} -c core.hooksPath=/dev/null push -u origin {branch}")
         ctx.would(f"gh pr list --head {branch}  # duplicate guard")
         ctx.would(
-            f"gh pr create --draft --base {ctx.project.base_branch} --head {branch} --title {pr_title!r}"
+            f"gh pr create --base {ctx.project.base_branch} --head {branch} --title {pr_title!r}"
         )
         ctx.would(f"  --body-file {body_path} ({len(body)} bytes)")
         ctx.would(f"transition {State.PR_READY} -> {State.AWAITING_HUMAN}")
@@ -97,7 +99,7 @@ def run(ctx: Context) -> None:
             "PR write. The value is compromised — rotation is James's call.",
         ) from exc
 
-    # 3. Push, then open or edit the draft PR (F16 duplicate guard).
+    # 3. Push, then open or edit the PR (F16 duplicate guard).
     github.push(worktree, branch)
     existing = github.find_pr(worktree, branch)
     if existing:
@@ -114,7 +116,7 @@ def run(ctx: Context) -> None:
             body_file=body_path,
         )
     ctx.store.update_run(ctx.run.id, pr_url=pr_url)
-    ctx.log("deliver.pr_opened", url=pr_url, draft=True)
+    ctx.log("deliver.pr_opened", url=pr_url, draft=False)
 
     # 4. Archive the attempt evidence to artifacts/ (§14.1), then announce. A secret in the
     # attempt dir fails the archive the same way the body scan does.

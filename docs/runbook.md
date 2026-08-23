@@ -101,11 +101,14 @@ and resume only after the fix lands.
 
 ## It opened a bad PR
 
-The PR is always a **draft** (through Phase 4). Nothing is merged by the factory — that is
-a unit-tested invariant (`tests/unit/test_boundaries.py`).
+The PR opens **ready for review** (§24.8) — the gates and the review already ran, so
+"draft" was the wrong word for it. It is not a trigger: `agent-review.yml` is label-gated
+in both harnesses (add the `agent-review` label), and `ci.yml` ran on drafts too. Nothing
+is merged by the factory, and that is a unit-tested invariant
+(`tests/unit/test_boundaries.py`).
 
 - **Wrong content / stale evidence:** `factory cancel <TICKET>` closes the run, then
-  `factory run <TICKET>` starts fresh. The draft PR on GitHub is left for you to close by
+  `factory run <TICKET>` starts fresh. The PR on GitHub is left for you to close by
   hand (`gh pr close <n> --delete-branch`) — the factory never deletes a pushed branch.
 - **A secret reached the PR body:** the run already failed with `secret-in-artifact`
   before the push. Rotate the credential; the value is compromised regardless of whether

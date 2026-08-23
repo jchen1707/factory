@@ -97,3 +97,45 @@ def test_the_sandbox_namespace_appears_only_as_a_factory_prefix() -> None:
 
     assert not sandbox_is_factory_owned("codex-python-harness")
     assert sandbox_is_factory_owned("factory-build-python-harness")
+
+
+#: Every `gh` verb pair that appears in `src/`. Derived, not enumerated: the test below
+#: reads the argv literals and compares the *set*, so adding a `gh` call the factory has
+#: no business making fails here rather than passing unnoticed. §25's four claims are
+#: about shapes; this is the same idea one level up — the surface, not one bad token.
+_GH_ARGV = re.compile(r'"gh"\s*,\s*"([a-z-]+)"\s*,\s*"([a-z-]+)"')
+
+ALLOWED_GH_CALLS = {
+    ("auth", "status"),  # doctor
+    ("pr", "list"),  # the F16 duplicate guard, and the poller's open-PR scan
+    ("pr", "create"),  # deliver
+    ("pr", "edit"),  # deliver, on a re-delivery
+    ("pr", "view"),  # complete — evidence that James merged
+}
+
+
+def test_the_factory_never_merges_a_pull_request() -> None:
+    """`gh pr merge` has no code path, and neither has anything else unaccounted for.
+
+    "The factory never merges" was two docstrings (`steps/complete.py:3`,
+    `steps/deliver.py:4`) and an argument grep. The docstrings cannot fail. Moving PRs to
+    ready-for-review takes the factory one step nearer the merge button, so the guarantee
+    gets read off the source here instead: five verbs, and `merge` is not one of them.
+    """
+    found: set[tuple[str, str]] = set()
+    for _, body in _bodies():
+        found |= set(_GH_ARGV.findall(body))
+
+    assert ("pr", "merge") not in found
+    assert ("pr", "review") not in found  # approving is James's too (§24.8)
+    assert found <= ALLOWED_GH_CALLS, f"unaccounted gh calls: {sorted(found - ALLOWED_GH_CALLS)}"
+    # …and the allow-list is not quietly describing calls that no longer exist.
+    assert found == ALLOWED_GH_CALLS
+
+
+def test_no_pull_request_is_merged_through_the_rest_api_either() -> None:
+    # The argument grep above catches `["gh", "pr", "merge"]`. It does not catch the
+    # other spelling of the same act, where the verb is a path segment rather than an
+    # argv token: `gh api --method PUT repos/{o}/{r}/pulls/{n}/merge`.
+    for path, body in _bodies():
+        assert not re.search(r"pulls/[^\s\"']*/merge|/merge[\"'/]", body), path

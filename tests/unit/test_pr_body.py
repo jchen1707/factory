@@ -68,8 +68,11 @@ def test_render_pr_body_lays_out_the_evidence_in_spec_order() -> None:
     assert "/Users/james/factory/artifacts/BAC-5/1" in body
     assert "Tokens: in 9600000, out 46000 — token counts only (no price row)" in body
 
-    # The draft boundary is stated.
-    assert "draft" in body
+    # The merge boundary is stated, and the PR is not a draft: §24.8 opens it
+    # ready for review so `agent-review.yml` fires on open. The body must not go on
+    # claiming a draft the argv no longer asks for.
+    assert "Merge is a human's." in body
+    assert "draft" not in body.lower()
 
 
 def test_render_pr_body_names_tier2_ran_when_it_ran() -> None:
