@@ -248,6 +248,22 @@ def test_the_continuation_names_the_failure_rather_than_repeating_the_first_prom
     assert "attempt-orphaned" in continuation
 
 
+def test_the_continuation_names_a_block_the_human_is_sending_back(ctx: Context) -> None:
+    # `blocked -> implementing` is `unblock-is-a-judgement`: a human decided the finding is
+    # worth another attempt. Measured on BAC-6, 2026-08-23, the agent that attempt starts
+    # was told nothing about it -- `continuation_prompt` matched only transitions into
+    # `resumable`, so a run sent back from `blocked` got an empty "how it ended" section
+    # and a diff stat. Nothing else in `implement.start` reads the review findings, so the
+    # next attempt had to rediscover the reason it was restarted.
+    _start_an_attempt(ctx, finish=False)
+    advance(ctx, State.BLOCKED, rule="review-finding", detail="- [high] tests/x.py: vacuous")
+
+    continuation = recovery.continuation_prompt(ctx)
+
+    assert "review-finding" in continuation
+    assert "vacuous" in continuation
+
+
 def test_the_third_attempt_rewinds_to_planning_instead_of_running_again(ctx: Context) -> None:
     # §16.3a rung 3, end to end: two attempts are already spent, so the recovery does
     # not start a third implement — it starts a plan.

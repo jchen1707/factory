@@ -535,8 +535,16 @@ def continuation_prompt(ctx: Context) -> str:
     from factory import repo
 
     lines = ["### How the previous attempt ended", ""]
+    # `blocked` as well as `resumable`, because both are ways an attempt stops and only
+    # one of them was ever read here. A run sent back over `unblock-is-a-judgement` is a
+    # human deciding the finding is worth another attempt, and the finding itself is on
+    # that transition's `detail` — measured on BAC-6, whose `reviewing -> blocked` row
+    # carries both `high` findings verbatim. Without this the next attempt is started
+    # with a diff stat and no reason, and nothing else in `implement.start` reads the
+    # review output.
+    stopped = (str(State.RESUMABLE), str(State.BLOCKED))
     for row in reversed(ctx.store.transitions(ctx.run.id)):
-        if str(row["to_state"]) == str(State.RESUMABLE):
+        if str(row["to_state"]) in stopped:
             lines += [f"- reason: `{row['rule'] or 'unknown'}`", ""]
             if row["detail"]:
                 lines += ["```", str(row["detail"])[:2000], "```", ""]
