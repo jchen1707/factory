@@ -28,7 +28,8 @@ Re-measured 2026-08-23, later the same day. **Item 2 is closed**: both consumer 
 | re-vendor | `frontend-harness#47` **7/7 green**, `python-harness#69` **5/5 green**, both unmerged |
 | `factory#37` | open — recovers `9663a1b`, stranded when `#36` merged. The **fourth** instance of this race |
 | BAC-6 | `blocked` at `review-finding`, two `high` findings. **Waiting on James**, unchanged |
-| FRO-11 | `implementing`, **attempt 2** — attempt 1 was reaped as orphaned while the host slept; see below |
+| FRO-11 | `resumable`, **two of three re-entries spent** on a sleeping host and a recovered reconnect; see below |
+| `factory#38` | open — the reconnect fix. Its absence is what spent the second re-entry |
 
 **The only thing left for James on item 2 is merging `#47` and `#69`.** Both are two vendored
 JSON files, both fully green, and neither touches a source file.
@@ -118,6 +119,36 @@ is not the orphan signature — the signature §16.1 actually wants is the holde
 line 439 already checks first and which fires immediately. Reaching line 454 at all means
 "the wrapper stopped writing but everything holding it is still up", and suspension produces
 exactly that. Not changed here: it is a §16.1 semantics decision, and a run was in flight.
+
+### And a recovered reconnect threw away a finished attempt — fixed, `factory#38`
+
+Nineteen minutes after the sleep-reap, FRO-11 attempt 2 resumed, found the work committed,
+re-ran both reviews, exited **0**, and wrote a `last-message.json` reading `status:
+implemented` with commit `e00002b` and "Standards and Spec reviews found no issues".
+
+It was thrown away: `implementing -> resumable`, rule `agent-failed`, detail
+`exit 0; Reconnecting... 1/5 (stream disconnected before completion: Transport error…)`.
+
+The 70-line transcript is the whole story — `thread.started` at line 0, one top-level
+`{"type": "error"}` at line 5 carrying codex's own retry notice, `turn.completed` at line 69.
+`parse_events` (`agent/codex.py`) marked *any* top-level `error` as a failed transcript, and
+`implement.collect` raises `agent-failed` on `transcript.failed` regardless of exit code.
+
+**So two of that run's three `resumable` re-entries were spent inside two hours, neither on
+anything wrong with the work** — one on a sleeping laptop, one on a network blip codex had
+already recovered from by itself.
+
+Fixed in `factory#38`: a top-level `error` fails the transcript only while it is the stream's
+last word on the turn; a later `turn.completed` withdraws it. `turn.failed` is held in a
+separate variable and is never cleared — it is the model's verdict, not the transport's. The
+notice still lands in `error_items`, because a run that reconnected four times succeeded on
+worse terms than one that never dropped. Fixtures are the real FRO-11 lines; three mutations
+tried, three caught. Suite 533 -> 535.
+
+**One hazard the fix exposed: the daemon executes whatever is checked out in
+`/Users/james/factory`.** A `git checkout` in that directory changes the code the next tick
+runs. This document was edited from a temporary `git worktree` for exactly that reason, and
+anyone doing control-plane work while a run is live should do the same.
 
 ### One small follow-up taken
 
