@@ -23,7 +23,8 @@ gone wrong.
 | `frontend-harness` | PR **#46**, `chore/vendor-gate-requires`, 3 commits, **all 7 checks green**, unmerged |
 | `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
 | vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
-| BAC-6 | Linear ticket moved to `Todo` by James 2026-08-23; its run is still `suspended` at attempt 7 and **still holds the ticket** — see item 4 |
+| BAC-6 | **running.** Old `suspended` run cancelled by James 2026-08-23; the daemon re-claimed it and it is at `implementing`, attempt 1 |
+| FRO-10 | tried as the frontend test and refused at intake, `already-implemented` — 0 tokens spent. The whole FRO backlog is exhausted; see item 4 |
 
 **Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
 closed.** Nothing else in this document depends on them.
@@ -127,46 +128,80 @@ less of it is missing than that document claimed.
 
 ### 4. The end-to-end tests — one ticket per stack
 
-**James moved BAC-6 to `Todo` in Linear on 2026-08-23. That is necessary and it is not
-sufficient, and the reason is worth understanding before you spend a tick wondering why
-nothing happened.**
+**The python half is running.** James cancelled BAC-6's `suspended` run on 2026-08-23; the
+launchd daemon claimed the freed ticket within a minute and it is live at `implementing`,
+attempt 1. Nothing more is needed from anyone until it reaches `awaiting_human`, where merge
+is James's.
 
-BAC-6 still carries a **`suspended`** run at **attempt 7**, `resume-target-invalid`. Only
-`completed` and `cancelled` are terminal (`machine.py:57`), and `_LIVE_RUN_INDEX`
-(`store.py:87`) is derived from that set, so a `suspended` run is **live** and holds its
-ticket. Intake reads `store.live_run_for_ticket` and skips any ticket that has one —
-`cli.py:703`, which in `--verbose` prints `BAC-6 already has a live run at suspended`. The
-poller will therefore never look at BAC-6 while that row exists, no matter what Linear says.
+The mechanism worth remembering, because it is not obvious from the board: only `completed`
+and `cancelled` are terminal (`machine.py:57`), `_LIVE_RUN_INDEX` (`store.py:87`) is derived
+from that set, and intake skips any ticket that has a live run (`cli.py:703`). So a
+`suspended` **or** `blocked` row holds its ticket against every future tick, and moving the
+ticket in Linear changes nothing until the row is cancelled. `store.py:80` says so on
+purpose: "`blocked` is deliberately live: it is a stop, not an end". `cancelled` is
+`abandon-is-james`, so an agent cannot clear one.
 
-The same is true of every `blocked` row on the board, and deliberately: `store.py:80` says
-"`blocked` is deliberately live: it is a stop, not an end, so a blocked run still holds its
-ticket until someone cancels it. That is the contract, not an oversight."
+**The frontend half has no usable ticket, and this is now measured rather than assumed.**
 
-**So the python half is a three-step, and step 1 is James's:**
+FRO-10 was tried on 2026-08-23 — the smallest candidate, 5 acceptance criteria, one method in
+one file. James cleared `needs-info`, moved it to `Todo`, and cancelled its blocked run; the
+daemon claimed it and intake stopped it in 0 tokens:
 
-1. **`factory cancel BAC-6`.** `cancelled` is in `HUMAN_ONLY_DESTINATIONS` under
-   `abandon-is-james`, so an agent cannot do this and should not try to.
-2. **Check the ticket is still `Todo` afterwards — read it, do not assume.** This is where
-   carried defect 1 lands: `cancel` restores the tracker only to the state *the factory*
-   set, and James set this one by hand. The likely output is
-   `left BAC-6 at 'Todo' (not the state the factory set)` with no write, which is the
-   wanted outcome here — `Todo` is exactly where it needs to be. But defect 1 exists
-   because that path has surprised this system before.
-3. **Then run it.** BAC-6's 11 intake conditions all passed on 2026-08-23, which is also
-   what settled that a `Canceled` parent satisfies the parent-spec condition. The new row
-   starts at attempt 1; the 7 attempts belong to the cancelled run.
+```
+approved -> blocked  (auto)  [already-implemented]
+```
 
-**The frontend half has no ticket yet, and the same two-step applies to whichever you pick.**
-FRO-5, FRO-6 and FRO-10 each sit behind a live `blocked` run at `state-not-todo`, so each
-needs its run cancelled *and* the ticket moved to `Todo`. **FRO-7 is not a candidate** — its
-work merged as `frontend-harness#45`. FRO-1 is the parent spec and is refused permanently
-and correctly.
+That is **condition 10** (`intake/linear.py:476`), the one P0-11 added: "the identifier does
+not appear in a commit subject on the base ref". FRO-10's work is already on `v2`. Intake
+caught it before any model spend, which is the condition doing exactly its job.
 
-`needs-info` is currently cleared by James, so nothing is held at intake by a label.
+Two facts fall out of that run and both matter:
 
-**The third test cannot be written until item 3 exists.** "A monorepo dispatch test proving
-a CSS-only change runs no Python gate" needs a monorepo. Do items in the order 3 → 4, or
-deliver item 4's two stack tickets and say plainly that the dispatch test is outstanding.
+- **The block re-applied `needs-info`.** `steps/block.py` adds it by design (§13.1). It is
+  also a *reasonless* condition (7), and `eligibility_verdict` makes a reasonless failure
+  win — which produces **no run row at all**, just a log line. A run row with a reason is
+  therefore proof the label was absent at intake. Do not read the label now on the ticket as
+  evidence that James left it there.
+- **The previous handoff's "`needs-info` is currently cleared" was wrong** for FRO. It was
+  true of BAC-6 only. Every `Done` FRO ticket carries it.
+
+**The whole FRO backlog was then surveyed against the base ref. None of it can serve:**
+
+| ticket | state | on `v2`? | why it cannot be the test |
+| --- | --- | --- | --- |
+| FRO-1 | Todo | yes | parent spec — `no-parent-spec`, permanently and correctly |
+| FRO-2, 3, 4 | Canceled | no | `wontfix` (reasonless); superseded by FRO-5/6/7 |
+| FRO-5, 6, 7, 10 | Done | yes | `already-implemented` at condition 10 |
+| FRO-8 | Todo | no | `wontfix`, no `ready-for-agent`; duplicate of FRO-10, so the work is in the tree anyway |
+| FRO-9 | Todo | no | no labels at all, and it is FRO-10's parent spec |
+
+FRO-11 does not exist. **So item 4's frontend half needs a ticket that does not exist yet,
+describing work that is not on `v2`.** §24.1 reserves that: the factory never files a ticket,
+and §13.1 makes it true at the credential layer — the `factory-linear` keychain key is scoped
+to read, comment, and update state and labels, with **no create-issue scope**. Tickets come
+from the separate system James runs on `mattpocock-skills`.
+
+**What that new ticket has to satisfy** — all 11 conditions, from `evaluate_eligibility`:
+
+| # | requirement | how to meet it |
+| --- | --- | --- |
+| 1 | label `ready-for-agent` | add it; it is the signature that starts the factory and nothing else is |
+| 2 | state `Todo` | — |
+| 3 | team `FRO` in the registry | automatic |
+| 4 | has a parent issue | **FRO-9** is the natural parent and is not itself claimable |
+| 5 | parent description ≥ 200 chars | FRO-9 already passes — FRO-10 got past this condition to reach 10 |
+| 6 | own description has an acceptance-criteria section | matched by `##\s*Acceptance` or "Acceptance criteria" |
+| 7 | no `needs-info` / `needs-triage` / `ready-for-human` / `wontfix` | reasonless — one of these produces no run row at all |
+| 8 | no open PR on `feat/FRO-<n>-<slug>` | automatic for new work |
+| 9 | repo `tracker.team` equals `FRO` | automatic |
+| 10 | identifier absent from every commit subject on `v2` | **automatic only if the work is genuinely unbuilt** — this is what killed every existing candidate |
+| 11 | every blocking ticket is `Done` | do not add a `blocked_by` relation |
+
+`needs-info` is cleared on BAC-6 and present on every `Done` FRO ticket.
+
+**The third test still cannot be written until item 3 exists.** "A monorepo dispatch test
+proving a CSS-only change runs no Python gate" needs a monorepo. Deliver item 4's two stack
+tickets and say plainly that the dispatch test is outstanding, or do 3 first.
 
 ### 3. First layer-C product — less is missing than the last handoff said
 
