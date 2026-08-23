@@ -56,6 +56,20 @@ _OPT_IN_KINDS = frozenset({"e2e", "integration"})
 #: honest `fail` is accepted here; the loop-back happens on the verdict, not the claim.
 _RAN = frozenset({"pass", "fail"})
 
+#: `disabled` is a gate the config switched off with `enabled: false`. It is not a gate
+#: that ran, so it is not in `_RAN` — but it is not a disagreement either, and this
+#: distinction is load-bearing. Which opt-in gates an agent claims is **not
+#: deterministic**: FRO-7 was run twice from one prompt, and the second run claimed
+#: `lighthouse` where the first had not. An agent free to run a disabled gate on its own
+#: and report it honestly must not be blocked for it, because the alternative is a run
+#: that dies on `evidence-mismatch` instead of `env-gate-failed` — the same wall wearing
+#: a different name, and the whole reason `enabled: false` exists.
+#:
+#: The gate still did not run *as a gate*: nothing here promotes it to evidence. The
+#: report says `disabled`, the verdict ignores it, and this set only stops the claim from
+#: being read as a lie.
+_CLAIM_SATISFIED = _RAN | {"disabled"}
+
 POLL_INTERVAL_SECONDS = 10
 
 
@@ -366,6 +380,12 @@ def _asserted_opt_in_gates(harness: HarnessConfig | None, gates_run: list[str]) 
     check against the canonical config — never a pattern match over the diff (§12.1). A
     gate the agent did not claim is not asserted, so it comes back `not_applicable`.
 
+    A gate with `enabled: false` is never asserted, whoever claimed it. Missing this is
+    harmless — layer A reports `disabled` regardless of the assertion, deliberately, so
+    that an operator who switched a gate off gets the same answer whatever the caller
+    said — but the argv would then state an intent the factory does not have, and the
+    argv is the record of what layer D asked for.
+
     This used to return a bool and the caller passed `--all`, which is where FRO-7 died.
     `--all` asserts *every* opt-in gate's `when` clause at once, and a `when` is prose no
     machine can evaluate — so an agent that honestly ran `playwright` also asserted
@@ -385,7 +405,9 @@ def _asserted_opt_in_gates(harness: HarnessConfig | None, gates_run: list[str]) 
     kinds = {gate.name: gate.kind for gate in harness.gates}
     claimed = {_gate_named_in(claim, kinds) for claim in gates_run}
     return [
-        gate.name for gate in harness.gates if gate.kind in _OPT_IN_KINDS and gate.name in claimed
+        gate.name
+        for gate in harness.gates
+        if gate.kind in _OPT_IN_KINDS and gate.name in claimed and gate.enabled
     ]
 
 
@@ -415,9 +437,10 @@ def _gate_named_in(claim: str, names: Iterable[str]) -> str | None:
 
 def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]]) -> list[str]:
     """The §15.1 cross-check. Every gate the agent claimed must appear in the report with
-    a status of `pass` or `fail`. A claimed gate that is `unavailable`, `not_applicable`,
-    `skipped_unchanged`, or absent is a disagreement — the agent said it ran something the
-    toolchain could not prove ran. Returns the disagreeing gate names, in claim order.
+    a status of `pass` or `fail` — or `disabled`, see `_CLAIM_SATISFIED`. A claimed gate
+    that is `unavailable`, `not_applicable`, `skipped_unchanged`, or absent is a
+    disagreement — the agent said it ran something the toolchain could not prove ran.
+    Returns the disagreeing gate names, in claim order.
 
     The agent's `gates_run` entries are free-form strings — the schema is `array of string`
     and the prompt fixes no format — so the real agent writes the commands it ran with the
@@ -434,7 +457,7 @@ def _evidence_mismatch(gates_run: list[str], report_gates: list[dict[str, Any]])
     for claim in gates_run:
         matched = _gate_named_in(claim, by_name)
         status = by_name.get(matched) if matched is not None else None
-        if status not in _RAN:
+        if status not in _CLAIM_SATISFIED:
             # The report gate name when one matched (clearer in the block message than the
             # agent's command string); the raw claim only when nothing matched.
             mismatched.append(matched if matched is not None else claim)
