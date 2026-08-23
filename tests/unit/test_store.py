@@ -320,3 +320,91 @@ def test_migration_is_not_rerun_on_an_already_current_database(tmp_path: Path) -
     Store(path).close()
     store = Store(path)  # second open must be a no-op, not a second rebuild
     assert len(store.all_runs()) == 1
+
+
+# --------------------------------------------------------------------------------
+# The re-run ceiling, and what `--authorise` has to do to it
+# --------------------------------------------------------------------------------
+
+
+def _orphan_cycle(store: Store, run_id: str, times: int) -> None:
+    """`reviewing -> resumable -> reviewing`, the shape reap writes when it orphans an
+    attempt and recovery re-runs it."""
+    for _ in range(times):
+        store.record_transition(
+            run_id,
+            from_state=State.REVIEWING,
+            to_state=State.RESUMABLE,
+            actor="auto",
+            rule="attempt-orphaned",
+        )
+        store.record_transition(
+            run_id, from_state=State.RESUMABLE, to_state=State.REVIEWING, actor="auto"
+        )
+
+
+def test_re_entries_are_counted_for_a_run_no_human_has_re_authorised(store: Store) -> None:
+    run = store.insert_run(linear_id="FRO-7", project="frontend-harness", team="FRO")
+    _orphan_cycle(store, run.id, 3)
+    assert store.resumable_reentries(run.id, State.REVIEWING) == 3
+
+
+def test_re_authorising_restarts_the_re_run_budget(store: Store) -> None:
+    """`--authorise` is §16.4's explicit "spend again on this run", and the only way the
+    ceiling ever produces `failed` is by being reached — so counting for all time made the
+    flag inert in exactly the case it names. FRO-7 run `b1aa9785bbe44663` failed on
+    `max-reruns-reviewing`, was re-authorised, and the next tick failed it again on the
+    same three historical rows: `failed -> resumable -> failed`, with a good
+    implementation stranded behind it.
+    """
+    run = store.insert_run(linear_id="FRO-7", project="frontend-harness", team="FRO")
+    _orphan_cycle(store, run.id, 3)
+    store.record_transition(
+        run.id,
+        from_state=State.RESUMABLE,
+        to_state=State.FAILED,
+        actor="auto",
+        rule="max-reruns-reviewing",
+    )
+
+    store.record_transition(
+        run.id,
+        from_state=State.FAILED,
+        to_state=State.RESUMABLE,
+        actor="human",
+        rule="reauthorise-spend",
+    )
+
+    assert store.resumable_reentries(run.id, State.REVIEWING) == 0
+
+
+def test_re_entries_after_a_re_authorisation_count_against_the_new_budget(store: Store) -> None:
+    # The flag restarts the budget; it does not remove the ceiling.
+    run = store.insert_run(linear_id="FRO-7", project="frontend-harness", team="FRO")
+    _orphan_cycle(store, run.id, 3)
+    store.record_transition(
+        run.id,
+        from_state=State.FAILED,
+        to_state=State.RESUMABLE,
+        actor="human",
+        rule="reauthorise-spend",
+    )
+    _orphan_cycle(store, run.id, 2)
+
+    assert store.resumable_reentries(run.id, State.REVIEWING) == 2
+
+
+def test_only_the_most_recent_re_authorisation_bounds_the_count(store: Store) -> None:
+    # Two re-authorisations: the earlier one is a spent budget, not this one's.
+    run = store.insert_run(linear_id="FRO-7", project="frontend-harness", team="FRO")
+    for _ in range(2):
+        store.record_transition(
+            run.id,
+            from_state=State.FAILED,
+            to_state=State.RESUMABLE,
+            actor="human",
+            rule="reauthorise-spend",
+        )
+        _orphan_cycle(store, run.id, 1)
+
+    assert store.resumable_reentries(run.id, State.REVIEWING) == 1
