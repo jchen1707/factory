@@ -28,7 +28,7 @@ Re-measured 2026-08-23, later the same day. **Item 2 is closed**: both consumer 
 | re-vendor | `frontend-harness#47` **7/7 green**, `python-harness#69` **5/5 green**, both unmerged |
 | `factory#37` | open — recovers `9663a1b`, stranded when `#36` merged. The **fourth** instance of this race |
 | BAC-6 | `blocked` at `review-finding`, two `high` findings. **Waiting on James**, unchanged |
-| FRO-11 | `implementing` since 16:09:50 UTC in sandbox `factory-build-frontend-harness`, attempt 1 |
+| FRO-11 | `implementing`, **attempt 2** — attempt 1 was reaped as orphaned while the host slept; see below |
 
 **The only thing left for James on item 2 is merging `#47` and `#69`.** Both are two vendored
 JSON files, both fully green, and neither touches a source file.
@@ -85,6 +85,40 @@ Host branch work in `frontend-harness` proceeded alongside the run with no inter
 **Its PR will open with `freshness` red, and not for anything wrong with its work.** The run
 claimed a worktree pinned at `134b21c`, so it needs a rebase onto `v2` after `#47` merges.
 
+### A sleeping laptop reaps a healthy run — measured, new, and the sharpest edge on defect 2
+
+FRO-11 attempt 1 was declared `attempt-orphaned` at 17:16:56 UTC after 67 minutes of
+implementing. **The agent was not dead. The machine was asleep.**
+
+`pmset -g log` on this host:
+
+```
+13:16:39 EDT  DarkWake ... 45 secs
+13:17:24 EDT  Entering Sleep state due to 'Maintenance Sleep' ... 1024 secs
+13:34:28 EDT  DarkWake ... 45 secs
+13:50:58 EDT  Wake ... due to UserActivity
+```
+
+The reap fired at 13:16:56 EDT — **inside that 45-second DarkWake**. The heartbeat subshell
+(`while :; do date -u +%s > heartbeat; sleep 20; done`, §14.1's wrapper) does not run while
+the host is suspended, so on every wake its file is minutes stale. `sbx.poll` then takes the
+last branch: holder pid alive, sandbox `running`, beat older than `ORPHAN_AFTER_SECONDS = 90`
+-> `ORPHANED` (`sandbox/sbx.py:454`). Recovery re-entered at 13:34:59 EDT, inside the *next*
+DarkWake, as attempt 2 with the same session id.
+
+That worked — attempt 2 resumed, found the work committed at `0438fd1`, and went straight to
+re-running the two reviews. But **it spent one of the three `resumable` re-entries defect 2
+describes, and it spent it on nothing at all.** A host that sleeps four times overnight fails
+an unattended run whose work is perfect, and the run's own log will say `attempt-orphaned`
+three times with no cause visible anywhere in the factory's evidence. It is only visible in
+`pmset`.
+
+The cheap fix is in `poll`: a stale heartbeat with a **live holder pid and a running sandbox**
+is not the orphan signature — the signature §16.1 actually wants is the holder gone, which
+line 439 already checks first and which fires immediately. Reaching line 454 at all means
+"the wrapper stopped writing but everything holding it is still up", and suspension produces
+exactly that. Not changed here: it is a §16.1 semantics decision, and a run was in flight.
+
 ### One small follow-up taken
 
 `.DS_Store` is now in `.gitignore` — it was the third session with two untracked files in
@@ -102,7 +136,8 @@ claimed a worktree pinned at `134b21c`, so it needs a rebase onto `v2` after `#4
    two `high` findings, and both exits from `blocked` are `unblock-is-a-judgement`. An agent
    can read the findings and propose a repair; it cannot take the edge. Do not try.
 
-3. **Watch FRO-11 to `awaiting_human`.** It is the first unattended run to put the new
+3. **Watch FRO-11 to `awaiting_human`, and expect more sleep-reaps.** Each one costs a
+   `resumable` re-entry and the ceiling is three. It is the first unattended run to put the new
    `playwright` `requires` probe through a sandbox, and item 4's frontend half turns on it.
    Read its gate report the way BAC-6's was read: the `playwright` entry's `status` and its
    `outputTail` are the evidence, and a `pass` there is what four green unit tests could not
@@ -249,11 +284,12 @@ None block the remaining Phase 5 work.
    leaves the ticket at a non-`Todo` state and the poller skips it for ever. It prints
    `left <T> at '<state>' (not the state the factory set)` and nothing says the ticket is now
    unclaimable.
-2. **The re-run ceiling counts orphans, not attempts.** `resumable_reentries` counts
+2. **The re-run ceiling counts orphans, not attempts — and host sleep manufactures them.** `resumable_reentries` counts
    `<state> -> resumable` transitions, so a deterministic environment failure burns the budget
    in three ticks and fails a run whose work is good. `requires` narrows this — a missing tool
    now blocks at `gates-incomplete` instead of looping — but every other deterministic
-   environment failure still burns the budget.
+   environment failure still burns the budget. **Measured 2026-08-23: so does a laptop
+   going to sleep**, which is not an environment failure at all — see the FRO-11 section.
 3. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not
    codex, so neither `pkill -f "codex exec"` nor `pkill -x codex` matches it. Pre-existing.
 4. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when
