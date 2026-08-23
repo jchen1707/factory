@@ -8,10 +8,16 @@ without a context, a sandbox or a store.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from factory.harness import Gate, HarnessConfig
-from factory.steps.verify import _asserted_opt_in_gates, _evidence_mismatch, _gate_argv
+from factory.steps.verify import (
+    _CLAIM_SATISFIED,
+    _asserted_opt_in_gates,
+    _evidence_mismatch,
+    _gate_argv,
+)
 
 
 def _harness(*gates: Gate) -> HarnessConfig:
@@ -83,6 +89,26 @@ def test_two_claims_naming_one_gate_assert_it_once() -> None:
     harness = _harness(Gate("playwright", "e2e", ()))
     argv = _gate_argv(harness, ["playwright — 4 tests", "playwright — rerun, 4 tests"], "")
     assert argv.count("--gate") == 1
+
+
+def test_every_status_the_step_accepts_is_one_the_schema_allows() -> None:
+    """The drift guard for the two-places problem that blocked FRO-7 run 4.
+
+    `_validated_report` checks the document against `schemas/gate_report.schema.json`
+    *before* `_evidence_mismatch` ever runs, so a status the step accepts but the schema
+    rejects is unreachable — the run blocks on `schema-invalid` instead, which reads like
+    a malformed report rather than a stale enum. That is exactly what happened when
+    `disabled` was taught to the step and not to the schema.
+
+    Stated as a subset rather than equality: the schema is the authority on what layer A
+    may emit, and the step is free to treat some of those as disagreements. The direction
+    that must never hold is a status the step blesses and the document cannot carry.
+    """
+    schema = json.loads(
+        (Path(__file__).resolve().parents[2] / "schemas" / "gate_report.schema.json").read_text()
+    )
+    allowed = set(schema["properties"]["gates"]["items"]["properties"]["status"]["enum"])
+    assert allowed >= _CLAIM_SATISFIED, _CLAIM_SATISFIED - allowed
 
 
 # -- the evidence-mismatch cross-check (§15.1) --------------------------------
