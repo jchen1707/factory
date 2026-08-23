@@ -15,116 +15,101 @@ gone wrong.
 
 ## Where things stand
 
+Re-measured 2026-08-23, later the same day. **Item 2 is closed**: both consumer PRs merged,
+`harness#19` merged, and both consumers are re-vendored in a pair of green PRs.
+
 | | |
 | --- | --- |
-| `factory@main` | `507363d`. This branch adds `9e33944` (the delete above) on top of the merged handoff commits |
+| `factory@main` | `c2c52b0` |
 | suite | 533 passed, mypy clean on 71 files, ruff check + format clean — re-measured this session |
-| `harness@v2` | `134b21c`. Unchanged this session, deliberately — see the schema-example item below |
-| `frontend-harness` | PR **#46**, `chore/vendor-gate-requires`, 3 commits, **all 7 checks green**, unmerged |
-| `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
-| vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
-| BAC-6 | **running.** Old `suspended` run cancelled by James 2026-08-23; the daemon re-claimed it and it is at `implementing`, attempt 1 |
-| FRO-10 | tried as the frontend test and refused at intake, `already-implemented` — 0 tokens spent. The whole FRO backlog was exhausted; see item 4 |
-| FRO-11 | **new ticket, filed 2026-08-23**, all 11 intake conditions pass. Claimed by the daemon and `implementing` |
-| `harness#19` | open — the `requires` examples fix. **Do not merge before FRO-11's PR lands**; see below |
-| `factory#36` | open — two handoff commits stranded when #35 merged ahead of a push |
+| `harness@v2` | **`a3beb34`** — `#19` merged, plugin `0.10.1` |
+| `frontend-harness@v2` | `8a6dfee` — `#46` merged 15:38 UTC, pin `134b21c` |
+| `python-harness@v2` | `0a84feb` — `#68` merged 15:38 UTC, pin `134b21c` |
+| re-vendor | `frontend-harness#47` **7/7 green**, `python-harness#69` **5/5 green**, both unmerged |
+| `factory#37` | open — recovers `9663a1b`, stranded when `#36` merged. The **fourth** instance of this race |
+| BAC-6 | `blocked` at `review-finding`, two `high` findings. **Waiting on James**, unchanged |
+| FRO-11 | `implementing` since 16:09:50 UTC in sandbox `factory-build-frontend-harness`, attempt 1 |
 
-**Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
-closed.** Nothing else in this document depends on them.
-
-One host-state change to know about: **`uv sync --extra app` was run in `python-harness`**,
-because proving the new probe's *met* branch needed the extra actually installed. It is the
-repo's own documented setup command and it was the host venv, not a sandbox one, so it is
-the safe direction of the bind-mount hazard. It also removed two `mypy` "unused type: ignore"
-errors that were purely artifacts of the extra being absent.
+**The only thing left for James on item 2 is merging `#47` and `#69`.** Both are two vendored
+JSON files, both fully green, and neither touches a source file.
 
 ---
 
-## What landed this session — item 2 is built, proved, and waiting on a merge
+## What this session did
 
-The mechanism (`harness#18`, `requires`) and layer D's block message (`factory#33`) were
-already in. This session did the three consumer steps the last handoff listed, and both
-of them turned out to need a different probe than the one that was prescribed.
+### The re-vendor, and why it was not optional
 
-### The prescribed probes were wrong, and executing them is the only reason that is known
+`harness#19` changed `plugins/harness/schema/harness.config.schema.json`, and `schema/` is
+vendored. `vendor_sync.py check` compares vendored *content*, so that commit turned the
+consumers' pins into `stale pin` failures rather than behind-but-identical notes — `freshness`
+red on both `v2` branches from the moment `#19` landed.
 
-**`frontend-harness`: `pnpm exec playwright --version` exits 0 with no browsers at all.**
-Measured against an empty `PLAYWRIGHT_BROWSERS_PATH`. It probes the npm package, and the npm
-package is never the missing half: `network_allow` for the frontend build sandbox is
-`registry.npmjs.org`, `*.npmjs.org`, `github.com` — **not `cdn.playwright.dev`** — so
-`pnpm install` always succeeds and the browsers can never arrive. That probe would have
-reported "environment met" in precisely the environment it was written to catch.
+Both consumers were re-vendored with the generator itself
+(`python3 /Users/james/harness/scripts/vendor_sync.py sync --harness /Users/james/harness --target .`),
+never by hand. The diff is two files in each repo — `MANIFEST.json` (`134b21c` -> `a3beb34`)
+and the schema's `requires` description and examples. `vendor_sync.py check` prints
+`OK: vendored layer A matches harness@a3beb3457` in both.
 
-The gate now probes `pnpm exec playwright screenshot about:blank /tmp/playwright-probe.png`,
-which launches the browser and so answers the question actually being asked, in ~0.4 s. It
-writes to `/tmp` because the probe runs with cwd at the repo root and a probe that leaves a
-PNG in the tree shows up in the diff.
+Every gate was run on the host before opening either PR, and every one is in the PR body as
+its real output, not as an assertion: frontend `81 passed` / `built in 1.02s`, python
+`173 passed, 3 deselected` and `3 passed` under `-m integration` with its `requires` probe
+exiting 0. CI then agreed — 7/7 and 5/5.
 
-**`python-harness`: `docker info` covers one of the gate's two requirements,** exactly as the
-last handoff suspected. It is not a theoretical gap — measured on this host with Docker
-running and the extra unsynced, `uv run pytest -m integration` errored on `import pydantic`
-in three files, because **pytest collects the whole `tests/` tree before any marker filter
-applies**, so a missing extra fails collection repo-wide rather than only in the integration
-tests. `docker info` would have called that environment met.
+**Two traps the last handoff named were live and both were avoided by following it.** The
+frontend `body` job wants all four template headings, and the PR was written from
+`.github/PULL_REQUEST_TEMPLATE.md` first time. No layer A content changed here, so no plugin
+version bump was owed.
 
-The probe is now `uv run python scripts/integration_env_probe.py`: `shutil.which` + `docker
-info` for the daemon, `importlib.util.find_spec` for `psycopg` and `pgvector`, and a stderr
-message naming both halves and the fix. Six tests, four mutations tried, all four caught.
-`scripts/` is a new directory, so it is named in mypy's `files` in the same change that
-created it — that gate's own caveat says to.
+**One new thing worth knowing: `frontend-harness` runs `lint-staged` on commit, and it runs
+`prettier --write` over staged JSON.** That is exactly the write that would reflow a vendored
+file and break its sha. It did not, because `prettier` honours `.prettierignore` and that file
+excludes `.agents/vendor/` — the caveat on the `prettier --check` gate is load-bearing at
+commit time, not only at gate time. `vendor_sync.py check` was re-run *after* the commit to
+prove it, and that is the check to repeat on any future vendor commit in that repo.
 
-### Proved end to end, in the real repos, not in fixtures
+### The stranding race, a fourth time
 
-| repo | environment | `--gate` result |
-| --- | --- | --- |
-| `frontend-harness` | browsers present | `pass`, exit 0, 2869 ms; verdict `pass` across all 7 gates |
-| `frontend-harness` | `PLAYWRIGHT_BROWSERS_PATH` empty | `unavailable`, `exit: null`, verdict `incomplete`, process exit 3 |
-| `python-harness` | Docker up + extra installed | `pass`, exit 0, 2009 ms; verdict `pass` across all 5 gates |
-| `python-harness` | `docker` off `PATH` | `unavailable`, `exit: null`, verdict `incomplete`, process exit 3 |
+`9663a1b` — the previous handoff's own last commit — was not in `origin/main`. `#36` merged
+while it was still in flight. `git merge-base --is-ancestor 9663a1b origin/main` exits 1, and
+`factory#37` recovers it. **Check the branch tip, not the PR state**, every time.
 
-In both `unavailable` cases the entry's `outputTail` carries the probe's own message, which
-is what a human reads out of the `gates-incomplete` block.
+### FRO-11's run row says `worktree = /Users/james/frontend-harness`, and that is not a bug
 
-### One defect found on the way, fixed in the same PR
+There is no `.factory/worktrees/FRO-11` on the host — `git worktree list` shows only FRO-7 —
+and `src/features/projects/ui/ProjectDetailPage.test.tsx`, which the run's log shows it
+editing, does not exist in the host checkout. The run is inside the `sbx` clone
+`factory-build-frontend-harness`, which mirrors the host path. A reader who sees that path in
+`runs.worktree` and panics about the main checkout will waste the time this paragraph saves.
+Host branch work in `frontend-harness` proceeded alongside the run with no interaction.
 
-`.factory/worktrees/<TICKET>/` is a full second copy of the repository, so **every ignore in
-`eslint.config.js` and `.prettierignore` is defeated one level down inside it** and the other
-checkout's findings are reported as this one's. `vite.config.ts` learned this in
-`frontend-harness@47ca3b5`; the other two had not. Reproduced with the FRO-7 worktree
-present — 2 eslint errors, 1 warning, 1 prettier warning, all four in the other checkout —
-and clean afterwards with the worktree still there. `python-harness` does not have the
-same hole: `ruff` and `mypy` both skip dot-directories.
+**Its PR will open with `freshness` red, and not for anything wrong with its work.** The run
+claimed a worktree pinned at `134b21c`, so it needs a rebase onto `v2` after `#47` merges.
 
-### A cost worth not repeating
+### One small follow-up taken
 
-`frontend-harness` CI has a **`body` job that checks the PR body against
-`.github/PULL_REQUEST_TEMPLATE.md`** and fails the PR when `## Summary`, `## What changed`,
-`## How to demo` or `## Evidence` is missing. One round trip was spent on it. `python-harness`
-has no such job — the asymmetry is real, and the frontend template is the stricter one.
-**Write the frontend PR body from the template, first time.**
-
----
+`.DS_Store` is now in `.gitignore` — it was the third session with two untracked files in
+`git status`.
 
 ## The next session's first job
 
-1. **Merge order matters now, and getting it wrong red-lines two repositories.**
+1. **Merge `frontend-harness#47` and `python-harness#69`, then rebase FRO-11's PR.**
+   Both re-vendor PRs are green and independent of each other. Until they land, `freshness`
+   is red on every open PR in both consumers, including any FRO-11 opens — a red that says
+   nothing about the code under review, which is the worst kind. `factory#37` is independent
+   and can merge whenever.
 
-   `harness#19` fixes the `requires` examples in `plugins/harness/schema/harness.config.schema.json`
-   — both of the ones `harness#18` shipped were measured this session to pass in the very
-   environment they exist to catch. It is documentation only, all three harness gates green.
+2. **BAC-6 is still waiting on James, not on an agent.** `blocked` at `review-finding` with
+   two `high` findings, and both exits from `blocked` are `unblock-is-a-judgement`. An agent
+   can read the findings and propose a repair; it cannot take the edge. Do not try.
 
-   **But `schema/` is vendored.** `vendor_sync.py check` compares vendored *content*, not the
-   sha: a commit that changes a vendored file is a **`stale pin` failure**, not the "behind but
-   nothing changed" note. So merging #19 turns the `freshness` job red on every open PR in both
-   consumers until each re-vendors.
+3. **Watch FRO-11 to `awaiting_human`.** It is the first unattended run to put the new
+   `playwright` `requires` probe through a sandbox, and item 4's frontend half turns on it.
+   Read its gate report the way BAC-6's was read: the `playwright` entry's `status` and its
+   `outputTail` are the evidence, and a `pass` there is what four green unit tests could not
+   supply.
 
-   The order is: **FRO-11's PR lands → merge `harness#19` → re-vendor both consumers as their
-   own pair of PRs.** `factory#36` is independent and can merge whenever.
-
-2. **Check the branch tip, not the PR state.** `factory#35` merged while two commits were still
-   in flight to its branch, and both were stranded — the third time this session's family of
-   races has appeared. `git merge-base --is-ancestor <sha> origin/main` answers it in one
-   command, and the remote ref is what makes recovery possible.
+4. **Check the branch tip, not the PR state.** Four times now. `git merge-base --is-ancestor
+   <sha> origin/main` answers it in one command.
 
 ## What Phase 5 has left — items 3 and 4, and how to actually finish them
 
@@ -284,8 +269,7 @@ None block the remaining Phase 5 work.
   path share their machinery elsewhere, so the divergence is worth closing.
 - Nothing surfaces "PR merged — ready to complete" in `factory status`. The tick could notice
   and *say* so without taking the edge, which stays reserved to `merge-is-james`.
-- `.DS_Store` and `.agents/.DS_Store` are untracked in the working tree and still want a
-  `.gitignore` line.
+- ~~`.DS_Store` wants a `.gitignore` line.~~ Done this session.
 
 ---
 
