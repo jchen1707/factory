@@ -2228,6 +2228,9 @@ between ticks, so stopping it is safe at any instant.
 **Human approval boundary:** James decides when the timer is loaded. Until then every run
 is manual.
 
+**Phase 4 — closed 2026-08-22.** Timer loaded, 120 consecutive ticks at exit 0, one ticket
+claimed and driven unattended through a detached agent run.
+
 ---
 
 ### Phase 4.5 — prove the pipeline unattended
@@ -2343,6 +2346,7 @@ its own reaches `awaiting_human` with a draft PR, and the transition log shows n
 
 **Repositories:** `factory@main`; both consumers `@v2` if a kit is adopted.
 
+- **Build the awaiting_human -> completed transition** — **done 2026-08-23**, factory@2f864fb. Nothing in src/factory/ reached COMPLETED, so a successful run sat at awaiting_human for ever and gc could never reclaim…  Built as factory complete: a human command, because merge-is-james reserves the hop; what it adds is gh pr view --json state as evidence.
 - Fill `config/projects.toml` with the **measured** template answer from P0-3.
 - If P0-3 found node or `uv` missing: author `kits/python.yaml` and `kits/frontend.yaml`
   in the factory repo, each extending `kits/base.yaml`, carrying `setup.install`,

@@ -108,6 +108,22 @@ This is also what makes `agent-review.yml` fire on open rather than waiting for 
 un-draft. `frontend-harness` has that workflow; `python-harness` does not (§2.1) — closing
 that asymmetry is named in the plan as Phase 5's.
 
+**Three test sites pin the current behaviour**, and each must be shown failing against the
+*new* intent before it is rewritten — a test edited to match whatever the code now does is
+the failure mode this repo has already paid for twice:
+
+| | |
+| --- | --- |
+| `tests/unit/test_pr_body.py:72` | `assert "draft" in body` |
+| `tests/integration/test_phase3.py:56` | `assert "gh pr create --draft" in planned` — the `--dry-run` fidelity check |
+| `tests/integration/test_phase3.py:191` | `test_deliver_opens_a_draft_pr_and_announces`, the name and its body |
+
+**A gap worth closing in the same change.** "The factory never merges" is asserted in two
+docstrings (`steps/complete.py:3`, `steps/deliver.py:4`) and nowhere else — `grep -rn "pr
+merge" src/factory tests` finds no test. Moving PRs to ready-for-review takes the factory one
+step closer to that boundary, which makes it the right moment to give the guarantee a test
+rather than a sentence.
+
 ### 2. The two environment assertions
 
 - **Frontend:** assert `pnpm exec playwright install chromium` has run before an `e2e` gate
