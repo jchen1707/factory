@@ -23,7 +23,11 @@ gone wrong.
 | `frontend-harness` | PR **#46**, `chore/vendor-gate-requires`, 3 commits, **all 7 checks green**, unmerged |
 | `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
 | vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
-| BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
+| BAC-6 | **running.** Old `suspended` run cancelled by James 2026-08-23; the daemon re-claimed it and it is at `implementing`, attempt 1 |
+| FRO-10 | tried as the frontend test and refused at intake, `already-implemented` — 0 tokens spent. The whole FRO backlog was exhausted; see item 4 |
+| FRO-11 | **new ticket, filed 2026-08-23**, all 11 intake conditions pass. Claimed by the daemon and `implementing` |
+| `harness#19` | open — the `requires` examples fix. **Do not merge before FRO-11's PR lands**; see below |
+| `factory#36` | open — two handoff commits stranded when #35 merged ahead of a push |
 
 **Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
 closed.** Nothing else in this document depends on them.
@@ -103,43 +107,130 @@ has no such job — the asymmetry is real, and the frontend template is the stri
 
 ## The next session's first job
 
-1. **If #46 and #68 have merged, item 2 is closed.** Check with `gh pr view`, and check the
-   *branch tip* rather than the PR state — a previous session lost two commits to a merge
-   that raced the last push by 24 seconds.
-2. **Then fix layer A's schema example.** `plugins/harness/schema/harness.config.schema.json`
-   offers `["pnpm", "exec", "playwright", "--version"]` as an example `requires` value, and
-   this session measured that it does not detect a missing browser. It is a docstring
-   teaching the wrong probe. Two candidate replacements: the screenshot argv now in
-   `frontend-harness`, or dropping the example to the `docker info` one alone.
+1. **Merge order matters now, and getting it wrong red-lines two repositories.**
 
-   **This was deliberately not done this session**, because `vendor-freshness.yml` in both
-   consumers compares the vendored pin against `harness@v2` HEAD; a harness commit pushed
-   while #46 and #68 were open would have made both PRs stale. Do it after they merge, and
-   re-vendor as its own pair of PRs.
+   `harness#19` fixes the `requires` examples in `plugins/harness/schema/harness.config.schema.json`
+   — both of the ones `harness#18` shipped were measured this session to pass in the very
+   environment they exist to catch. It is documentation only, all three harness gates green.
 
----
+   **But `schema/` is vendored.** `vendor_sync.py check` compares vendored *content*, not the
+   sha: a commit that changes a vendored file is a **`stale pin` failure**, not the "behind but
+   nothing changed" note. So merging #19 turns the `freshness` job red on every open PR in both
+   consumers until each re-vendors.
 
-## What Phase 5 has left
+   The order is: **FRO-11's PR lands → merge `harness#19` → re-vendor both consumers as their
+   own pair of PRs.** `factory#36` is independent and can merge whenever.
 
-### 3. First layer-C product — not started, and it needs James twice
+2. **Check the branch tip, not the PR state.** `factory#35` merged while two commits were still
+   in flight to its branch, and both were stranded — the third time this session's family of
+   races has appeared. `git merge-base --is-ancestor <sha> origin/main` answers it in one
+   command, and the remote ref is what makes recovery possible.
+
+## What Phase 5 has left — items 3 and 4, and how to actually finish them
+
+Read this whole section before touching either. Both were re-measured against the code on
+2026-08-23, and the previous handoff's framing of item 3 was **wrong in James's favour**:
+less of it is missing than that document claimed.
+
+### 4. The end-to-end tests — both stacks are now running
+
+**The python half ran end to end and is the strongest evidence Phase 5 has produced.**
+BAC-6, attempt 1, unattended, 2026-08-23:
+
+```
+approved -> claimed -> context_loaded -> sandbox_creating -> sandbox_ready
+  -> worktree_ready -> implementing (25 min) -> verifying -> reviewing -> blocked
+```
+
+Gate report **verdict: pass**, all five gates. It stopped at `review-finding` on two `high`
+findings, both of them the reviewer catching vacuous tests — gold-set tests asserting label
+counts rather than query-to-document mapping, and PDF tests asserting page counts rather than
+page content. That is the pipeline working, not failing: the stop is a human judgement, and
+`unblock-is-a-judgement` reserves both exits from `blocked`.
+
+**Read the gate report on that run before anything else.** `pytest -m integration` came back
+`pass`, and the worktree's vendored pin is `134b21c` with `requires` at line 77 of its
+`harness.config.json` — python-harness#68 merged at 15:38 UTC and the run claimed at 15:44.
+So **item 2's probe was exercised inside a real unattended sandbox and its requirement was
+met**: `sbx` gives the VM its own Docker daemon, exactly as §19 predicted. Four green unit
+tests and two hand measurements did not prove that. This run did.
+
+**The frontend half needed a ticket that did not exist, and now has one.**
+
+The FRO backlog was surveyed against the base ref and none of it could serve — recorded
+below because the survey is what cost the time, not the conclusion:
+
+| ticket | state | on `v2`? | why it could not be the test |
+| --- | --- | --- | --- |
+| FRO-1 | Todo | yes | parent spec — `no-parent-spec`, permanently and correctly |
+| FRO-2, 3, 4 | Canceled | no | `wontfix` (reasonless); superseded by FRO-5/6/7 |
+| FRO-5, 6, 7, 10 | Done | yes | `already-implemented` at condition 10 |
+| FRO-8 | Todo | no | `wontfix`, no `ready-for-agent`; duplicate of FRO-10, work already in the tree |
+| FRO-9 | Todo | no | no labels at all, and it is FRO-10's parent spec |
+
+FRO-10 was tried first, as the smallest candidate, and intake refused it in **0 tokens**:
+`approved -> blocked (auto) [already-implemented]` — condition 10
+(`intake/linear.py:476`), the one P0-11 added. Two things that run settled:
+
+- **A run row with a reason proves `needs-info` was absent at intake.** It is a *reasonless*
+  condition, and `eligibility_verdict` makes a reasonless failure win, which produces no run
+  row at all — just a log line. The label now on FRO-10 was written back by `steps/block.py`
+  (§13.1), not left there by a human. Do not misread it.
+- The previous handoff's "`needs-info` is currently cleared" was true of **BAC-6 only**.
+
+**FRO-11, "See one project at `/projects/:id`", was filed 2026-08-23 and all 11 conditions
+pass** — checked against the live ticket and the real repo *before* the daemon saw it, with
+`evaluate_eligibility` called directly. The daemon claimed it and it is `implementing`.
+
+The work is real rather than invented: FRO-1 put the detail screen out of scope and said the
+link target "can be a stub route", and it still is one — `ProjectDetailStub.tsx` renders the
+id back at the user and reads nothing, `ProjectsRepository` declares `listProjects` only, and
+`src/test/msw/handlers.ts` serves `/projects` only. So condition 10 is safe by construction,
+and the slice exercises the full frontend gate set **including the browser suite** — which
+makes FRO-11 the first run to put the new `playwright` `requires` probe through an unattended
+sandbox.
+
+**Recorded honestly: the factory did not file it, and neither did the `mattpocock-skills`
+system.** James authenticated the personal Linear MCP and asked for it directly, and it was
+created through that. §24.1 and §13.1's create-issue-less keychain key are both intact — the
+factory still cannot file a ticket, and did not. But the ticket in front of the frontend
+stack's first end-to-end run came from an agent, not from the ticket system, and a reader
+comparing this to §24.1 deserves to know that rather than infer it.
+
+**What is left on item 4:** BAC-6 needs a human on its two `high` findings, and FRO-11 needs
+to reach `awaiting_human`. Then the monorepo dispatch test, which still cannot be written
+until item 3 exists.
+
+### 3. First layer-C product — less is missing than the last handoff said
 
 `python3 /Users/james/harness/scripts/new_project.py create <name> --api python --web react
---agnostic`, then a registry row with `stack = "monorepo"`. §19's own approval boundary
-reserves **the first layer-C repository's creation** to James, and `stack` accepts only
-`python` / `frontend` today, so this is a real `src/factory/` change and not only scaffolding.
-Asked and answered on 2026-08-23: **not now.**
+--agnostic`, then a registry row with `stack = "monorepo"`.
 
-### 4. Tests — blocked, and only James can clear it
+**Correction, measured this session: `stack = "monorepo"` needs no `src/factory/` change to
+be *accepted*.** `registry.py:190` reads it as a bare `str(raw["stack"])` — there is no enum
+and no validation — and the two places that branch on the value already anticipate a
+monorepo:
 
-One ticket per stack end to end, plus a monorepo dispatch test proving a CSS-only change runs
-no Python gate. Unchanged from the last handoff: Todo holds only BAC-1 and FRO-1, and both are
-correctly and permanently refused at intake with `no-parent-spec` because they *are* the parent
-specs. Moving a `Canceled` ticket to `Todo` works — BAC-6 did exactly that on 2026-08-23 and
-all 11 intake conditions passed, which settled that **a `Canceled` parent satisfies the
-parent-spec condition**. It is a Linear move, not a code problem: §24.1, the factory reads
-tickets and never files them.
+- `harness.py:34`, `EXPECTED_RUNNER = {"python": "uv", "frontend": "pnpm"}`. A stack that is
+  not in it makes `cross_check_stack` return early, and `harness.py:169` returns early for
+  `config.is_monorepo` regardless — with the comment "a monorepo root declares `apps` and no
+  gates of its own; the dispatch in layer A resolves them per app, so there is nothing here
+  to cross-check."
+- Layer A already carries the dispatch. `apps` is in the schema, `is_monorepo` is
+  `bool(self.apps)` (`harness.py:76`), and `load_harness_config` refuses a config with
+  neither `gates` nor `apps` (`harness.py:131`).
 
-`needs-info` is currently cleared by James.
+**What is genuinely missing is one line and two acts:**
+
+- `_SENSITIVE_DIRS` (`steps/review.py:87`) has `python` and `frontend` entries and no
+  `monorepo` one, so Tier-2's sensitive-path trigger would be empty for the new project.
+  That is carried defect 4's family — the `frontend` entry already matches nothing — so fix
+  the two together rather than adding a third guess.
+- **`new_project.py create` does `git init` and commits locally. It does not create a GitHub
+  repository**, and the registry row requires a `remote`. Someone has to `gh repo create`.
+- §19's approval boundary reserves **the first layer-C repository's creation** to James, and
+  he has to choose the name. Asked on 2026-08-23 and answered **not now** — so do not
+  scaffold anything until he says otherwise.
 
 ---
 
