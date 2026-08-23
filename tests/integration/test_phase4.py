@@ -871,7 +871,45 @@ def test_resume_authorise_reauthorises_a_failed_run(ctx: Context) -> None:
     ]
     # `failed -> resumable` is James's explicit act, then the ladder takes over.
     assert (str(State.FAILED), str(State.RESUMABLE), "human", "reauthorise-spend") in hops
-    assert ctx.state is State.IMPLEMENTING  # restart (no session captured) -> a fresh attempt
+    # Re-entered at the state that actually died, which here is `verifying`. This run
+    # orphaned mid-verify: its implementation is intact and only the gate report never
+    # finished, so re-running the report is both the correct phase and the one that
+    # spends nothing on a model. Before the §16.4 fix this landed on `implementing`,
+    # for the wrong reason -- `state_before(RESUMABLE)` answered `failed` for a
+    # re-authorised run, and `failed` is not one of the two states that re-run detached.
+    assert ctx.state is State.VERIFYING
+
+
+def test_reauthorising_a_run_whose_ladder_is_spent_actually_starts_an_attempt(
+    ctx: Context,
+) -> None:
+    # FRO-11's exact shape, 2026-08-23: three attempts spent, `resumable -> failed
+    # [ladder-exhausted]`, and `factory resume FRO-11 --authorise` wrote
+    # `failed -> resumable [reauthorise-spend]` followed by a second
+    # `resumable -> failed [ladder-exhausted]` **in the same second**. The authorisation
+    # bought nothing, because the next decision read the run's lifetime attempt count.
+    _start_an_attempt(ctx, finish=False)
+    ctx.store.update_run(ctx.run.id, attempt=3)
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+    reap_step.reap(ctx)
+    _fake(ctx).poll_status = None
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.RESUMABLE,
+        to_state=State.FAILED,
+        actor="auto",
+        rule="ladder-exhausted",
+    )
+    ctx.refresh()
+
+    recovery.resume(ctx, authorise=True)
+
+    assert ctx.state is State.IMPLEMENTING
+    hops = [
+        (row["from_state"], row["to_state"], row["rule"])
+        for row in ctx.store.transitions(ctx.run.id)
+    ]
+    assert (str(State.RESUMABLE), str(State.FAILED), "ladder-exhausted") not in hops[-1:]
 
 
 def test_suspend_comments_once_and_resume_does_not_repeat(ctx: Context) -> None:

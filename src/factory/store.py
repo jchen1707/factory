@@ -625,6 +625,19 @@ class Store:
         ).fetchone()
         return int(row["n"]) if row else 0
 
+    def attempts_since(self, run_id: str, at: int) -> int:
+        """Attempts this run started at or after `at` — §16.4's re-authorised ladder.
+
+        Counted from `attempts.started_at` rather than from the run's attempt number,
+        because the number is a lifetime counter and the ladder after a re-authorisation
+        is not.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE run_id = ? AND started_at >= ?",
+            (run_id, int(at)),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def resumable_reentries(self, run_id: str, from_state: State) -> int:
         """How many times a run left `from_state` for `resumable`.
 

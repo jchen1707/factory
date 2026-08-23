@@ -106,6 +106,34 @@ def test_the_per_run_ceiling_stops_a_run_that_cycled_through_states() -> None:
     assert result.reason == "max-total-attempts"  # type: ignore[attr-defined]
 
 
+# --------------------------------------------------------------------------------
+# §16.4 — what James's `--authorise` actually buys
+# --------------------------------------------------------------------------------
+
+
+def test_reauthorising_spend_starts_the_ladder_again() -> None:
+    # §16.4: "A `failed` requires `factory resume <TEAM-NUM> --authorise`, which is
+    # James's explicit act." Measured on FRO-11, 2026-08-23, that act was inert: the
+    # command wrote `failed -> resumable [reauthorise-spend]` and the very next decision
+    # read the run's lifetime attempt count, found rung 4, and wrote `resumable -> failed
+    # [ladder-exhausted]` in the same second. An edge that returns you to the state you
+    # left, before anything runs, is not an edge.
+    #
+    # The ladder counts attempts since the authorisation; the run's lifetime ceiling is
+    # what still bounds it, and it is passed separately for exactly that reason.
+    result = verdict(0, total_attempts_spent=3)
+    assert result.disposition is Disposition.RESTART  # type: ignore[attr-defined]
+    assert result.rung == 1  # type: ignore[attr-defined]
+
+
+def test_reauthorising_cannot_outrun_the_per_run_ceiling() -> None:
+    # Otherwise `--authorise` would be an unbounded budget: §16.4's `max_total_attempts`
+    # is the number that makes it a re-authorisation rather than a blank cheque.
+    result = verdict(0, total_attempts_spent=5)
+    assert result.disposition is Disposition.FAIL  # type: ignore[attr-defined]
+    assert result.reason == "max-total-attempts"  # type: ignore[attr-defined]
+
+
 def test_the_backoff_is_zero_sixty_three_hundred_and_then_stops_growing() -> None:
     assert [backoff_seconds(n) for n in (0, 1, 2)] == [0, 60, 300]
     # Not exponential beyond that: a fourth try is a `failed`, not a longer wait, so
