@@ -1,11 +1,29 @@
 # Phase 5 — where it stands, and what to do next
 
-Rewritten 2026-08-23, after §19 Phase 5's item 1 landed. The previous version (written after
-`factory complete` landed) is in git history at `df057b0`; everything it listed under "Do
-these first" is settled and recorded below.
+Rewritten 2026-08-23, after item 2's mechanism landed in layer A. The previous version is in
+git history at `9cf57d2`.
 
 **§19 Phase 5 in `SOFTWARE-FACTORY-PLAN.md` is the authority.** Everything here either points
 at it or records a fact measured on 2026-08-23 that §19 does not carry.
+
+---
+
+## Read this before trusting any file path in this repo
+
+**There are two plan files, and one of them is stale.**
+
+| | |
+| --- | --- |
+| `SOFTWARE-FACTORY-PLAN.md` (repo root, 179k) | **the authority.** `AGENTS.md:4` names it; `harness.config.json` protects it |
+| `.agents/plans/software-factory-plan.md` (169k) | **a stale condensed copy.** Last written 2026-08-23 01:24, before the session's corrections |
+
+macOS is case-insensitive, so `SOFTWARE-FACTORY-PLAN.md` and `software-factory-plan.md` look
+like the same file and are not. This session read the stale copy first and concluded that the
+`agent-review.yml` corrections had never been applied — they had, to the authority. The
+previous handoff flagged this drift as "do this first"; it is still unreconciled, and it has
+now cost two sessions. **Decide: delete the condensed copy, or put a one-line "NOT CANONICAL —
+see /SOFTWARE-FACTORY-PLAN.md" header on it.** It is not a protected file, so an agent can do
+either on your word.
 
 ---
 
@@ -13,133 +31,121 @@ at it or records a fact measured on 2026-08-23 that §19 does not carry.
 
 | | |
 | --- | --- |
-| `main` | `5ee99c2` + two docs commits, **pushed** |
-| `feat/pr-opens-ready-for-review` | `8f7b9f6`, **local and unpushed**, two commits — item 1. No PR |
-| suite | 532 passed, mypy clean on 71 files, ruff clean |
-| `awaiting_human` | **empty** |
+| `main` | `1abfc83`, **pushed**. Item 1 merged as factory#32 |
+| suite | 533 passed, mypy clean on 71 files, ruff check + format clean |
+| open PR (factory) | **#33** — `feat/unavailable-gate-names-its-requirement`, pushed, ready |
+| open PR (harness) | **#18** — `feat/gate-requires-probe` on `v2`, pushed, ready. **Yours to merge** |
+| `awaiting_human` | empty |
 | runs | 4 `completed`, 30 `cancelled`, 8 `blocked`, 1 `suspended` |
 | BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
 | daemon | loaded, ticking every 60 s, running `main` |
-
-**First thing to decide:** the branch above is unpushed and has no PR. It is the factory's own
-repo, so the merge is James's the same way every other one is.
 
 ---
 
 ## What landed this session
 
-### §19 Phase 5 item 1 — the PR opens ready for review, not as a draft (§24.8)
+### Item 1 is closed
 
-`69e7ead`. The previous handoff tabled six lines; `grep -rni draft` found **ten**. The four it
-missed were all user-facing text that would have gone on describing a draft the argv no longer
-asks for: three `cli.py` prints, the `awaiting_human` Linear comment in `block.py`, a `review.py`
-comment, and two runbook paragraphs. *Grep the word, not the table.*
+factory#32 merged. `main` carries it. Nothing left here.
 
-**The dry-run fidelity property is a test now, not a convention.**
-`test_the_dry_run_preview_names_the_flags_gh_pr_create_actually_carries` measures **both**
-halves — the argv from a captured `create_pr`, the preview from a real dry run — and asserts the
-flag sets are equal. Proved by mutation: removing `--draft` from the preview alone fails it with
-`Extra items in the left set: '--draft'`. It is an invariant, so it stays green through the
-change; that is why it had to be mutation-proved rather than trusted.
+### Item 2 — the two environment assertions: the mechanism is built
 
-All three rewritten tests were shown red against the new intent before they were touched.
+**The design tension the previous handoff named is resolved, and the reasoning changed on one
+point worth keeping.** That handoff framed option (a) as "a machine-readable field in
+`harness.config.json` plus a generic probe in `steps/sandbox.py: preflight`". The field is
+right; **the preflight is the wrong home**, and reading §19's own sentence is what settles it:
 
-### "The factory never merges" has a test
+> otherwise the report says `unavailable`, not `pass`
 
-`test_the_factory_never_merges_a_pull_request` reads the set of `gh` verb pairs off `src/` and
-compares it against an allow-list of five — derived, not enumerated, so an unaccounted verb fails
-rather than passing unnoticed. A second test closes the other spelling of the same act,
-`gh api --method PUT .../pulls/{n}/merge`, where `merge` is a path segment and there is no argv
-token to grep. Both mutation-proved, along with an unlisted `gh pr close`.
+Only layer A produces that report. `preflight` can record a ledger check by name — it cannot
+make a gate come back `unavailable`. So the probe went to `gate_report.mjs`.
 
-**A correction to the previous handoff:** it claimed `grep -rn "pr merge" src/factory tests`
-found no test. The pre-existing `test_no_forbidden_git_or_gh_argument_appears` *did* already catch
-the argv form — it spells the token `'"merge"'`, which that grep could not match. The gap was
-narrower than stated; the REST route and the open verb surface were the parts genuinely uncovered.
+**harness#18 — `requires`.** An optional argv beside `caveat`, run immediately before the gate
+and only when the gate was going to run anyway. Non-zero or unspawnable, and the gate is
+reported `unavailable` and **never runs**, feeding `verdict: incomplete` unchanged.
 
-### §2.1's `agent-review.yml` asymmetry does not exist, and draft was never a trigger
+```json
+{ "name": "playwright", "kind": "e2e", "run": ["pnpm", "test:e2e"],
+  "requires": ["pnpm", "exec", "playwright", "--version"],
+  "caveat": "needs browsers installed: pnpm exec playwright install chromium." }
+```
 
-`8f7b9f6`, applied to the authority by James. **Measured 2026-08-23, so nobody re-derives it:**
+Three judgments, each pinned by a test, each mutation-proved:
 
-- `python-harness` **has** `.github/workflows/agent-review.yml`, stack-correct with the `BAC`
-  branch pattern. It landed 2026-08-21 in `bc802ca` as a Phase 3 prereq. §2.1 and three "**New**"
-  file rows in §11/§19 were stale and now say landed.
-- Both harnesses' copies are `on: pull_request: types: [labeled]` behind
-  `if github.event.label.name == 'agent-review'` — **label-gated on purpose**, because it is
-  billed model spend. Un-drafting never fired it.
-- `ci.yml` in both is a bare `on: pull_request:` with no type filter, so it ran on drafts already.
-- Nothing in either `.github/` mentions `ready_for_review` or `draft`.
+- The probe runs **after** `disabled` / `skipped_unchanged` / `not_applicable`. Probing a gate
+  those already settled spends a subprocess on a question nobody asked — and on the opt-in
+  kinds that is the common case, not the rare one.
+- An **unspawnable probe is unmet, not met**. The probe is the cheaper of the two commands; if
+  it cannot start, the gate's toolchain is not there either.
+- A **met requirement leaves `fail` alone**, so real code defects still reach the agent.
+  Without that, this hides the failures it exists to distinguish itself from.
 
-So §19's "which is also what makes `agent-review.yml` fire on open" was false twice over. The
-bullet now carries the real reason: "draft" is GitHub's word for work in progress, and by delivery
-the gates are green and the two-tier review is clean; a draft takes no review request and cannot
-be merged, so un-drafting was a manual step carrying no information in front of two acts that are
-James's regardless.
+`probeGate` is injected beside `runGate` and defaults to met, so every config with no
+`requires` behaves exactly as before. `verify.mjs` needed no change — `STOP_KINDS` excludes
+`e2e`/`integration`, so the Stop hook never runs an opt-in gate.
 
-**Deliberately left alone:** the "draft PR" in §19's Phase 3 and 4.5 *evidence* rows
-(`frontend-harness#45`, the `awaiting_human` transition log). Those record runs that really did
-open drafts. Rewriting measured evidence to match today's code is the failure this plan's own
-method section warns about. §19's Phase 3 section still says "opened as a **draft** in this
-phase", which is correctly scoped and left as written.
+Six mutations, all caught: removing the probe block, ignoring its result, treating an
+unspawnable probe as met, carrying the probe's exit code onto the entry, probing an empty
+`requires`, and hoisting the probe above the dispatch decisions.
 
-### How to edit the authority without burning a session on it
+**factory#33 — the block message names what to install.** `gates-incomplete` is a
+human-judgement state and the human's next act is to install something; the message named the
+gate and left the *what* in the artifact. It now carries the caveat, attached to its gate, and
+only for gates that did not run. This matters more now: a missing tool used to arrive as
+`fail` and now arrives as `unavailable`, so this is the message it actually reaches.
 
-The previous handoff said to budget for this. **The route that works:** write the edits as a
-Python script to the scratchpad that asserts each FIND string appears **exactly once** before
-touching anything — all-or-nothing, backs up first, no-op on re-run — then hand James one
-`! python3 <path>` line. He runs it; that is the keystroke the protection is asking for, and it
-costs him one command instead of N find-and-replaces. Do **not** try to route around the hook or
-the classifier: silently defeating the enforcement layer is exactly `p0-6-codex-trust.md`.
+**`src/factory/` needed no other change, and that was verified rather than assumed.**
+`unavailable` → `verdict: incomplete` → `Blocked("gates-incomplete")`, which blocks and does
+*not* loop back to the agent (`steps/verify.py:327`). That is already the wanted behaviour.
 
 ---
 
-## What Phase 5 has left, in order
+## What item 2 has left — this is the next session's first job
 
-### 2. The two environment assertions ← **next**
+**Everything remaining is downstream of `harness#18` merging.** Nothing below can be done
+before it, because adding `requires` to either config would fail validation against the
+vendored schema.
 
-§19: assert the tool is present **before** an opt-in gate is *required*, so the report says
-`unavailable` rather than running and failing.
+1. **Merge `harness#18`** (yours — §19 reserves every layer-A merge).
+2. **Re-vendor into both consumers**, one at a time: `python3 /Users/james/harness/scripts/vendor_sync.py sync`
+   in the consumer, then commit the bumped pin. Current pin in both is `3248fbe`.
+3. **Add the two `requires` argvs**, in the consumer repos, on `v2`:
 
-- **Frontend:** `pnpm exec playwright install chromium` has run. This is the failure mode that
-  killed three FRO-7 runs.
-- **Python:** Docker is available before a python `integration` gate is required. `grep -rn docker
-  src/factory` is still empty. `sbx` gives the VM its own Docker daemon, so this is a check, not a
-  blocker.
+   | repo | gate | `requires` |
+   | --- | --- | --- |
+   | `frontend-harness` | `playwright` | `["pnpm", "exec", "playwright", "--version"]` |
+   | `python-harness` | `pytest -m integration` | `["docker", "info"]` |
 
-**Two facts that shape this, both read on 2026-08-23 — start here rather than re-deriving:**
+   **Check the python one against the real config first.** `python-harness`'s integration
+   caveat says "needs Docker **and the app extra**", and `docker info` probes only the first
+   half. Either the probe covers both or the caveat should stop claiming it does.
+4. **Prove it end to end, not in a fixture.** The method section below is not decoration: run
+   `gate_report.mjs --json --gate playwright` in the frontend sandbox with chromium *actually
+   absent*, and read the status. That is the only evidence that the mechanism does what four
+   green unit tests claim.
 
-1. **The existing caveat machinery is reactive, and this item is not.** `verify.collect`'s
-   `env-gate-failed` (`steps/verify.py:284`) fires *after* the gate ran and failed, when every
-   failing gate carries a `caveat`. Item 2 wants the assertion *before* the gate is required. The
-   two are complementary; do not mistake one for the other.
-2. **`steps/sandbox.py: preflight` is the shaped home for it.** It is already a list of positive
-   assertions (`preflight(ctx, spec)`, `sandbox.py:111`), check 1 is literally a toolchain probe,
-   and each check is recorded to the ledger by name. Adding two more fits without inventing a
-   mechanism.
+---
 
-**The design tension to resolve before writing code — this is the whole difficulty.** AGENTS.md's
-ownership rule says the factory holds no gate command, and that *"a gate name appearing anywhere
-in `src/` is a review failure; `uv` and `pnpm` appear only as expectations to cross-check"*. So
-`docker` and `chromium` must not be hardcoded into `src/factory/`.
+## The authority edit, ready for one keystroke
 
-The target repos already declare the condition — but in **prose**:
+§19 needs the decision recorded. The script is written and **validated against a copy** —
+applies cleanly, idempotent on re-run, refuses unless every FIND is unique, backs up first:
 
-| repo | gate | `caveat` |
-| --- | --- | --- |
-| `python-harness` | `pytest -m integration` | "needs Docker and the app extra." |
-| `frontend-harness` | `playwright` | "needs browsers installed: pnpm exec playwright install chromium." |
+```
+! python3 /private/tmp/claude-501/-Users-james-factory/cbbbf1f4-7c6a-4f7b-9449-de4a5e6046f6/scratchpad/apply-plan-19.py
+```
 
-Prose is not probeable. The two honest options:
+Two edits: the Phase 5 bullet gains a paragraph recording that the mechanism is layer A's
+`requires` and why not `src/factory/` or `preflight`; §20.2's harness file table gains the
+schema's second optional key. **If that scratchpad is gone** (it is session-scoped), the
+content is in this file's "What landed" section — re-author it rather than skipping it.
 
-- **(a) Add a machine-readable field to `harness.config.json`** — a `requires` or `probe` argv
-  beside the existing `caveat` — and have the preflight run whatever the config names. Generic
-  mechanism in layer D, stack-specific data in layer B. **This is the one that respects the
-  ownership rule**, and it means the change is layer A/B *and* factory, not factory alone. Budget
-  for a `harness@v2` plugin bump plus a re-vendor into both consumers.
-- **(b) Hardcode the two probes in `src/factory/`.** Faster, and a review failure by this repo's
-  own stated rule. Named here only so nobody rediscovers it as an idea.
+Do **not** try to route around the hook or the classifier. Silently defeating the enforcement
+layer is exactly `p0-6-codex-trust.md`.
 
-Whichever is chosen, §19 needs a line saying so — use the script route above.
+---
+
+## What Phase 5 has left after item 2
 
 ### 3. First layer-C product
 
@@ -149,32 +155,32 @@ Whichever is chosen, §19 needs a line saying so — use the script route above.
 
 ### 4. Tests
 
-One ticket per stack end to end, plus a monorepo dispatch test proving a CSS-only change runs no
-Python gate. **Blocked — see below.**
+One ticket per stack end to end, plus a monorepo dispatch test proving a CSS-only change runs
+no Python gate. **Blocked — see below.**
 
 ---
 
 ## The blocker only James can clear
 
-**Phase 5's end-to-end tests need one eligible ticket per stack, and none exists.** Todo holds only
-BAC-1 and FRO-1, and both are refused at intake with `no-parent-spec` — correctly and permanently,
-because they *are* the parent specs (`parent_identifier` is empty and every other ticket in their
-teams names one of them).
+**Phase 5's end-to-end tests need one eligible ticket per stack, and none exists.** Todo holds
+only BAC-1 and FRO-1, and both are refused at intake with `no-parent-spec` — correctly and
+permanently, because they *are* the parent specs (`parent_identifier` is empty and every other
+ticket in their teams names one of them).
 
-Moving a `Canceled` ticket to `Todo` works: BAC-6 did exactly that on 2026-08-23 and all 11 intake
-conditions passed, which settled the open question — **a `Canceled` parent does satisfy the
-parent-spec condition.** So this is a Linear move, not a code problem, and not work to code
+Moving a `Canceled` ticket to `Todo` works: BAC-6 did exactly that on 2026-08-23 and all 11
+intake conditions passed, which settled the open question — **a `Canceled` parent does satisfy
+the parent-spec condition.** So this is a Linear move, not a code problem, and not work to code
 around: §24.1, the factory reads tickets and never files them.
 
-`needs-info` is currently **cleared** by James. Item 2 needs no ticket at all, so this does not
-block starting.
+`needs-info` is currently **cleared** by James. Item 2's remaining steps need no ticket, so
+this does not block them.
 
 ---
 
 ## Open decisions
 
-**Completing a run resets its `gc` clock, and nobody has decided whether that is right.** Carried
-forward unchanged — it is a decision, not a bug, and **nothing was changed**.
+**Completing a run resets its `gc` clock, and nobody has decided whether that is right.**
+Carried forward unchanged — it is a decision, not a bug, and **nothing was changed**.
 
 `gc.py:97` computes age from `run.updated_at`, and completing *writes* the run, so all four
 completed runs went to `0.0` days old and `worktree_days = 7` (`config/projects.toml:58`) holds
@@ -182,52 +188,64 @@ them for a fresh week.
 
 - *For:* the floor is a safety margin after a run becomes collectable, and it only becomes
   collectable at the merge. §16.5's opening line says every rule is a floor, never a promise.
-- *Against:* the run stopped being worked on at `awaiting_human`. Late bookkeeping granting a fresh
-  week is not what "kept for 7 days" reads like.
+- *Against:* the run stopped being worked on at `awaiting_human`. Late bookkeeping granting a
+  fresh week is not what "kept for 7 days" reads like.
 
 Changing it means measuring from the `pr_ready -> awaiting_human` transition rather than
-`updated_at` — small in `_collect_run`, but it changes what §16.5 *means*. Two worktrees wait on
-it: `python-harness/.factory/worktrees/BAC-4` (latent — pytest does not glob into `.factory/`) and
-`frontend-harness/.factory/worktrees/FRO-7`.
+`updated_at` — small in `_collect_run`, but it changes what §16.5 *means*. Two worktrees wait
+on it: `python-harness/.factory/worktrees/BAC-4` (latent — pytest does not glob into
+`.factory/`) and `frontend-harness/.factory/worktrees/FRO-7`.
 
 ---
 
 ## Defects carried into the rest of Phase 5
 
-None block starting. All four are unchanged from the previous handoff.
+None block the remaining item-2 steps. All four unchanged.
 
-1. **`cancel` cannot restore a tracker it did not set — which is the successful case.** A run that
-   opened a PR has been moved to `In Review` by the GitHub integration, so cancelling it leaves the
-   ticket at a non-`Todo` state and the poller skips it for ever. It prints `left <T> at '<state>'
-   (not the state the factory set)` and nothing says the ticket is now unclaimable.
+1. **`cancel` cannot restore a tracker it did not set — which is the successful case.** A run
+   that opened a PR has been moved to `In Review` by the GitHub integration, so cancelling it
+   leaves the ticket at a non-`Todo` state and the poller skips it for ever. It prints
+   `left <T> at '<state>' (not the state the factory set)` and nothing says the ticket is now
+   unclaimable.
 2. **The re-run ceiling counts orphans, not attempts.** `resumable_reentries` counts
-   `<state> -> resumable` transitions, so a deterministic environment failure burns the budget in
-   three ticks and fails a run whose work is good. An attempt that dies before its first heartbeat
-   never ran. **Note this one is adjacent to item 2** — a missing chromium is exactly such a
-   deterministic environment failure.
-3. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not codex,
-   so neither `pkill -f "codex exec"` nor `pkill -x codex` matches it. Pre-existing.
-4. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when the
-   attempt directory is missing.
+   `<state> -> resumable` transitions, so a deterministic environment failure burns the budget
+   in three ticks and fails a run whose work is good. An attempt that dies before its first
+   heartbeat never ran. **`requires` narrows this but does not close it** — a missing tool now
+   blocks at `gates-incomplete` instead of looping, but every other deterministic environment
+   failure still burns the budget.
+3. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not
+   codex, so neither `pkill -f "codex exec"` nor `pkill -x codex` matches it. Pre-existing.
+4. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when
+   the attempt directory is missing.
 
 ## Small follow-ups, deliberately not built
 
-- The §18.5 console has Suspend and Resume but no **Complete**. The CLI and the console POST path
-  share their machinery elsewhere, so the divergence is worth closing.
-- Nothing surfaces "PR merged — ready to complete" in `factory status`. The tick could notice and
-  *say* so without taking the edge, which stays reserved to `merge-is-james`.
-- A stale `type: ignore` in `test_sbx.py:421` was failing mypy on `main` before this session and is
-  cleared in `69e7ead`. Mentioned only so it is not mistaken for part of item 1.
+- The §18.5 console has Suspend and Resume but no **Complete**. The CLI and the console POST
+  path share their machinery elsewhere, so the divergence is worth closing.
+- Nothing surfaces "PR merged — ready to complete" in `factory status`. The tick could notice
+  and *say* so without taking the edge, which stays reserved to `merge-is-james`.
+- `.DS_Store` and `.agents/.DS_Store` are untracked in the working tree and probably want a
+  `.gitignore` line.
 
 ---
 
 ## The method, unchanged — and it paid again this session
 
-Every defect in the last four sessions was found by executing the thing, never by reading about it.
-This session the previous handoff was wrong on three counts, and each was caught by running
-something: the six-line table (it was ten), the missing merge test (it partly existed), and the
-`agent-review.yml` asymmetry and its whole justification (neither existed).
+Every defect in the last five sessions was found by executing the thing, never by reading about
+it. This session it caught three things the handoff would otherwise have carried forward:
 
-**A green suite is a claim, not evidence.** Before believing a test, stash or mutate the source and
-watch it fail; check the test sits at the altitude the defect lives at, not one layer above it.
+- **The previous handoff's "first thing to decide" was already decided.** It said the item-1
+  branch was "local and unpushed, no PR". `gh pr list` said PR #32, `MERGED`. One command.
+- **The stale plan duplicate.** Reading `.agents/plans/software-factory-plan.md` produced a
+  confident, wrong conclusion that the `agent-review.yml` corrections had never landed. `git
+  show --stat` on the commit named a different filename, which is the only reason it surfaced.
+- **The handoff's own design recommendation was half wrong.** `preflight` is genuinely the
+  shaped home for a positive assertion — and it still cannot satisfy the bullet, because the
+  bullet is about the *report*. Re-reading the authority beat re-reading the summary of it.
+
+**A green suite is a claim, not evidence.** Before believing a test, stash or mutate the source
+and watch it fail; check the test sits at the altitude the defect lives at. Watch for the
+vacuous assertion too — this session's "a passing gate contributes no caveat noise" passed
+before the fixture was changed to make it capable of failing.
+
 **And before believing a handoff — including this one — grep the tree it describes.**
