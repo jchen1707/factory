@@ -2342,9 +2342,15 @@ its own reaches `awaiting_human` with a draft PR, and the transition log shows n
 
 ---
 
-### Phase 5 — Python and frontend stack adapters
+### Phase 5 — Python and frontend stack adapters — **COMPLETE 2026-08-23**
 
 **Repositories:** `factory@main`; both consumers `@v2` if a kit is adopted.
+
+Both exit tests passed and both PRs are merged: **BAC-6** (`python-harness#70`) and
+**FRO-11** (`frontend-harness#48`), each driven end to end and each ending at `completed`
+by James's own hand. The monorepo dispatch test passed against the first layer-C repository.
+What the phase actually cost is recorded at the bottom of this section, because the number
+of defects it found is the argument for the next phase's method.
 
 - **Build the awaiting_human -> completed transition** — **done 2026-08-23**, factory@2f864fb. Nothing in src/factory/ reached COMPLETED, so a successful run sat at awaiting_human for ever and gc could never reclaim…  Built as factory complete: a human command, because merge-is-james reserves the hop; what it adds is gh pr view --json state as evidence.
 - Fill `config/projects.toml` with the **measured** template answer from P0-3.
@@ -2391,15 +2397,74 @@ its own reaches `awaiting_human` with a draft PR, and the transition log shows n
   delivery the gates are green and the two-tier review is clean. A draft takes no
   review request and cannot be merged, so un-drafting was a manual step carrying no
   information, in front of two acts that are James's regardless.
-- First layer-C product: `python3 /Users/james/harness/scripts/new_project.py create
-  <name> --api python --web react --agnostic`, then a registry row with
-  `stack = "monorepo"`.
+- First layer-C product — **done 2026-08-23**, `jchen1707/test-project`, scaffolded with
+  `--agnostic` and pushed. **The registry row was not written, and that is the answer rather
+  than an omission.** §10.2 resolves a project by the ticket prefix alone, and two projects
+  claiming one team is a `RegistryError` that refuses to start the daemon. The Linear
+  workspace has two teams — `BAC` and `FRO` — and no tier to add a third, so there is no
+  prefix left for a product repository. A row carrying an invented key would parse, match
+  nothing, and read exactly like a working row: the same class of inert configuration the
+  sensitive-path table held for four phases (see the note under `_SENSITIVE_DIRS` below).
+  Nothing was added rather than adding that.
 
-**Tests:** one ticket per stack, end to end; a monorepo dispatch test proving a CSS-only
-change runs no Python gate.
+  The dispatch test never needed the row. It is a property of the scaffold and of layer A's
+  `dispatch()`, and it was measured directly against the new repository — see **Tests**.
+
+  If the factory is ever to *drive* a layer-C product on this Linear tier, the change is to
+  §10.2 rather than to the registry: let a project be selected by a label or Linear project
+  **within** a team, so an `FRO` ticket labelled `test-project` resolves to the product
+  repository instead of the harness. Not built; nothing in Phases 1–5 needed it.
+
+**Tests — all three passed 2026-08-23:**
+
+| test | result |
+| --- | --- |
+| One python ticket, end to end | **BAC-6**, unattended. `approved -> … -> implementing (25 min) -> verifying -> reviewing -> blocked [review-finding]`, unblocked by James, delivered `python-harness#70`, merged, `completed`. Gate report `pass` on all five gates, `pytest -m integration` included — which proved the Docker `requires` probe inside a real sandbox. |
+| One frontend ticket, end to end | **FRO-11**, `frontend-harness#48`, merged, `completed`. The first run to put the `playwright` `requires` probe through an unattended sandbox (`playwright: pass`), and the first whose Tier-2 nine-axis fan-out actually ran rather than skipping. It cost four attempts and seven control-plane defects; see below. |
+| Monorepo dispatch: a CSS-only change runs no Python gate | Measured directly in `test-project` on a one-file CSS commit: all five `apps/api` gates `skipped_unchanged`, all five `apps/web` gates `pass`, verdict `pass`. No sandbox and no Linear ticket were required, because the claim is about `dispatch()` and the scaffold, not about a run. |
+
 **Rollback:** remove the registry row; `sbx rm factory-build-<project>`.
 **Human approval boundary:** James approves any new template or kit before it is used
-unattended, and approves the first layer-C repository's creation.
+unattended, and approves the first layer-C repository's creation. **Both were exercised:**
+no new template or kit was needed (`codex-pnpm:v1` was measured to carry node 22.22.1,
+pnpm 10.15.1 *and* uv 0.9.26, so one existing template serves a python+react monorepo), and
+James named and created `test-project` himself.
+
+#### What this phase actually cost, and why that is the finding
+
+Phase 5's two end-to-end tickets produced **eight control-plane defects**, seven of them on
+FRO-11 alone. Every one lives on a path that only runs *after something else has already
+gone wrong*, and **not one of them was reachable by the test suite** — which was green at
+533, 541, 549 and 562 tests while each was live.
+
+| # | defect | fixed |
+| --- | --- | --- |
+| 1 | A sleeping laptop reaps a healthy run as `attempt-orphaned` | **open** — a §16.1 semantics decision |
+| 2 | A recovered `Reconnecting...` discards a finished attempt | `factory#38` |
+| 3 | The rung-3 rewind hands codex a host-only schema path, and its failure reads as an orphan | `factory#39` |
+| 4 | A run sent back from `blocked` is told nothing about why | `factory#41` |
+| 5 | `--authorise` writes `resumable` and `failed` in the same second | `factory#42` |
+| 6 | A §15.3 escalation could be raised and never answered — `awaiting_human` had no edge back to `reviewing`, and `(awaiting_human, implementing)` had a rule and no caller | `factory#46` |
+| 7 | The Tier-2 sensitive-path trigger was a stack fact in layer D, and its frontend glob matched **0 of 192** tracked files | `factory#47` |
+| 8 | A resumed verify/review re-collects its own corpse for ever, and a dead agent is reported as a schema error | `factory#48` |
+
+Four of these (4, 5, 6, 8) are reachable **only when a human takes an edge**, which is why
+four unattended runs in Phase 4.5 surfaced none of them. Phase 6 should assume the same:
+a path with no test is not a path that works, and the only instrument that has ever found
+these is a real ticket in a real sandbox with a human at the other end.
+
+Two environment facts were also measured and belong with the risks (§22):
+
+- **There are two independent OpenAI credentials on this host and refreshing either says
+  nothing about the other.** `codex login` writes `~/.codex/auth.json`; a sandboxed agent
+  authenticates through `sbx`'s proxy against a *globally stored* OAuth token
+  (`sbx secret ls` -> `(global) service openai (oauth configured)`). The sandbox's own
+  `~/.codex/auth.json` is a 40-byte stub. When the stored token expired, **every sandboxed
+  run of both stacks failed**, the host looked fine, and the only symptom was a `401
+  token_expired` buried in a per-axis transcript. `sbx secret set openai --oauth` is the
+  fix. Nothing in `factory doctor` looks at it.
+- Recreating a sandbox does **not** refresh that credential, because it was never in the
+  sandbox. This was tested — a freshly created reviewer failed identically.
 
 ---
 
