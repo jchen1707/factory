@@ -96,6 +96,11 @@ class RunHandle:
     workdir: str
     attempt_dir: Path
     session_id: str | None = None
+    #: The terminal file this phase's wrapper writes, relative to `attempt_dir`. The
+    #: plan phase writes `plan-exit` so that a rewind's two phases can share one attempt
+    #: directory (`steps/plan.py`); every other phase writes `exit`. A poller that reads
+    #: only `exit` calls a finished plan an orphan -- measured on FRO-11 attempt 3.
+    exit_name: str = "exit"
 
 
 class RunStatus(StrEnum):

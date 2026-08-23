@@ -428,7 +428,7 @@ class SbxAdapter:
         heartbeat with no `exit` is an orphan whether or not the sandbox is up.
         """
         attempt_dir = handle.attempt_dir
-        if (attempt_dir / "exit").exists():
+        if (attempt_dir / handle.exit_name).exists():
             return RunStatus.EXITED
         # The session holder is gone, so the sandbox has either stopped already or will
         # in under 30 s, and nothing inside it survives that. Saying so now rather than

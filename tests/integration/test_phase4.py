@@ -264,6 +264,32 @@ def test_the_third_attempt_rewinds_to_planning_instead_of_running_again(ctx: Con
     assert ctx.state is State.PLANNING
 
 
+def test_the_rewind_hands_codex_a_schema_path_that_exists_where_codex_runs(
+    ctx: Context,
+) -> None:
+    # Measured on FRO-11 attempt 3, 2026-08-23: the rung-3 rewind spawned, and codex
+    # died in under a second with
+    #   Failed to read output schema file /Users/james/factory/schemas/implement_result.schema.json
+    # `--output-schema` was the control plane's *host* path, and the plan runs inside the
+    # build sandbox, which has no `/Users/james/factory`. `implement.start` stages the
+    # schema into the attempt directory and points at the copy -- the attempt directory
+    # resolves identically on both sides, which is the whole point of §14.1's protocol --
+    # and `plan.start` made the copy and then handed over the original.
+    _start_an_attempt(ctx, finish=False)
+    ctx.store.update_run(ctx.run.id, attempt=2)
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+    reap_step.reap(ctx)
+    _fake(ctx).poll_status = None
+    _expire_the_backoff(ctx)
+
+    recovery.resume_run(ctx)
+
+    script = _fake(ctx).detached[-1][1]
+    flag = script.split("--output-schema", 1)[1].split()[0].strip("'\"")
+    assert Path(flag).is_relative_to(ctx.factory_dir), flag
+    assert Path(flag).exists()
+
+
 def test_a_run_over_its_budget_blocks_before_the_next_attempt_starts(ctx: Context) -> None:
     # F24. The ceiling is a reason not to begin; a run cut off mid-write is worse than
     # one that stopped an attempt early and said why.
