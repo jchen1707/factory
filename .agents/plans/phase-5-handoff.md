@@ -23,7 +23,7 @@ gone wrong.
 | `frontend-harness` | PR **#46**, `chore/vendor-gate-requires`, 3 commits, **all 7 checks green**, unmerged |
 | `python-harness` | PR **#68**, `chore/vendor-gate-requires`, 2 commits, **all 5 checks green**, unmerged |
 | vendor pins | both bumped `3248fbe` → `134b21c` in those PRs; still `3248fbe` on both `v2` until they merge |
-| BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
+| BAC-6 | Linear ticket moved to `Todo` by James 2026-08-23; its run is still `suspended` at attempt 7 and **still holds the ticket** — see item 4 |
 
 **Merging #46 and #68 is James's, and it is the only thing between here and item 2 being
 closed.** Nothing else in this document depends on them.
@@ -119,27 +119,85 @@ has no such job — the asymmetry is real, and the frontend template is the stri
 
 ---
 
-## What Phase 5 has left
+## What Phase 5 has left — items 3 and 4, and how to actually finish them
 
-### 3. First layer-C product — not started, and it needs James twice
+Read this whole section before touching either. Both were re-measured against the code on
+2026-08-23, and the previous handoff's framing of item 3 was **wrong in James's favour**:
+less of it is missing than that document claimed.
+
+### 4. The end-to-end tests — one ticket per stack
+
+**James moved BAC-6 to `Todo` in Linear on 2026-08-23. That is necessary and it is not
+sufficient, and the reason is worth understanding before you spend a tick wondering why
+nothing happened.**
+
+BAC-6 still carries a **`suspended`** run at **attempt 7**, `resume-target-invalid`. Only
+`completed` and `cancelled` are terminal (`machine.py:57`), and `_LIVE_RUN_INDEX`
+(`store.py:87`) is derived from that set, so a `suspended` run is **live** and holds its
+ticket. Intake reads `store.live_run_for_ticket` and skips any ticket that has one —
+`cli.py:703`, which in `--verbose` prints `BAC-6 already has a live run at suspended`. The
+poller will therefore never look at BAC-6 while that row exists, no matter what Linear says.
+
+The same is true of every `blocked` row on the board, and deliberately: `store.py:80` says
+"`blocked` is deliberately live: it is a stop, not an end, so a blocked run still holds its
+ticket until someone cancels it. That is the contract, not an oversight."
+
+**So the python half is a three-step, and step 1 is James's:**
+
+1. **`factory cancel BAC-6`.** `cancelled` is in `HUMAN_ONLY_DESTINATIONS` under
+   `abandon-is-james`, so an agent cannot do this and should not try to.
+2. **Check the ticket is still `Todo` afterwards — read it, do not assume.** This is where
+   carried defect 1 lands: `cancel` restores the tracker only to the state *the factory*
+   set, and James set this one by hand. The likely output is
+   `left BAC-6 at 'Todo' (not the state the factory set)` with no write, which is the
+   wanted outcome here — `Todo` is exactly where it needs to be. But defect 1 exists
+   because that path has surprised this system before.
+3. **Then run it.** BAC-6's 11 intake conditions all passed on 2026-08-23, which is also
+   what settled that a `Canceled` parent satisfies the parent-spec condition. The new row
+   starts at attempt 1; the 7 attempts belong to the cancelled run.
+
+**The frontend half has no ticket yet, and the same two-step applies to whichever you pick.**
+FRO-5, FRO-6 and FRO-10 each sit behind a live `blocked` run at `state-not-todo`, so each
+needs its run cancelled *and* the ticket moved to `Todo`. **FRO-7 is not a candidate** — its
+work merged as `frontend-harness#45`. FRO-1 is the parent spec and is refused permanently
+and correctly.
+
+`needs-info` is currently cleared by James, so nothing is held at intake by a label.
+
+**The third test cannot be written until item 3 exists.** "A monorepo dispatch test proving
+a CSS-only change runs no Python gate" needs a monorepo. Do items in the order 3 → 4, or
+deliver item 4's two stack tickets and say plainly that the dispatch test is outstanding.
+
+### 3. First layer-C product — less is missing than the last handoff said
 
 `python3 /Users/james/harness/scripts/new_project.py create <name> --api python --web react
---agnostic`, then a registry row with `stack = "monorepo"`. §19's own approval boundary
-reserves **the first layer-C repository's creation** to James, and `stack` accepts only
-`python` / `frontend` today, so this is a real `src/factory/` change and not only scaffolding.
-Asked and answered on 2026-08-23: **not now.**
+--agnostic`, then a registry row with `stack = "monorepo"`.
 
-### 4. Tests — blocked, and only James can clear it
+**Correction, measured this session: `stack = "monorepo"` needs no `src/factory/` change to
+be *accepted*.** `registry.py:190` reads it as a bare `str(raw["stack"])` — there is no enum
+and no validation — and the two places that branch on the value already anticipate a
+monorepo:
 
-One ticket per stack end to end, plus a monorepo dispatch test proving a CSS-only change runs
-no Python gate. Unchanged from the last handoff: Todo holds only BAC-1 and FRO-1, and both are
-correctly and permanently refused at intake with `no-parent-spec` because they *are* the parent
-specs. Moving a `Canceled` ticket to `Todo` works — BAC-6 did exactly that on 2026-08-23 and
-all 11 intake conditions passed, which settled that **a `Canceled` parent satisfies the
-parent-spec condition**. It is a Linear move, not a code problem: §24.1, the factory reads
-tickets and never files them.
+- `harness.py:34`, `EXPECTED_RUNNER = {"python": "uv", "frontend": "pnpm"}`. A stack that is
+  not in it makes `cross_check_stack` return early, and `harness.py:169` returns early for
+  `config.is_monorepo` regardless — with the comment "a monorepo root declares `apps` and no
+  gates of its own; the dispatch in layer A resolves them per app, so there is nothing here
+  to cross-check."
+- Layer A already carries the dispatch. `apps` is in the schema, `is_monorepo` is
+  `bool(self.apps)` (`harness.py:76`), and `load_harness_config` refuses a config with
+  neither `gates` nor `apps` (`harness.py:131`).
 
-`needs-info` is currently cleared by James.
+**What is genuinely missing is one line and two acts:**
+
+- `_SENSITIVE_DIRS` (`steps/review.py:87`) has `python` and `frontend` entries and no
+  `monorepo` one, so Tier-2's sensitive-path trigger would be empty for the new project.
+  That is carried defect 4's family — the `frontend` entry already matches nothing — so fix
+  the two together rather than adding a third guess.
+- **`new_project.py create` does `git init` and commits locally. It does not create a GitHub
+  repository**, and the registry row requires a `remote`. Someone has to `gh repo create`.
+- §19's approval boundary reserves **the first layer-C repository's creation** to James, and
+  he has to choose the name. Asked on 2026-08-23 and answered **not now** — so do not
+  scaffold anything until he says otherwise.
 
 ---
 
