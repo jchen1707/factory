@@ -100,6 +100,19 @@ class Project:
     #: list is per project because the judgement is per project — see
     #: `policy.capability_env_names`.
     acknowledged_env_credentials: tuple[str, ...] = ()
+    #: §15.2's sensitive-path Tier-2 trigger: a diff touching one of these globs runs the
+    #: full nine-axis fan-out however small it is. It lives here rather than in
+    #: `src/factory/` because it is a stack fact, and §3.2 gives layer D none of those —
+    #: a table of one repository's directory names inside the control plane is the same
+    #: violation a gate command there would be. The registry is where this file's own
+    #: header says a stack fact belongs.
+    #:
+    #: Empty is a real answer and the default: a project that has not decided which of its
+    #: directories carry extra risk gets the size and protected-path triggers alone. What
+    #: is *not* an answer is a glob that matches nothing, which is what the moved-from
+    #: table held for `frontend` — an inert trigger reads exactly like a trigger that
+    #: never fired, and nothing tells the two apart.
+    sensitive_paths: tuple[str, ...] = ()
 
     @property
     def base_ref(self) -> str:
@@ -200,6 +213,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
         acknowledged_env_credentials=tuple(
             str(n) for n in raw.get("acknowledged_env_credentials", ())
         ),
+        sensitive_paths=tuple(str(g) for g in raw.get("sensitive_paths", ())),
     )
 
 

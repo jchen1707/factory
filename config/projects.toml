@@ -121,6 +121,13 @@ network_allow  = ["pypi.org", "*.pythonhosted.org", "astral.sh", "github.com"]
 # sbx's. Every run records this as a warning, and a credential name that is *not* listed
 # here blocks the run rather than riding in unseen.
 acknowledged_env_credentials = ["GH_TOKEN"]
+# §15.2's sensitive-path Tier-2 trigger. Unchanged in scope from the table this moved out
+# of `src/factory/steps/review.py`: the AI subtree is the part of this repository where a
+# small diff can be expensive to get wrong. Ten directories here carry their own AGENTS.md
+# and widening the list to all of them would fire the nine-axis fan-out on nearly every
+# change — a spend decision, made here where it can be read and edited rather than in the
+# control plane where it could not.
+sensitive_paths = ["src/app/ai/**"]
 [projects.python-harness.env]
 UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/python-harness"
 
@@ -147,4 +154,11 @@ requires_clone = true
 # The same measurement as python-harness above — the clone sandbox that proved it was
 # this project's.
 acknowledged_env_credentials = ["GH_TOKEN"]
+# The table this replaces held `src/**/routes/**` for this stack, and there has never been
+# a `routes` directory in this repository — the trigger was inert from the day it was
+# written and read identically to one that simply never fired. These are the directories
+# that actually declare their own standards, measured 2026-08-23 with
+# `git ls-files '*AGENTS.md'`. `src/test/**` is deliberately absent: a change confined to
+# test infrastructure is what the red-phase replay and the weakening guard already cover.
+sensitive_paths = ["e2e/**", "src/components/**", "src/core/**", "src/features/**"]
 [projects.frontend-harness.env]
