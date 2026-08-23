@@ -135,6 +135,57 @@ def test_resume_uses_the_session_id_and_never_last(tmp_path: Path) -> None:
     assert "--last" not in argv
 
 
+#: Every option `codex exec resume` accepts, read off `codex exec resume --help` inside
+#: `factory-build-python-harness-2` on 2026-08-23. `codex exec` and `codex exec resume`
+#: are **different clap commands with different option sets**, and the difference that
+#: matters is `-C/--cd`: `exec` has it, `resume` does not.
+MEASURED_RESUME_OPTIONS = frozenset(
+    {
+        "-c",
+        "--config",
+        "--last",
+        "--all",
+        "--enable",
+        "--disable",
+        "-i",
+        "--image",
+        "--strict-config",
+        "-m",
+        "--model",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--output-schema",
+        "--json",
+        "-o",
+        "--output-last-message",
+        "-h",
+        "--help",
+    }
+)
+
+
+def test_a_resume_passes_only_flags_the_resume_subcommand_accepts(tmp_path: Path) -> None:
+    """The test above pins the first four tokens and the absence of `--last`, and passed
+    for the whole of Phase 4 while the command it describes could not start.
+
+    BAC-6 attempt 3 was the first resume-by-id ever executed against the real binary. It
+    exited 2 in under a second: `error: unexpected argument '-C'`. The flag is copied
+    from the `codex exec` argv, which does accept it — and the worktree is already the
+    process's cwd, because `exec_argv` passes `sbx exec -w <worktree>`, so on a resume it
+    was never doing any work in the first place.
+    """
+    argv = list(CodexAdapter().command(_invocation(tmp_path, resume_session="01a0-thread")))
+    # The trailing bare `-` is the PROMPT positional (read from stdin), not an option.
+    flags = [part for part in argv if part.startswith("-") and part != "-"]
+    assert flags, "a resume with no options at all would mean the argv stopped being built"
+    unsupported = [flag for flag in flags if flag not in MEASURED_RESUME_OPTIONS]
+    assert not unsupported, f"`codex exec resume` rejects {unsupported}"
+
+
 def test_the_vault_setting_is_present_on_a_resume_too(tmp_path: Path) -> None:
     argv = list(CodexAdapter().command(_invocation(tmp_path, resume_session="01a0-thread")))
     assert any("OBSIDIAN_VAULT_DIRECTORY" in a for a in argv)
