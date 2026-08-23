@@ -42,16 +42,20 @@ from pathlib import Path
 
 from factory import repo
 from factory.machine import Blocked
+from factory.registry import Project
 from factory.repo import GitError
-from factory.sandbox.base import Completed
+from factory.sandbox.base import Completed, SandboxAdapter
 from factory.sandbox.sbx import SbxError
 from factory.steps import Context
+from factory.store import Run
 
 __all__ = [
     "create_branch",
     "ensure_on_branch",
     "fetch_back",
     "host_worktree_path",
+    "refresh_base",
+    "release_branch",
     "remote_name",
     "scratch_add",
     "scratch_apply",
@@ -116,6 +120,12 @@ def create_branch(ctx: Context, branch: str) -> None:
     back to a branch that already exists, and the recovery model requires the second call
     to attach to the agent's commits rather than reset over them. So an existing branch is
     checked out, never `-B`-forced.
+
+    `origin` is refreshed first, and only on the cut. See `refresh_base`: a clone is made
+    once per project and outlives every run in it, so `origin/<base>` inside it is as old
+    as the sandbox. On the re-entrant path there is nothing to refresh into — the branch
+    already carries the agent's commits, and moving `origin/<base>` under it would change
+    nothing but the diff the review reads.
     """
     project_path = str(ctx.project.path)
     exists = ctx.sandbox.exec_sync(
@@ -127,7 +137,105 @@ def create_branch(ctx: Context, branch: str) -> None:
     if exists:
         _exec(ctx, ["git", "-C", project_path, "checkout", branch])
         return
+    refresh_base(ctx)
     _exec(ctx, ["git", "-C", project_path, "checkout", "-b", branch, ctx.project.base_ref])
+
+
+def refresh_base(ctx: Context) -> None:
+    """Bring the clone's `origin/<base>` up to date before a branch is cut from it.
+
+    **The defect this closes did not fail; it silently built the wrong thing.** The clone
+    is created once per project and shared by every run in it, so its `origin/<base>` is
+    frozen at whenever the sandbox was made. Measured 2026-08-22 on frontend-harness: the
+    host's `origin/v2` was `910a2f1` and the clone's was `1c4422d`, **three merges
+    behind**. A branch cut there starts from a base with neither the previous ticket's
+    work nor the vendored hook the run is about to be verified by, and every gate, review
+    and PR downstream is honest about a tree nobody asked for.
+
+    A failed fetch blocks rather than falling through to the stale ref. Continuing would
+    reproduce exactly the failure this exists to prevent, and the staleness would be
+    invisible in every artefact the run produces — the run has no way to say "this base is
+    of unknown age" once it is past here. A network blip costs a `factory cancel` and a
+    re-claim; a stale base costs a ticket's worth of work aimed at the wrong tree.
+
+    `--prune` because a base branch deleted upstream should not keep resolving in here.
+    """
+    project_path = str(ctx.project.path)
+    fetched = ctx.sandbox.exec_sync(
+        ctx.project.build_sandbox,
+        ["git", "-C", project_path, "fetch", "origin", ctx.project.base_branch, "--prune"],
+        env=dict(ctx.project.env),
+        timeout=600,
+    )
+    if not fetched.ok:
+        raise Blocked(
+            "clone-fetch-failed",
+            f"could not refresh origin/{ctx.project.base_branch} inside the clone "
+            f"({ctx.project.build_sandbox}), exit {fetched.returncode}. The branch would be "
+            f"cut from whatever base the clone was created with, which is silently wrong "
+            f"rather than loudly broken:\n{fetched.stdout.strip()}\n{fetched.stderr.strip()}",
+        )
+    ctx.log("clone.base_refreshed", base=ctx.project.base_ref)
+
+
+def release_branch(sandbox: SandboxAdapter, project: Project, run: Run) -> list[str]:
+    """Undo the run's branch *inside the clone*, at cancel. The clone half of
+    `_release_local_debris`, and the second of the two defects that do not fail loudly.
+
+    `_release_local_debris` deletes the **host** branch. For a `--clone` project the branch
+    the agent actually worked on lives in the VM and survives untouched — and
+    `create_branch` is re-entrant by design, so the next run of the same ticket checks the
+    abandoned branch out instead of cutting a fresh one from the refreshed base. The run
+    then builds on a dead run's commits and says nothing.
+
+    **Nothing is deleted, only unnamed.** The branch is first written to
+    `refs/factory/cancelled/<run id>/<branch>` and only then removed from `refs/heads`.
+    The host rule keeps an unpushed branch because its commits are the only copy; the same
+    reasoning applies here and more so, since a clone's commits were never pushable at all
+    (the VM has no credential — §13.2). So the commits stay reachable, under a ref no step
+    ever checks out, and the name that misdirected the next run is gone. `git log
+    refs/factory/cancelled/<run id>/<branch>` in the sandbox reads them back.
+
+    Best-effort and never fatal. A stopped or deleted sandbox has no branch to release,
+    and a rollback must not fail on debris that is already gone — so every failure is
+    reported as a line and the cancel proceeds. The lines are printed, like the host's
+    refusals, because what is left behind has to be visible before the next run meets it.
+    """
+    if not project.requires_clone or not run.branch:
+        return []
+    branch = run.branch
+    project_path = str(project.path)
+    env = dict(project.env)
+
+    def git(*argv: str) -> Completed:
+        return sandbox.exec_sync(
+            project.build_sandbox, ["git", "-C", project_path, *argv], env=env, timeout=120
+        )
+
+    if not git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").ok:
+        return [f"clone {project.build_sandbox}: no branch {branch} to release"]
+
+    rescue = f"refs/factory/cancelled/{run.id}/{branch}"
+    if not git("update-ref", rescue, f"refs/heads/{branch}").ok:
+        # Never delete what could not be saved first. Leaving the branch misdirects the
+        # next run, which is bad; deleting commits with no copy anywhere is worse.
+        return [
+            f"clone {project.build_sandbox}: could not save {branch} to {rescue}, so it was "
+            f"left in place. The next run of this ticket will check it out instead of "
+            f"cutting a fresh branch — delete it by hand first."
+        ]
+
+    # Off the branch before deleting it: git refuses to delete the checked-out branch, and
+    # the base is where a clone should sit between runs anyway.
+    git("checkout", project.base_branch)
+    deleted = git("branch", "-D", branch)
+    if not deleted.ok:
+        return [
+            f"clone {project.build_sandbox}: saved {branch} to {rescue} but could not "
+            f"delete it ({deleted.stderr.strip() or deleted.stdout.strip()}); delete it by "
+            f"hand or the next run will check it out"
+        ]
+    return [f"clone {project.build_sandbox}: deleted branch {branch} (kept at {rescue})"]
 
 
 def ensure_on_branch(ctx: Context) -> None:

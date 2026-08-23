@@ -65,6 +65,20 @@ def test_no_harness_config_asserts_nothing() -> None:
     assert _asserted_opt_in_gates(None, ["playwright smoke"]) == []
 
 
+def test_a_disabled_gate_is_never_asserted() -> None:
+    # Layer A reports `disabled` whatever the caller says, so missing this would not
+    # change the report — but the argv is the record of what layer D asked for, and it
+    # must not ask for a gate the config switched off.
+    harness = _harness(
+        Gate("playwright", "e2e", ()),
+        Gate("lighthouse", "integration", (), enabled=False),
+    )
+    assert _asserted_opt_in_gates(harness, ["playwright — 4 tests", "lighthouse — exit 0"]) == [
+        "playwright"
+    ]
+    assert "lighthouse" not in _gate_argv(harness, ["lighthouse — exit 0"], "")
+
+
 def test_two_claims_naming_one_gate_assert_it_once() -> None:
     harness = _harness(Gate("playwright", "e2e", ()))
     argv = _gate_argv(harness, ["playwright — 4 tests", "playwright — rerun, 4 tests"], "")
@@ -97,6 +111,30 @@ def test_a_claimed_gate_marked_not_applicable_is_a_mismatch() -> None:
 def test_a_claimed_gate_marked_skipped_unchanged_is_a_mismatch() -> None:
     report = [{"name": "app-b lint", "status": "skipped_unchanged"}]
     assert _evidence_mismatch(["app-b lint"], report) == ["app-b lint"]
+
+
+def test_a_claimed_gate_marked_disabled_is_not_a_mismatch() -> None:
+    """The load-bearing half of `enabled: false`, and the reason `_CLAIM_SATISFIED` is
+    not `_RAN`.
+
+    Which opt-in gates an agent claims is not deterministic: FRO-7 was run twice from one
+    prompt and the second run claimed `lighthouse` where the first had not. An agent may
+    still run a switched-off gate on its own and report it honestly. Without this, the run
+    blocks on `evidence-mismatch` instead of `env-gate-failed` — the same wall wearing a
+    different name, and the whole reason the gate was switched off in the first place."""
+    report = [
+        {"name": "playwright", "status": "pass"},
+        {"name": "lighthouse", "status": "disabled"},
+    ]
+    claims = ["playwright — 4 tests passed", "lighthouse — exit 0; accessibility 1.00"]
+    assert _evidence_mismatch(claims, report) == []
+
+
+def test_a_disabled_gate_nobody_claimed_is_still_not_a_mismatch() -> None:
+    # The check runs over claims, so an unclaimed gate of any status is silent here. Kept
+    # explicit because a `disabled` row appears in every report once a gate is off.
+    report = [{"name": "lighthouse", "status": "disabled"}]
+    assert _evidence_mismatch([], report) == []
 
 
 def test_mismatched_gates_are_returned_in_claim_order() -> None:

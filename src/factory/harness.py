@@ -41,6 +41,13 @@ class Gate:
     run: tuple[str, ...]
     when: str | None = None
     caveat: str | None = None
+    #: `enabled: false` in `harness.config.json` switches a declared gate off: layer A
+    #: reports it as `disabled` and never runs it. Absent means `True` — a config that
+    #: predates the field declares gates that all run, which is what it always meant.
+    #: Layer D reads this only to keep its argv honest; the report is the authority on
+    #: what actually happened, and a gate switched off between the argv and the report
+    #: still comes back `disabled`.
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,7 @@ def load_harness_config(root: Path) -> HarnessConfig:
             run=tuple(g["run"]),
             when=g.get("when"),
             caveat=g.get("caveat"),
+            enabled=g.get("enabled", True),
         )
         for g in raw.get("gates", [])
     )

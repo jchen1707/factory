@@ -28,7 +28,13 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "ruff>=0.6",
+    # Pinned exactly, not floored. `ruff format` is a formatter and its output changes
+    # between releases; `ruff format --check` is one of this repo's four Definition-of-Done
+    # gates. Under `>=0.6` a ruff release re-formats files nobody touched and the DoD goes
+    # red on `main`, out from under whatever run is in flight — measured on 2026-08-22,
+    # when 0.16.4 failed five files on `main` before anyone had made a change. Bump this
+    # line deliberately, in a commit that also carries the reformat.
+    "ruff==0.16.4",
     "mypy>=1.11",
     "pytest>=8.3",
     # `fastapi.testclient` only — it drives the §18.5 console's routes in-process. A test

@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from factory import cli, recovery, repo
 from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
-from factory.sandbox.base import SandboxSpec
+from factory.sandbox.base import Completed, SandboxSpec
 from factory.sandbox.sbx import create_argv
 from factory.steps import Context
 from factory.steps import claim as claim_step
@@ -191,6 +192,73 @@ def test_the_context_is_seeded_on_the_mount_where_both_sides_can_read_it(
     run_json = json.loads((clone_ctx.factory_dir / "run.json").read_text())
     assert run_json["clone"] is True
     assert run_json["branch"] == clone_ctx.run.branch
+
+
+def test_the_branch_is_cut_from_a_freshly_fetched_base(clone_ctx: Context) -> None:
+    """The clone outlives every run in it, so its `origin/<base>` is as old as the sandbox.
+
+    This defect did not fail — it silently built the wrong thing. Measured 2026-08-22 on
+    frontend-harness: the host's `origin/v2` was `910a2f1` and the clone's `1c4422d`,
+    three merges behind, so the next run would have been cut from a base carrying neither
+    the previous ticket's work nor the vendored hook it was about to be verified by.
+
+    The commit below lands on the host *after* the clone was made, which is exactly the
+    window. Without `refresh_base` the branch does not contain it.
+    """
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+
+    host = clone_ctx.project.path
+    (host / "moved-on.txt").write_text("a merge that landed after the clone was made\n")
+    git(host, "add", "moved-on.txt")
+    git(host, "commit", "-m", "chore: advance the base after the clone exists")
+    advanced = git(host, "rev-parse", "HEAD")
+
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    assert advanced not in git(clone, "log", "--format=%H", "-20", clone_ctx.project.base_ref)
+
+    worktree_step.run(clone_ctx)
+
+    assert advanced in git(clone, "log", "--format=%H", "-20", "HEAD")
+    assert (Path(clone) / "moved-on.txt").exists()
+
+
+def test_a_base_that_cannot_be_fetched_blocks_rather_than_cutting_from_a_stale_one(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Continuing would reproduce the very failure `refresh_base` exists to prevent, and
+    the staleness would be invisible in every artefact the run goes on to produce."""
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+
+    fake = _fake(clone_ctx)
+    real = fake.exec_sync
+
+    def refuse_fetch(name: str, argv: Any, **kwargs: Any) -> Any:
+        if "fetch" in tuple(argv):
+            return Completed(tuple(argv), 128, "", "fatal: unable to access origin")
+        return real(name, argv, **kwargs)
+
+    monkeypatch.setattr(fake, "exec_sync", refuse_fetch)
+    with pytest.raises(Blocked) as caught:
+        worktree_step.run(clone_ctx)
+    assert caught.value.reason == "clone-fetch-failed"
+
+
+def test_re_entering_the_cut_does_not_refetch_the_base(clone_ctx: Context) -> None:
+    """The re-entrant path attaches to the agent's commits. There is nothing to refresh
+    into by then, and moving `origin/<base>` under them would change nothing but the diff
+    the review reads."""
+    _to_verifying(clone_ctx)
+    fake = _fake(clone_ctx)
+    before = len([call for call in fake.sync_calls if "fetch" in call[1]])
+
+    clone_step.create_branch(clone_ctx, clone_ctx.run.branch or "")
+
+    assert len([call for call in fake.sync_calls if "fetch" in call[1]]) == before
 
 
 def test_cutting_the_branch_twice_attaches_rather_than_resetting(clone_ctx: Context) -> None:
@@ -672,6 +740,105 @@ def test_a_second_run_does_not_read_the_first_runs_verdict(clone_ctx: Context) -
 
     assert not second_attempt.exit_file.exists()
     assert first_attempt.exit_file.exists()  # and the first run's record survives
+
+
+def test_cancel_releases_the_branch_inside_the_clone(clone_ctx: Context) -> None:
+    """The second defect that does not fail loudly.
+
+    `_release_local_debris` deletes the *host* branch; for a `--clone` project the branch
+    the agent worked on lives in the VM and survives it. `create_branch` is re-entrant by
+    design, so the next run of the same ticket checks that abandoned branch out instead of
+    cutting a fresh one from the refreshed base — and builds on a dead run's commits
+    without saying so.
+    """
+    _to_verifying(clone_ctx)
+    branch = clone_ctx.run.branch
+    assert branch
+    fake = _fake(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+
+    lines = clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    assert branch not in git(clone, "branch", "--list", branch)
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == clone_ctx.project.base_branch
+    assert any(branch in line for line in lines)
+
+
+def test_the_released_branch_is_unnamed_rather_than_destroyed(clone_ctx: Context) -> None:
+    """A rollback that destroys the evidence of why the run needed rolling back is not a
+    rollback. The clone's commits were never pushable at all (the VM has no credential),
+    so this is the only copy — it keeps its commits under a ref no step checks out."""
+    _to_verifying(clone_ctx)
+    fake = _fake(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    head = git(clone, "rev-parse", "HEAD")
+
+    clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    rescue = f"refs/factory/cancelled/{clone_ctx.run.id}/{clone_ctx.run.branch}"
+    assert git(clone, "rev-parse", rescue) == head
+
+
+def test_the_next_run_of_the_ticket_cuts_fresh_after_a_release(clone_ctx: Context) -> None:
+    """The property the whole fix is for, stated end to end: cancel, then re-run, and the
+    second run's branch does not carry the first run's commits."""
+    _to_verifying(clone_ctx)
+    fake = _fake(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    abandoned = git(clone, "rev-parse", "HEAD")
+    clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    run = _rerun_the_same_ticket(clone_ctx)
+    clone_ctx.store.acquire_lease(run.id, ttl_seconds=600)
+    _to_worktree_ready(replace(clone_ctx, run=run))
+
+    assert abandoned not in git(clone, "log", "--format=%H", "-20", "HEAD")
+
+
+def test_releasing_a_branch_that_is_already_gone_is_not_an_error(clone_ctx: Context) -> None:
+    """A rollback must not fail on debris that is already gone — a stopped or recreated
+    sandbox has no branch to release, and cancel has to finish either way."""
+    _to_verifying(clone_ctx)
+    fake = _fake(clone_ctx)
+    clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    lines = clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    assert any("no branch" in line for line in lines)
+
+
+def test_a_bind_mounted_project_has_no_clone_branch_to_release(ctx: Context) -> None:
+    # The host rule already covers it; touching the sandbox here would start one for
+    # nothing on every cancel of every non-clone project.
+    _to_verifying(ctx)
+    assert clone_step.release_branch(_fake(ctx), ctx.project, ctx.run) == []
+
+
+def test_a_branch_that_could_not_be_saved_is_left_in_place(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never delete what could not be saved first. Leaving the branch misdirects the next
+    run, which is bad; deleting the only copy of an implementation is worse."""
+    _to_verifying(clone_ctx)
+    fake = _fake(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    real = fake.exec_sync
+
+    def refuse_update_ref(name: str, argv: Any, **kwargs: Any) -> Any:
+        if "update-ref" in tuple(argv):
+            return Completed(tuple(argv), 1, "", "fatal: cannot lock ref")
+        return real(name, argv, **kwargs)
+
+    monkeypatch.setattr(fake, "exec_sync", refuse_update_ref)
+    lines = clone_step.release_branch(fake, clone_ctx.project, clone_ctx.run)
+
+    branch = clone_ctx.run.branch or ""
+    assert branch in git(clone, "branch", "--list", branch)
+    assert any("left in place" in line for line in lines)
 
 
 def test_cancel_never_offers_the_repository_itself_as_a_worktree(clone_ctx: Context) -> None:

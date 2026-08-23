@@ -64,6 +64,51 @@ def test_a_missing_config_blocks(tmp_path: Path) -> None:
     assert caught.value.reason == "no-harness-config"
 
 
+def test_an_absent_enabled_key_means_the_gate_runs(tmp_path: Path) -> None:
+    # Every config written before layer A 0.9.0 omits the key, and every one of them
+    # declared gates that run. The default must say so, or a sync would silently switch
+    # a repository's whole Definition of Done off.
+    (tmp_path / "harness.config.json").write_text(
+        json.dumps({"name": "x", "gates": [{"name": "ruff", "kind": "lint", "run": ["uv"]}]})
+    )
+    assert load_harness_config(tmp_path).gates[0].enabled is True
+
+
+def test_enabled_false_is_carried_off_the_config(tmp_path: Path) -> None:
+    (tmp_path / "harness.config.json").write_text(
+        json.dumps(
+            {
+                "name": "x",
+                "gates": [
+                    {"name": "ruff", "kind": "lint", "run": ["uv"]},
+                    {
+                        "name": "lighthouse",
+                        "kind": "integration",
+                        "run": ["pnpm"],
+                        "enabled": False,
+                    },
+                ],
+            }
+        )
+    )
+    gates = load_harness_config(tmp_path).gates
+    assert [g.enabled for g in gates] == [True, False]
+
+
+@pytest.mark.skipif(not FRONTEND_HARNESS.exists(), reason="frontend-harness is not cloned here")
+def test_the_real_frontend_harness_lighthouse_gate_is_switched_off() -> None:
+    # Not a tautology against the fixture above: this reads the config the factory will
+    # actually hand to a run, and it is the one place the two are checked to agree.
+    # If lighthouse is switched back on, this test is the thing that says so.
+    config = load_harness_config(FRONTEND_HARNESS)
+    lighthouse = next(g for g in config.gates if g.name == "lighthouse")
+    assert lighthouse.enabled is False
+    # `when` and `caveat` are kept deliberately while it is off — they are the record of
+    # what the gate would check and how it lies.
+    assert lighthouse.when
+    assert lighthouse.caveat
+
+
 def test_an_absent_tests_key_yields_an_empty_tuple() -> None:
     # Layer A gains `tests` in Phase 2. Until then the red-phase replay must report
     # `unavailable`, which it can only do if this is empty rather than guessed.

@@ -47,6 +47,7 @@ from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
 from factory.steps import Context, advance, factory_dir_for
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
+from factory.steps import clone as clone_step
 from factory.steps import context as context_step
 from factory.steps import deliver as deliver_step
 from factory.steps import implement as implement_step
@@ -1181,6 +1182,11 @@ def _cancel_run(
                     lines.append(f"archived {directory.name} to {kept}")
 
     lines += _release_local_debris(project, run, ticket, paths)
+    # The clone's copy of the branch, for a `--clone` project. Before the sandbox is
+    # stopped below, because releasing it needs the sandbox running — and the host call
+    # above cannot reach it: that branch lives in the VM. See `clone.release_branch`.
+    sbx = SbxAdapter()
+    lines += clone_step.release_branch(sbx, project, run)
 
     if machine.can(run.state, State.CANCELLED):
         store.record_transition(
@@ -1192,7 +1198,7 @@ def _cancel_run(
             detail=reason,
         )
     store.release_lease(run.id)
-    SbxAdapter().stop(project.build_sandbox)
+    sbx.stop(project.build_sandbox)
 
     # Last, and never fatal: the local cleanup above has already happened, and a Linear
     # outage must not turn a completed rollback into a failed command.
