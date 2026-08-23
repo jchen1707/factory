@@ -33,7 +33,7 @@ either on your word.
 | --- | --- |
 | `main` | `1abfc83`, **pushed**. Item 1 merged as factory#32 |
 | suite | 533 passed, mypy clean on 71 files, ruff check + format clean |
-| open PR (factory) | **#33** — `feat/unavailable-gate-names-its-requirement`, pushed, ready |
+| open PR (factory) | **#33** — `feat/unavailable-gate-names-its-requirement`, pushed, ready. 3 commits: the fix, this handoff, the §19 edit |
 | open PR (harness) | **#18** — `feat/gate-requires-probe` on `v2`, pushed, ready. **Yours to merge** |
 | `awaiting_human` | empty |
 | runs | 4 `completed`, 30 `cancelled`, 8 `blocked`, 1 `suspended` |
@@ -126,19 +126,17 @@ vendored schema.
 
 ---
 
-## The authority edit, ready for one keystroke
+## The authority edit — done
 
-§19 needs the decision recorded. The script is written and **validated against a copy** —
-applies cleanly, idempotent on re-run, refuses unless every FIND is unique, backs up first:
+§19 carries the decision. James ran the prepared script on 2026-08-23; the two edits are in
+`0ad42cb` on this branch: the Phase 5 bullet gained a paragraph recording that the mechanism
+is layer A's `requires` and why not `src/factory/` or `preflight`, and §20.2's harness file
+table gained the schema's second optional key.
 
-```
-! python3 /private/tmp/claude-501/-Users-james-factory/cbbbf1f4-7c6a-4f7b-9449-de4a5e6046f6/scratchpad/apply-plan-19.py
-```
-
-Two edits: the Phase 5 bullet gains a paragraph recording that the mechanism is layer A's
-`requires` and why not `src/factory/` or `preflight`; §20.2's harness file table gains the
-schema's second optional key. **If that scratchpad is gone** (it is session-scoped), the
-content is in this file's "What landed" section — re-author it rather than skipping it.
+The route is recorded because it works and cost one keystroke instead of a session: write the
+edits as a script that asserts each FIND string appears **exactly once** before touching
+anything — all-or-nothing, backs up first, no-op on re-run — validate it against a *copy* of
+the file, then hand James one `! python3 <path>` line.
 
 Do **not** try to route around the hook or the classifier. Silently defeating the enforcement
 layer is exactly `p0-6-codex-trust.md`.
