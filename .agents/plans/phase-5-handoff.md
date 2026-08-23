@@ -25,8 +25,8 @@ was measured, not carried forward.
 | `harness@v2` | `a3beb34`, plugin `0.10.1` |
 | `frontend-harness@v2` | re-vendored and merged (`#47`, 7/7 green) |
 | `python-harness@v2` | `f924eb3` — re-vendored and merged (`#69`, 5/5 green) |
-| BAC-6 | **`implementing`, attempt 2** — unblocked over `unblock-is-a-judgement`, the first time that edge has been taken |
-| FRO-11 | **`implementing`, attempt 4** — re-authorised over `failed -> resumable`, also the first time |
+| BAC-6 | **`awaiting_human`**, PR [python-harness#70](https://github.com/jchen1707/python-harness/pull/70) — the full path, through the unblock edge |
+| FRO-11 | **`awaiting_human`**, **no PR** — every gate green, stopped by the `test-weakening` guard one step before `deliver` |
 | `factory#41` | open — a run sent back from `blocked` is told why |
 | `factory#42` | open, **stacked on #41** — `--authorise` buys an attempt |
 
@@ -254,22 +254,37 @@ them, those two mutations are how to check.
 `.DS_Store` is now in `.gitignore` — it was the third session with two untracked files in
 `git status`.
 
-## The next session's first job
+## Outstanding at the end of 2026-08-23 — start here
 
-1. **Merge `factory#41`, then `#42`.** They are stacked in that order. Both are recovery-path
-   fixes measured on live runs today, and **the working checkout already carries them** —
-   which matters, because the daemon executes whatever is checked out in `/Users/james/factory`.
-   Until they merge, a `git checkout` in that directory silently reverts them for the next tick.
+Phase 5's items 1, 2 and 4 are closed. What is left is below, in the order it can be done.
 
-2. **Watch BAC-6 and FRO-11 to `awaiting_human`.** Both are live and both are first-of-kind:
-   BAC-6 is the first run to leave `blocked` by a human's judgement, and FRO-11 is the first to
-   leave `failed`. Between them they are item 4's two end-to-end tests.
+**Nothing here is blocked on an agent.** Three of the five need James, and the fourth needs
+the third.
 
-3. **Host sleep is still unfixed and is the last known way a healthy run dies.** `caffeinate`
-   is the stopgap and it expires. The decision is in the sleep section above.
+| # | what | who |
+| --- | --- | --- |
+| 1 | `factory#45` — this document's own last commit, stranded when `#43` merged | James (merge) |
+| 2 | BAC-6's PR **python-harness#70** — merge or reject | James (`merge-is-james`) |
+| 3 | FRO-11's three rewritten e2e assertions — accept or refuse. **It produces no PR until this is answered** | James |
+| 4 | **Item 3, the first layer-C product** — §19 reserves the repository's creation, and the name, to James. Asked 2026-08-23, answered *not now* | James |
+| 5 | Item 4's last piece, the **monorepo dispatch test** (a CSS-only change runs no Python gate) — cannot be written until item 3 exists | follows 4 |
 
-4. **Check the branch tip, not the PR state.** Five times now, the last one on the very PR
-   that existed to repair the fourth. `git merge-base --is-ancestor <sha> origin/main`.
+**The open defect is the sleep-reap, and it is a decision rather than a bug** — see the
+numbered list below and the section above it. `caffeinate -i -m -s -t 7200` was started at
+about 18:00 UTC as a stopgap and **expires around 20:00 UTC**; after that an unattended
+overnight run will lose a ladder rung per host sleep.
+
+### Two operational facts a new session must not rediscover
+
+- **The daemon executes whatever is checked out in `/Users/james/factory`.** A `git checkout`
+  in that directory changes the code the next tick runs. This session edited the handoff from
+  a temporary `git worktree` for exactly that reason, and left the checkout on `main`. Anything
+  else — a branch cut before today's merges, for instance — silently reverts `#38`, `#39`,
+  `#41` and `#42` for the daemon.
+- **The stranding race fired six times today**, twice on this very document. A PR merges while
+  a commit is still in flight to its branch; the branch ref keeps the commit and `main` never
+  sees it. `git merge-base --is-ancestor <sha> origin/main` is the check, and it costs one
+  command. Run it before believing anything here is on `main`.
 
 ## The recovery paths were the whole story today — five defects, four of them fixed
 
@@ -292,6 +307,51 @@ with three attempts is at rung 4 for ever and `_LADDER.get(4)` is `FAIL`.
 
 The method that found all five is unchanged and is stated at the bottom of this document.
 Nothing here came from reading the code first.
+
+## Item 4 is done — and the two stacks finished in different shapes
+
+Both runs reached `awaiting_human` on 2026-08-23. That is Phase 5's "one ticket per stack,
+end to end", and the difference between the two endings is the part worth keeping.
+
+**BAC-6 — the whole path, including delivery.**
+
+```
+blocked -> implementing -> verifying -> reviewing -> pr_ready -> awaiting_human
+```
+
+Gate verdict `pass` (`ruff check`, `ruff format`, `mypy`, `pytest`; `pytest -m integration`
+reported `not_applicable`, because the diff touches `data/`, `scripts/` and tests only and its
+`when` never fired). Both reviews clean. PR **python-harness#70**. This is the python stack end
+to end *through* the human-judgement edge rather than around it — the first run ever to leave
+`blocked` that way.
+
+The strengthened tests were verified rather than believed. Both mutations that defeated the
+originals now fail: swapping one gold answer to another document of the same visibility fails
+`test_gold_query_labels_match_the_approved_answers`, and rendering only the shared context
+header fails `test_generator_creates_one_readable_pdf_per_document`.
+
+**FRO-11 — all seven gates green, then a guard stopped it before `deliver`.**
+
+```
+implementing -> verifying [verdict: pass, 7 gates] -> reviewing -> awaiting_human [test-weakening]
+```
+
+`playwright` **passed in 4,572 ms inside an unattended sandbox**. That is item 2's `requires`
+probe proved on the frontend side, in the only way it could be: four green unit tests and two
+hand measurements never touched it.
+
+Then `redphase.weakening_guard` found three assertion lines removed from the existing
+`e2e/projects.spec.ts` and escalated — by design a judgement, not a block — so the run is at
+`awaiting_human` **with no PR**, having never reached `deliver`.
+
+The removed lines tested the stub route this ticket deletes, and their replacements are
+strictly stronger (real heading text, a literal URL, focus management, and a return journey).
+So it reads as a rewrite rather than a weakening — **but the guard cannot tell those apart,
+which is exactly why it hands it over.** If the frontend half should also produce a PR,
+`factory resume FRO-11 --from reviewing` re-runs review and carries it to `pr_ready`.
+
+**What this leaves for item 4:** the monorepo dispatch test, which still cannot be written
+until item 3 exists. Nothing else.
 
 ## What Phase 5 has left — items 3 and 4, and how to actually finish them
 
@@ -364,9 +424,9 @@ factory still cannot file a ticket, and did not. But the ticket in front of the 
 stack's first end-to-end run came from an agent, not from the ticket system, and a reader
 comparing this to §24.1 deserves to know that rather than infer it.
 
-**What is left on item 4:** BAC-6 needs a human on its two `high` findings, and FRO-11 needs
-to reach `awaiting_human`. Then the monorepo dispatch test, which still cannot be written
-until item 3 exists.
+**Both of those happened on 2026-08-23** — see "Item 4 is done" above, which supersedes this
+paragraph. What is left on item 4 is only the monorepo dispatch test, which still cannot be
+written until item 3 exists.
 
 ### 3. First layer-C product — less is missing than the last handoff said
 
@@ -424,24 +484,40 @@ on it: `python-harness/.factory/worktrees/BAC-4` and `frontend-harness/.factory/
 
 ## Defects carried forward
 
-None block the remaining Phase 5 work.
+None block the remaining Phase 5 work. **Defect 1 is the only one still capable of killing a
+healthy run, and it is the one deliberately left open.**
 
-1. **`cancel` cannot restore a tracker it did not set — which is the successful case.** A run
+1. **A sleeping host reaps a live run as `attempt-orphaned`, and it is a §16.1 decision, not
+   a bug to fix quietly.** The heartbeat subshell does not run while the machine is suspended,
+   so on every wake the file is minutes stale and `sbx.poll` takes its last branch — holder pid
+   alive, sandbox `running`, beat older than `ORPHAN_AFTER_SECONDS = 90` (`sandbox/sbx.py:454`).
+   Measured on FRO-11 attempt 1 against `pmset -g log`: the reap fired inside a 45-second
+   DarkWake, 67 minutes into a run that was working, and cost a ladder rung.
+
+   *The fix, if it is wanted:* reaching line 454 at all means the wrapper stopped writing while
+   everything holding it is still up, which is suspension's signature. The real orphan — the
+   holder gone — is already caught at line 439 and fires immediately. So the last branch could
+   return `RUNNING` rather than `ORPHANED`. That widens what §16.1 calls a live run, which is
+   why it was not taken unilaterally.
+
+   *The stopgap in force:* `caffeinate`, which expires. There is no other mitigation.
+
+2. **`cancel` cannot restore a tracker it did not set — which is the successful case.** A run
    that opened a PR has been moved to `In Review` by the GitHub integration, so cancelling it
    leaves the ticket at a non-`Todo` state and the poller skips it for ever. It prints
    `left <T> at '<state>' (not the state the factory set)` and nothing says the ticket is now
    unclaimable.
-2. **The re-run ceiling counts orphans, not attempts — and host sleep manufactures them.** `resumable_reentries` counts
+3. **The re-run ceiling counts orphans, not attempts — and host sleep manufactures them.** `resumable_reentries` counts
    `<state> -> resumable` transitions, so a deterministic environment failure burns the budget
    in three ticks and fails a run whose work is good. `requires` narrows this — a missing tool
    now blocks at `gates-incomplete` instead of looping — but every other deterministic
    environment failure still burns the budget. **Measured 2026-08-23: so does a laptop
    going to sleep**, which is not an environment failure at all — see the FRO-11 section.
-3. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not
+4. **`kill_agent` cannot stop a hung `verifying` gate.** Its body is a node gate report, not
    codex, so neither `pkill -f "codex exec"` nor `pkill -x codex` matches it. Pre-existing.
-4. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when
+5. `_SENSITIVE_DIRS["frontend"]` matches nothing, and `deliver._archive` returns silently when
    the attempt directory is missing.
-5. **New, and mild:** the frontend probe writes `/tmp/playwright-probe.png`, so it is POSIX-only.
+6. **New, and mild:** the frontend probe writes `/tmp/playwright-probe.png`, so it is POSIX-only.
    Nothing in use runs `gate_report.mjs` on Windows — the Stop hook's `STOP_KINDS` excludes
    `e2e` and the sandboxes are Linux — and a Windows run would report the gate `unavailable`
    rather than falsely `pass`, so it fails safe. Recorded rather than fixed.
