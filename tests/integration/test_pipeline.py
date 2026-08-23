@@ -680,6 +680,69 @@ def test_an_incomplete_report_blocks_without_evidence_mismatch(ctx: Context) -> 
     assert "playwright smoke" in caught.value.detail  # the unavailable gate is named
 
 
+def test_a_disabled_gate_passes_the_report_schema_and_advances(ctx: Context) -> None:
+    """`disabled` has to survive the *schema* before `_evidence_mismatch` ever sees it.
+
+    This is the step that was missed. `_validated_report` checks the document against
+    `schemas/gate_report.schema.json` first, and layer D keeps its own copy of layer A's
+    output contract — so teaching `verify.py` the new status while leaving the enum alone
+    moved the wall rather than removing it. Measured on FRO-7 run `4d2faf24b79a4094`,
+    which reached `verifying` with `verdict: pass` and six green gates, and blocked with
+    `schema-invalid: $.gates[6].status: 'disabled' is not one of [...]`.
+
+    The unit tests for `_evidence_mismatch` could not catch it: they call the function
+    directly and never go through the schema. This one drives the real step.
+    """
+    _to_verifying(ctx)
+    report = json.loads(json.dumps(GOOD_GATE_REPORT))
+    report["gates"].append(
+        {
+            "name": "lighthouse",
+            "kind": "integration",
+            "status": "disabled",
+            "exit": None,
+            "durationMs": None,
+            "caveat": "cannot pass on this host",
+            "when": "performance or accessibility budgets are in scope",
+            "outputTail": "",
+        }
+    )
+    _fake(ctx).gate_report = report
+
+    verify_step.run(ctx)
+
+    assert ctx.run.state is State.REVIEWING
+    assert next(g for g in _gates_json(ctx)["gates"] if g["name"] == "lighthouse")["status"] == (
+        "disabled"
+    )
+
+
+def test_a_claimed_disabled_gate_advances_rather_than_mismatching(ctx: Context) -> None:
+    """The agent may run a switched-off gate on its own and report it honestly — FRO-7
+    run 2 did exactly that. Through the whole step, not just the cross-check."""
+    claims = [*GOOD_RESULT["gates_run"], "playwright smoke — pnpm test:e2e passed (4 tests)"]
+    _fake(ctx).result = {**GOOD_RESULT, "gates_run": claims}
+    _to_verifying(ctx)
+    report = json.loads(json.dumps(GOOD_GATE_REPORT))
+    report["gates"].append(
+        {
+            "name": "playwright smoke",
+            "kind": "e2e",
+            "status": "disabled",
+            "exit": None,
+            "durationMs": None,
+            "caveat": None,
+            "when": "user-visible behaviour changed",
+            "outputTail": "",
+        }
+    )
+    _fake(ctx).gate_report = report
+
+    verify_step.run(ctx)
+
+    assert ctx.run.state is State.REVIEWING
+
+
 def test_a_claimed_gate_the_report_omits_is_evidence_mismatch(ctx: Context) -> None:
     _to_verifying(ctx)
     report = json.loads(json.dumps(GOOD_GATE_REPORT))

@@ -46,7 +46,8 @@
               "fail",
               "unavailable",
               "not_applicable",
-              "skipped_unchanged"
+              "skipped_unchanged",
+              "disabled"
             ]
           },
           "exit": { "type": ["integer", "null"] },
