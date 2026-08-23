@@ -31,10 +31,10 @@ either on your word.
 
 | | |
 | --- | --- |
-| `main` | `1abfc83`, **pushed**. Item 1 merged as factory#32 |
+| `main` | `507363d`. Item 1 merged as factory#32; item 2's layer-D half as factory#33 |
+| `harness@v2` | `134b21c`. Item 2's mechanism merged as harness#18, all checks green |
 | suite | 533 passed, mypy clean on 71 files, ruff check + format clean |
-| open PR (factory) | **#33** — `feat/unavailable-gate-names-its-requirement`, pushed, ready |
-| open PR (harness) | **#18** — `feat/gate-requires-probe` on `v2`, pushed, ready. **Yours to merge** |
+| consumers | both on `v2`, clean trees, vendor pin still `3248fbe` — **the re-vendor is step 1 below** |
 | `awaiting_human` | empty |
 | runs | 4 `completed`, 30 `cancelled`, 8 `blocked`, 1 `suspended` |
 | BAC-6 | `suspended` at attempt 7, deliberately held. Do not touch |
@@ -88,6 +88,13 @@ Six mutations, all caught: removing the probe block, ignoring its result, treati
 unspawnable probe as met, carrying the probe's exit code onto the entry, probing an empty
 `requires`, and hoisting the probe above the dispatch decisions.
 
+**One CI round trip was spent on formatting, and the cause is worth not repeating.** `harness`
+installs no `node_modules`, so `npx --no-install prettier` cannot run and reads like "tool
+unavailable" rather than "not checked". The Generate main job runs `npx --yes prettier@3
+--check .` and fails the PR on formatting alone, and prettier always breaks a JSON array whose
+elements are themselves arrays regardless of `printWidth`. Neither `node --test` nor
+`scripts/check.py` covers formatting. **Run the CI command verbatim before pushing layer A.**
+
 **factory#33 — the block message names what to install.** `gates-incomplete` is a
 human-judgement state and the human's next act is to install something; the message named the
 gate and left the *what* in the artifact. It now carries the caveat, attached to its gate, and
@@ -102,43 +109,42 @@ only for gates that did not run. This matters more now: a missing tool used to a
 
 ## What item 2 has left — this is the next session's first job
 
-**Everything remaining is downstream of `harness#18` merging.** Nothing below can be done
-before it, because adding `requires` to either config would fail validation against the
-vendored schema.
+**`harness#18` is merged, so this is unblocked and nothing here waits on a decision.** It had
+to go first: adding `requires` to either config before the schema shipped would fail validation
+against the vendored copy.
 
-1. **Merge `harness#18`** (yours — §19 reserves every layer-A merge).
-2. **Re-vendor into both consumers**, one at a time: `python3 /Users/james/harness/scripts/vendor_sync.py sync`
-   in the consumer, then commit the bumped pin. Current pin in both is `3248fbe`.
-3. **Add the two `requires` argvs**, in the consumer repos, on `v2`:
+1. **Re-vendor into both consumers**, one at a time: `python3 /Users/james/harness/scripts/vendor_sync.py sync`
+   in the consumer, then commit the bumped pin. Both sit on `3248fbe`; `harness@v2` is now
+   `134b21c`.
+2. **Add the two `requires` argvs**, in the consumer repos, on `v2`:
 
    | repo | gate | `requires` |
    | --- | --- | --- |
    | `frontend-harness` | `playwright` | `["pnpm", "exec", "playwright", "--version"]` |
    | `python-harness` | `pytest -m integration` | `["docker", "info"]` |
 
+   Both gate names were verified against the live configs on 2026-08-23.
    **Check the python one against the real config first.** `python-harness`'s integration
    caveat says "needs Docker **and the app extra**", and `docker info` probes only the first
    half. Either the probe covers both or the caveat should stop claiming it does.
-4. **Prove it end to end, not in a fixture.** The method section below is not decoration: run
+3. **Prove it end to end, not in a fixture.** The method section below is not decoration: run
    `gate_report.mjs --json --gate playwright` in the frontend sandbox with chromium *actually
    absent*, and read the status. That is the only evidence that the mechanism does what four
    green unit tests claim.
 
 ---
 
-## The authority edit, ready for one keystroke
+## The authority edit — done
 
-§19 needs the decision recorded. The script is written and **validated against a copy** —
-applies cleanly, idempotent on re-run, refuses unless every FIND is unique, backs up first:
+§19 carries the decision. James ran the prepared script on 2026-08-23; the two edits are in
+`0ad42cb` on this branch: the Phase 5 bullet gained a paragraph recording that the mechanism
+is layer A's `requires` and why not `src/factory/` or `preflight`, and §20.2's harness file
+table gained the schema's second optional key.
 
-```
-! python3 /private/tmp/claude-501/-Users-james-factory/cbbbf1f4-7c6a-4f7b-9449-de4a5e6046f6/scratchpad/apply-plan-19.py
-```
-
-Two edits: the Phase 5 bullet gains a paragraph recording that the mechanism is layer A's
-`requires` and why not `src/factory/` or `preflight`; §20.2's harness file table gains the
-schema's second optional key. **If that scratchpad is gone** (it is session-scoped), the
-content is in this file's "What landed" section — re-author it rather than skipping it.
+The route is recorded because it works and cost one keystroke instead of a session: write the
+edits as a script that asserts each FIND string appears **exactly once** before touching
+anything — all-or-nothing, backs up first, no-op on re-run — validate it against a *copy* of
+the file, then hand James one `! python3 <path>` line.
 
 Do **not** try to route around the hook or the classifier. Silently defeating the enforcement
 layer is exactly `p0-6-codex-trust.md`.
@@ -242,6 +248,14 @@ it. This session it caught three things the handoff would otherwise have carried
 - **The handoff's own design recommendation was half wrong.** `preflight` is genuinely the
   shaped home for a positive assertion — and it still cannot satisfy the bullet, because the
   bullet is about the *report*. Re-reading the authority beat re-reading the summary of it.
+
+- **Two commits missed their own PR by 24 seconds.** `0ad42cb` was the tip when factory#33
+  merged; `ff686e1` and `078e795` were pushed to the branch *after* and were never in it. The
+  branch looked merged, `git status` was clean, and both were still stranded. What surfaced it
+  was reading the file's content on `main` rather than trusting that "the PR merged" meant the
+  branch's tip merged. `git log --oneline -3 -- <file>` and `git merge-base --is-ancestor`
+  answer this in one command each. **Deleting the local branch before checking would have made
+  it much harder to find** — the remote ref is what saved it.
 
 **A green suite is a claim, not evidence.** Before believing a test, stash or mutate the source
 and watch it fail; check the test sits at the altitude the defect lives at. Watch for the
