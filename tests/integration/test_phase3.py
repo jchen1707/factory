@@ -349,11 +349,69 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     assert len(scripts) == 1
     outputs = [Path(m.group(1)) for m in re.finditer(r"(?:^|\s)-o (\S+)", scripts[0])]
     assert len(outputs) == 3  # standards, spec, full
-    assert all(out.parent == scratch for out in outputs), outputs
+    # Inside the mount, not necessarily at its root: the *mount* is what §9.1 fixes per
+    # project, and a run-id subdirectory under it is free — the same shape the clone mount
+    # takes, and what keeps two runs of one ticket from colliding.
+    assert all(out.is_relative_to(scratch) for out in outputs), outputs
     # And each landed in the run's own directory afterwards.
     for name in ("review-standards.json", "review-spec.json", "review-full.json"):
         assert (ctx.state_dir / "review" / name).exists(), name
-    assert not list(scratch.glob("review-*.json"))  # moved, not copied
+    assert not list(scratch.rglob("review-*.json"))  # moved, not copied
+
+
+def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The structural check the `-o` test above could not make, derived from the spec.
+
+    The existing test asserts the *findings* paths are writable, and it passed throughout
+    the defect. What it could not see is everything else the detached script names: the
+    prompt it reads with `<`, the event stream and stderr it writes with `>` and `2>`, and
+    the wrapper's own `heartbeat` and `exit`. Those pointed at `state/runs/<run>/review/`
+    and `ctx.factory_dir`, and **neither is a workspace of the review sandbox** — its spec
+    is the project `:ro` plus the per-project scratch, and nothing else.
+
+    Measured on FRO-7 run `b1aa9785bbe44663`, the first real review the daemon ever drove:
+    `cannot create .../.factory/run/1/heartbeat: Directory nonexistent` and
+    `cannot open .../review/review-standards.prompt: No such file`, then `reviewing ->
+    resumable` on a loop. It survived every test because review only became a *detached*
+    step in `147dc88`; before that it ran synchronously, needed no heartbeat, and read its
+    prompt from the host.
+
+    So this asserts the property rather than the paths: every absolute path the script
+    names must be inside a workspace the spec actually mounts. Written by construction
+    from `_review_spec`, so a workspace added or removed changes what this allows without
+    anyone editing the test.
+    """
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, tier1_has_human=False: None)
+    _fake(ctx).review_findings = {"findings": []}
+
+    review_step.run(ctx)
+
+    spec = review_step._review_spec(ctx, review_step._review_scratch(ctx))
+    mounts = [Path(w.path) for w in spec.workspaces]
+    writable = [Path(w.path) for w in spec.workspaces if not w.readonly]
+
+    script = next(s for _name, s in _fake(ctx).detached if "review-standards" in s)
+    named = {Path(tok.strip("'\"")) for tok in re.findall(r"'?/[^\s'\"<>]+", script)}
+    # Only paths the factory owns; the script also names binaries like /bin/sh.
+    owned = [p for p in named if p.is_relative_to(ctx.home) or p.is_relative_to(ctx.project.path)]
+    assert owned, "the script named no factory-owned path; the regex stopped matching"
+
+    outside = [p for p in owned if not any(p.is_relative_to(m) for m in mounts)]
+    assert not outside, f"named but not mounted in the review sandbox: {outside}"
+
+    # The liveness files and the reviewer's outputs are *written*, so a read-only mount is
+    # not enough for them — the bind-mounted variant of the same defect, where the worktree
+    # is present but `:ro` on purpose (§15.2).
+    written = [
+        p for p in owned if p.name in {"heartbeat", "exit"} or p.suffix in {".jsonl", ".log"}
+    ]
+    unwritable = [p for p in written if not any(p.is_relative_to(w) for w in writable)]
+    assert not unwritable, f"written by the reviewer but not on a writable mount: {unwritable}"
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(

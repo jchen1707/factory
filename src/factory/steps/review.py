@@ -240,9 +240,27 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     #    heartbeat + atomic `exit` that `poll` and `reap` read.
     body = "\n".join(_axis_script_block(a) for a in axes)
     attempt = ctx.run.attempt
-    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt))
-    # Reuse the implement attempt's directory (verify did too); clear the stale `exit`/
-    # `heartbeat` the previous step left, preserving the implement/verify evidence.
+    # The review's liveness lives in the scratch, not at `ctx.factory_dir`, and this is
+    # the one place the review's attempt directory differs from implement's and verify's.
+    #
+    # Those two run in the *build* sandbox, which mounts `ctx.factory_dir` rw for exactly
+    # this. The reviewer runs in a different sandbox with a deliberately narrower spec —
+    # the project `:ro` plus the scratch — and `ctx.factory_dir` is not in it: for a clone
+    # project it is under `state/clone/<project>/`, which the review sandbox does not
+    # mount at all, and for a bind-mounted project it is inside the worktree, which is
+    # mounted read-only on purpose (§15.2 — a reviewer that can write to the code it is
+    # reviewing is not a reviewer). Either way the wrapper cannot write its heartbeat, so
+    # the detached run dies before its first beat and every tick reaps it as
+    # `attempt-orphaned`, forever.
+    #
+    # Measured on FRO-7 run `b1aa9785bbe44663`: `cannot create .../\.factory/run/1/
+    # heartbeat: Directory nonexistent`, then `reviewing -> resumable` on a loop until the
+    # re-run ceiling would have failed the run. Nothing caught it earlier because review
+    # only became a *detached* step in `147dc88`; before that it ran synchronously and
+    # needed no heartbeat at all, which is why BAC-4 reviewed cleanly under the old shape.
+    attempt_dir = AttemptDir(_sandbox_run_dir(scratch, ctx.run.id) / "run" / str(attempt))
+    # Clear the stale `exit`/`heartbeat` a previous re-run left. The implement and verify
+    # evidence is untouched by this — it is in a different tree now.
     attempt_dir.clear_liveness()
     script = detached_shell_script(
         heartbeat_path=attempt_dir.heartbeat,
@@ -284,9 +302,16 @@ def _axis_entry(
     prompt: str,
 ) -> dict[str, Any]:
     """One axis's start-time bookkeeping: write its prompt, choose its paths, build argv."""
-    prompt_path = review_dir / f"review-{label}.prompt"
+    # Every path the *sandbox* touches is in the scratch; every path the *host* reads the
+    # evidence from is in the run directory. The prompt is read by codex, the event stream
+    # and stderr are written by it, so all three sit in the scratch and `collect` lands
+    # them — the same round trip the findings have always made.
+    sandbox_dir = _sandbox_run_dir(scratch, ctx.run.id)
+    prompt_path = sandbox_dir / f"review-{label}.prompt"
     prompt_path.write_text(prompt, encoding="utf-8")
-    scratch_out = _sandbox_out(scratch, f"review-{label}.json")
+    scratch_out = _sandbox_out(sandbox_dir, f"review-{label}.json")
+    scratch_events = sandbox_dir / f"review-{label}.events.jsonl"
+    scratch_stderr = sandbox_dir / f"review-{label}.stderr.log"
     out_path = review_dir / f"review-{label}.json"
     events_path = review_dir / f"review-{label}.events.jsonl"
     stderr_path = review_dir / f"review-{label}.stderr.log"
@@ -297,6 +322,8 @@ def _axis_entry(
             "label": label,
             "prompt": str(prompt_path),
             "scratch_out": str(scratch_out),
+            "scratch_events": str(scratch_events),
+            "scratch_stderr": str(scratch_stderr),
             "out": str(out_path),
             "events": str(events_path),
             "stderr": str(stderr_path),
@@ -304,8 +331,8 @@ def _axis_entry(
         },
         "argv": argv,
         "prompt_path": prompt_path,
-        "events_path": events_path,
-        "stderr_path": stderr_path,
+        "events_path": scratch_events,
+        "stderr_path": scratch_stderr,
     }
 
 
@@ -363,6 +390,11 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         events_path = Path(axis["events"])
         stderr_path = Path(axis["stderr"])
         _land(scratch_out, out_path)
+        # The event stream and stderr come home the same way the findings do. `.get` with
+        # a fallback so a plan written by an older build — one whose axes name only the
+        # host paths — still collects rather than crashing on a missing key mid-recovery.
+        _land(Path(axis.get("scratch_events", events_path)), events_path)
+        _land(Path(axis.get("scratch_stderr", stderr_path)), stderr_path)
         axis_findings = _validated_findings(ctx, out_path, stderr_path, label)
         # A secret in the review's own stream is compromised the way one in the PR body is.
         artifacts.scan_for_secrets(
@@ -488,9 +520,31 @@ def _sandbox_out(scratch: Path, name: str) -> Path:
     return path
 
 
+def _sandbox_run_dir(scratch: Path, run_id: str) -> Path:
+    """The reviewer's writable ground for **one run**, inside the per-project mount.
+
+    Everything the sandbox must read or write lives here, and the reason is the same one
+    `_sandbox_out` gives for findings: the scratch is the reviewer's only writable mount,
+    and it is the only part of the host filesystem it can see at all. `state/runs/<run>/`
+    — where the review's evidence belongs and where `collect` reads its plan — is **not a
+    workspace of the review sandbox**, so a prompt written there cannot be read and an
+    events file pointed there cannot be written.
+
+    The mount is fixed per project (§9.1, and `_review_scratch` explains why it cannot be
+    per run); a subdirectory under it is free, exactly as the clone mount takes a run-id
+    subdirectory for the same reason. Keyed by run id so two runs of one ticket cannot
+    collide — the defect `factory_dir_for` records.
+    """
+    path = scratch / run_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _land(scratch_out: Path, out_path: Path) -> None:
-    """Move an axis's findings from the shared scratch into this run's own directory,
-    where the evidence belongs."""
+    """Move one of the reviewer's outputs from the shared scratch into this run's own
+    directory, where the evidence belongs. Findings, the event stream and stderr all come
+    home this way; a missing file is silent, because an axis that never started has
+    nothing to land and `_validated_findings` is what judges that."""
     if scratch_out.exists():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(scratch_out), out_path)
