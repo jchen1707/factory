@@ -4,10 +4,25 @@ Written 2026-08-23 at the end of the session that finished it. Phase 5 is **comp
 exit tickets merged and recorded, the layer-C repository exists, and the last carried
 decision is resolved.
 
-**`/SOFTWARE-FACTORY-PLAN.md` is the authority.** It is the only plan file. There is no copy
-under `.agents/plans/` — a 169k condensed duplicate lived there until `9e33944` and misled
-two sessions before being deleted on James's word. **Do not recreate it.** If you are reading
-a plan whose path is not `/SOFTWARE-FACTORY-PLAN.md`, stop and check what you are reading.
+**`/SOFTWARE-FACTORY-PLAN.md` is the authority, and it is the only file you may edit.**
+
+There is a second copy at `.agents/plans/software-factory-plan.md`, restored 2026-08-23 on
+James's word: he reads the plan through a model that can only see files under `.agents/` and
+cannot open the published artifact. **It is generated and verbatim — never edit it.**
+
+The distinction matters, because a copy at that exact path is what misled two sessions before
+`9e33944` deleted it. That one was a *condensed* 169k rewrite: it said almost the same thing
+in slightly different words, so a reader could not tell it had gone stale. The restored copy
+is byte-for-byte, which means it can only diverge in **age** — and age is checkable:
+
+```
+python3 scripts/sync_plan_copy.py           # regenerate after editing the plan
+python3 scripts/sync_plan_copy.py --check   # exits 1 when it has fallen behind
+```
+
+`factory doctor` runs that check (`plan copy` row) and so does the test suite
+(`tests/unit/test_plan_copy.py`), so a plan edit that forgets the copy fails CI rather than
+waiting to be noticed. **If you edit the plan, run the sync.**
 
 ---
 

@@ -1754,6 +1754,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         for project in registry.projects.values():
             check(*_sensitive_paths_check(project))
 
+    check(*_plan_copy_check(home))
     check(*_prices_check(home))
 
     if args.deep and registry:
@@ -1817,6 +1818,36 @@ def _sensitive_paths_check(project: Project) -> tuple[str, bool, str]:
         return name, False, f"matches no tracked file: {', '.join(dead)}"
     hits = sum(1 for f in files if review_step._matches_any(f, project.sensitive_paths))
     return name, True, f"{len(project.sensitive_paths)} glob(s), {hits} files"
+
+
+def _plan_copy_check(home: Path) -> tuple[str, bool, str]:
+    """Is `.agents/plans/software-factory-plan.md` still the canonical plan, byte for byte?
+
+    The copy exists for agents and tools that can read `.agents/` but not the repository
+    root. The *previous* copy at that path was a condensed rewrite that said almost the same
+    thing in slightly different words, and it misled two sessions before `9e33944` deleted
+    it. A verbatim copy can only go stale, and this is what notices — the same argument as
+    the vendored-layer-A rows above, applied to one file.
+
+    Reported rather than failed when the script is absent: a checkout without
+    `scripts/sync_plan_copy.py` has no copy to keep current, and `doctor` runs against
+    fixture homes in the test suite.
+    """
+    script = home / "scripts" / "sync_plan_copy.py"
+    if not script.exists():
+        return "plan copy", True, "no scripts/sync_plan_copy.py in this tree"
+    try:
+        done = subprocess.run(
+            [sys.executable, str(script), "--check"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "plan copy", False, str(exc)
+    output = (done.stdout or done.stderr).strip().splitlines()
+    return "plan copy", done.returncode == 0, output[-1] if output else ""
 
 
 def _tool_check(argv: Sequence[str]) -> tuple[str, bool, str]:
