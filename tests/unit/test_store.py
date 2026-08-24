@@ -163,6 +163,47 @@ def test_transitions_record_actor_and_rule(store: Store) -> None:
     assert store.run_by_id(run.id).state is State.CANCELLED  # type: ignore[union-attr]
 
 
+def test_leaving_blocked_clears_its_reason(store: Store) -> None:
+    """Defect 4 (Phase 5 handoff): FRO-11 reached `awaiting_human` with a merged PR
+    still carrying `blocked_reason = review-agent-failed`, because nothing cleared the
+    column on the way out of `blocked`. A stale reason on a healthy row is exactly the
+    kind of thing that misleads the next reader, so the transition out of `blocked`
+    clears it."""
+    run = store.insert_run(linear_id="FRO-11", project="frontend-harness", team="FRO")
+    _move(store, run.id, State.REVIEWING)
+    store.update_run(run.id, blocked_reason="review-agent-failed")
+    store.record_transition(
+        run.id,
+        from_state=State.REVIEWING,
+        to_state=State.BLOCKED,
+        actor="auto",
+        rule="review-finding",
+    )
+    assert store.run_by_id(run.id).blocked_reason == "review-agent-failed"  # type: ignore[union-attr]
+
+    # James unblocks; the run re-enters the pipeline. The reason it was blocked must
+    # not follow it into `implementing`.
+    store.record_transition(
+        run.id, from_state=State.BLOCKED, to_state=State.IMPLEMENTING, actor="human", rule="unblock"
+    )
+    assert store.run_by_id(run.id).state is State.IMPLEMENTING  # type: ignore[union-attr]
+    assert store.run_by_id(run.id).blocked_reason is None  # type: ignore[union-attr]
+
+
+def test_a_transition_that_stays_blocked_keeps_its_reason(store: Store) -> None:
+    """Re-blocking the same run with a new reason is a legitimate path (a run unblocked
+    into `implementing` that fails again). Clearing on entry to `blocked` would discard
+    the new reason; only the exit clears."""
+    run = store.insert_run(linear_id="BAC-6", project="python-harness", team="BAC")
+    _move(store, run.id, State.IMPLEMENTING)
+    store.update_run(run.id, blocked_reason="first-failure")
+    store.record_transition(
+        run.id, from_state=State.IMPLEMENTING, to_state=State.BLOCKED, actor="auto", rule="first"
+    )
+    store.update_run(run.id, blocked_reason="second-failure")
+    assert store.run_by_id(run.id).blocked_reason == "second-failure"  # type: ignore[union-attr]
+
+
 def test_cost_records_unknown_price_as_null_not_zero(store: Store) -> None:
     # A zero reads as a free run rather than an unpriced one, and the difference
     # decides whether the $20 ceiling means anything.
