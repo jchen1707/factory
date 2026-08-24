@@ -93,13 +93,16 @@ def _load_sync(root: Path):  # type: ignore[no-untyped-def]
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.ROOT = root
-    module.CANONICAL = root / "SOFTWARE-FACTORY-PLAN.md"
-    module.COPY = root / ".agents" / "plans" / "software-factory-plan.md"
+    # `module` is a dynamically-loaded `ModuleType`; ROOT/CANONICAL/COPY/main_write are
+    # injected here so the tests never touch the real plan. mypy cannot see runtime
+    # attribute injection on a ModuleType, so these are silenced, not declared.
+    module.ROOT = root  # type: ignore[attr-defined]
+    module.CANONICAL = root / "SOFTWARE-FACTORY-PLAN.md"  # type: ignore[attr-defined]
+    module.COPY = root / ".agents" / "plans" / "software-factory-plan.md"  # type: ignore[attr-defined]
 
     def main_write() -> None:
         module.COPY.parent.mkdir(parents=True, exist_ok=True)
         module.COPY.write_text(module.render(module.canonical_text()), encoding="utf-8")
 
-    module.main_write = main_write
+    module.main_write = main_write  # type: ignore[attr-defined]
     return module
