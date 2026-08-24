@@ -323,6 +323,29 @@ def test_poll_still_reports_a_live_holder_as_running(tmp_path: Path) -> None:
     assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
 
 
+def test_poll_does_not_reap_a_paused_run_on_a_stale_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 5 defect 1: a sleeping laptop reaped a healthy run as `attempt-orphaned`.
+
+    While the host is suspended the heartbeat subshell stops advancing — the sandbox
+    suspends with the host — so on every wake the heartbeat file is minutes stale.
+    `poll` read that stale beat as an orphan verdict even though the holder pid was
+    live and the sandbox was still running: nothing had died, only paused. The orphan
+    signature §16.1 actually wants — the holder gone — is checked first and is the
+    only death signal when a holder is recorded. A stale heartbeat with a live holder
+    and a running sandbox is a paused run, left for the §5.1 state timeout, not `poll`.
+    """
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    # Minutes stale — well past ORPHAN_AFTER_SECONDS, as it is after every wake.
+    (tmp_path / "heartbeat").write_text(str(int(time.time()) - 600))
+    adapter = SbxAdapter()
+    monkeypatch.setattr(adapter, "exists", lambda _name: True)
+    monkeypatch.setattr(adapter, "inspect", lambda _name: {"state": "running"})
+
+    assert adapter.poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
+
+
 def test_poll_reads_the_exit_file_the_phase_actually_writes(tmp_path: Path) -> None:
     """A plan attempt's wrapper writes `plan-exit`, not `exit`.
 

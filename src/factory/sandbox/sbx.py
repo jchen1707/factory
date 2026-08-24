@@ -424,8 +424,14 @@ class SbxAdapter:
     def poll(self, handle: RunHandle) -> RunStatus:
         """Filesystem first, sandbox state second.
 
-        `exit` present is terminal regardless of what the VM is doing; a stale
-        heartbeat with no `exit` is an orphan whether or not the sandbox is up.
+        `exit` present is terminal regardless of what the VM is doing. A run is an
+        orphan when its session holder is gone or its sandbox has stopped — the
+        heartbeat is a progress signal, not a death signal. A stale heartbeat with a
+        *live* holder and a running sandbox is a paused run: the host slept and the
+        sandbox suspended with it, so the heartbeat subshell stopped advancing while
+        nothing died. Reaping that as an orphan (Phase 5 defect 1) lost healthy runs
+        on every wake. The §5.1 state timeout recovers a run that is alive but making
+        no progress; `poll` recovers one whose holder or sandbox is gone.
         """
         attempt_dir = handle.attempt_dir
         if (attempt_dir / handle.exit_name).exists():
@@ -436,7 +442,8 @@ class SbxAdapter:
         # next tick recovering the run and it waiting out a minute and a half for a
         # verdict that is already decided.
         holder = holder_pid(attempt_dir)
-        if holder is not None and not pid_alive(holder):
+        holder_alive = holder is not None and pid_alive(holder)
+        if holder is not None and not holder_alive:
             return RunStatus.ORPHANED
         beat = attempt_dir / "heartbeat"
         try:
@@ -450,7 +457,12 @@ class SbxAdapter:
         state = str(self.inspect(handle.sandbox).get("state", ""))
         if state != "running":
             return RunStatus.ORPHANED
-        # The sandbox is up and the file is young enough to still be the first beat.
+        # The sandbox is running. A stale heartbeat here with a live holder is a paused
+        # run, not an orphan — the host slept and both the holder and the sandbox resume
+        # on wake. Only a run with no recorded holder falls back to the heartbeat: that
+        # is the pre-holder-pid path, where a stale beat is the only death signal.
+        if holder_alive:
+            return RunStatus.RUNNING
         return RunStatus.RUNNING if age is None else RunStatus.ORPHANED
 
     def collect(self, handle: RunHandle) -> RunResult:
