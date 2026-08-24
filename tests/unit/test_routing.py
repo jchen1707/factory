@@ -79,7 +79,7 @@ def _load(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
 def test_the_shipped_table_validates() -> None:
     routing = load_routing(HOME / "config" / "models.toml", cache=CACHE)
     assert routing.roles["builder"].model != routing.roles["reviewer"].model
-    assert routing.usd_per_run == 20.0
+    assert routing.usd_per_run == 50.0
 
 
 def test_the_shipped_table_records_all_eight_measured_models() -> None:
