@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The factory console, always on. `factory serve` is a foreground uvicorn process bound
+  to 127.0.0.1:7717 — loopback only, no credential of its own (§18.5). Unlike the tick
+  timer (`com.jchen.factory.plist`), this is a daemon, not a poller: `KeepAlive` keeps it
+  running and restarts it if it exits, so the console is reachable at
+  http://127.0.0.1:7717/ without holding a terminal open. Off-machine access is a Phase 7
+  decision with its own auth story; this plist does not widen the bind.
+
+  Load:   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.console.plist
+  Restart:launchctl kickstart -k gui/$(id -u)/com.jchen.factory.console
+  Stop:   launchctl bootout gui/$(id -u)/com.jchen.factory.console
+
+  The absolute `/opt/homebrew/bin/uv` path is deliberate (launchd does not inherit PATH).
+  PATH still needs /opt/homebrew/bin and ~/.local/bin because the console's runtimes view
+  execs `sbx ls` — the same list the tick plist carries, kept in step for the same reason.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jchen.factory.console</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>/Users/james/factory</string>
+        <string>factory</string>
+        <string>serve</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/Users/james/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/james/factory/logs/console.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/james/factory/logs/console.err.log</string>
+</dict>
+</plist>
