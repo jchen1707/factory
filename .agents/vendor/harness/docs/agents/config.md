@@ -117,3 +117,21 @@ settings, and the protected paths that are nobody's app in particular.
 The test is the rule at the top. A key earns its place when a _shared_ file needs it. A fact
 only this repository's own code reads is not config — it belongs wherever that code is, and
 putting it here just moves it further from its reader.
+
+## The vault variable has two scopes, one per layer
+
+The Obsidian vault path travels under two names, and neither is wrong — they live in two
+different scopes, and the harness is the translator between them.
+
+- **`OBSIDIAN_VAULT_DIR`** — the **host shell** variable, owned by `dotfiles`. The factory
+  reads the host value from it (falling back to `OBSIDIAN_VAULT_DIRECTORY`, then to a path
+  declared in the project registry), and if none resolves it blocks rather than proceeding
+  with the second brain silently unmounted.
+- **`OBSIDIAN_VAULT_DIRECTORY`** — the **in-sandbox** variable, owned by the harness. It is
+  the name `session_learnings.mjs`, `vault_index.mjs` and the `search-second-brain` skill
+  read, and it is the only name the factory emits into a sandbox. A repo's own `AGENTS.md`
+  that documents the variable for its agents names this one, because the agent runs inside
+  the sandbox where this is the canonical name.
+
+One translator, one canonical name per scope: the host keeps its name, the sandbox keeps
+its name, and no layer redefines the other's.

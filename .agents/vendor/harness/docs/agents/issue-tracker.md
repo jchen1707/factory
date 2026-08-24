@@ -108,6 +108,21 @@ Once installed, the agent's remaining manual duties shrink to: the **In Progress
 branch creation, the evidence comment, and the parent rollup. Until it is installed, the whole
 table is manual — do not assume the automation exists; check the issue actually moved.
 
+### Unattended runs: the control plane writes
+
+The table above is an attended session's doctrine — the agent moves the issue in the same
+turn as the git action that causes it. An unattended factory run inverts who writes. The
+control plane (layer D) owns every tracker write — claiming the issue, moving status,
+applying and removing labels, posting comments — through its effects ledger, and the
+sandboxed agent writes to the tracker neither directly nor through the Linear API. A
+sandboxed reviewer that cannot reach Linear is not a broken run; it is the design — the
+agent has nothing to write because the control plane already has.
+
+So an unattended run's tracker state is authoritative regardless of what the agent's
+transcript says it did. Read the issue, not the transcript, to learn where the work stands.
+Which repos the factory drives unattended is a property of its project registry, not of this
+file; see `factory.md`.
+
 ## Labels vs workflow states
 
 Linear separates **workflow state** (Backlog / Todo / In Progress / Done — a single value that

@@ -148,6 +148,39 @@ export function gatedChange(cwd, hooks, prefix = '') {
     .some((path) => isGated(path, hooks, prefix));
 }
 
+/**
+ * True if the commits `<base>..HEAD` touched gated source — the factory's post-commit
+ * analogue of `gatedChange`.
+ *
+ * `gatedChange` reads uncommitted working-tree edits (`git status --porcelain`), which is
+ * exactly right for the Stop hook: it fires at turn-end over the agent's not-yet-committed
+ * edits. The factory verifies *after* the implement step has committed the agent's work, so
+ * the working tree is clean, `git status` is empty, and `gatedChange` sees nothing — every
+ * gate would be `skipped_unchanged` regardless of what the change touched. Against a base
+ * ref, `git diff --name-only` sees the committed change instead. `gate_report.mjs --base
+ * <ref>` switches on this; the Stop hook never passes a base, so `gatedChange` is unchanged.
+ *
+ * The diff output is repo-root-relative, like porcelain, so the same `isGated` filter and
+ * `prefix` reconciliation apply. A rename line is `old\tnew`; the last segment is the path
+ * that exists.
+ */
+export function gatedChangeSince(cwd, hooks, prefix = '', base) {
+  const pathspec = [...hooks.gatedPaths, ...hooks.gatedFiles];
+  if (pathspec.length === 0) return false; // Nothing declared -> nothing to gate.
+  if (!base) return false; // No base ref -> nothing to diff against.
+
+  const result = run('git', ['diff', '--name-only', `${base}..HEAD`, '--', ...pathspec], {
+    cwd,
+    timeout: 30_000,
+  });
+  if (result.status !== 0) return false; // Can't tell -> don't block.
+  return result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => line.split('\t').pop())
+    .some((path) => isGated(path, hooks, prefix));
+}
+
 /** One line per declared gate this hook does not run, naming when it stops being optional. */
 export function skippedNote(gates) {
   const skipped = gates.filter((gate) => !STOP_KINDS.has(gate?.kind));

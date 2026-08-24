@@ -99,8 +99,29 @@
           "caveat": {
             "type": "string",
             "description": "One sentence naming how this gate can pass without having checked anything \u2014 a linter rule that fails open on an unclassified file, a metric the runner could not measure, a suite that silently collected nothing. /verify prints it beside the green result. A gate whose vacuous pass is undocumented is worse than a missing gate, because it is trusted."
+          },
+          "requires": {
+            "$ref": "#/$defs/argv",
+            "description": "A cheap command that exits zero only when this gate's environment is actually present -- the browser downloaded, the container runtime up. Run immediately before the gate, and only when the gate was going to run anyway; when it exits non-zero or cannot be spawned, the gate is reported `unavailable` and never runs. This is what makes the difference between \"the tool is missing\" and \"the code is wrong\" visible in the report instead of buried in a failure tail: a missing browser makes the e2e gate exit non-zero exactly like a real regression does, and an agent handed that `fail` will try to fix it by writing code. `caveat` says the same thing in prose for a human; this says it in a form a machine can check. Omit for a gate that needs nothing beyond the repo's own install step. Probe the thing that is actually absent, not the wrapper around it -- measured 2026-08-23, `pnpm exec playwright --version` exits 0 with no browsers downloaded at all, so as a probe it reports \"environment met\" in exactly the case it was written to catch. A probe that cannot fail for the reason named in `caveat` is worse than no probe, because the gate is then trusted.",
+            "examples": [
+              ["pnpm", "exec", "playwright", "screenshot", "about:blank", "/tmp/probe.png"],
+              ["uv", "run", "python", "scripts/integration_env_probe.py"]
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this gate runs at all. Omit for true. Set false to switch a gate off without deleting its declaration \u2014 the gate stays visible in the report as `disabled`, so a reader can see it exists and is off, which a deleted gate cannot tell them. For a gate that is real but cannot run in this environment, or that checks a property the project does not care about yet."
           }
         }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "description": "Which files in this repository are tests, as git pathspecs. Declared because a check that needs to separate the test half of a diff from the implementation half cannot infer it: one stack keeps tests in a directory and the other colocates them beside the source. Omit it and any check that needs the split reports itself as unavailable rather than guessing \u2014 the same rule every gate that could not run follows.",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
       }
     },
     "hooks": {
