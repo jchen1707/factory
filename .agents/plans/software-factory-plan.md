@@ -12,8 +12,8 @@
 > | | |
 > | --- | --- |
 > | source | `/SOFTWARE-FACTORY-PLAN.md` |
-> | body sha256 | `d8c988c379f1ed4b93402c7882ea641698c2a1901fb040d6789d4114a2f4be65` |
-> | copied at | commit `26a490f` |
+> | body sha256 | `13353fe1f3ea19c8dbd1db9c4e5e9db9b8a121ba0b59eff0e4c65e7d57fa3466` |
+> | copied at | commit `bedabff` |
 >
 > **If you are editing the plan, edit the canonical file and regenerate this one.** From the
 > repository root:
@@ -2566,6 +2566,25 @@ hygiene cleanup, not Phase 6.
 
 Until a trigger fires, this phase is a paragraph, not code. The note's own line applies:
 *"You do not need this on day one. You need it when a lost sandbox costs you a ticket."*
+
+**Evidence gate — 2026-08-24 (first check, at Phase 6 close).** All three triggers audited
+against the live `state/factory.db`, the `logs/daemon.out.log` transcript, and the Phase 0–5
+discovery record. **None fired.** Phase 7 stays a paragraph; no code is written.
+
+| Trigger | Threshold | Observed | Fired? |
+| --- | --- | --- | --- |
+| A lost sandbox costs a ticket | ≥ 2 occurrences in 30 d that §16 recovery did **not** save | **0 tickets lost.** Two `orphaned` attempts — both FRO-11 (`implementing` att 1, `planning` att 3) — were saved by §16 resume-by-session (`resumable:resume(session-intact)`); FRO-11 reached `completed`. The three `failed` transitions on record (FRO-7 `max-reruns-reviewing`; FRO-11 `ladder-exhausted` ×2) are attempt-budget exhaustion, not sandbox losses, and all were recovered by the human-authorised `failed → resumable` retry (§5.3). No run is in state `failed` today. | No |
+| Concurrency exceeds the laptop | ≥ 3 tickets queued > 4 h, twice | Serial execution (one writer per project, `concurrency.per_project = 1`, 60 s poll). The 11 `blocked` and 34 `cancelled` rows are re-appearing intake rejects (`state-not-todo` on `Done` tickets still labelled `ready-for-agent`) and cancelled reruns, not a queue backlog. No 4-h starvation event. | No |
+| Wall-clock dominated by passthrough I/O | P0-10's ratio > 3× and not improving | P0-10 measured the sandbox **~2× faster** than the host on every Python gate — *"the virtiofs passthrough is not the bottleneck at this repository size; macOS process spawn is."* The ratio is ~2× in the favourable direction, not > 3×, and the whole gate suite is under three seconds either way. | No |
+
+**Verdict.** The recovery machinery that Phases 4 and 4.5 built has absorbed every sandbox
+loss the real runs have produced: two orphans, both resumed by session id, neither costing a
+ticket. That is the single highest-value trigger (R4 / the §23 tradeoff that named this
+phase), and it has not fired. The other two are capacity questions for a load the laptop has
+not seen. **Phase 7 is deferred, not abandoned**: re-run this gate when a run ends in
+`failed` with no human retry, when the poller reports tickets queued > 4 h behind a busy
+machine, or at the next phase boundary — whichever comes first. Until then the §23 tradeoff
+stands as written: SQLite + poller + effects ledger, no durable engine.
 
 ---
 
