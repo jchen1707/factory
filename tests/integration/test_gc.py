@@ -36,8 +36,15 @@ def _finished_run(ctx: Context, state: State = State.CANCELLED) -> None:
     ctx.store.record_transition(
         ctx.run.id, from_state=ctx.state, to_state=state, actor="human", rule="test"
     )
+    # Both clocks, because §16.5's floor now counts from the transition that parked the
+    # run rather than from the row's last write. Ageing `updated_at` alone is what these
+    # tests used to do, and it stopped ageing anything the moment the clock moved.
     with ctx.store.transaction() as conn:
         conn.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (int(WEEKS_AGO), ctx.run.id))
+        conn.execute(
+            "UPDATE transitions SET at = ? WHERE run_id = ? AND to_state = ?",
+            (int(WEEKS_AGO), ctx.run.id, str(state)),
+        )
     ctx.refresh()
 
 
@@ -110,8 +117,78 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
 
 def test_a_run_still_inside_the_age_floor_is_left_entirely_alone(ctx: Context) -> None:
     _finished_run(ctx)
+    # Young by the clock that counts: the hop that parked it happened just now.
     with ctx.store.transaction() as conn:
+        conn.execute(
+            "UPDATE transitions SET at = ? WHERE run_id = ?", (int(time.time()), ctx.run.id)
+        )
+    ctx.refresh()
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert _kinds(actions, "worktree-remove") == []
+    assert Path(ctx.run.worktree or "").is_dir()
+
+
+def test_writing_the_run_row_does_not_grant_it_another_week(ctx: Context) -> None:
+    """§16.5's floor counts from when the run stopped moving, not from the row's last write.
+
+    This is the defect, in the shape it actually appeared. `factory complete` writes the
+    run row to record a merge, so a run parked a month ago became "0 days old" the instant
+    somebody recorded that its PR had landed — and `complete` printed "now collectable"
+    while `gc --dry-run` listed nothing. Both behaved as designed and contradicted each
+    other in front of the user. Measured 2026-08-23 on BAC-6 and FRO-11.
+
+    `acquire_lease` and its renewal write the same column, so the old reading also meant
+    any future lease on a finished run silently extended it. A lease records no transition,
+    so counting from the transition log closes that too — asserted below.
+    """
+    _finished_run(ctx)
+    ctx.store.update_run(ctx.run.id, blocked_reason=None)  # any write at all
+    ctx.store.acquire_lease(ctx.run.id, ttl_seconds=600)
+    ctx.refresh()
+    assert ctx.run.updated_at > WEEKS_AGO, "the row really was rewritten just now"
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert _kinds(actions, "worktree-remove"), "a month-old run was rejuvenated by a row write"
+
+
+def test_a_run_with_no_transition_into_its_state_falls_back_to_the_row(ctx: Context) -> None:
+    """A row that reached its state by a path recording no hop still has to age, and the
+    fallback is `updated_at` — the reading this replaced — so such a run is no worse off.
+
+    Asserted in the *young* direction on purpose. "No transitions, therefore collect it"
+    passes whether the fallback returns `updated_at` or the epoch, and an accidental epoch
+    would quietly make every unlogged run instantly collectable — the one direction where
+    a mistake here destroys work rather than merely delaying it.
+    """
+    _finished_run(ctx)
+    with ctx.store.transaction() as conn:
+        conn.execute("DELETE FROM transitions WHERE run_id = ?", (ctx.run.id,))
         conn.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (int(time.time()), ctx.run.id))
+    ctx.refresh()
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert _kinds(actions, "worktree-remove") == []
+    assert Path(ctx.run.worktree or "").is_dir()
+
+
+def test_a_run_that_re_entered_its_state_ages_from_the_latest_entry(ctx: Context) -> None:
+    """A run can be parked, reopened and parked again. The floor asks how long it has been
+    sitting still *now*, so the clock starts at the most recent entry — reading the first
+    would age it from work that was subsequently resumed, and collect a worktree somebody
+    came back to.
+    """
+    _finished_run(ctx)  # leaves one aged transition into the resting state
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.IMPLEMENTING,
+        to_state=ctx.run.state,
+        actor="human",
+        rule="re-entered just now",
+    )
     ctx.refresh()
 
     actions = _sweep(ctx, dry_run=False)

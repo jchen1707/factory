@@ -85,6 +85,34 @@ def sweep(
 # --------------------------------------------------------------------------------
 
 
+def _resting_since(store: Store, run: Run) -> float:
+    """When this run stopped moving — the timestamp §16.5's floor should count from.
+
+    The transition that put the run in the state it is resting in, or `updated_at` when
+    there is none (a row that reached its state before the transition log existed, or by
+    a path that recorded no hop).
+
+    It used to read `updated_at` directly, and that is not the age of the work — it is the
+    last time *anything wrote the row*. Two consequences, both measured 2026-08-23:
+
+    - `factory complete` writes the row, so recording a merge reset the clock. A run
+      finished sixty seconds ago was "0 days old" against a 7-day floor, and `complete`
+      printed "now collectable" while `gc --dry-run` listed nothing. Both were behaving as
+      designed and they contradicted each other in front of the user.
+    - `acquire_lease` and its renewal write it too (`store.py:446,456`), so any future
+      lease on a finished run would silently grant it another week. A lease records no
+      transition, so counting from the transition log closes that on its own.
+
+    Deliberately not special-cased to delivered runs: a cancelled or blocked run is resting
+    too, and "how long has this been sitting still" is one question with one answer. §16.5
+    stays a floor either way — this only decides when the floor starts counting.
+    """
+    for row in reversed(store.transitions(run.id)):
+        if str(row["to_state"]) == str(run.state):
+            return float(row["at"])
+    return float(run.updated_at)
+
+
 def _collect_run(
     home: Path,
     registry: Registry,
@@ -94,7 +122,7 @@ def _collect_run(
     dry_run: bool,
     now: float,
 ) -> list[Action]:
-    age_days = (now - run.updated_at) / DAY_SECONDS
+    age_days = (now - _resting_since(store, run)) / DAY_SECONDS
     floor = registry.defaults.gc.worktree_days
     if age_days < floor:
         return []
