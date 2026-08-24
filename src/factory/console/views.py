@@ -86,6 +86,7 @@ class RunRow:
     activity: str | None
     heartbeat_age: float | None
     blocked_reason: str | None
+    pr_url: str | None
 
 
 def runs_board(
@@ -150,6 +151,7 @@ def runs_board(
                 activity=view.activity if view is not None else None,
                 heartbeat_age=heartbeat_age,
                 blocked_reason=run.blocked_reason,
+                pr_url=run.pr_url,
             )
         )
     return rows
@@ -310,6 +312,7 @@ def run_detail(
             activity=None,
             heartbeat_age=None,
             blocked_reason=run.blocked_reason,
+            pr_url=run.pr_url,
         ),
     )
     return RunDetail(
