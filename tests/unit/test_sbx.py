@@ -452,3 +452,38 @@ def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
     # The wrapper must not, and neither must its heartbeat subshell. Both are `/bin/sh`
     # processes whose command line contains the agent's argv verbatim.
     assert not _pkill_selects(pkill, process_name="sh", cmdline=wrapper_cmdline)
+
+
+def test_kill_agent_targets_node_for_the_verifying_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 5 defect 3: the `verifying` step runs `node gate_report.mjs`, not
+    `codex exec`, so the default `pkill -x codex` matched nothing and a hung gate
+    report was never signalled — no `exit` file, no terminal record, the run went
+    `resumable` on a timeout it could not actually stop. `kill_agent` takes the
+    in-VM process name; the verifying step passes `node`."""
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        SbxAdapter,
+        "_run",
+        lambda self, argv, **kw: captured.append(list(argv)),
+    )
+    SbxAdapter().kill_agent("factory-build-python-harness", "node")
+
+    argv = captured[0]
+    assert argv[:3] == ["sbx", "exec", "factory-build-python-harness"]
+    assert argv[3:] == ["pkill", "-x", "node"]
+
+
+def test_kill_agent_defaults_to_codex(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The implement/review/reap/recovery callers pass no process name; the default
+    stays `codex` so this change does not widen what those steps kill."""
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        SbxAdapter,
+        "_run",
+        lambda self, argv, **kw: captured.append(list(argv)),
+    )
+    SbxAdapter().kill_agent("factory-build-python-harness")
+
+    assert captured[0][3:] == ["pkill", "-x", "codex"]
