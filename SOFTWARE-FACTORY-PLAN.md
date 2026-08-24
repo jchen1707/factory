@@ -2480,7 +2480,7 @@ Two environment facts were also measured and belong with the risks (§22):
 
 ---
 
-### Phase 6 — shared layer-A improvements and vendor synchronisation
+### Phase 6 — shared layer-A improvements and vendor synchronisation— **COMPLETE 2026-08-24**
 
 **Repository:** `jchen1707/harness@v2`, then both consumers `@v2`.
 
@@ -2499,6 +2499,29 @@ Then `vendor_sync.py sync` in each consumer and commit the bumped pin.
 
 **Rollback:** revert the layer-A PR; re-sync both consumers to the previous sha.
 **Human approval boundary:** every layer-A merge.
+
+**What shipped — 2026-08-24.** `harness#20` (`v2`, 0.10.1 → 0.10.2): `docs/agents/factory.md`
+(new) and the "Unattended runs: the control plane writes" subsection of
+`docs/agents/issue-tracker.md`. Both consumers re-vendored to `3442cb6` — `python-harness#72`,
+`frontend-harness#50`.
+
+**The evidence gate did the work.** Two of the three candidates were audited against the
+Phase 5 runs (BAC-6, FRO-11) and the eight-defect table and dropped for lack of evidence:
+the `factory` review frame (every real finding mapped to an existing axis; the nine-axis
+Tier-2 fan-out ran in both) and the `gate_report.mjs` `when` flag (the preflight never reads
+`when`; `requires` already covers the machine-checkable part). Only `factory.md` — plus the
+§20.2 `issue-tracker.md` paragraph that never landed in Phase 5 — was justified. Phase 6 is
+two prose files, not three changes, because the plan says "only changes that Phases 1–5
+proved were needed."
+
+**Verified.** `check.py` and `cross_stack.py` green on the layer-A PR; both consumers' CI
+green (one Windows `verify` timeout on the shelled-out hook suite — a slow-runner flake on a
+latent 5s vitest timeout, not caused by the prose change — passed on re-run).
+
+**Not done.** The factory's own `.agents/vendor/harness/` pin stays at `5cdb49f` (behind);
+§20 lists only the two consumers as vendor-sync targets, so the factory's pin is a separate
+hygiene cleanup, not Phase 6.
+
 
 ---
 
