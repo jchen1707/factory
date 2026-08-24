@@ -500,9 +500,22 @@ class Store:
                 now,
             ),
         )
-        self._conn.execute(
-            "UPDATE runs SET state = ?, updated_at = ? WHERE id = ?", (str(to_state), now, run_id)
-        )
+        # Defect 4 (Phase 5 handoff): a run that came to rest in `blocked` carried its
+        # `blocked_reason` into every later state, so FRO-11 sat at `awaiting_human`
+        # with a merged PR still labelled `blocked_reason = review-agent-failed`. Nothing
+        # reads the column outside `blocked`, which is exactly why a stale value misleads
+        # whoever next opens the row. Clear it the moment the run leaves `blocked`; a
+        # transition that stays in `blocked` keeps its reason.
+        if from_state == State.BLOCKED and to_state != State.BLOCKED:
+            self._conn.execute(
+                "UPDATE runs SET state = ?, blocked_reason = NULL, updated_at = ? WHERE id = ?",
+                (str(to_state), now, run_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE runs SET state = ?, updated_at = ? WHERE id = ?",
+                (str(to_state), now, run_id),
+            )
 
     def transitions(self, run_id: str) -> list[sqlite3.Row]:
         return list(
