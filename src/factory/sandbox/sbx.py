@@ -390,7 +390,7 @@ class SbxAdapter:
             f"{START_TIMEOUT_SECONDS}s; the wrapper never reached its first beat"
         )
 
-    def kill_agent(self, name: str) -> None:
+    def kill_agent(self, name: str, proc: str = "codex") -> None:
         """Stop a hung run so the attempt gets a real terminal record.
 
         A timeout is never silently a success: the wrapper's `exit` file still lands
@@ -415,9 +415,16 @@ class SbxAdapter:
         `-x codex` selects the agent alone (`command()` puts `codex` at argv[0]); the
         wrapper, named `sh`, survives to write `143`. Measured both ways on the same
         sandbox with the real envelope.
+
+        ``proc`` is the in-VM process name to kill, because not every step runs
+        ``codex``. The ``verifying`` step runs ``node gate_report.mjs`` (Phase 5
+        defect 3): the gate report is a node process, so ``pkill -x codex`` matched
+        nothing, the hung report was never signalled, no ``exit`` landed, and the run
+        went ``resumable`` with no terminal record. The caller names the process; the
+        default stays ``codex`` for implement/review/reap/recovery.
         """
         assert_factory_sandbox(name)
-        self._run(["sbx", "exec", name, "pkill", "-x", "codex"], timeout=60)
+        self._run(["sbx", "exec", name, "pkill", "-x", proc], timeout=60)
 
     # -- observation --------------------------------------------------------------
 
