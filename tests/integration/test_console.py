@@ -625,3 +625,39 @@ def test_the_timeline_lists_tool_calls_folded_from_events(ctx: Context) -> None:
 
     assert "uv run pytest -q" in page
     assert "command_execution" in page
+    # no timings sidecar → no dur column (the Phase 1 look, not a column of em dashes)
+    assert "<th>dur</th>" not in page
+
+
+def test_the_timeline_shows_call_durations_when_a_sidecar_exists(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.refresh()
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {"type": "thread.started", "thread_id": "01a0"},
+        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "i1",
+                "type": "command_execution",
+                "command": "uv run pytest -q",
+                "exit_code": 0,
+            },
+        },
+    ]
+    (attempt_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+    # the Phase 2 sidecar: one observed_at per events line, in order
+    (attempt_dir / "events.timings.jsonl").write_text(
+        "\n".join(json.dumps({"observed_at": t}) for t in (1000.0, 1000.0, 1042.0)) + "\n",
+        encoding="utf-8",
+    )
+
+    page = _client(ctx).get("/runs/BAC-4/timeline").text
+
+    # the dur column appears, with the defended duration (42s) rendered
+    assert "<th>dur</th>" in page
+    assert "42s" in page

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from factory import artifacts, policy
+from factory.agent import timings
 from factory.agent.base import (
     AgentInvocation,
     SchemaInvalid,
@@ -186,6 +187,12 @@ def start(
         attempt_dir=attempt_dir.root,
     )
     ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    # Phase 2 (opt-in): a host-side tailer that stamps each `events.jsonl` line with an
+    # `observed_at`, so the run-timeline can defend a per-call `duration_s`. Gated by
+    # `registry.defaults.timings` — off by default, so the test suite (which does not set
+    # it) never spawns a real process, and arming the writer is James's call per project.
+    if ctx.registry.defaults.timings:
+        timings.spawn(attempt_dir.events, attempt_dir.exit_file)
     ctx.log(
         "implement.started",
         sandbox=handle.sandbox,

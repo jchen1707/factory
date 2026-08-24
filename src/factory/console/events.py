@@ -132,18 +132,79 @@ class ToolCallView:
     """One row in the run-timeline tool-call drill-down — the `events.jsonl` stream folded
     to one entry per `item.completed`, the SSSF visualizer's per-phase call list.
 
-    **No `duration` field in Phase 1.** The event stream carries no timestamp (P0-7,
-    `docs/discovery/codex-events.md`): each line has only `type` and `item`/`usage`, never
-    `at`. A duration column would be a number the console cannot defend, and the console's
-    own rule is that it never shows one (events.py: "never show a number it cannot
-    defend"). Phase 2's opt-in `events.timings.jsonl` sidecar is what would defend it; until
-    then the column stays absent — not `Optional`, absent.
+    `duration_s` is `None` unless an `events.timings.jsonl` sidecar (Phase 2) is present.
+    The event stream itself carries no timestamp (P0-7, `docs/discovery/codex-events.md`):
+    each line has only `type` and `item`/`usage`, never `at`. A duration the console cannot
+    defend is the one thing §18.5 refuses to show, so the field is `None` — never a guess —
+    until a sidecar defends it. The sidecar is one `{"observed_at": <epoch>}` row per
+    `events.jsonl` line, in order; a call's duration is its `item.completed` observed time
+    minus its matching `item.started` observed time (paired by item `id`).
     """
 
     index: int
     kind: str  # the item's `type` — command_execution | file_change | agent_message | error
     summary: str
     exit_code: int | None  # only `command_execution` carries one
+    duration_s: float | None  # Phase 2 sidecar; None without it
+
+
+def _exit_code_of(item: dict[str, Any], item_type: str) -> int | None:
+    if item_type != "command_execution":
+        return None
+    raw = item.get("exit_code")
+    if isinstance(raw, bool):  # JSON true/false are ints in Python; refuse them
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float) and raw.is_integer():
+        return int(raw)
+    return None
+
+
+def _read_timings(path: Path) -> list[float | None]:
+    """The `events.timings.jsonl` sidecar as a list indexed by `events.jsonl` line number.
+
+    One row per line, in order — blank/unparseable lines become `None` so the indices stay
+    aligned with `enumerate(events.jsonl.splitlines())`. Returns `[]` when there is no
+    sidecar (Phase 1, or a run whose writer never armed one), which leaves every
+    `duration_s` `None` — the Phase 1 behaviour, unchanged.
+    """
+    if not path.exists():
+        return []
+    out: list[float | None] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            out.append(None)
+            continue
+        ts = row.get("observed_at") if isinstance(row, dict) else None
+        out.append(float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None)
+    return out
+
+
+def _duration_of(
+    item_id: str | None,
+    completed_line: int,
+    started_line: dict[str, int],
+    observed: list[float | None],
+) -> float | None:
+    """A call's wall-clock duration from the sidecar, or `None` if undefended.
+
+    `item.completed` is emitted *after* the call finishes, so its observed time is the end;
+    the matching `item.started` (same `id`, earlier line) is the start. Both must have a
+    sidecar timestamp, or the result is `None` — never a guess.
+    """
+    if item_id is None or item_id not in started_line:
+        return None
+    start_line = started_line[item_id]
+    if start_line >= len(observed) or completed_line >= len(observed):
+        return None
+    start, end = observed[start_line], observed[completed_line]
+    if start is None or end is None:
+        return None
+    elapsed = end - start
+    return elapsed if elapsed >= 0 else None
 
 
 def read_tool_calls(events_path: Path) -> list[ToolCallView]:
@@ -151,38 +212,49 @@ def read_tool_calls(events_path: Path) -> list[ToolCallView]:
 
     A sibling to `read_turn_view`: the same half-flushed-trailing-line skip (a file a live
     agent is writing is the normal case), the same "display only, never raise" stance, and
-    the same `_activity_from` summary. Only `item.completed` is folded — `item.started` /
-    `item.updated` are the stream's noise, and one row per real call is the SSSF shape.
-    Returns `[]` for a missing file (the attempt has not spawned, or the state has no agent).
+    the same `_activity_from` summary. Only `item.completed` is folded into rows;
+    `item.started` is consumed only to pair start/end with the sidecar for `duration_s`.
+    `item.updated` is the stream's noise. Returns `[]` for a missing file (the attempt has
+    not spawned, or the state has no agent).
+
+    Per-call `duration_s` is `None` unless an `events.timings.jsonl` sidecar sits beside the
+    stream — the Phase 2 producer's call to arm, not the console's to assume.
     """
     if not events_path.exists():
         return []
+    observed = _read_timings(events_path.with_name("events.timings.jsonl"))
     rows: list[ToolCallView] = []
-    for line in events_path.read_text(encoding="utf-8").splitlines():
+    started_line: dict[str, int] = {}
+    for i, line in enumerate(events_path.read_text(encoding="utf-8").splitlines()):
         if not line.strip():
             continue
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue  # half-flushed trailing line — see read_turn_view for the reasoning
-        if not isinstance(event, dict) or event.get("type") != "item.completed":
+        if not isinstance(event, dict):
             continue
+        kind = event.get("type")
         item = event.get("item")
         if not isinstance(item, dict):
             continue
+        item_id = item.get("id")
+        item_id_str = str(item_id) if item_id is not None else None
+        if kind == "item.started":
+            if item_id_str is not None:
+                started_line[item_id_str] = i
+            continue
+        if kind != "item.completed":
+            continue
         item_type = str(item.get("item_type") or item.get("type") or "")
-        summary = _activity_from(item) or item_type or "item"
-        exit_code: int | None = None
-        if item_type == "command_execution":
-            raw = item.get("exit_code")
-            if isinstance(raw, bool):  # JSON true/false are ints in Python; refuse them
-                exit_code = None
-            elif isinstance(raw, int):
-                exit_code = raw
-            elif isinstance(raw, float) and raw.is_integer():
-                exit_code = int(raw)
         rows.append(
-            ToolCallView(index=len(rows), kind=item_type, summary=summary, exit_code=exit_code)
+            ToolCallView(
+                index=len(rows),
+                kind=item_type,
+                summary=_activity_from(item) or item_type or "item",
+                exit_code=_exit_code_of(item, item_type),
+                duration_s=_duration_of(item_id_str, i, started_line, observed),
+            )
         )
     return rows
 

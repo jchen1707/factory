@@ -235,13 +235,64 @@ def test_read_tool_calls_folds_one_row_per_completed_item(tmp_path: Path) -> Non
     assert "changed 1 file" in rows[1].summary
 
 
-def test_read_tool_calls_has_no_duration_field_in_phase_1() -> None:
-    # The honesty table: `events.jsonl` carries no timestamp, so a duration column would be
-    # a number the console cannot defend. The field is absent — not `Optional` — and mypy
-    # holds that. This assertion makes the rule executable: a regression that adds the field
-    # fails here.
-    assert "duration" not in ToolCallView.__dataclass_fields__
-    assert "duration_s" not in ToolCallView.__dataclass_fields__
+def test_read_tool_calls_duration_is_none_without_a_timings_sidecar(tmp_path: Path) -> None:
+    # Phase 2: `duration_s` exists on the dataclass, but is `None` unless an
+    # `events.timings.jsonl` sidecar defends it. Without a sidecar (Phase 1, or a producer
+    # that never armed one), every row is `None` — never a guess. The field is Optional,
+    # not absent, and the console renders no `dur` column when all rows are `None`.
+    assert "duration_s" in ToolCallView.__dataclass_fields__
+    rows = read_tool_calls(
+        _events(
+            tmp_path,
+            {
+                "type": "item.completed",
+                "item": {"id": "i1", "type": "command_execution", "command": "ls", "exit_code": 0},
+            },
+        )
+    )
+    assert rows
+    assert rows[0].duration_s is None
+
+
+def test_read_tool_calls_durations_come_from_the_timings_sidecar(tmp_path: Path) -> None:
+    # With a sidecar (one `observed_at` per events line, in order), a call's duration is its
+    # `item.completed` observed time minus its matching `item.started` observed time, paired
+    # by item `id`. The producer writes the sidecar; the console only reads.
+    path = _events(
+        tmp_path,
+        {"type": "thread.started", "thread_id": "01a0"},  # line 0
+        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},  # line 1
+        {  # line 2
+            "type": "item.completed",
+            "item": {
+                "id": "i1",
+                "type": "command_execution",
+                "command": "uv run pytest",
+                "exit_code": 0,
+            },
+        },
+        {"type": "item.started", "item": {"id": "i2", "type": "file_change"}},  # line 3
+        {  # line 4
+            "type": "item.completed",
+            "item": {
+                "id": "i2",
+                "type": "file_change",
+                "changes": [{"path": "a.py", "kind": "modify"}],
+            },
+        },
+    )
+    path.with_name("events.timings.jsonl").write_text(
+        "\n".join(json.dumps({"observed_at": t}) for t in (1000.0, 1000.5, 1012.9, 1013.0, 1013.4))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = read_tool_calls(path)
+    assert [r.kind for r in rows] == ["command_execution", "file_change"]
+    assert rows[0].duration_s is not None
+    assert round(rows[0].duration_s, 1) == 12.4  # 1012.9 - 1000.5
+    assert rows[1].duration_s is not None
+    assert round(rows[1].duration_s, 1) == 0.4  # 1013.4 - 1013.0
 
 
 def test_read_tool_calls_skips_a_half_flushed_trailing_line(tmp_path: Path) -> None:

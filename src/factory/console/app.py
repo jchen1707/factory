@@ -327,27 +327,34 @@ def _waterfall_html(blocks: list[console_views.WaterfallBlock]) -> str:
 
 
 def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
-    """Band 4 — the per-tool-call drill-down. No duration column in Phase 1 (the event
-    stream carries no timestamp); the `#` ordinal, type, summary and exit code are what
-    `read_tool_calls` can defend."""
+    """Band 4 — the per-tool-call drill-down. The `#` ordinal, type, summary and exit code
+    are always shown; a `dur` column appears only when the Phase 2 `events.timings.jsonl`
+    sidecar defended a duration for at least one call — so a run with no sidecar keeps the
+    Phase 1 look (no column of em dashes), and a run with one gains the column honestly."""
     if not calls:
-        return '<h2>tool calls <span class="muted">this attempt</span></h2><p class="muted">No completed calls yet.</p>'
+        return (
+            '<h2>tool calls <span class="muted">this attempt</span></h2>'
+            '<p class="muted">No completed calls yet.</p>'
+        )
+    has_dur = any(c.duration_s is not None for c in calls)
     rows = "".join(
         f"<tr><td class='mono'>{c.index}</td>"
         f'<td><span class="ttype t-{_e(c.kind)}">{_e(c.kind)}</span></td>'
         f'<td class="wrap">{_e(c.summary)}</td>'
-        f'<td class="mono exit '
+        + (f'<td class="mono">{_duration(c.duration_s)}</td>' if has_dur else "")
+        + f'<td class="mono exit '
         f'{"ok" if c.exit_code == 0 else "bad" if c.exit_code is not None else "na"}">'
         f"{_e(c.exit_code) if c.exit_code is not None else '—'}</td></tr>"
         for c in calls
     )
-    return (
+    head = (
         '<h2>tool calls <span class="muted">this attempt</span></h2>'
         '<div class="scroll"><table><thead><tr><th>#</th><th>type</th>'
-        "<th>command / summary</th><th>exit</th></tr></thead><tbody>"
-        + rows
-        + "</tbody></table></div>"
+        "<th>command / summary</th>"
+        + ("<th>dur</th>" if has_dur else "")
+        + "<th>exit</th></tr></thead><tbody>"
     )
+    return head + rows + "</tbody></table></div>"
 
 
 def _timeline_html(tl: console_views.RunTimeline, ticket: str) -> str:
