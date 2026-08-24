@@ -67,6 +67,22 @@ now; it cannot fail a build tomorrow. If the change altered behaviour and no tes
 say so explicitly — "verified by hand, unguarded by tests" — and name the test that should
 exist.
 
+## The machine-readable form
+
+`gate_report.mjs --json` (the `hooks/` hook this skill's gates come from) emits the same
+results as one JSON document: one row per gate with its `status` (`pass`, `fail`,
+`unavailable`, `not_applicable`, `skipped_unchanged` or `disabled`), its `exit`,
+`durationMs`, `caveat` and `when`, and a single `verdict`. A gate that declares a `requires`
+argv is probed with it first and reported `unavailable` without running when the probe does
+not exit zero — so "the browser was never installed" arrives as a gate that could not run
+rather than as a gate that failed, which is a different instruction to whoever reads it. Use it when a caller needs the record rather than prose —
+an automated verifier, a CI summary, a run record — and use this skill when a human is
+reading. Its `verdict` is `incomplete`, never `pass`, when a gate could not start or a
+monorepo app had no config of its own, because a green exit code alone does not prove every
+relevant gate ran; the exit codes `0`/`1`/`3` keep `pass`/`fail`/`incomplete` distinct for a
+caller that reads only the code. `--all` adds the `e2e` and `integration` gates the way this
+skill does — pass it when the change matches a gate's `when` clause.
+
 > **Image-input consent (hard rule).** A screenshot or a screencast feeds an image into the
 > model. **Stop and ask the user for permission first, and do not proceed until they
 > confirm.** Prefer a text snapshot of the interface: it needs no consent, and it is a better

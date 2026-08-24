@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jchen1707/harness/blob/v2/plugins/harness/schema/review-findings.schema.json",
+  "title": "review findings",
+  "description": "The shape every reviewer axis returns, whether the review runs through the Claude `full-review` workflow or the Codex `codex exec --output-schema` path. One file, so the two paths cannot produce different finding shapes: an empty `findings` list is a valid and common result, and a finding carries the fields the synthesiser merges on. Extracted from `workflows/full-review.js` so the factory can hand the same schema to `codex exec --output-schema` without re-authoring it in Python. Written to the structured-output subset both paths accept: every object sets `additionalProperties: false` and lists every property in `required`, because the Codex path sends this as a strict response format and the API rejects anything else. A field that is genuinely optional is therefore required-and-nullable, not absent.",
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file the defect is in, as a repo-relative path."
+          },
+          "line": {
+            "type": ["number", "null"],
+            "description": "The 1-based line the defect anchors to, or null when it anchors to no single line."
+          },
+          "severity": {
+            "enum": ["critical", "high", "medium", "low"],
+            "description": "How bad the defect is, in the four tiers the synthesiser ranks by."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One sentence naming the defect."
+          },
+          "why_it_matters": {
+            "type": ["string", "null"],
+            "description": "One sentence on the consequence, for a reader who cannot see the code; null when the summary says it all."
+          }
+        },
+        "required": ["file", "line", "severity", "summary", "why_it_matters"],
+        "additionalProperties": false
+      },
+      "description": "Every real defect this axis found in the diff. An empty list is valid and common."
+    }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

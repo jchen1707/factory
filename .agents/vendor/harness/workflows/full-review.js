@@ -121,25 +121,14 @@ function axisPrompt(agent) {
   );
 }
 
-const FINDING_SCHEMA = {
-  type: 'object',
-  properties: {
-    findings: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          file: { type: 'string' },
-          line: { type: 'number' },
-          severity: { enum: ['critical', 'high', 'medium', 'low'] },
-          summary: { type: 'string' },
-          why_it_matters: { type: 'string' },
-        },
-        required: ['file', 'severity', 'summary'],
-      },
-    },
-  },
-};
+// The shape every reviewer axis returns. Lives in `schema/review-findings.schema.json`
+// so the Codex review path (`codex exec --output-schema`) and this Claude workflow path
+// cannot produce different finding shapes: one file, read by both. `schema/` is vendored
+// alongside `workflows/`, so the copy a consumer hands to `codex` is the same one this
+// file reads. Extracted from the inline constant that was here; the structure is unchanged.
+const FINDING_SCHEMA = JSON.parse(
+  readFileSync(join(HERE, '..', 'schema', 'review-findings.schema.json'), 'utf8'),
+);
 
 const reviews = await pipeline(AXES, (axis) =>
   agent(
