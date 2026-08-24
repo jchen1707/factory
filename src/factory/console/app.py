@@ -189,6 +189,180 @@ def _controls(ticket: str) -> str:
     return _render("controls.html", buttons=buttons)
 
 
+# --------------------------------------------------------------------------------
+# View 6 — the run timeline (agent status + runtime waterfall). The data comes from
+# `console_views.run_timeline`; everything below is rendering. The waterfall positions
+# blocks by `left = (start - t0)/span`, `width = duration/span` — the same transition `at`
+# values the run-detail timeline table shows, so the two views cannot disagree.
+# --------------------------------------------------------------------------------
+
+_WF_LANES: tuple[str, ...] = ("engineer", "planner", "builder", "reviewer", "code")
+
+
+def _timeline_head(r: console_views.RunRow, tl: console_views.RunTimeline) -> str:
+    """Band 1 — the summary strip. The same `RunRow` fields the run-detail head renders, so
+    the page's header and `/runs/{ticket}`'s header are one producer apart."""
+    badge = f' <span class="chip">{_e(r.badge)}</span>' if r.badge else ""
+    head = (
+        f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
+        f'<p class="sub">{_e(r.state)}{badge} · attempt {r.attempt} · rung {_e(r.rung)} · '
+        f"elapsed {_duration(tl.elapsed_total_s)} · context "
+        f"{_pct_cell(r.context_pct, r.context_reason)} · "
+        f"spend {_spend_cell(r.spend_usd, r.spend_ceiling)}</p>"
+    )
+    if r.pr_url:
+        head += (
+            f'<p>Pull request: <a href="{_e(r.pr_url)}" target="_blank" '
+            f'rel="noreferrer">{_e(r.pr_url)}</a> '
+            '<span class="muted">— merging happens on GitHub.</span></p>'
+        )
+    if r.blocked_reason:
+        head += f'<p class="fail">blocked: {_e(r.blocked_reason)}</p>'
+    return head
+
+
+def _cards_html(cards: list[console_views.AgentCard]) -> str:
+    """Band 2 — one card per agent role. The left stripe is the lane colour; the status
+    pill is the Gmail-MCP 'authed' analogue. Context is shown for the live role only;
+    a done/idle role shows the reason it has no number, the same hide-with-reason rule the
+    board holds for the run-level percentage."""
+    if not cards:
+        return ""
+    items: list[str] = []
+    for c in cards:
+        if c.status == "live":
+            ctx = (
+                '<div class="cardctx"><span class="k">context</span>'
+                f"{_pct_cell(c.context_pct, c.context_reason)}</div>"
+            )
+            hb = f'<div class="cardrow"><span class="k">heartbeat</span> {_duration(c.heartbeat_age)}</div>'
+            act_label = "now"
+        else:
+            ctx = (
+                '<div class="cardctx muted"><span class="k">context</span> '
+                f"{_e(c.context_reason)}</div>"
+            )
+            hb = ""
+            act_label = "last"
+        act = (
+            '<div class="cardrow"><span class="k">' + act_label + "</span> "
+            f'<span class="v">{_e(c.activity) if c.activity else "—"}</span></div>'
+        )
+        items.append(
+            f'<div class="card lane-{c.role}">'
+            f'<div class="cardhead"><span><b>{_e(c.role)}</b> '
+            f'<span class="muted">{_e(c.model)} · {_e(c.effort)}</span></span>'
+            f'<span class="status st-{c.status}">{_e(c.status)}</span></div>'
+            f"{ctx}{act}{hb}</div>"
+        )
+    return '<div class="cards">' + "".join(items) + "</div>"
+
+
+def _waterfall_html(blocks: list[console_views.WaterfallBlock]) -> str:
+    """Band 3 — the swim-lane waterfall. Block widths are runtime (from transition
+    timestamps); colour is lane identity. A block under ~6% of the span is too thin to
+    label, so it shows a `title` tooltip and no inline text — the axis never lets an
+    18-second 'label' block look as long as a 12-minute implement."""
+    if not blocks:
+        return '<p class="muted">No transitions yet.</p>'
+    t0 = blocks[0].start
+    span = max(1, blocks[-1].end - t0)
+
+    def pos(b: console_views.WaterfallBlock) -> tuple[float, float]:
+        left = (b.start - t0) / span * 100.0
+        width = (b.end - b.start) / span * 100.0
+        return max(0.0, left), max(0.0, width)
+
+    ticks = "".join(
+        f'<span class="wftick" style="left:{f * 100:.1f}%">{_duration(f * span)}</span>'
+        for f in (0.0, 0.25, 0.5, 0.75, 1.0)
+    )
+    axis = f'<div class="wfaxis">{ticks}<span class="wfnow" style="left:100%"></span></div>'
+
+    # A marker state (resumable/blocked/…) has lane None; it renders in the lane of the
+    # block that entered it, so a dead attempt's 'resumable' sits in the builder row.
+    rows: list[str] = []
+    render_lane = "code"
+    lane_blocks: dict[str, list[console_views.WaterfallBlock]] = {ln: [] for ln in _WF_LANES}
+    for b in blocks:
+        rl = b.lane or render_lane
+        if rl not in lane_blocks:
+            rl = "code"
+        lane_blocks[rl].append(b)
+        render_lane = rl
+    for ln in _WF_LANES:
+        cells: list[str] = []
+        for b in lane_blocks[ln]:
+            left, width = pos(b)
+            classes = f"wfblk lane-{b.lane or ln}"
+            if b.dead:
+                classes += " dead"
+            if b.live:
+                classes += " live"
+            title = (
+                f"{_e(b.state)} · {_duration(b.duration_s)}{' — dead attempt' if b.dead else ''}"
+            )
+            if width < 6:
+                cells.append(
+                    f'<span class="{classes}" style="left:{left:.2f}%;'
+                    f'width:max({width:.2f}%,3px)" title="{title}"></span>'
+                )
+            else:
+                cells.append(
+                    f'<span class="{classes}" style="left:{left:.2f}%;width:{width:.2f}%" '
+                    f'title="{title}"><span class="wflabel">{_e(b.state)}</span>'
+                    f'<span class="wfdur">{_duration(b.duration_s)}</span></span>'
+                )
+        rows.append(
+            f'<div class="wflane"><span class="wflab"><i class="wfsw lane-{ln}"></i>'
+            f"{_e(ln)}</span>{''.join(cells)}</div>"
+        )
+    legend = (
+        '<div class="wflegend">'
+        + "".join(f'<span><i class="wfsw lane-{ln}"></i>{_e(ln)}</span>' for ln in _WF_LANES)
+        + '<span><i class="wfsw dead"></i>dead attempt</span>'
+        + "</div>"
+    )
+    return f'<div class="waterfall">{axis}{"".join(rows)}{legend}</div>'
+
+
+def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
+    """Band 4 — the per-tool-call drill-down. No duration column in Phase 1 (the event
+    stream carries no timestamp); the `#` ordinal, type, summary and exit code are what
+    `read_tool_calls` can defend."""
+    if not calls:
+        return '<h2>tool calls <span class="muted">this attempt</span></h2><p class="muted">No completed calls yet.</p>'
+    rows = "".join(
+        f"<tr><td class='mono'>{c.index}</td>"
+        f'<td><span class="ttype t-{_e(c.kind)}">{_e(c.kind)}</span></td>'
+        f'<td class="wrap">{_e(c.summary)}</td>'
+        f'<td class="mono exit '
+        f'{"ok" if c.exit_code == 0 else "bad" if c.exit_code is not None else "na"}">'
+        f"{_e(c.exit_code) if c.exit_code is not None else '—'}</td></tr>"
+        for c in calls
+    )
+    return (
+        '<h2>tool calls <span class="muted">this attempt</span></h2>'
+        '<div class="scroll"><table><thead><tr><th>#</th><th>type</th>'
+        "<th>command / summary</th><th>exit</th></tr></thead><tbody>"
+        + rows
+        + "</tbody></table></div>"
+    )
+
+
+def _timeline_html(tl: console_views.RunTimeline, ticket: str) -> str:
+    """The full inner timeline, wrapped in `#timeline` so the SSE stream can swap it."""
+    return (
+        '<div id="timeline">'
+        + _timeline_head(tl.row, tl)
+        + _cards_html(tl.cards)
+        + '<h2 class="wf-title">runtime · swim-lane waterfall</h2>'
+        + _waterfall_html(tl.blocks)
+        + _tool_calls_html(tl.tool_calls)
+        + "</div>"
+    )
+
+
 def create_app(
     home: Path,
     registry: Registry | None = None,
@@ -272,7 +446,8 @@ def create_app(
             f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
             f'<p class="sub">{_e(r.state)} · attempt {r.attempt} · rung {_e(r.rung)} · '
             f"context {_pct_cell(r.context_pct, r.context_reason)} · "
-            f"spend {_spend_cell(r.spend_usd, r.spend_ceiling)}</p>"
+            f"spend {_spend_cell(r.spend_usd, r.spend_ceiling)} · "
+            f'<a href="/runs/{_e(r.ticket)}/timeline">timeline</a></p>'
         )
         if detail.pr_url:
             head += (
@@ -377,6 +552,47 @@ def create_app(
             tail=tail_html,
         )
         return HTMLResponse(_page(r.ticket, body))
+
+    @app.get("/runs/{ticket}/timeline", response_class=HTMLResponse)
+    def run_timeline_view(ticket: str) -> HTMLResponse:
+        """View 6 — the run timeline. Reached one click deeper than the run detail (the
+        detail page's head links here), matching the depth of the evidence views."""
+        reg, rt, st, _ = _cfg()
+        run = st.run_by_ticket(ticket.upper())
+        if run is None:
+            return HTMLResponse(
+                _page(ticket, f"<h1>{_e(ticket)}</h1><p>No run.</p>"), status_code=404
+            )
+        tl = console_views.run_timeline(home, reg, rt, st, run)
+        body = _render(
+            "run_timeline.html",
+            timeline=_timeline_html(tl, ticket),
+            ticket=_e(ticket.upper()),
+        )
+        return HTMLResponse(_page(f"{ticket.upper()} timeline", body))
+
+    @app.get("/sse/timeline/{ticket}")
+    async def timeline_stream(ticket: str) -> StreamingResponse:
+        """The live timeline, as server-sent events. Re-reads the store each tick and
+        re-renders the whole inner timeline — the waterfall blocks, the agent cards and the
+        tool-call table all advance on the same poll, the same `board_stream` pattern. No
+        new transport; the page swaps `#timeline` on each message."""
+
+        def read_timeline() -> str:
+            reg, rt, st, _ = _cfg()
+            run = st.run_by_ticket(ticket.upper())
+            if run is None:
+                return ""
+            tl = console_views.run_timeline(home, reg, rt, st, run)
+            return _timeline_html(tl, ticket)
+
+        async def events() -> Any:
+            while True:
+                payload = json.dumps({"html": await asyncio.to_thread(read_timeline)})
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(SSE_INTERVAL_SECONDS)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     @app.get("/sse/tail/{ticket}")
     async def tail_stream(ticket: str) -> StreamingResponse:

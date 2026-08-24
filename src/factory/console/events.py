@@ -24,7 +24,14 @@ from typing import Any
 from factory.machine import State
 from factory.routing import Routing
 
-__all__ = ["TurnView", "context_percentage", "read_turn_view"]
+__all__ = [
+    "ToolCallView",
+    "TurnView",
+    "context_percentage",
+    "lane_of",
+    "read_tool_calls",
+    "read_turn_view",
+]
 
 
 #: The agent role each live state runs under — the model that produced the events the
@@ -36,6 +43,33 @@ _AGENT_ROLE: dict[State, str] = {
     State.IMPLEMENTING: "builder",
     State.REVIEWING: "reviewer",
 }
+
+
+#: The lane each state belongs to on the run timeline — the AGENTS.md three-actor model
+#: (engineer / agent / code), with the agent lane split by role. The colour is *identity*,
+#: not verdict: it is deliberately separate from `--pass/--fail/--warn` (semantic), so a
+#: hatched dead block never reads as a failed gate. States without a lane (`blocked`,
+#: `resumable`, `suspended`, `failed`, `cancelled`) are transient or terminal markers and
+#: get `None`; the waterfall renders them as the run's exit, not as a lane block.
+_LANE: dict[State, str] = {
+    State.APPROVED: "engineer",
+    State.AWAITING_HUMAN: "engineer",
+    State.CLAIMED: "code",
+    State.CONTEXT_LOADED: "code",
+    State.SANDBOX_CREATING: "code",
+    State.SANDBOX_READY: "code",
+    State.WORKTREE_READY: "code",
+    State.VERIFYING: "code",
+    State.PR_READY: "code",
+    State.PLANNING: "planner",
+    State.IMPLEMENTING: "builder",
+    State.REVIEWING: "reviewer",
+}
+
+
+def lane_of(state: State) -> str | None:
+    """The lane a state occupies on the run timeline, or `None` for a marker state."""
+    return _LANE.get(state)
 
 
 @dataclass(frozen=True)
@@ -91,6 +125,66 @@ def read_turn_view(events_path: Path) -> TurnView | None:
         elif kind == "item.completed":
             activity = _activity_from(event.get("item"))
     return TurnView(input_tokens, cached, output, reasoning, activity, saw_turn)
+
+
+@dataclass(frozen=True)
+class ToolCallView:
+    """One row in the run-timeline tool-call drill-down — the `events.jsonl` stream folded
+    to one entry per `item.completed`, the SSSF visualizer's per-phase call list.
+
+    **No `duration` field in Phase 1.** The event stream carries no timestamp (P0-7,
+    `docs/discovery/codex-events.md`): each line has only `type` and `item`/`usage`, never
+    `at`. A duration column would be a number the console cannot defend, and the console's
+    own rule is that it never shows one (events.py: "never show a number it cannot
+    defend"). Phase 2's opt-in `events.timings.jsonl` sidecar is what would defend it; until
+    then the column stays absent — not `Optional`, absent.
+    """
+
+    index: int
+    kind: str  # the item's `type` — command_execution | file_change | agent_message | error
+    summary: str
+    exit_code: int | None  # only `command_execution` carries one
+
+
+def read_tool_calls(events_path: Path) -> list[ToolCallView]:
+    """Fold an `events.jsonl` into one `ToolCallView` per `item.completed`, in file order.
+
+    A sibling to `read_turn_view`: the same half-flushed-trailing-line skip (a file a live
+    agent is writing is the normal case), the same "display only, never raise" stance, and
+    the same `_activity_from` summary. Only `item.completed` is folded — `item.started` /
+    `item.updated` are the stream's noise, and one row per real call is the SSSF shape.
+    Returns `[]` for a missing file (the attempt has not spawned, or the state has no agent).
+    """
+    if not events_path.exists():
+        return []
+    rows: list[ToolCallView] = []
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # half-flushed trailing line — see read_turn_view for the reasoning
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("item_type") or item.get("type") or "")
+        summary = _activity_from(item) or item_type or "item"
+        exit_code: int | None = None
+        if item_type == "command_execution":
+            raw = item.get("exit_code")
+            if isinstance(raw, bool):  # JSON true/false are ints in Python; refuse them
+                exit_code = None
+            elif isinstance(raw, int):
+                exit_code = raw
+            elif isinstance(raw, float) and raw.is_integer():
+                exit_code = int(raw)
+        rows.append(
+            ToolCallView(index=len(rows), kind=item_type, summary=summary, exit_code=exit_code)
+        )
+    return rows
 
 
 def context_percentage(

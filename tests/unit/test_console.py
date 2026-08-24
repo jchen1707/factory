@@ -15,7 +15,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from factory.console.events import context_percentage, read_turn_view
+from factory.console.events import (
+    ToolCallView,
+    context_percentage,
+    lane_of,
+    read_tool_calls,
+    read_turn_view,
+)
 from factory.machine import State
 from factory.routing import ModelFacts, Role, Routing
 
@@ -159,3 +165,104 @@ def test_the_activity_column_reads_the_last_completed_item(tmp_path: Path) -> No
 
     assert view is not None
     assert view.activity == "uv run pytest -q"
+
+
+# --------------------------------------------------------------------------------
+# Lane mapping + the tool-call drill-down (run timeline, §18.5 View 6)
+# --------------------------------------------------------------------------------
+
+
+def test_lane_of_maps_each_state_to_its_actor_lane() -> None:
+    # The AGENTS.md three-actor model: agents get a named lane, engineer + code are the
+    # other two, and the marker/parked states have no lane (they render as the run's exit).
+    assert lane_of(State.PLANNING) == "planner"
+    assert lane_of(State.IMPLEMENTING) == "builder"
+    assert lane_of(State.REVIEWING) == "reviewer"
+    assert lane_of(State.APPROVED) == "engineer"
+    assert lane_of(State.AWAITING_HUMAN) == "engineer"
+    assert lane_of(State.VERIFYING) == "code"
+    assert lane_of(State.SANDBOX_CREATING) == "code"
+    assert lane_of(State.BLOCKED) is None
+    assert lane_of(State.RESUMABLE) is None
+    assert lane_of(State.CANCELLED) is None
+
+
+def test_read_tool_calls_folds_one_row_per_completed_item(tmp_path: Path) -> None:
+    # The SSSF fold: one row per `item.completed`, in file order. `item.started` is the
+    # stream's noise and is skipped. A command carries its exit code; a file change does
+    # not (the field is `None`, not invented).
+    events: list[dict[str, Any]] = [
+        {"type": "thread.started", "thread_id": "01a0"},
+        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "i1",
+                "type": "command_execution",
+                "command": "uv run pytest -q",
+                "exit_code": 0,
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "i2",
+                "type": "file_change",
+                "changes": [{"path": "a.py", "kind": "modify"}],
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {"id": "i3", "type": "command_execution", "command": "false", "exit_code": 1},
+        },
+        {"type": "item.completed", "item": {"id": "i4", "type": "agent_message", "text": "done"}},
+        {"type": "item.completed", "item": {"id": "i5", "type": "error", "message": "boom"}},
+    ]
+    rows = read_tool_calls(_events(tmp_path, *events))
+
+    assert [r.index for r in rows] == [0, 1, 2, 3, 4]  # item.started skipped, ordinal resets
+    assert [r.kind for r in rows] == [
+        "command_execution",
+        "file_change",
+        "command_execution",
+        "agent_message",
+        "error",
+    ]
+    assert rows[0].exit_code == 0
+    assert rows[2].exit_code == 1
+    assert rows[1].exit_code is None  # a file change has no exit code
+    assert "pytest" in rows[0].summary
+    assert "changed 1 file" in rows[1].summary
+
+
+def test_read_tool_calls_has_no_duration_field_in_phase_1() -> None:
+    # The honesty table: `events.jsonl` carries no timestamp, so a duration column would be
+    # a number the console cannot defend. The field is absent — not `Optional` — and mypy
+    # holds that. This assertion makes the rule executable: a regression that adds the field
+    # fails here.
+    assert "duration" not in ToolCallView.__dataclass_fields__
+    assert "duration_s" not in ToolCallView.__dataclass_fields__
+
+
+def test_read_tool_calls_skips_a_half_flushed_trailing_line(tmp_path: Path) -> None:
+    # The same live-write condition `read_turn_view` handles: a file a live agent is
+    # writing ends mid-line, and a display parser skips it rather than raising.
+    path = _events(
+        tmp_path,
+        {"type": "thread.started", "thread_id": "01a0"},
+        {
+            "type": "item.completed",
+            "item": {"id": "i1", "type": "command_execution", "command": "ls", "exit_code": 0},
+        },
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write('{"type":"item.comp')
+
+    rows = read_tool_calls(path)
+
+    assert len(rows) == 1
+    assert rows[0].kind == "command_execution"
+
+
+def test_read_tool_calls_missing_file_is_empty(tmp_path: Path) -> None:
+    assert read_tool_calls(tmp_path / "nope.jsonl") == []
