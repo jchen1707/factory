@@ -1730,6 +1730,18 @@ longer wait.
 
 1. For every run in `completed`/`cancelled`/`failed` older than `gc.worktree_days` (7):
    `git worktree remove` (with `unlock` then `--force` on refusal), then `git worktree prune`.
+
+   **"Older than" counts from the transition that put the run in the state it is resting
+   in** — decided and built 2026-08-23, `factory#50`. It used to count from
+   `runs.updated_at`, which is not the age of the work but the last time anything wrote
+   that row: `factory complete` writes it, so recording a merge reset the clock, and a run
+   finished sixty seconds earlier was "0 days old" against the 7-day floor while `complete`
+   printed "now collectable". `acquire_lease` and its renewal write it too, so any lease on
+   a finished run granted it another week; a lease records no transition, so counting from
+   the log closes that as well. The rule is not special-cased to delivered runs — a
+   cancelled or blocked run is resting too, and "how long has this been sitting still" is
+   one question with one answer. Every number here remains a **floor**, never a promise;
+   this decides only when the floor starts counting.
 2. `git branch -D` **only** for branches with no remote counterpart and no open PR.
    A pushed branch is never deleted by the factory.
 3. Archive the attempt directory to `~/factory/artifacts/…` and delete it from the worktree.
