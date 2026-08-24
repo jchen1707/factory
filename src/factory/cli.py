@@ -792,11 +792,59 @@ def cmd_status(args: argparse.Namespace) -> int:
             _print_run_detail(console_views.run_detail(home, registry, routing, store, run))
         return 0
 
-    _print_runs_board(console_views.runs_board(home, registry, routing, store))
+    rows = console_views.runs_board(home, registry, routing, store)
+    _print_runs_board(rows, _ready_to_complete(rows, _board_pr_state(registry)))
     return 0
 
 
-def _print_runs_board(rows: list[console_views.RunRow]) -> None:
+def _board_pr_state(
+    registry: Registry,
+) -> Callable[[str, str], str | None]:
+    """A ``pr_state(project_name, pr_url)`` closure for the board's merge check.
+
+    ``gh pr view <url>`` resolves the repo from the URL, so the cwd only needs to
+    be *some* path on this machine for `gh` to find its auth. The project's own
+    checkout is the natural one; a project missing from the registry (a run whose
+    project row was removed) falls back to the factory home so the row is still
+    asked about rather than silently dropped.
+    """
+
+    def _state(project_name: str, pr_url: str) -> str | None:
+        project = registry.projects.get(project_name)
+        cwd = project.path if project is not None else factory_home()
+        return github.pr_state(cwd, pr_url)
+
+    return _state
+
+
+def _ready_to_complete(
+    rows: list[console_views.RunRow],
+    pr_state: Callable[[str, str], str | None],
+) -> set[str]:
+    """Tickets at ``awaiting_human`` whose PR James has merged.
+
+    The ``awaiting_human -> completed`` edge is ``merge-is-james``: the factory
+    never takes it. But nothing told James *when* to take it, so a run with a
+    merged PR sat at ``awaiting_human`` looking like every other parked run. This
+    surfaces "ready to complete" without taking the edge — it is a notice, not a
+    transition, and `factory complete <TICKET>` is still the human command.
+
+    A `gh` that cannot answer (``None``) is not "merged": a transient `gh` failure
+    must not look the same as a PR James has not merged, for the same reason
+    `cmd_complete` refuses both.
+    """
+    ready: set[str] = set()
+    for r in rows:
+        if (
+            r.state == State.AWAITING_HUMAN.value
+            and r.pr_url
+            and pr_state(r.project, r.pr_url) == "MERGED"
+        ):
+            ready.add(r.ticket)
+    return ready
+
+
+def _print_runs_board(rows: list[console_views.RunRow], ready: set[str]) -> None:
     if not rows:
         print("no runs")
         return
@@ -818,6 +866,8 @@ def _print_runs_board(rows: list[console_views.RunRow]) -> None:
             print(f"        ctx: {r.context_reason}")
         if r.activity:
             print(f"        · {r.activity}")
+        if r.ticket in ready:
+            print(f"        · PR merged — ready to complete: factory complete {r.ticket}")
 
 
 def _print_run_detail(detail: console_views.RunDetail) -> None:
