@@ -55,8 +55,11 @@ target-version = "py312"
 # `docs/discovery/` is Phase 0's dated evidence, both marked protected in
 # harness.config.json — and ruff formats Python fenced in Markdown as well as Python
 # files, so without this a `ruff format .` silently rewrites the record it is meant to
-# be checked against.
-extend-exclude = ["docs", "SOFTWARE-FACTORY-PLAN.md"]
+# be checked against. The generated copy at `.agents/plans/software-factory-plan.md`
+# is a byte-for-byte mirror of the canonical file (`scripts/sync_plan_copy.py`), so it
+# carries the same fenced Python and needs the same exclusion — without it
+# `ruff format --check` is red on a clean tree.
+extend-exclude = ["docs", "SOFTWARE-FACTORY-PLAN.md", ".agents/plans/software-factory-plan.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "C4", "PIE", "PT", "S"]
