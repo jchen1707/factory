@@ -1,0 +1,8 @@
+$timeline
+<script>
+const es = new EventSource('/sse/timeline/$ticket');
+es.onmessage = e => {
+  const html = JSON.parse(e.data).html;
+  if (html) { document.getElementById('timeline').innerHTML = html; }
+};
+</script>
