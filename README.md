@@ -89,11 +89,14 @@ uv run factory run BAC-6
 uv run factory run BAC-6 --dry-run        # print every command, execute none
 uv run factory run BAC-6 --plan          # force the planning step first
 uv run factory run BAC-6 --full-review   # force Tier 2's full fan-out regardless of trigger
+uv run factory run BAC-6 --no-follow     # start it and return; `tick` carries it from there
 ```
 
-Stops at `awaiting_human` (PR open) or at a `blocked`/`failed` state. For a long run, invoke
-it detached (`nohup`/`&`) — a foreground run killed at the terminal leaves an orphan the
-next tick reaps.
+Stops at `awaiting_human` (PR open) or at a `blocked`/`failed` state. `run` and `tick` are the
+same loop — `factory run` is `driver.drive(follow=True)`, a tick is one `driver.step` per run —
+so a foreground run killed at the terminal leaves exactly the orphan the next tick reaps, and
+resuming it needs nothing but `factory tick`. `--no-follow` returns as soon as an agent is
+detached, which is the shape to use from a script.
 
 ### `tick` — one unattended pass
 

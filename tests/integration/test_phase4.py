@@ -32,7 +32,7 @@ from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Effect, Run
-from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeSandbox
+from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeSandbox, advance_state
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -767,7 +767,7 @@ def test_resume_into_verifying_does_not_increment_the_attempt(ctx: Context) -> N
 
     # And the gate report actually runs against the existing attempt directory — it would
     # raise `schema-invalid` (no last-message.json) had the attempt been incremented.
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.REVIEWING
 
 
@@ -792,7 +792,7 @@ def test_resume_a_blocked_at_verifying_run_re_enters_verifying(ctx: Context) -> 
         "unblock-is-a-judgement",
     )
     # The gate report re-runs against the evidence the implementer already wrote.
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.REVIEWING
 
 
@@ -816,12 +816,12 @@ def test_a_verifying_resume_re_runs_the_gates_rather_than_reading_a_stale_report
     (attempt_dir / "gates.json").write_text(json.dumps(stale, indent=2), encoding="utf-8")
 
     _block_at(ctx, State.VERIFYING, "env-gate-failed")
+    detached_before = len(_fake(ctx).detached)
     recovery.resume(ctx)  # re-enters verifying (no --from: reads the recorded origin)
     assert ctx.state is State.VERIFYING
 
     # `fake.gate_report` is still the default pass — the fresh reality.
-    detached_before = len(_fake(ctx).detached)
-    verify_step.run(ctx)  # start spawns a fresh gate report, collect reads it back
+    advance_state(ctx)  # reap collects the report `recovery.resume` re-spawned
 
     assert ctx.state is State.REVIEWING  # the fresh pass won, not the stale fail
     assert len(_fake(ctx).detached) > detached_before  # a gate report actually re-ran
@@ -996,7 +996,7 @@ def test_an_environment_gate_failure_blocks_rather_than_looping_back(ctx: Contex
     _to_verifying(ctx)
 
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
 
     assert caught.value.reason == "env-gate-failed"
     # It did not loop back to a fresh implement — the exit the daemon hazard exploits.
@@ -1016,7 +1016,7 @@ def test_a_real_code_gate_failure_still_loops_back(ctx: Context) -> None:
     fake.gate_report = _fixture("gate-report-fail.json")
     _to_verifying(ctx)
 
-    verify_step.run(ctx)
+    advance_state(ctx)
 
     # verify -> reviewing is gated behind review; the load-bearing claim here is the
     # loop-back did NOT fire (verdict fail on a code gate routes to implementing, not
@@ -1032,7 +1032,7 @@ def test_a_real_code_gate_failure_still_loops_back(ctx: Context) -> None:
 
 def _finish_implement_and_loop_back(ctx: Context, *, attempt: int) -> None:
     """Record a finished implement attempt that failed the gate and looped back, the shape
-    `reap` hands to `_drive_from_here`'s NEXT_STEP branch. The two-phase verify dance is
+    `reap.act` answers with its NEXT_STEP branch. The two-phase verify dance is
     skipped because what is under test is the ladder dispatch, not the gate report."""
     ctx.store.finish_attempt(
         ctx.run.id, attempt, State.IMPLEMENTING, exit_code=0, outcome="implemented"
@@ -1051,7 +1051,7 @@ def test_a_third_gate_failure_rewinds_to_planning_not_a_fourth_implement(ctx: Co
     _to_worktree(ctx)
     implement_step.start(ctx)  # attempt 1
     _finish_implement_and_loop_back(ctx, attempt=1)  # -> implementing (loop-back, rung 2)
-    cli._start_next_after_gate_fail(ctx)  # rung 2 -> a fresh implement, attempt 2
+    reap_step.act(ctx)  # rung 2 -> a fresh implement, attempt 2
     ctx.refresh()
     assert ctx.run.attempt == 2
 
@@ -1061,7 +1061,7 @@ def test_a_third_gate_failure_rewinds_to_planning_not_a_fourth_implement(ctx: Co
     _fake(ctx).gate_report = _fixture("gate-report-fail.json")  # a real code-gate failure
 
     # Rung 3: verify.collect rewinds to planning rather than looping back to a third implement.
-    verify_step.run(ctx)
+    advance_state(ctx)
     ctx.refresh()
     assert ctx.state is State.PLANNING
     assert ctx.run.attempt == 3  # a rewind is one attempt with two phases
@@ -1075,11 +1075,12 @@ def test_a_fourth_gate_failure_parks_at_resumable_not_a_fifth_implement(ctx: Con
     _to_worktree(ctx)
     implement_step.start(ctx)  # attempt 1 -> implementing
     # Place the run at `implementing` for the fourth time (three attempts spent), the shape
-    # the NEXT_STEP branch hands to `_start_next_after_gate_fail` after a rung-4 loop-back.
+    # `reap.act`'s NEXT_STEP branch is handed after a rung-4 loop-back.
     ctx.store.update_run(ctx.run.id, attempt=3)
     ctx.refresh()
+    _finish_implement_and_loop_back(ctx, attempt=3)
 
-    cli._start_next_after_gate_fail(ctx)
+    reap_step.act(ctx)
     ctx.refresh()
     assert ctx.state is State.RESUMABLE
     # A park, not a block: `resume_run` takes it the rest of the way to `failed`.

@@ -26,7 +26,7 @@ from factory.machine import TERMINAL, Blocked, State, can
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -98,6 +98,7 @@ _LIVE_RUN_INDEX = (
 #: two paths nobody had run lately.
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     3: ("ALTER TABLE runs ADD COLUMN full_review INTEGER NOT NULL DEFAULT 0",),
+    4: ("ALTER TABLE runs ADD COLUMN force_plan INTEGER NOT NULL DEFAULT 0",),
 }
 
 _SCHEMA = (
@@ -180,6 +181,12 @@ class Run:
     #: `Context`, because the review can happen in a later process than the one that
     #: was asked — under `factory tick` it usually does.
     full_review: bool = False
+    #: James typed `factory run --plan`. On the row for the same reason `full_review`
+    #: is: the flag was carried on the command line's `Context` and the state it decides
+    #: (`worktree_ready -> planning`) is reached in a later process on every path but
+    #: one — so a `factory run --plan` that died before `worktree_ready` was resumed by
+    #: the daemon with no plan phase at all, silently.
+    force_plan: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Run:
@@ -200,6 +207,7 @@ class Run:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             full_review=bool(row["full_review"]),
+            force_plan=bool(row["force_plan"]),
         )
 
 
@@ -319,6 +327,7 @@ class Store:
         team: str,
         state: State = State.APPROVED,
         full_review: bool = False,
+        force_plan: bool = False,
     ) -> Run:
         """`INSERT OR IGNORE` against `_LIVE_RUN_INDEX` — §7.2 phase one.
 
@@ -335,9 +344,20 @@ class Store:
         run_id = new_run_id()
         inserted = self._conn.execute(
             "INSERT OR IGNORE INTO runs "
-            "(id, linear_id, project, team, state, attempt, created_at, updated_at, full_review) "
-            "VALUES (?,?,?,?,?,0,?,?,?)",
-            (run_id, linear_id, project, team, str(state), now, now, int(full_review)),
+            "(id, linear_id, project, team, state, attempt, created_at, updated_at, "
+            "full_review, force_plan) "
+            "VALUES (?,?,?,?,?,0,?,?,?,?)",
+            (
+                run_id,
+                linear_id,
+                project,
+                team,
+                str(state),
+                now,
+                now,
+                int(full_review),
+                int(force_plan),
+            ),
         ).rowcount
         # Ask for the row by the id just written rather than by ticket: a terminal run
         # and this fresh one can share a `created_at` second, and picking the wrong one
@@ -421,6 +441,7 @@ class Store:
             "blocked_reason",
             "pr_url",
             "full_review",
+            "force_plan",
         }
         unknown = set(fields) - allowed
         if unknown:

@@ -21,9 +21,7 @@ from factory.machine import Blocked, Resumable, State
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
-from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
-from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from tests.integration.conftest import (
     GOOD_GATE_REPORT,
@@ -32,6 +30,7 @@ from tests.integration.conftest import (
     TICKET,
     FakeLinear,
     FakeSandbox,
+    advance_state,
     git,
 )
 
@@ -47,8 +46,8 @@ def _drive(ctx: Context) -> None:
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
-    implement_step.run(ctx)
-    verify_step.run(ctx)
+    advance_state(ctx, until=State.VERIFYING)
+    advance_state(ctx)
 
 
 def _to_verifying(ctx: Context) -> None:
@@ -58,7 +57,7 @@ def _to_verifying(ctx: Context) -> None:
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
-    implement_step.run(ctx)
+    advance_state(ctx, until=State.VERIFYING)
     assert ctx.run.state is State.VERIFYING
 
 
@@ -207,7 +206,7 @@ def test_a_schema_invalid_result_blocks_and_keeps_the_raw_file(ctx: Context) -> 
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
     with pytest.raises(Blocked) as caught:
-        implement_step.run(ctx)
+        advance_state(ctx, until=State.VERIFYING)
     # §22 F6 — schema-invalid output does not advance the state; the raw file is kept.
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.IMPLEMENTING  # the state did not advance
@@ -226,7 +225,7 @@ def test_a_non_zero_exit_is_resumable_and_carries_the_stderr_tail(ctx: Context) 
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
     with pytest.raises(Resumable) as caught:
-        implement_step.run(ctx)
+        advance_state(ctx, until=State.VERIFYING)
     assert caught.value.reason == "agent-failed"
     assert "traceback line" in caught.value.detail
     assert caught.value.detail.count("traceback line") == 40
@@ -264,7 +263,7 @@ def test_a_write_outside_the_vault_allowlist_blocks_the_run(
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
     with pytest.raises(Blocked) as caught:
-        implement_step.run(ctx)
+        advance_state(ctx, until=State.VERIFYING)
     assert caught.value.reason == "vault-write-outside-allowlist"
     assert "Upskilling/notes.md" in caught.value.detail
     # Both snapshots are kept, so a wrong write is reconstructible after the fact.
@@ -611,7 +610,7 @@ def test_the_verify_step_invokes_the_report_hook_by_path_not_a_gate_name(
     # The factory holds no gate command. The detached script names the vendored report hook
     # and `--json`; it does not name ruff, mypy, pytest or any other gate.
     _to_verifying(ctx)
-    verify_step.run(ctx)
+    advance_state(ctx)
     scripts = [s for _name, s in _fake(ctx).detached if "gate_report.mjs" in s]
     assert len(scripts) == 1
     # The redirect paths after `>` carry the pytest temp dir name, so tokenise only the
@@ -636,7 +635,7 @@ def test_the_verify_step_passes_the_run_base_ref_so_post_commit_gates_run(
     # the BAC-5 real run blocked on evidence-mismatch even though its gates had passed.
     _to_verifying(ctx)
     assert ctx.run.base_ref == "origin/v2"  # set at worktree creation
-    verify_step.run(ctx)
+    advance_state(ctx)
     scripts = [s for _name, s in _fake(ctx).detached if "gate_report.mjs" in s]
     assert len(scripts) == 1
     cmd = next(line for line in scripts[0].splitlines() if "gate_report.mjs" in line)
@@ -650,7 +649,7 @@ def test_a_pass_report_advances_to_reviewing(ctx: Context) -> None:
     _to_verifying(ctx)
     # The default fake report is the all-pass one; exercise it explicitly anyway.
     _fake(ctx).gate_report = dict(GOOD_GATE_REPORT)
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.run.state is State.REVIEWING
     assert _gates_json(ctx)["verdict"] == "pass"
 
@@ -658,7 +657,7 @@ def test_a_pass_report_advances_to_reviewing(ctx: Context) -> None:
 def test_a_fail_report_loops_back_to_implementing(ctx: Context) -> None:
     _to_verifying(ctx)
     _fake(ctx).gate_report = _fixture("gate-report-fail.json")
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.run.state is State.IMPLEMENTING  # loop back for a real failure
     gates = _gates_json(ctx)
     assert gates["verdict"] == "fail"
@@ -674,7 +673,7 @@ def test_an_incomplete_report_blocks_without_evidence_mismatch(ctx: Context) -> 
     _to_verifying(ctx)
     _fake(ctx).gate_report = _fixture("gate-report-unavailable.json")
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "gates-incomplete"
     assert "evidence-mismatch" not in caught.value.detail
     assert "playwright smoke" in caught.value.detail  # the unavailable gate is named
@@ -698,7 +697,7 @@ def test_an_unavailable_gate_names_what_it_needs_not_only_that_it_is_missing(
     _to_verifying(ctx)
     _fake(ctx).gate_report = _fixture("gate-report-unavailable.json")
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "gates-incomplete"
     # The caveat is the config author's own sentence naming the environment condition.
     assert "binary not on PATH" in caught.value.detail
@@ -740,7 +739,7 @@ def test_a_disabled_gate_passes_the_report_schema_and_advances(ctx: Context) -> 
     )
     _fake(ctx).gate_report = report
 
-    verify_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.run.state is State.REVIEWING
     assert next(g for g in _gates_json(ctx)["gates"] if g["name"] == "lighthouse")["status"] == (
@@ -769,7 +768,7 @@ def test_a_claimed_disabled_gate_advances_rather_than_mismatching(ctx: Context) 
     )
     _fake(ctx).gate_report = report
 
-    verify_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.run.state is State.REVIEWING
 
@@ -781,7 +780,7 @@ def test_a_claimed_gate_the_report_omits_is_evidence_mismatch(ctx: Context) -> N
     report["gates"] = [g for g in report["gates"] if g["name"] != "mypy"]
     _fake(ctx).gate_report = report
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "evidence-mismatch"
     assert "mypy" in caught.value.detail
 
@@ -806,7 +805,7 @@ def test_a_claimed_gate_the_report_marks_unavailable_is_evidence_mismatch(
     report["verdict"] = "incomplete"
     _fake(ctx).gate_report = report
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "evidence-mismatch"
 
 
@@ -816,7 +815,7 @@ def test_a_monorepo_report_with_a_skipped_app_advances(ctx: Context) -> None:
     # and the pass verdict advances the run.
     _to_verifying(ctx)
     _fake(ctx).gate_report = _fixture("gate-report-monorepo.json")
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.run.state is State.REVIEWING
     gates = _gates_json(ctx)
     assert len(gates["targets"]) == 2
@@ -843,7 +842,7 @@ def test_a_command_string_gate_claim_cross_checks_by_name(ctx: Context) -> None:
     }
     _to_verifying(ctx)
     _fake(ctx).gate_report = dict(GOOD_GATE_REPORT)  # ruff check, mypy, pytest — all pass
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.run.state is State.REVIEWING
 
 
@@ -886,7 +885,7 @@ def test_an_integration_command_claim_matches_the_longer_gate_name(ctx: Context)
         "verdict": "pass",
     }
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "evidence-mismatch"
     assert "pytest -m integration" in caught.value.detail
 
@@ -900,7 +899,7 @@ def test_the_report_is_validated_before_the_verdict_is_trusted(ctx: Context) -> 
     report["verdict"] = "pass"
     _fake(ctx).gate_report = report
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.VERIFYING  # the state did not advance
 
@@ -911,7 +910,7 @@ def test_a_non_json_report_blocks(ctx: Context) -> None:
     # document never parsed. This is the path the schema-invalid guard exists for.
     _fake(ctx).gate_report_raw_stdout = "not json at all"
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.VERIFYING
 
@@ -924,7 +923,7 @@ def test_a_rejected_report_leaves_its_raw_streams_on_disk(ctx: Context) -> None:
     # it arrived on — so the evidence is what this test is about, not the block.
     _fake(ctx).gate_report_raw_stdout = '{"schemaVersion": 1, "verdict": "pass"}\ntrailing\n'
     with pytest.raises(Blocked) as caught:
-        verify_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "schema-invalid"
 
     attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"

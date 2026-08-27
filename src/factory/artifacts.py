@@ -106,7 +106,7 @@ class AttemptDir:
         """Remove any previous invocation's terminal evidence from this directory.
 
         The filesystem is the protocol, and every reader here treats `exit` as
-        authoritative: `implement._await_exit` returns the moment it appears and
+        authoritative: `sbx.poll` reports `EXITED` the moment it appears and
         `sbx.poll` calls it terminal regardless of what the VM is doing. A stale one is
         therefore not clutter — it is a false answer to the only question the protocol
         asks, and the reader has no way to tell.
