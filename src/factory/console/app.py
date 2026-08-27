@@ -22,7 +22,6 @@ import json
 import sqlite3
 import threading
 import time
-import tomllib
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
@@ -32,6 +31,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
+from factory import routing as routing_module
 from factory.console import views as console_views
 from factory.intake.linear import LinearClient
 from factory.registry import Registry, load_registry
@@ -725,14 +725,18 @@ def create_app(
     @app.post("/config/models")
     async def config_write(request: Request) -> RedirectResponse:
         """View 4's write. Validated **before** the file is replaced: the edit is rendered
-        to TOML, parsed back through `load_routing`, and only a table that passes §4.5's
+        to TOML and run through `routing.validate`, and only a table that passes §4.5's
         rules reaches the disk. A rejected edit returns to the form with the rule that
-        refused it — never a half-written `models.toml` the next tick would refuse."""
+        refused it — never a half-written `models.toml` the next tick would refuse.
+
+        Both halves belong to `routing`, which owns reading this file: the console decides
+        *when* an edit happens and renders the refusal, and knows nothing about the
+        file's shape."""
         form = _parse_form(await request.body())
         path = home / "config" / "models.toml"
         try:
-            text = _rewrite_models_toml(path, form)
-            _validate_models_toml(text)
+            text = routing_module.rewrite(path, form)
+            routing_module.validate(text)
         except (RoutingError, ValueError, KeyError) as exc:
             return RedirectResponse(f"/config?error={_query(str(exc))}", status_code=303)
         path.write_text(text, encoding="utf-8")
@@ -777,84 +781,3 @@ def _query(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value[:400])
-
-
-def _rewrite_models_toml(path: Path, form: dict[str, Any]) -> str:
-    """Apply the form's role/budget edits to `models.toml`, returning the new text.
-
-    A targeted line rewrite rather than a re-serialisation: the file carries the measured
-    model catalogue and a page of comments explaining why each number is what it is, and
-    round-tripping it through a TOML writer would throw all of that away. Only the values
-    the form actually owns are touched.
-    """
-    original = path.read_text(encoding="utf-8")
-    lines = original.splitlines()
-    current_role: str | None = None
-    out: list[str] = []
-    in_budget = False
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("[roles."):
-            current_role = stripped[len("[roles.") :].rstrip("]").strip()
-            in_budget = False
-        elif stripped.startswith("["):
-            current_role = None
-            in_budget = stripped.startswith("[budget]")
-
-        if current_role and "=" in stripped and not stripped.startswith("#"):
-            key = stripped.split("=", 1)[0].strip()
-            if key in ("model", "effort"):
-                proposed = form.get(f"{key}.{current_role}")
-                if proposed is not None:
-                    out.append(_replace_value(line, f'"{str(proposed).strip()}"'))
-                    continue
-        if in_budget and "=" in stripped and not stripped.startswith("#"):
-            key = stripped.split("=", 1)[0].strip()
-            if key in ("usd_per_run", "usd_warn_at"):
-                proposed = form.get(key)
-                if proposed is not None:
-                    out.append(_replace_value(line, str(float(str(proposed).strip()))))
-                    continue
-        out.append(line)
-    return "\n".join(out) + "\n"
-
-
-def _replace_value(line: str, rendered: str) -> str:
-    """Swap the value on one `key = value  # comment` line, leaving everything else byte-
-    identical — including the column the comment sits in.
-
-    A line whose value is unchanged is returned untouched rather than re-rendered. The
-    alternative (always rebuilding the line) reflows the comment alignment of every role
-    in the file on any edit, so a one-effort change arrives as a five-line diff and the
-    next reader cannot see what actually changed.
-    """
-    head, _, rest = line.partition("=")
-    comment_at = rest.find("#")
-    current = (rest if comment_at < 0 else rest[:comment_at]).strip()
-    if current == rendered:
-        return line
-    if comment_at < 0:
-        return f"{head}= {rendered}"
-    # Keep the comment in its original column where the new value still fits under it.
-    comment = rest[comment_at:]
-    padding = len(rest[:comment_at]) - len(f" {rendered}")
-    return f"{head}= {rendered}{' ' * padding if padding > 0 else '  '}{comment}"
-
-
-def _validate_models_toml(text: str) -> None:
-    """Run §4.5's rules over the proposed text without writing it.
-
-    `load_routing` reads a path, so the candidate is written to a temporary file and parsed
-    from there — the validation that runs is byte-for-byte the one the daemon runs, which
-    is the only way the form's "no" and the tick's "no" cannot disagree."""
-    import tempfile
-
-    tomllib.loads(text)  # a syntax error should say so before §4.5 does
-    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False, encoding="utf-8") as handle:
-        handle.write(text)
-        candidate = Path(handle.name)
-    try:
-        load_routing(candidate)
-    finally:
-        candidate.unlink(missing_ok=True)
