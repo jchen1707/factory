@@ -30,10 +30,6 @@ def announce_completed(ctx: Context, *, pr_url: str | None) -> None:
     announcement and never masks the transition. The run is already `completed` in the
     store by the time this is called, and that is the record that matters.
     """
-    if ctx.dry_run:
-        ctx.would(f"linear: move {ctx.run.linear_id} to {DONE}")
-        ctx.would(f"linear: comment on {ctx.run.linear_id} (completed)")
-        return
 
     try:
         _move_done(ctx)

@@ -89,16 +89,6 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
 
-    if ctx.dry_run:
-        ctx.would(
-            f"run node {_REPORT_HOOK} --json --base {base_ref} in {ctx.project.build_sandbox}"
-        )
-        ctx.would(f"  workdir {worktree}")
-        ctx.would("write gates.json beside last-message.json; cross-check gates_run")
-        ctx.would("advance on pass -> reviewing, fail -> implementing, incomplete -> blocked")
-        advance(ctx, State.REVIEWING)
-        return None
-
     attempt = ctx.run.attempt
     attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt))
     # Reuse the implement attempt's directory — verify reads its `last-message.json` and

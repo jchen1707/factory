@@ -24,7 +24,6 @@ from factory.agent.base import AgentInvocation
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle
-from factory.sandbox.sbx import exec_argv
 from factory.steps import Context, advance
 
 __all__ = ["collect", "plan_dir", "should_plan", "start"]
@@ -116,24 +115,6 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         env=dict(ctx.project.env),
     )
     script = ctx.agent.wrapper_script(invocation)
-
-    if ctx.dry_run:
-        ctx.would(f"write {prompt_path}")
-        ctx.would(
-            " ".join(
-                exec_argv(
-                    ctx.project.build_sandbox,
-                    ["/bin/sh", "-lc", "<the plan script>"],
-                    workdir=str(worktree),
-                    env=dict(ctx.project.env),
-                    detach=True,
-                )
-            )
-        )
-        ctx.would(f"require {plans}/plan.md and test-plan.md")
-        advance(ctx, State.PLANNING, actor=actor)
-        advance(ctx, State.IMPLEMENTING)
-        return None
 
     prompt_path.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)

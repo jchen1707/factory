@@ -111,7 +111,7 @@ def step(ctx: Context) -> Result:
         return Result(Outcome.NEEDS_HUMAN, f"{before} is held for a human")
 
     result = _perform(ctx, action, before)
-    if result.outcome is Outcome.WAITING and not ctx.dry_run:
+    if result.outcome is Outcome.WAITING:
         ctx.store.renew_lease(ctx.run.id, ttl_seconds=LEASE_TTL_SECONDS)
     return result
 

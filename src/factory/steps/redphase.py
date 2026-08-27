@@ -133,17 +133,6 @@ def replay(ctx: Context) -> ReplayOutcome:
         _record(ctx, "unavailable", reason="no `kind: test` gate declared in harness.config.json")
         return "proceed"
 
-    if ctx.dry_run:
-        ctx.would(f"git worktree add --detach <scratch> {ctx.run.base_ref or ctx.project.base_ref}")
-        ctx.would(
-            f"git diff {ctx.run.base_ref}...HEAD -- {' '.join(harness.tests)} | git -C <scratch> apply"
-        )
-        ctx.would(
-            f"run {' '.join(test_gate.run)} in {ctx.project.build_sandbox} (workdir <scratch>)"
-        )
-        ctx.would("require the test gate to FAIL naming a new/changed test")
-        return "proceed"
-
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     # The one step of the clone path that cannot follow the branch home. Everything else
@@ -248,9 +237,6 @@ def weakening_guard(ctx: Context) -> list[str]:
     if ctx.harness is None or not ctx.harness.tests:
         return []
     tests = list(ctx.harness.tests)
-    if ctx.dry_run:
-        ctx.would("scan the diff for removed assertions in existing test files")
-        return []
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     existing = _existing_test_files(worktree, base_ref, tests)

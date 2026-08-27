@@ -75,17 +75,6 @@ def run(ctx: Context) -> None:
     body_path = ctx.state_dir / "pr-body.md"
     pr_title = f"{ctx.run.linear_id}: {ctx.issue.title}" if ctx.issue else ctx.run.linear_id
 
-    if ctx.dry_run:
-        ctx.would(f"git -C {worktree} -c core.hooksPath=/dev/null push -u origin {branch}")
-        ctx.would(f"gh pr list --head {branch}  # duplicate guard")
-        ctx.would(
-            f"gh pr create --base {ctx.project.base_branch} --head {branch} --title {pr_title!r}"
-        )
-        ctx.would(f"  --body-file {body_path} ({len(body)} bytes)")
-        ctx.would(f"transition {State.PR_READY} -> {State.AWAITING_HUMAN}")
-        ctx.would("linear: move to In Review + comment (PR link, gates, review, cost)")
-        return
-
     body_path.write_text(body, encoding="utf-8")
     # F18: a secret that reached the PR body is compromised and must not be pushed. The run
     # fails before any host-side write; the block announcement tells James to rotate without

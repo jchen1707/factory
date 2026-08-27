@@ -154,3 +154,28 @@ def test_no_source_records_a_transition_with_no_source_state() -> None:
     """
     for path, body in _bodies():
         assert "from_state=None" not in body, f"{path} places a run instead of moving it"
+
+
+def test_no_run_pipeline_module_simulates_itself() -> None:
+    """§25, extended: `--dry-run` is gone from the run pipeline and must stay gone.
+
+    It was an *untested* simulation of a state machine — `Context.dry_run`,
+    `shadow_state`, `shadow_worktree`, `shadow_branch`, `planned` and `would()`, ~130
+    sites across 17 modules, a second implementation nobody had ever checked agreed with
+    the first. Measured 2026-08-27: **no test drove the run pipeline with
+    `dry_run=True`.** That is the exact drift the three-layer scheme exists to end,
+    living inside the layer that exists to end it.
+
+    A grep rather than a comment, because the shape is what comes back: one `if
+    ctx.dry_run:` added to one step reads as a two-line convenience and is the whole
+    thing again.
+
+    `gc.py` is deliberately exempt. `gc --dry-run` is a real sweep planner, it is tested,
+    and `gc.sweep` takes `dry_run` as its own parameter and never sees a `Context`.
+    """
+    for path, body in _bodies():
+        if path.name == "gc.py":
+            continue
+        assert "shadow_" not in body, f"{path} carries a shadow of the real state"
+        assert "ctx.dry_run" not in body, f"{path} branches on a simulated run"
+        assert ".would(" not in body, f"{path} records a command it is not going to run"

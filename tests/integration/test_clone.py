@@ -674,24 +674,6 @@ def _commit_a_test(ctx: Context) -> None:
     git(worktree, "commit", "-m", "test: a health check")
 
 
-# --------------------------------------------------------------------------------
-# the dry run prints the clone chain
-# --------------------------------------------------------------------------------
-
-
-def test_the_dry_run_prints_the_in_vm_checkout_and_the_fetch_back(clone_ctx: Context) -> None:
-    clone_ctx.dry_run = True
-    claim_step.run(clone_ctx)
-    context_step.run(clone_ctx)
-    sandbox_step.run(clone_ctx)
-    worktree_step.run(clone_ctx)
-
-    planned = "\n".join(clone_ctx.planned)
-    assert "--clone" in planned
-    assert f"checkout -b {clone_ctx.shadow_branch}" in planned
-    assert str(clone_ctx.clone_mount) in planned
-
-
 def _rerun_the_same_ticket(ctx: Context) -> Run:
     """Cancel this run and start a second one for the **same ticket**, as `factory cancel`
     followed by `factory run` does.

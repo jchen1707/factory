@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, policy
@@ -81,20 +81,6 @@ class Context:
     run: Run
     issue: Issue | None = None
     harness: HarnessConfig | None = None
-    dry_run: bool = False
-    #: In a dry run every command that *would* have been executed lands here instead.
-    #: `--dry-run` prints every command and executes none, which is only true if there
-    #: is one place that decides.
-    planned: list[str] = field(default_factory=list)
-    #: Where a dry run has got to. The database is not written, so the real state never
-    #: moves — and without somewhere to record the simulated position, the second
-    #: transition would look illegal and the dry run would stop after one step while
-    #: appearing to have walked the whole pipeline.
-    shadow_state: State | None = None
-    #: Same reason: a dry run never creates the worktree or records the branch, and the
-    #: later steps have to be able to print the paths they would have used.
-    shadow_worktree: Path | None = None
-    shadow_branch: str | None = None
 
     # -- paths --------------------------------------------------------------------
 
@@ -119,13 +105,11 @@ class Context:
     def worktree(self) -> Path:
         if self.run.worktree:
             return Path(self.run.worktree)
-        if self.dry_run and self.shadow_worktree:
-            return self.shadow_worktree
         raise Blocked("no-worktree", f"run {self.run.id} has no worktree recorded")
 
     @property
     def branch(self) -> str | None:
-        return self.run.branch or (self.shadow_branch if self.dry_run else None)
+        return self.run.branch
 
     @property
     def clone_mount(self) -> Path:
@@ -149,21 +133,18 @@ class Context:
     def factory_dir(self) -> Path:
         """Where `.factory/` lives for this run — the host side of the protocol.
 
-        `factory_dir_for` holds the path logic; this is its `Context`-bound view, and it
-        adds the one thing a bare `Run` cannot know: a dry run has no recorded worktree,
-        only the shadow one it would have created, and every later step still has to be
-        able to print the path it would have used.
+        `factory_dir_for` holds the path logic and this is its `Context`-bound view, so
+        the console (which reads the store without building adapters) and a step cannot
+        disagree about where the evidence is.
         """
-        if not self.project.requires_clone and not self.run.worktree:
-            return self.worktree / ".factory"  # raises no-worktree, or gives the shadow
         return factory_dir_for(self.home, self.project, self.run)
 
     # -- plumbing -----------------------------------------------------------------
 
     @property
     def state(self) -> State:
-        """Where the run is, real or simulated."""
-        return self.shadow_state if self.dry_run and self.shadow_state else self.run.state
+        """Where the run is. One answer, read from the row."""
+        return self.run.state
 
     def refresh(self) -> None:
         run = self.store.run_by_id(self.run.id)
@@ -182,10 +163,6 @@ class Context:
             attempt=self.run.attempt,
             detail=detail or None,
         )
-
-    def would(self, description: str) -> None:
-        """Record a command a dry run is not going to execute."""
-        self.planned.append(description)
 
     def timeout_for(self, state: State) -> int:
         return self.registry.defaults.timeouts_seconds.get(str(state), 1800)
@@ -255,7 +232,7 @@ def advance(
             f"{source} -> {to_state} is reserved for James by rule {human_rule!r}",
         )
 
-    if not ctx.dry_run and not ctx.store.holds_lease(ctx.run.id):
+    if not ctx.store.holds_lease(ctx.run.id):
         raise Blocked("lease-lost", f"run {ctx.run.id} no longer holds its lease")
 
     free_gb = shutil.disk_usage(ctx.home).free / 1_000_000_000
@@ -264,11 +241,6 @@ def advance(
             "disk-below-floor",
             f"{free_gb:.1f} GB free, floor is {ctx.registry.defaults.disk_min_free_gb} GB",
         )
-
-    if ctx.dry_run:
-        ctx.would(f"transition {source} -> {to_state}")
-        ctx.shadow_state = to_state
-        return
 
     ctx.store.record_transition(
         ctx.run.id,

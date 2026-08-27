@@ -516,11 +516,6 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
     from factory.intake.linear import LinearError
     from factory.steps import effect_marker, record_effect
 
-    if ctx.dry_run:
-        ctx.would(
-            f"linear: comment on {ctx.run.linear_id} (suspend; marker {effect_marker(ctx, _SUSPEND_STEP)})"
-        )
-        return
     marker = effect_marker(ctx, _SUSPEND_STEP)
     issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
     body = (

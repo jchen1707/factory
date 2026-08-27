@@ -23,12 +23,6 @@ IN_PROGRESS = "In Progress"
 def run(ctx: Context) -> None:
     _refuse_second_writer(ctx)
 
-    if ctx.dry_run:
-        ctx.would(f"linear: move {ctx.run.linear_id} to {IN_PROGRESS}")
-        ctx.would(f"linear: comment on {ctx.run.linear_id} (marker {effect_marker(ctx, STEP)})")
-        advance(ctx, State.CLAIMED)
-        return
-
     issue_uuid, current_state = ctx.linear.issue_uuid(ctx.run.linear_id)
     marker = effect_marker(ctx, STEP)
 

@@ -47,10 +47,6 @@ def record(ctx: Context, reason: str, detail: str) -> None:
     is §13.1's failure, and a block recorded without `blocked_reason` is a run the
     console shows as stopped with no reason to show.
     """
-    if ctx.dry_run:
-        ctx.would(f"block: {reason} ({detail})")
-        announce(ctx, reason, detail)
-        return
     ctx.store.update_run(ctx.run.id, blocked_reason=reason)
     record_stop(ctx, State.BLOCKED, rule=reason, detail=detail)
     ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
@@ -63,10 +59,6 @@ def announce(ctx: Context, reason: str, detail: str) -> None:
     Called from the one place that handles a block, so a step raising `Blocked` never
     has to remember to do this.
     """
-    if ctx.dry_run:
-        ctx.would(f"linear: comment on {ctx.run.linear_id} (marker {effect_marker(ctx, STEP)})")
-        ctx.would(f"linear: add label {NEEDS_INFO!r} to {ctx.run.linear_id}")
-        return
 
     try:
         _comment(ctx, reason, detail)
@@ -160,12 +152,6 @@ def announce_awaiting_human(ctx: Context, *, pr_url: str | None, sections: Seque
     when the run reached `awaiting_human` without opening a PR (a review finding, a weakened
     assertion); the comment says so rather than inventing a link.
     """
-    if ctx.dry_run:
-        ctx.would(f"linear: move {ctx.run.linear_id} to {IN_REVIEW}")
-        ctx.would(
-            f"linear: comment on {ctx.run.linear_id} (awaiting_human; marker {effect_marker(ctx, _AWAITING_STEP)})"
-        )
-        return
 
     try:
         _move_in_review(ctx)

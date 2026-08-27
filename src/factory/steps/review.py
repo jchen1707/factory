@@ -114,16 +114,8 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     #    the replay's host-side diff, the reviewer sandbox (which mounts the host project
     #    `:ro` and has no clone of its own) and the host-execution guard all read an
     #    ordinary host worktree, and after this they get one. Nothing below knows.
-    if ctx.project.requires_clone and not ctx.dry_run:
+    if ctx.project.requires_clone:
         clone_step.fetch_back(ctx)
-    elif ctx.project.requires_clone:
-        ctx.would(
-            f"git -C {ctx.project.path} fetch "
-            f"{clone_step.remote_name(ctx.project.build_sandbox)} {ctx.branch}"
-        )
-        ctx.would(
-            f"git worktree add -b {ctx.branch} {clone_step.host_worktree_path(ctx)} FETCH_HEAD"
-        )
 
     # 1. The red-phase replay (§15.3). May raise Blocked (test-proves-nothing,
     #    behaviour-change-without-test, inconclusive:block) or return "awaiting_human"
@@ -133,12 +125,11 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     #    passes through: the replay still runs (its check row is the PR body's evidence and
     #    its two non-configurable Blocked outcomes are not clearable), only the escalation
     #    is spent. Ordering matters — `replay` must be called before `accepted` is consulted.
-    if not ctx.dry_run:
-        outcome = redphase.replay(ctx)
-        cleared, _ = redphase.accepted(ctx, redphase.REDPHASE_INCONCLUSIVE)
-        if outcome == "awaiting_human" and not cleared:
-            _awaiting_human(ctx, "redphase-inconclusive", "the red-phase replay was inconclusive")
-            return None
+    outcome = redphase.replay(ctx)
+    cleared, _ = redphase.accepted(ctx, redphase.REDPHASE_INCONCLUSIVE)
+    if outcome == "awaiting_human" and not cleared:
+        _awaiting_human(ctx, "redphase-inconclusive", "the red-phase replay was inconclusive")
+        return None
 
     # 2. The test-weakening guard — a judgement, so it escalates rather than blocks. Once
     #    that judgement has been made and recorded, the same hunks must not park the run a
@@ -152,17 +143,6 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             "the diff removes assertions in existing tests:\n"
             + "\n".join(f"- {line}" for line in offending[:20]),
         )
-        return None
-
-    if ctx.dry_run:
-        ctx.would(
-            f"Tier 1: standards + spec review in {ctx.project.review_sandbox} (read-only, sandbox_mode=read-only)"
-        )
-        ctx.would("Tier 2: evaluate trigger — run the full fan-out or skip + name the rule")
-        ctx.would(
-            f"advance {State.REVIEWING} -> {State.PR_READY} (clean) | {State.AWAITING_HUMAN} (finding)"
-        )
-        advance(ctx, State.PR_READY)
         return None
 
     # 3. Decide the fan-out: which axes run, and the Tier-2 rule the PR body names. The

@@ -16,7 +16,6 @@ from factory.harness import vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
 from factory.sandbox.base import SandboxSpec, Workspace
-from factory.sandbox.sbx import create_argv
 from factory.steps import Context, advance
 
 __all__ = ["preflight", "run"]
@@ -29,14 +28,6 @@ _BLOCKING_EXIT = 2
 
 def run(ctx: Context) -> None:
     spec = build_spec(ctx)
-
-    if ctx.dry_run:
-        ctx.would(f"sbx inspect {spec.name}  # create only if absent")
-        ctx.would(" ".join(create_argv(spec)))
-        advance(ctx, State.SANDBOX_CREATING)
-        ctx.would("preflight: toolchain, HARNESS_SKIP_VERIFY, vendored tree, protect_paths canary")
-        advance(ctx, State.SANDBOX_READY)
-        return
 
     advance(ctx, State.SANDBOX_CREATING)
     ctx.sandbox.ensure(spec)
@@ -99,7 +90,7 @@ def _capability_env(ctx: Context, spec: SandboxSpec) -> list[str]:
     which names matter, and the answer was none.
     """
     names = list(ctx.harness.secret_vars) if ctx.harness else []
-    if not names or ctx.dry_run:
+    if not names:
         return []
     listed = " ".join(names)
     # `rf`: the backslash is shell syntax (`\$$v` is "expand $v, once"), not Python's.
