@@ -34,7 +34,7 @@ from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, detached_shell_script
-from factory.steps import Context, advance
+from factory.steps import KILL_TARGET, Context, advance
 
 __all__ = ["collect", "run", "start"]
 
@@ -202,13 +202,7 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
         time.sleep(POLL_INTERVAL_SECONDS)
 
     ctx.log("verify.timeout", level="warning", seconds=timeout)
-    kill = getattr(ctx.sandbox, "kill_agent", None)
-    if kill is not None:
-        # The body is a `node gate_report.mjs` process, not `codex exec` (Phase 5
-        # defect 3): the default `pkill -x codex` matched nothing and the hung gate
-        # report was never signalled. Name the real process so the wrapper survives
-        # to write `exit`, exactly as the codex path does.
-        kill(handle.sandbox, "node")
+    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.VERIFYING])
     for _ in range(12):
         if attempt_dir.exit_file.exists():
             break

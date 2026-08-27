@@ -22,7 +22,7 @@ from pathlib import Path
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, State
 from factory.sandbox.base import RunHandle, RunStatus
-from factory.steps import Context
+from factory.steps import KILL_TARGET, Context
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import review as review_step
@@ -160,18 +160,31 @@ def reap(ctx: Context) -> Verdict:
         # the attempt ends with a real terminal record rather than a truncated one —
         # the same thing `implement._await_exit` does at the end of a foreground run.
         ctx.log("reap.timeout", level="warning", state=str(state), overrun_seconds=int(overrun))
-        kill = getattr(ctx.sandbox, "kill_agent", None)
-        if kill is not None:
-            kill(handle.sandbox)
+        ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[state])
         deadline = time.monotonic() + KILL_GRACE_SECONDS
         while time.monotonic() < deadline and not attempt_dir.exit_file.exists():
             time.sleep(5)
+        detail = f"{state} ran {int(overrun)}s past its timeout and was signalled"
+        # Resumable, not collected. A killed body did not finish its work, so its artifacts
+        # are truncated by definition — and `collect` reads them as a *verdict*: a signalled
+        # gate report has no `gates.stdout.txt`, which `verify.collect` reports as
+        # `schema-invalid`, a block that needs a human. A timeout is not a judgement about
+        # the work, it is the state's budget running out, and the ladder is what answers it.
+        #
+        # This is also the only reading under which the two paths agree: every foreground
+        # waiter — `plan`, `implement`, `verify`, `review` — signals and then raises
+        # `Resumable`, and not one of them collects. The branch could disagree unnoticed for
+        # as long as it did because for `verifying` it was never reached: the signal named
+        # `codex` at a `node` process, so the wait always timed out into `_orphan` below.
         if attempt_dir.exit_file.exists():
-            _collect(ctx, state, attempt_dir)
-            return Verdict(Outcome.COLLECTED, f"timed out after {int(overrun)}s over budget")
-        return _orphan(
-            ctx, "state-timeout", f"{state} ran {int(overrun)}s past its timeout and was signalled"
-        )
+            return _stopped(
+                ctx,
+                "state-timeout",
+                detail,
+                exit_code=_exit_code(attempt_dir, handle.exit_name),
+                outcome="timed-out",
+            )
+        return _orphan(ctx, "state-timeout", detail)
 
     return Verdict(Outcome.RUNNING, f"{state} attempt {ctx.run.attempt}")
 
@@ -227,15 +240,27 @@ def _entered_state_at(ctx: Context, /) -> int | None:
 
 
 def _orphan(ctx: Context, reason: str, detail: str) -> Verdict:
+    """An attempt with no terminal record: nothing is running and no `exit` ever landed."""
+    return _stopped(ctx, reason, detail, exit_code=None, outcome="orphaned")
+
+
+def _stopped(
+    ctx: Context, reason: str, detail: str, *, exit_code: int | None, outcome: str
+) -> Verdict:
     """Record `-> resumable` here rather than raising it.
 
     `factory run` raises `Resumable` and lets `cmd_run` record it, because there is a
     call stack that knows what it was doing. A tick reaping someone else's attempt has
     no such stack, and a transition that depends on an exception reaching the right
     handler is a transition that will one day not be recorded at all.
+
+    `exit_code` separates the two ways an attempt stops without finishing. An orphan has
+    none — nothing wrote one and nothing ever will. A signalled attempt has a real one,
+    because the wrapper traps the signal and writes `exit` last, and that code is the
+    whole difference between "we gave up" and "we gave up and recorded it".
     """
     ctx.store.finish_attempt(
-        ctx.run.id, ctx.run.attempt, ctx.run.state, exit_code=None, outcome="orphaned"
+        ctx.run.id, ctx.run.attempt, ctx.run.state, exit_code=exit_code, outcome=outcome
     )
     ctx.store.record_transition(
         ctx.run.id,

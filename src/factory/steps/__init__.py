@@ -28,9 +28,30 @@ from factory.routing import Routing
 from factory.sandbox.base import SandboxAdapter
 from factory.store import Run, Store, marker
 
-__all__ = ["Context", "advance", "factory_dir_for", "record_effect"]
+__all__ = ["KILL_TARGET", "Context", "advance", "factory_dir_for", "record_effect"]
 
 LEASE_TTL_SECONDS = 900
+
+#: The in-VM process name each detached state's body actually runs under.
+#:
+#: `SbxAdapter.kill_agent` is `pkill -x <proc>`: it matches the process name exactly, so a
+#: caller that names the wrong one signals nothing at all. The wrapper is never asked to
+#: stop, no `exit` file lands, and the attempt is orphaned with `exit_code = NULL` after the
+#: whole kill grace is spent — a timeout the factory reports as having signalled, and did not.
+#:
+#: That is Phase 5 defect 3. `verify._await_exit` fixed it for `factory run` by passing
+#: "node" at the one call site it owns, and the two paths that matter more never learned:
+#: `reap`, which is how every unattended run times out, and `recovery.suspend`, which is how
+#: every park stops an agent. Both signalled `codex` at a gate report.
+#:
+#: Indexed, never `.get(state, "codex")`. A detached state added without an entry here
+#: should raise on the spot; the default is what made the wrong name invisible for a phase.
+KILL_TARGET: dict[State, str] = {
+    State.PLANNING: "codex",
+    State.IMPLEMENTING: "codex",
+    State.VERIFYING: "node",  # `node gate_report.mjs`, not an agent session
+    State.REVIEWING: "codex",
+}
 
 
 @dataclass
