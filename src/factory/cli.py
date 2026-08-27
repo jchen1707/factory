@@ -45,7 +45,7 @@ from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import MODEL_CACHE, Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
-from factory.steps import Context, advance, factory_dir_for, redphase
+from factory.steps import Context, advance, factory_dir_for, record_stop, redphase
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
@@ -235,14 +235,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     except Resumable as exc:
         print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
         if not ctx.dry_run:
-            ctx.store.record_transition(
-                ctx.run.id,
-                from_state=ctx.state,
-                to_state=State.RESUMABLE,
-                actor="auto",
-                rule=exc.reason,
-                detail=exc.detail[:2000],
-            )
+            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         _report(ctx)
         return 3
     finally:
@@ -322,16 +315,7 @@ def _block(ctx: Context, reason: str, detail: str) -> None:
         block_step.announce(ctx, reason, detail)
         return
     ctx.store.update_run(ctx.run.id, blocked_reason=reason)
-    if machine.can(ctx.state, State.BLOCKED):
-        ctx.store.record_transition(
-            ctx.run.id,
-            from_state=ctx.state,
-            to_state=State.BLOCKED,
-            actor="auto",
-            rule=reason,
-            detail=detail[:2000],
-        )
-        ctx.refresh()
+    record_stop(ctx, State.BLOCKED, rule=reason, detail=detail)
     ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
     block_step.announce(ctx, reason, detail)
 
@@ -527,15 +511,8 @@ def _work_on(store: Store, run: Run, build: ContextFactory, *, verbose: bool) ->
             return f"{run.linear_id:<10} blocked: {exc.reason}"
         return f"{run.linear_id:<10} blocked before its context loaded: {exc.reason}"
     except Resumable as exc:
-        if ctx is not None and machine.can(ctx.state, State.RESUMABLE):
-            store.record_transition(
-                ctx.run.id,
-                from_state=ctx.state,
-                to_state=State.RESUMABLE,
-                actor="auto",
-                rule=exc.reason,
-                detail=exc.detail[:2000],
-            )
+        if ctx is not None:
+            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         return f"{run.linear_id:<10} resumable: {exc.reason}"
     except (GitError, SbxError, LinearError, RegistryError) as exc:
         # An adapter failure is not a factory crash and must not end the pass. It is
@@ -1550,14 +1527,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     except Resumable as exc:
         print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
         if not ctx.dry_run:
-            ctx.store.record_transition(
-                ctx.run.id,
-                from_state=ctx.state,
-                to_state=State.RESUMABLE,
-                actor="auto",
-                rule=exc.reason,
-                detail=exc.detail[:2000],
-            )
+            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         _report(ctx)
         return 3
     finally:
@@ -1656,14 +1626,7 @@ def dispatch_control(
         _block(ctx, exc.reason, exc.detail)
         return 2, f"{run.linear_id} blocked: {exc.reason} — {exc.detail}"
     except Resumable as exc:
-        ctx.store.record_transition(
-            ctx.run.id,
-            from_state=ctx.state,
-            to_state=State.RESUMABLE,
-            actor="auto",
-            rule=exc.reason,
-            detail=exc.detail[:2000],
-        )
+        record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         return 3, f"{run.linear_id} resumable: {exc.reason} — {exc.detail}"
     finally:
         store.release_lease(run.id)

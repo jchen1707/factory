@@ -254,6 +254,41 @@ def advance(
     ctx.log("state.changed", **{"from": str(source), "to": str(to_state), "rule": rule})
 
 
+def record_stop(ctx: Context, to_state: State, *, rule: str, detail: str) -> bool:
+    """Record a run coming to rest, for the exception handlers that cannot use `advance`.
+
+    `advance` is the way a run *moves*: it takes the lease and the disk floor as
+    preconditions, because a step is about to do work. A stop is the opposite case. A
+    step raised `Resumable` or `Blocked` precisely because something went wrong, and the
+    lease may be the thing that went wrong — refusing to record the stop because the run
+    is no longer leased would lose the one fact a human needs. So the two guards are
+    skipped and the §5.2 check is not.
+
+    Returns whether the hop was recorded. A stop the table has no edge for leaves the run
+    where it is and says so at error level, rather than moving it somewhere §5.2 does not
+    allow — `store.record_transition` refuses that outright, and this is where the four
+    handlers that used to write it by hand find out without raising a second exception on
+    top of the one they are already handling.
+    """
+    if not can(ctx.state, to_state):
+        ctx.log(
+            "stop.illegal",
+            level="error",
+            **{"from": str(ctx.state), "to": str(to_state), "rule": rule},
+        )
+        return False
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=ctx.state,
+        to_state=to_state,
+        actor=AUTOMATIC,
+        rule=rule,
+        detail=detail[:2000],
+    )
+    ctx.refresh()
+    return True
+
+
 def record_effect(
     ctx: Context,
     *,

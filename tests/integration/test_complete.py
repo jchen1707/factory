@@ -39,12 +39,12 @@ def _delivered(ctx: Context, *, aged: bool = False) -> None:
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
+    # Placed, not hopped: `worktree_ready -> awaiting_human` is not an edge and the run
+    # never took it. The real path is `reviewing -> pr_ready -> awaiting_human` through
+    # the deliver step, and none of that is what these tests are about — they start from a
+    # run already parked with a PR. `from_state=None` is how a test puts a run somewhere.
     ctx.store.record_transition(
-        ctx.run.id,
-        from_state=ctx.state,
-        to_state=State.AWAITING_HUMAN,
-        actor="auto",
-        rule="delivered",
+        ctx.run.id, from_state=None, to_state=State.AWAITING_HUMAN, actor="auto", rule="delivered"
     )
     ctx.store.update_run(ctx.run.id, pr_url=PR_URL)
     if aged:

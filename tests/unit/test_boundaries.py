@@ -139,3 +139,18 @@ def test_no_pull_request_is_merged_through_the_rest_api_either() -> None:
     # argv token: `gh api --method PUT repos/{o}/{r}/pulls/{n}/merge`.
     for path, body in _bodies():
         assert not re.search(r"pulls/[^\s\"']*/merge|/merge[\"'/]", body), path
+
+
+def test_no_source_records_a_transition_with_no_source_state() -> None:
+    """`from_state=None` is the one way past `record_transition`'s §5.2 check.
+
+    That is deliberate — it means "place this run here", which is not a hop and has no
+    edge to check. Nothing in `src/` places a run: a run is created at `approved` by
+    `insert_run` and moves only by transitions. Tests use it to set a scenario up.
+
+    Without this grep the guard is advisory: a call site that found the table
+    inconvenient could pass `None` and write whatever it liked, which is exactly the
+    convention-shaped enforcement the check exists to replace.
+    """
+    for path, body in _bodies():
+        assert "from_state=None" not in body, f"{path} places a run instead of moving it"
