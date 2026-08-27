@@ -18,9 +18,11 @@ from typing import Any
 
 import pytest
 
+from factory import driver
 from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config
 from factory.intake.linear import Issue
+from factory.machine import State
 from factory.registry import load_registry
 from factory.routing import load_routing
 from factory.sandbox.base import Completed, RunHandle, RunResult, RunStatus, SandboxSpec
@@ -106,6 +108,41 @@ GOOD_GATE_REPORT: dict[str, Any] = {
     ],
     "verdict": "pass",
 }
+
+
+def advance_state(ctx: Context, *, until: State | None = None, limit: int = 24) -> driver.Result:
+    """Drive one run the way `factory tick` and `factory run` both do, and stop.
+
+    The replacement for `plan.run`, `implement.run`, `verify.run` and `review.run`, which
+    were the foreground half of the two execution models PR 2 collapsed. They were
+    `start` → wait → `collect`; this is the same three things through `driver.step`, one
+    look at a time.
+
+    It lives here and **not** in `driver` on purpose. `factory run` needs `drive`, and
+    production code that exists only so a test can call it is the smell this whole review
+    is about.
+
+    `until` is for the two steps that crossed more than one state — `implement.run` was
+    called at `worktree_ready` and returned at `verifying`. The default stops at the first
+    change, which is what a `verify.run` or `review.run` call site meant: the fake writes
+    `exit` synchronously inside `exec_detached`, so one of those is generally two `step`
+    calls (reap sees no attempt and starts one; reap sees `exit` and collects).
+
+    `Blocked` and `Resumable` propagate, because `driver.step` does not catch them — the
+    call sites that wrapped a `run()` in `pytest.raises` still read the same way.
+    """
+    before = ctx.state
+    result = driver.Result(driver.Outcome.WAITING, "")
+    for _ in range(limit):
+        result = driver.step(ctx)
+        if result.outcome in (driver.Outcome.STOPPED, driver.Outcome.NEEDS_HUMAN):
+            return result
+        settled = ctx.state is until if until is not None else ctx.state is not before
+        if settled:
+            return result
+    raise AssertionError(
+        f"{before} did not settle after {limit} driver.step calls (now {ctx.state})"
+    )
 
 
 @dataclass

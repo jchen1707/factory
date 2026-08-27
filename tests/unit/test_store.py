@@ -490,3 +490,35 @@ def test_a_hop_the_table_allows_still_goes_through(store: Store) -> None:
     )
 
     assert store.run_by_id(run.id).state is State.RESUMABLE  # type: ignore[union-attr]
+
+
+def test_migration_3_to_4_adds_force_plan_without_touching_the_rows_it_finds(
+    tmp_path: Path,
+) -> None:
+    """Schema 4 — the `--plan` flag, moved off the command line and onto the run.
+
+    `--plan` was a `Context` argument, so it lived only in the process that typed it: a
+    `factory run --plan` that died before `worktree_ready` was resumed by the daemon with
+    no plan phase at all. The column is `full_review`'s shape exactly, defaults to 0, and
+    walks the same `_migrate` ladder — so a version-1 database crosses three steps and
+    keeps every ledger row it arrived with.
+    """
+    path = tmp_path / "factory.db"
+    old_id = _v1_database(path)
+
+    store = Store(path)
+
+    columns = {row["name"] for row in store._conn.execute("PRAGMA table_info(runs)")}
+    assert "force_plan" in columns
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    # The pre-existing run is untouched and defaults to off, not to on.
+    old = store.run_by_id(old_id)
+    assert old is not None
+    assert old.force_plan is False
+    assert len(store.effects(old_id)) == 1
+
+    asked = store.insert_run(
+        linear_id="BAC-9", project="python-harness", team="BAC", force_plan=True
+    )
+    assert asked.force_plan is True
+    assert store.run_by_id(asked.id).force_plan is True  # type: ignore[union-attr]

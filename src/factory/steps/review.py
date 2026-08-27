@@ -48,7 +48,6 @@ import fnmatch
 import json
 import shlex
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
@@ -59,11 +58,11 @@ from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, SandboxSpec, Workspace, detached_shell_script
-from factory.steps import KILL_TARGET, Context, advance, redphase
+from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
 
-__all__ = ["collect", "run", "start"]
+__all__ = ["collect", "start"]
 
 STEP = "review"
 
@@ -92,23 +91,6 @@ _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 #: used to validate what comes back. One file, so the Codex path and the workflow path
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
-
-POLL_INTERVAL_SECONDS = 10
-
-
-def run(ctx: Context) -> None:
-    """Start the review and stay with it until it ends — `factory run`'s path.
-
-    `factory tick` uses `start` and `collect` separately, because a tick that blocked for
-    the length of the review fan-out could not reap anything else. The two paths share
-    every line that matters: this one is `start`, a poll loop, and `collect`.
-    """
-    started = start(ctx)
-    if started is None:
-        return
-    attempt_dir, handle = started
-    _await_exit(ctx, attempt_dir, handle)
-    collect(ctx, attempt_dir, ctx.run.attempt)
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
@@ -349,27 +331,6 @@ def _axis_script_block(axis: dict[str, Any]) -> str:
         f"> {shlex.quote(str(axis['events_path']))} "
         f"2> {shlex.quote(str(axis['stderr_path']))}"
     )
-
-
-def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
-    """Watch the `exit` file. A timeout is never silently a success."""
-    timeout = ctx.timeout_for(State.REVIEWING)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if attempt_dir.exit_file.exists():
-            return
-        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-    ctx.log("review.timeout", level="warning", seconds=timeout)
-    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.REVIEWING])
-    for _ in range(12):
-        if attempt_dir.exit_file.exists():
-            break
-        time.sleep(5)
-    from factory.machine import Resumable
-
-    raise Resumable("review-timeout", f"no exit file after {timeout}s; the fan-out was signalled")
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:

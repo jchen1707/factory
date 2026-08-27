@@ -37,7 +37,7 @@ from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Run
-from tests.integration.conftest import FakeSandbox, git
+from tests.integration.conftest import FakeSandbox, advance_state, git
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -54,7 +54,7 @@ def _to_worktree_ready(ctx: Context) -> None:
 
 def _to_verifying(ctx: Context) -> None:
     _to_worktree_ready(ctx)
-    implement_step.run(ctx)
+    advance_state(ctx, until=State.VERIFYING)
 
 
 # --------------------------------------------------------------------------------
@@ -435,8 +435,8 @@ def test_the_review_step_fetches_back_before_the_replay(
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
 
     _to_verifying(clone_ctx)
-    verify_step.run(clone_ctx)
-    review_step.run(clone_ctx)
+    advance_state(clone_ctx)
+    advance_state(clone_ctx)
 
     assert seen == [clone_step.host_worktree_path(clone_ctx)]
     assert clone_ctx.state is State.PR_READY
@@ -472,9 +472,9 @@ def test_the_pr_body_carries_the_gate_table_for_a_clone_run(
     that. §13.2 requires the full table, so this asserts the rows are there.
     """
     _to_verifying(clone_ctx)
-    verify_step.run(clone_ctx)
+    advance_state(clone_ctx)
     _stub_review(monkeypatch)
-    review_step.run(clone_ctx)
+    advance_state(clone_ctx)
     assert clone_ctx.state is State.PR_READY
 
     body = deliver_step._render_body(clone_ctx)
