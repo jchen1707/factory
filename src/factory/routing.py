@@ -24,6 +24,8 @@ __all__ = [
     "RoutingError",
     "load_model_cache",
     "load_routing",
+    "rewrite",
+    "validate",
 ]
 
 #: Where Codex keeps the account's real model list. Read rather than guessed, and
@@ -141,8 +143,16 @@ def load_routing(path: Path, *, cache: Mapping[str, ModelFacts] | None = None) -
     reports it: refusing to start over a stale comment in a config file would be a
     worse failure than the drift.
     """
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    return _validated(tomllib.loads(path.read_text(encoding="utf-8")), cache=cache)
 
+
+def _validated(raw: dict[str, Any], *, cache: Mapping[str, ModelFacts] | None = None) -> Routing:
+    """The rules themselves, over a parsed table. One body, two entry points.
+
+    Split out of `load_routing` so `validate` can run it against text that is not on disk
+    yet. Everything below this line is unchanged; the only thing the split buys is that
+    there is exactly one copy of it.
+    """
     roles = {
         name: Role(name=name, model=str(body["model"]), effort=str(body["effort"]))
         for name, body in dict(raw.get("roles", {})).items()
@@ -210,3 +220,87 @@ def load_routing(path: Path, *, cache: Mapping[str, ModelFacts] | None = None) -
         usd_per_run=usd_per_run,
         usd_warn_at=usd_warn_at,
     )
+
+
+# --------------------------------------------------------------------------------
+# Editing `models.toml` — the other half of owning it
+# --------------------------------------------------------------------------------
+
+
+def rewrite(path: Path, form: Mapping[str, Any]) -> str:
+    """Apply the form's role/budget edits to `models.toml`, returning the new text.
+
+    A targeted line rewrite rather than a re-serialisation: the file carries the measured
+    model catalogue and a page of comments explaining why each number is what it is, and
+    round-tripping it through a TOML writer would throw all of that away. Only the values
+    the form actually owns are touched.
+    """
+    original = path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    current_role: str | None = None
+    out: list[str] = []
+    in_budget = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[roles."):
+            current_role = stripped[len("[roles.") :].rstrip("]").strip()
+            in_budget = False
+        elif stripped.startswith("["):
+            current_role = None
+            in_budget = stripped.startswith("[budget]")
+
+        if current_role and "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in ("model", "effort"):
+                proposed = form.get(f"{key}.{current_role}")
+                if proposed is not None:
+                    out.append(_replace_value(line, f'"{str(proposed).strip()}"'))
+                    continue
+        if in_budget and "=" in stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in ("usd_per_run", "usd_warn_at"):
+                proposed = form.get(key)
+                if proposed is not None:
+                    out.append(_replace_value(line, str(float(str(proposed).strip()))))
+                    continue
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def _replace_value(line: str, rendered: str) -> str:
+    """Swap the value on one `key = value  # comment` line, leaving everything else byte-
+    identical — including the column the comment sits in.
+
+    A line whose value is unchanged is returned untouched rather than re-rendered. The
+    alternative (always rebuilding the line) reflows the comment alignment of every role
+    in the file on any edit, so a one-effort change arrives as a five-line diff and the
+    next reader cannot see what actually changed.
+    """
+    head, _, rest = line.partition("=")
+    comment_at = rest.find("#")
+    current = (rest if comment_at < 0 else rest[:comment_at]).strip()
+    if current == rendered:
+        return line
+    if comment_at < 0:
+        return f"{head}= {rendered}"
+    # Keep the comment in its original column where the new value still fits under it.
+    comment = rest[comment_at:]
+    padding = len(rest[:comment_at]) - len(f" {rendered}")
+    return f"{head}= {rendered}{' ' * padding if padding > 0 else '  '}{comment}"
+
+
+def validate(text: str, *, cache: Mapping[str, ModelFacts] | None = None) -> Routing:
+    """§4.5's rules over a candidate table, with no file involved.
+
+    This is the function `load_routing` should always have been, and its absence had a
+    shape: the console had to write its candidate to a `NamedTemporaryFile`, parse it back
+    through `load_routing`, and unlink it in a `finally` — a tempfile round-trip that was
+    the interface leaking into the caller. `load_routing` is now read-then-validate, so
+    the form's "no" and the tick's "no" are literally the same call rather than two calls
+    that have to be kept the same.
+
+    `tomllib.loads` first, so a syntax error says so before §4.5 does.
+    """
+    raw = tomllib.loads(text)
+    return _validated(raw, cache=cache)
