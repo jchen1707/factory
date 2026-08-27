@@ -16,7 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from factory.cli import _plan_copy_check
+from factory import doctor
+from factory.doctor import DoctorContext
 
 HOME = Path(__file__).resolve().parents[2]
 SCRIPT = HOME / "scripts" / "sync_plan_copy.py"
@@ -77,11 +78,11 @@ def test_a_copy_with_no_header_is_detected(tmp_path: Path) -> None:
 def test_doctor_reports_rather_than_fails_when_the_script_is_absent(tmp_path: Path) -> None:
     """`doctor` runs against fixture homes with no scripts directory. A tree with no copy to
     keep current has nothing to be stale, and must not be reported as broken."""
-    name, ok, detail = _plan_copy_check(tmp_path)
+    (result,) = doctor.check("plan copy").run(DoctorContext(home=tmp_path))
 
-    assert name == "plan copy"
-    assert ok
-    assert "no scripts" in detail
+    assert result.name == "plan copy"
+    assert result.ok
+    assert "no scripts" in result.detail
 
 
 def _load_sync(root: Path):  # type: ignore[no-untyped-def]

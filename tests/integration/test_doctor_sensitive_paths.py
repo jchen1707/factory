@@ -12,10 +12,12 @@ checkable, and these tests are what keep the check honest.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
-from factory.cli import _sensitive_paths_check
-from factory.registry import Project
+from factory import doctor
+from factory.doctor import DoctorContext
+from factory.registry import Project, load_registry
 
 
 def _repo(tmp_path: Path, *files: str) -> Path:
@@ -54,12 +56,25 @@ def _project(path: Path, *globs: str) -> Project:
     )
 
 
+def _check(project: Project) -> doctor.Result:
+    """The sensitive-path check, run through the same `Check` the report runs.
+
+    The registry is the shipped one with its projects swapped out, so the check is
+    handed the shape it is really handed rather than a stand-in for it.
+    """
+    home = Path(__file__).resolve().parents[2]
+    registry = replace(load_registry(home / "config" / "projects.toml"), projects={"p": project})
+    (result,) = doctor.check("sensitive paths").run(DoctorContext(home=home, registry=registry))
+    return result
+
+
 def test_a_glob_matching_no_tracked_file_fails_the_check(tmp_path: Path) -> None:
     """The exact shape of the original defect, reproduced: the repository is real, the
     glob is well-formed, and it names a directory that is not there."""
     repo = _repo(tmp_path, "src/features/projects/ui/ProjectsPage.tsx", "e2e/projects.spec.ts")
 
-    _, ok, detail = _sensitive_paths_check(_project(repo, "src/**/routes/**"))
+    result = _check(_project(repo, "src/**/routes/**"))
+    ok, detail = result.ok, result.detail
 
     assert not ok
     assert "src/**/routes/**" in detail
@@ -68,7 +83,8 @@ def test_a_glob_matching_no_tracked_file_fails_the_check(tmp_path: Path) -> None
 def test_a_glob_that_matches_passes_and_says_how_much(tmp_path: Path) -> None:
     repo = _repo(tmp_path, "src/features/projects/ui/ProjectsPage.tsx", "e2e/projects.spec.ts")
 
-    _, ok, detail = _sensitive_paths_check(_project(repo, "src/features/**", "e2e/**"))
+    result = _check(_project(repo, "src/features/**", "e2e/**"))
+    ok, detail = result.ok, result.detail
 
     assert ok
     assert "2 glob(s), 2 files" in detail
@@ -79,7 +95,8 @@ def test_one_dead_glob_among_live_ones_still_fails(tmp_path: Path) -> None:
     how a four-entry list rots one entry at a time."""
     repo = _repo(tmp_path, "src/features/a.tsx")
 
-    _, ok, detail = _sensitive_paths_check(_project(repo, "src/features/**", "src/gone/**"))
+    result = _check(_project(repo, "src/features/**", "src/gone/**"))
+    ok, detail = result.ok, result.detail
 
     assert not ok
     assert "src/gone/**" in detail
@@ -91,7 +108,8 @@ def test_declaring_nothing_is_not_a_failure(tmp_path: Path) -> None:
     `doctor` must not nag a project into naming a directory it does not have."""
     repo = _repo(tmp_path, "src/features/a.tsx")
 
-    _, ok, detail = _sensitive_paths_check(_project(repo))
+    result = _check(_project(repo))
+    ok, detail = result.ok, result.detail
 
     assert ok
     assert detail == "none declared"
