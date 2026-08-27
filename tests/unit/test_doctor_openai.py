@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
-from factory import cli
-from factory.cli import _openai_secret_check
+from factory import doctor
+from factory.doctor import DoctorContext
 
 _PRESENT = """\
 SCOPE                    TYPE      NAME     SECRET
@@ -35,8 +36,9 @@ codex-python-harness     service   github   (stored)
 
 
 def test_a_configured_global_openai_token_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli.subprocess, "run", _capture(_PRESENT))
-    name, ok, detail = _openai_secret_check()
+    monkeypatch.setattr(doctor.subprocess, "run", _capture(_PRESENT))
+    result = _only()
+    name, ok, detail = result.name, result.ok, result.detail
     assert ok
     assert "openai" in name
     assert "oauth configured" in detail
@@ -46,8 +48,9 @@ def test_no_global_openai_row_fails_and_names_the_fix(monkeypatch: pytest.Monkey
     """The exact shape of the Phase 5 failure: `sbx secret ls` runs fine and reports
     other services, but the `(global) openai` row is gone. Doctor must say so and point
     at the command that fixes it."""
-    monkeypatch.setattr(cli.subprocess, "run", _capture(_ABSENT))
-    _name, ok, detail = _openai_secret_check()
+    monkeypatch.setattr(doctor.subprocess, "run", _capture(_ABSENT))
+    result = _only()
+    ok, detail = result.ok, result.detail
     assert not ok
     assert "sbx secret set openai --oauth" in detail
 
@@ -59,8 +62,9 @@ def test_a_nonzero_sbx_secret_ls_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def _run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="not authenticated")
 
-    monkeypatch.setattr(cli.subprocess, "run", _run)
-    _name, ok, detail = _openai_secret_check()
+    monkeypatch.setattr(doctor.subprocess, "run", _run)
+    result = _only()
+    ok, detail = result.ok, result.detail
     assert not ok
     assert "not authenticated" in detail
     assert "sbx secret set openai" not in detail
@@ -72,3 +76,15 @@ def _capture(stdout: str) -> Callable[..., subprocess.CompletedProcess[str]]:
         return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
     return _run
+
+
+def _only() -> doctor.Result:
+    """The check, run the way `doctor.run` runs it.
+
+    Named lookup through `doctor.check` rather than an imported `cli` private: three of
+    these check families were tested past the interface, which is exactly what giving
+    every check one shape was for.
+    """
+    results = doctor.check("openai credential (sbx)").run(DoctorContext(home=Path(".")))
+    assert len(results) == 1
+    return results[0]
