@@ -28,7 +28,14 @@ from factory.routing import Routing
 from factory.sandbox.base import SandboxAdapter
 from factory.store import Run, Store, marker
 
-__all__ = ["KILL_TARGET", "Context", "advance", "factory_dir_for", "record_effect"]
+__all__ = [
+    "KILL_TARGET",
+    "Context",
+    "advance",
+    "factory_dir_for",
+    "record_effect",
+    "start_agent",
+]
 
 LEASE_TTL_SECONDS = 900
 
@@ -39,10 +46,11 @@ LEASE_TTL_SECONDS = 900
 #: stop, no `exit` file lands, and the attempt is orphaned with `exit_code = NULL` after the
 #: whole kill grace is spent — a timeout the factory reports as having signalled, and did not.
 #:
-#: That is Phase 5 defect 3. `verify._await_exit` fixed it for `factory run` by passing
-#: "node" at the one call site it owns, and the two paths that matter more never learned:
+#: That is Phase 5 defect 3. The foreground waiter fixed it for `factory run` by passing
+#: "node" at the one call site it owned, and the two paths that matter more never learned:
 #: `reap`, which is how every unattended run times out, and `recovery.suspend`, which is how
-#: every park stops an agent. Both signalled `codex` at a gate report.
+#: every park stops an agent. Both signalled `codex` at a gate report. There is one waiter
+#: now (`reap`), which is why that class of divergence has nowhere left to hide.
 #:
 #: Indexed, never `.get(state, "codex")`. A detached state added without an entry here
 #: should raise on the spot; the default is what made the wrong name invisible for a phase.
@@ -308,6 +316,30 @@ def record_stop(ctx: Context, to_state: State, *, rule: str, detail: str) -> boo
     )
     ctx.refresh()
     return True
+
+
+def start_agent(ctx: Context) -> None:
+    """`worktree_ready`'s entry action: a plan phase first, or straight to implement.
+
+    The plan-versus-implement choice lives here rather than in `driver` for the same
+    reason `reap` owns its own follow-on — it is a domain judgement, and `driver` holds
+    none. `machine.ENTRY[WORKTREE_READY]` is one action, `START_AGENT`, and nothing
+    above this line has to learn that planning exists.
+
+    `force_plan` is read off the run row, not passed in. `factory run --plan` used to
+    thread the flag through `cli._drive(ctx, force_plan=...)`, which meant it existed
+    only in the process that typed it: a run that died before `worktree_ready` was
+    picked up by the daemon and implemented with no plan at all.
+
+    The imports are function-local because `plan` and `implement` import this module.
+    """
+    from factory.steps import implement as implement_step
+    from factory.steps import plan as plan_step
+
+    if plan_step.should_plan(ctx, forced=ctx.run.force_plan):
+        plan_step.start(ctx)
+    else:
+        implement_step.start(ctx)
 
 
 def record_effect(

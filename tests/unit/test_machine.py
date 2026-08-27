@@ -7,12 +7,15 @@ from itertools import pairwise
 import pytest
 
 from factory.machine import (
+    ENTRY,
     HUMAN_ONLY,
     TERMINAL,
     TRANSITIONS,
+    Action,
     State,
     assert_table_is_sound,
     can,
+    is_human_held,
     requires_human_rule,
 )
 
@@ -205,3 +208,83 @@ def test_every_detached_state_names_the_process_its_body_runs_under() -> None:
 
     assert set(KILL_TARGET) == set(DETACHED_STATES)
     assert KILL_TARGET[State.VERIFYING] == "node"
+
+
+# --------------------------------------------------------------------------------
+# §5's missing column — the entry action of a state
+# --------------------------------------------------------------------------------
+
+
+def test_every_state_the_run_can_sit_in_is_acted_on_or_held_for_a_human() -> None:
+    """The soundness property PR 2 exists to buy, stated once and derived twice over.
+
+    Before `machine.ENTRY`, "what does the factory do in this state?" was answered by two
+    hand-written lists in two files that had to be exact complements: `cli._FORWARD`, and
+    `reap.DETACHED_STATES`, which `_FORWARD` encoded by *omission*. Nothing checked them
+    against each other or against `TRANSITIONS`, so a new state was silently a run that
+    stopped moving and said nothing — which is what happened to `sandbox_creating`.
+
+    The human-held side is computed rather than listed on purpose. A third hand-written
+    list is the defect, not the fix.
+    """
+    for state in TRANSITIONS:
+        if state in TERMINAL:
+            continue
+        assert (state in ENTRY) is not is_human_held(state), (
+            f"{state} is both acted on and human-held, or neither"
+        )
+
+
+def test_the_human_held_states_are_the_four_we_expect_today() -> None:
+    """A canary on the derivation, not a second definition of it.
+
+    If this list and `is_human_held` disagree, one of two things happened: an edge was
+    added that quietly hands a park back to the machine, or a `HUMAN_ONLY` rule was
+    added that quietly takes a state away from it. Both are worth a human reading the
+    diff; neither should be fixed by editing this list without reading `HUMAN_ONLY`.
+    """
+    held = {state for state in TRANSITIONS if is_human_held(state)}
+    assert held == {State.BLOCKED, State.AWAITING_HUMAN, State.SUSPENDED, State.FAILED}
+    # And the two that look parked but are not: `resumable` is the ladder's, `approved`
+    # is the claim's.
+    assert not is_human_held(State.RESUMABLE)
+    assert not is_human_held(State.APPROVED)
+
+
+def test_a_state_with_no_entry_action_and_an_automatic_exit_fails_the_soundness_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The check has to *fail*, or it is decoration.
+
+    This is `sandbox_creating`'s defect reproduced: a state the machine can leave on its
+    own, with nothing that says how. `assert_table_is_sound` is called by `factory
+    doctor` as well as by this suite, so the failure lands before the night it hangs.
+    """
+    entry = dict(ENTRY)
+    del entry[State.SANDBOX_CREATING]
+    monkeypatch.setattr("factory.machine.ENTRY", entry)
+
+    with pytest.raises(AssertionError, match="no entry action and is not human-held"):
+        assert_table_is_sound()
+
+
+def test_giving_a_human_held_state_an_entry_action_fails_the_soundness_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other direction, which is the one that matters more: an entry action on
+    `blocked` is the factory unblocking its own runs, and §5.3 reserves that for James."""
+    entry = dict(ENTRY)
+    entry[State.BLOCKED] = Action.START_AGENT
+    monkeypatch.setattr("factory.machine.ENTRY", entry)
+
+    with pytest.raises(AssertionError, match="human-held but has entry action"):
+        assert_table_is_sound()
+
+
+def test_the_reaped_states_are_exactly_the_ones_that_spawn_something_detached() -> None:
+    """`ENTRY` and `reap.DETACHED_STATES` were the two lists that had to agree, and now
+    one is checked against the other in a test rather than by whoever edits them."""
+    from factory.steps.reap import DETACHED_STATES
+
+    reaped = {state for state, action in ENTRY.items() if action is Action.REAP}
+    assert reaped == set(DETACHED_STATES)

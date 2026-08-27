@@ -35,9 +35,9 @@ from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
-from factory.steps import KILL_TARGET, Context, advance
+from factory.steps import Context, advance
 
-__all__ = ["build_prompt", "collect", "run", "start"]
+__all__ = ["build_prompt", "collect", "start"]
 
 STEP = "implement"
 
@@ -45,24 +45,6 @@ STEP = "implement"
 #: time and hashed into the evidence, so the record names the exact text that drove the
 #: run rather than a skill name that could mean anything.
 IMPLEMENT_SKILL = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
-
-POLL_INTERVAL_SECONDS = 10
-
-
-def run(ctx: Context) -> None:
-    """Start the attempt and stay with it until it ends — `factory run`'s path.
-
-    `factory tick` uses `start` and `collect` separately instead, because a tick that
-    blocked for the length of a model run would be a tick that could not reap anything
-    else. The two paths share every line that matters: this one is `start`, a poll loop,
-    and `collect`.
-    """
-    started = start(ctx)
-    if started is None:
-        return
-    attempt_dir, handle = started
-    _await_exit(ctx, attempt_dir, handle)
-    collect(ctx, attempt_dir, handle.attempt)
 
 
 def start(
@@ -241,30 +223,6 @@ def _read_vault_snapshot(ctx: Context, attempt_dir: AttemptDir) -> dict[str, tup
         name: (int(meta[0]), int(meta[1]), str(meta[2]))
         for name, meta in dict(payload.get("files", {})).items()
     }
-
-
-def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
-    """Watch three files. A timeout is never silently a success.
-
-    On timeout the agent is killed and the wrapper's `exit` file is *waited for*, so
-    the attempt ends with a real terminal record rather than a truncated one.
-    """
-    timeout = ctx.timeout_for(State.IMPLEMENTING)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if attempt_dir.exit_file.exists():
-            return
-        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        capture_session_id(ctx, attempt_dir, handle.attempt)
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-    ctx.log("implement.timeout", level="warning", seconds=timeout)
-    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.IMPLEMENTING])
-    for _ in range(12):
-        if attempt_dir.exit_file.exists():
-            break
-        time.sleep(5)
-    raise Resumable("implement-timeout", f"no exit file after {timeout}s; the agent was signalled")
 
 
 def capture_session_id(
