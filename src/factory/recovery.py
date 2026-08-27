@@ -570,9 +570,11 @@ def suspend(ctx: Context, *, reason: str) -> State:
                 from factory.steps.implement import capture_session_id
 
                 capture_session_id(ctx, AttemptDir(attempt_dir), ctx.run.attempt, origin)
-            kill = getattr(ctx.sandbox, "kill_agent", None)
-            if kill is not None:
-                kill(str(row["sandbox"] or ctx.project.build_sandbox))
+            from factory.steps import KILL_TARGET
+
+            ctx.sandbox.kill_agent(
+                str(row["sandbox"] or ctx.project.build_sandbox), KILL_TARGET[origin]
+            )
             exit_code = _wait_for_exit_file(attempt_dir, reap_step.KILL_GRACE_SECONDS)
             ctx.store.finish_attempt(
                 ctx.run.id, ctx.run.attempt, origin, exit_code=exit_code, outcome="suspended"

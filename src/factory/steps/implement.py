@@ -35,7 +35,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
-from factory.steps import Context, advance
+from factory.steps import KILL_TARGET, Context, advance
 
 __all__ = ["build_prompt", "collect", "run", "start"]
 
@@ -259,9 +259,7 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
         time.sleep(POLL_INTERVAL_SECONDS)
 
     ctx.log("implement.timeout", level="warning", seconds=timeout)
-    kill = getattr(ctx.sandbox, "kill_agent", None)
-    if kill is not None:
-        kill(handle.sandbox)
+    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.IMPLEMENTING])
     for _ in range(12):
         if attempt_dir.exit_file.exists():
             break
