@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory.machine import TERMINAL, State
+from factory.machine import TERMINAL, Blocked, State, can
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
@@ -486,6 +486,27 @@ class Store:
         rule: str | None = None,
         detail: str | None = None,
     ) -> None:
+        """Write one hop to the ledger and move the run to `to_state`.
+
+        §5.2 is enforced here, where the row is written, and not only in `steps.advance`
+        where the hop is decided. `advance` is not the only way a transition reaches this
+        table: a step raising `Resumable` was recorded straight through this method by
+        five call sites, and exactly one of them — `_work_on` — re-added `machine.can` by
+        hand. Seven states have no `resumable` edge, so the other four could each write a
+        hop the table forbids. That is the shape of the `cancel` defect measured on
+        2026-08-21, where a run reported `resumable` after cancel said it had cancelled it:
+        a row that describes a transition the machine cannot perform describes nothing.
+
+        A convention holds only for the call sites that know about it. This holds for the
+        ones nobody has written yet.
+
+        `from_state=None` is not a hop and is not checked — it is a run being *placed* in
+        a state with no source, which nothing in `src/` does and a test grep enforces.
+        """
+        if from_state is not None and not can(from_state, to_state):
+            raise Blocked(
+                "illegal-transition", f"{from_state} -> {to_state} is not in the transition table"
+            )
         now = int(time.time())
         self._conn.execute(
             "INSERT INTO transitions (run_id, from_state, to_state, actor, rule, detail, at) "

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from factory.machine import TERMINAL, State
+from factory.machine import TERMINAL, Blocked, State
 from factory.store import _SCHEMA, LIVE_INDEX_SCHEMA_VERSION, SCHEMA_VERSION, Store, marker
 
 
@@ -449,3 +449,44 @@ def test_only_the_most_recent_re_authorisation_bounds_the_count(store: Store) ->
         _orphan_cycle(store, run.id, 1)
 
     assert store.resumable_reentries(run.id, State.REVIEWING) == 1
+
+
+# --------------------------------------------------------------------------------
+# The ledger cannot record a hop the table forbids
+# --------------------------------------------------------------------------------
+
+
+def test_a_hop_absent_from_the_table_is_refused(store: Store) -> None:
+    """§5.2 is enforced where the row is written, not only where the hop is decided.
+
+    `steps.advance` has always checked `machine.can`, but it is not the only way a
+    transition reaches the ledger: five call sites wrote `-> resumable` straight through
+    `record_transition` when a step raised `Resumable`, and only one of them re-added the
+    check by hand. Seven states have no `resumable` edge, so `cmd_run`, `cmd_resume` and
+    the console's controls could each record a hop the table forbids — the same shape as
+    the `cancel` defect that left a run reporting `resumable` after cancelling it.
+
+    Checking here holds for call sites nobody has written yet, which a convention cannot.
+    """
+    run = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    _move(store, run.id, State.PR_READY)
+
+    with pytest.raises(Blocked) as caught:
+        store.record_transition(
+            run.id, from_state=State.PR_READY, to_state=State.RESUMABLE, actor="auto"
+        )
+
+    assert caught.value.reason == "illegal-transition"
+    assert store.run_by_id(run.id).state is State.PR_READY  # type: ignore[union-attr]
+    assert not [row for row in store.transitions(run.id) if row["to_state"] == str(State.RESUMABLE)]
+
+
+def test_a_hop_the_table_allows_still_goes_through(store: Store) -> None:
+    run = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
+    _move(store, run.id, State.IMPLEMENTING)
+
+    store.record_transition(
+        run.id, from_state=State.IMPLEMENTING, to_state=State.RESUMABLE, actor="auto"
+    )
+
+    assert store.run_by_id(run.id).state is State.RESUMABLE  # type: ignore[union-attr]
