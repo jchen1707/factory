@@ -539,38 +539,6 @@ def test_an_orphaned_verify_run_goes_resumable_and_is_rerun(
     assert ctx.run.state is State.VERIFYING
 
 
-def test_a_stop_the_table_forbids_leaves_the_run_where_it_is(ctx: Context) -> None:
-    """A handler catching `Resumable` must not raise a second exception on top of it.
-
-    `record_transition` now refuses a hop absent from §5.2, and the four handlers that
-    used to write `-> resumable` by hand catch exceptions — three of them from inside an
-    `except` block. If `record_stop` let that refusal through, a step that died at a state
-    with no `resumable` edge would replace a named, recorded failure with an unhandled
-    `Blocked` from the store, which is a worse outcome than the bug being fixed.
-
-    So the check happens before the write: the run stays where it is, the caller gets
-    `False`, and the illegal stop is on the record at error level rather than in a
-    traceback.
-    """
-    ctx.store.record_transition(ctx.run.id, from_state=None, to_state=State.PR_READY, actor="test")
-    ctx.refresh()
-
-    recorded = record_stop(ctx, State.RESUMABLE, rule="agent-died", detail="the holder vanished")
-
-    assert recorded is False
-    ctx.refresh()
-    assert ctx.run.state is State.PR_READY
-    assert not [
-        row for row in ctx.store.transitions(ctx.run.id) if row["to_state"] == str(State.RESUMABLE)
-    ]
-    logged = [
-        json.loads(line)
-        for path in sorted(ctx.log_dir.glob("*.jsonl"))
-        for line in path.read_text().splitlines()
-    ]
-    assert [e for e in logged if e["event"] == "stop.illegal" and e["level"] == "error"]
-
-
 def test_a_verify_run_that_orphaned_past_the_ceiling_escalates_to_failed(
     ctx: Context,
 ) -> None:
@@ -1224,3 +1192,35 @@ def test_suspend_refuses_a_state_the_transition_table_has_no_edge_from(ctx: Cont
     ctx.refresh()
     assert ctx.state is State.RESUMABLE
     assert all(row["to_state"] != str(State.SUSPENDED) for row in ctx.store.transitions(ctx.run.id))
+
+
+def test_a_stop_the_table_forbids_leaves_the_run_where_it_is(ctx: Context) -> None:
+    """A handler catching `Resumable` must not raise a second exception on top of it.
+
+    `record_transition` now refuses a hop absent from §5.2, and the four handlers that
+    used to write `-> resumable` by hand catch exceptions — three of them from inside an
+    `except` block. If `record_stop` let that refusal through, a step that died at a state
+    with no `resumable` edge would replace a named, recorded failure with an unhandled
+    `Blocked` from the store, which is a worse outcome than the bug being fixed.
+
+    So the check happens before the write: the run stays where it is, the caller gets
+    `False`, and the illegal stop is on the record at error level rather than in a
+    traceback.
+    """
+    ctx.store.record_transition(ctx.run.id, from_state=None, to_state=State.PR_READY, actor="test")
+    ctx.refresh()
+
+    recorded = record_stop(ctx, State.RESUMABLE, rule="agent-died", detail="the holder vanished")
+
+    assert recorded is False
+    ctx.refresh()
+    assert ctx.run.state is State.PR_READY
+    assert not [
+        row for row in ctx.store.transitions(ctx.run.id) if row["to_state"] == str(State.RESUMABLE)
+    ]
+    logged = [
+        json.loads(line)
+        for path in sorted(ctx.log_dir.glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+    ]
+    assert [e for e in logged if e["event"] == "stop.illegal" and e["level"] == "error"]
