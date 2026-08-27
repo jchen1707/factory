@@ -22,11 +22,10 @@ from factory.registry import RedPhase
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
-from factory.steps import implement as implement_step
 from factory.steps import redphase as redphase_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import git
+from tests.integration.conftest import advance_state, git
 
 
 def _to_verifying(ctx: Context) -> None:
@@ -34,7 +33,7 @@ def _to_verifying(ctx: Context) -> None:
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
-    implement_step.run(ctx)
+    advance_state(ctx, until=State.VERIFYING)
     assert ctx.state is State.VERIFYING
 
 

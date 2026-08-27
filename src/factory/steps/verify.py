@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import shlex
-import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -34,9 +33,9 @@ from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, detached_shell_script
-from factory.steps import KILL_TARGET, Context, advance
+from factory.steps import Context, advance
 
-__all__ = ["collect", "run", "start"]
+__all__ = ["collect", "start"]
 
 STEP = "verify"
 
@@ -69,23 +68,6 @@ _RAN = frozenset({"pass", "fail"})
 #: report says `disabled`, the verdict ignores it, and this set only stops the claim from
 #: being read as a lie.
 _CLAIM_SATISFIED = _RAN | {"disabled"}
-
-POLL_INTERVAL_SECONDS = 10
-
-
-def run(ctx: Context) -> None:
-    """Start the gate report and stay with it until it ends — `factory run`'s path.
-
-    `factory tick` uses `start` and `collect` separately, because a tick that blocked for
-    the length of a gate suite could not reap anything else. The two paths share every
-    line that matters: this one is `start`, a poll loop, and `collect`.
-    """
-    started = start(ctx)
-    if started is None:
-        return
-    attempt_dir, handle = started
-    _await_exit(ctx, attempt_dir, handle)
-    collect(ctx, attempt_dir, ctx.run.attempt)
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
@@ -174,34 +156,6 @@ def _gate_argv(harness: HarnessConfig | None, gates_run: list[str], base_ref: st
     if base_ref:
         argv += ["--base", base_ref]
     return argv
-
-
-def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> None:
-    """Watch the `exit` file. A timeout is never silently a success.
-
-    On timeout the node process is killed and the wrapper's `exit` file is waited for,
-    so the attempt ends with a real terminal record rather than a truncated one — the
-    same shape as `implement._await_exit`.
-    """
-    timeout = ctx.timeout_for(State.VERIFYING)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if attempt_dir.exit_file.exists():
-            return
-        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-    ctx.log("verify.timeout", level="warning", seconds=timeout)
-    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.VERIFYING])
-    for _ in range(12):
-        if attempt_dir.exit_file.exists():
-            break
-        time.sleep(5)
-    from factory.machine import Resumable
-
-    raise Resumable(
-        "verify-timeout", f"no exit file after {timeout}s; the gate report was signalled"
-    )
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:

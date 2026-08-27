@@ -17,17 +17,16 @@ is a judgement the plan step is for and the retry loop is not.
 from __future__ import annotations
 
 import shutil
-import time
 from pathlib import Path
 
 from factory import artifacts
 from factory.agent.base import AgentInvocation
 from factory.artifacts import AttemptDir
-from factory.machine import AUTOMATIC, Blocked, Resumable, State
+from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle
 from factory.steps import Context, advance
 
-__all__ = ["collect", "plan_dir", "run", "should_plan", "start"]
+__all__ = ["collect", "plan_dir", "should_plan", "start"]
 
 STEP = "plan"
 
@@ -39,8 +38,6 @@ PLAN_FILES = ("plan.md", "test-plan.md")
 #: finished?" — `sbx.poll` through `RunHandle.exit_name`, and `_exit_code` below — must
 #: be told this name, or a finished plan reads as an attempt that never ended.
 PLAN_EXIT_NAME = "plan-exit"
-
-POLL_INTERVAL_SECONDS = 10
 
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
@@ -60,26 +57,6 @@ def should_plan(ctx: Context, *, forced: bool = False) -> bool:
         len(ctx.issue.acceptance_criteria) > settings.acceptance_criteria_over
         or len(ctx.issue.description) > settings.description_chars_over
     )
-
-
-def run(ctx: Context) -> None:
-    """Run layer A's `/plan` in a fresh context and require both files to exist.
-
-    `factory run`'s path: start, wait, collect. `factory tick` calls `start` and
-    `collect` separately so a tick is never held open for the length of a model run.
-    """
-    started = start(ctx)
-    if started is None:
-        return
-    attempt_dir, _handle, exit_path = started
-    timeout = ctx.timeout_for(State.PLANNING)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and not exit_path.exists():
-        ctx.store.renew_lease(ctx.run.id, ttl_seconds=900)
-        time.sleep(POLL_INTERVAL_SECONDS)
-    if not exit_path.exists():
-        raise Resumable("plan-timeout", f"no exit file after {timeout}s")
-    collect(ctx, attempt_dir)
 
 
 def plan_dir(ctx: Context) -> Path:

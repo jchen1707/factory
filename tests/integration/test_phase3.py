@@ -23,25 +23,25 @@ from factory.machine import Blocked, State
 from factory.steps import Context, advance, redphase
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
-from factory.steps import verify as verify_step
 from factory.store import Store
 from tests.integration.conftest import (
     HOME,
     FakeLinear,
     FakeSandbox,
     _seed_vendored_review_tree,
+    advance_state,
     git,
 )
 from tests.integration.test_pipeline import _fake, _to_verifying
 
 # --------------------------------------------------------------------------------
-# wiring — the full chain runs review then deliver
+# review transitions
 # --------------------------------------------------------------------------------
 
 
 def _to_reviewing(ctx: Context) -> None:
     _to_verifying(ctx)
-    verify_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.REVIEWING
 
 
@@ -61,7 +61,7 @@ def test_a_clean_review_advances_to_pr_ready(ctx: Context, monkeypatch: pytest.M
     # axes run — the summary names the skip rule.
     _fake(ctx).review_findings = {"findings": []}
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.state is State.PR_READY
     # The review summary is stashed for the PR body.
@@ -80,7 +80,7 @@ def test_a_critical_tier1_finding_blocks_and_names_the_finding(
     # Tier 2 skips on the small fixture diff, so the critical finding is from Tier 1.
 
     with pytest.raises(Blocked) as caught:
-        review_step.run(ctx)
+        advance_state(ctx)
     assert caught.value.reason == "review-finding"
     assert "critical" in caught.value.detail
     assert "src/app.py" in caught.value.detail
@@ -95,7 +95,7 @@ def test_a_redphase_escalate_routes_to_awaiting_human(
     # weakening guard not reached after an escalate, but stub it for safety
     monkeypatch.setattr(review_step.redphase, "weakening_guard", lambda ctx: [])
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.state is State.AWAITING_HUMAN
     linear: FakeLinear = ctx.linear  # type: ignore[assignment]
@@ -113,7 +113,7 @@ def test_a_test_weakening_guard_routes_to_awaiting_human(
         review_step.redphase, "weakening_guard", lambda ctx: ["assert result == 42"]
     )
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.state is State.AWAITING_HUMAN
     linear: FakeLinear = ctx.linear  # type: ignore[assignment]
@@ -150,7 +150,7 @@ def test_a_cleared_weakening_escalation_lets_the_interrupted_review_run(
     _fake(ctx).review_findings = {"findings": []}
 
     # Unaccepted: parked.
-    review_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.AWAITING_HUMAN
 
     ctx.store.record_check(
@@ -165,7 +165,7 @@ def test_a_cleared_weakening_escalation_lets_the_interrupted_review_run(
 
     advance(ctx, State.REVIEWING, actor="human", rule="escalation-cleared-is-james")
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.state is State.PR_READY
 
@@ -190,7 +190,7 @@ def test_a_cleared_redphase_escalation_lets_the_interrupted_review_run(
         reason=redphase.TEST_WEAKENING,
         detail="wrong escalation",
     )
-    review_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.AWAITING_HUMAN
 
     ctx.store.record_check(
@@ -205,7 +205,7 @@ def test_a_cleared_redphase_escalation_lets_the_interrupted_review_run(
 
     advance(ctx, State.REVIEWING, actor="human", rule="escalation-cleared-is-james")
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     assert ctx.state is State.PR_READY
 
@@ -356,7 +356,7 @@ def _to_pr_ready(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_redphase(monkeypatch)
     _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
     _fake(ctx).review_findings = {"findings": []}
-    review_step.run(ctx)
+    advance_state(ctx)
     assert ctx.state is State.PR_READY
 
 
@@ -530,12 +530,12 @@ def test_a_step_that_dies_of_a_git_failure_blocks_the_run(
     flight."""
     monkeypatch.setattr(
         review_step,
-        "run",
-        lambda _ctx: (_ for _ in ()).throw(repo.GitError("git apply failed: corrupt patch")),
+        "start",
+        lambda _ctx, **_kw: (_ for _ in ()).throw(repo.GitError("git apply failed: corrupt patch")),
     )
 
     with pytest.raises(Blocked) as caught:
-        cli._drive(ctx, force_plan=False)
+        cli._drive_foreground(ctx, follow=True, poll=0)
 
     assert caught.value.reason == "reviewing-step-failed"
     assert "corrupt patch" in caught.value.detail
@@ -558,7 +558,7 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, tier1_has_human=False: None)
     _fake(ctx).review_findings = {"findings": []}
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     scratch = review_step._review_scratch(ctx)
     # The fan-out ran detached; the per-axis `-o` paths are baked into the script. Every
@@ -608,7 +608,7 @@ def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
     monkeypatch.setattr(review_step, "_tier2_trigger", lambda ctx, h, tier1_has_human=False: None)
     _fake(ctx).review_findings = {"findings": []}
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     spec = review_step._review_spec(ctx, review_step._review_scratch(ctx))
     mounts = [Path(w.path) for w in spec.workspaces]
@@ -648,7 +648,7 @@ def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
     ctx.store.update_run(ctx.run.id, full_review=True)
     ctx.refresh()
 
-    review_step.run(ctx)
+    advance_state(ctx)
 
     summary = json.loads((ctx.state_dir / "review" / "review-summary.json").read_text())
     assert summary["tier2"] == review_step.FORCED

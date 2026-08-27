@@ -17,14 +17,17 @@ from enum import StrEnum
 
 __all__ = [
     "AUTOMATIC",
+    "ENTRY",
     "HUMAN_ONLY",
     "TERMINAL",
     "TRANSITIONS",
+    "Action",
     "Blocked",
     "Resumable",
     "State",
     "assert_table_is_sound",
     "can",
+    "is_human_held",
     "requires_human_rule",
 ]
 
@@ -196,6 +199,73 @@ HUMAN_ONLY_ORIGINS: dict[State, str] = {
     State.SUSPENDED: "resume-is-james",
 }
 
+
+class Action(StrEnum):
+    """The entry action of a state — a *name*, not a callable.
+
+    `machine` is pure and cannot import `steps` (that import is a cycle), so the table
+    below holds names and `driver` maps each name to the function that performs it.
+    That indirection is the point rather than a cost: a `dict[State, Callable]` living
+    in `driver` is a hand-written list again, one file further from the transitions it
+    has to agree with, and the soundness check at the bottom of this file could not be
+    written against it.
+    """
+
+    CLAIM = "claim"
+    CONTEXT = "context"
+    SANDBOX = "sandbox"
+    WORKTREE = "worktree"
+    #: `planning` or `implementing`, decided by `plan.should_plan`. The driver never
+    #: learns that planning exists; `steps.start_agent` owns the choice.
+    START_AGENT = "start-agent"
+    #: Look at a detached run somebody else started and act on what the filesystem says.
+    REAP = "reap"
+    #: The §16.4 ladder: resume, restart, rewind or fail.
+    RECOVER = "recover"
+    DELIVER = "deliver"
+
+
+#: What the factory does when a run is sitting in a state — §5's missing column.
+#:
+#: This is the table `cli._FORWARD` used to be, plus the four detached states and
+#: `resumable`, which `_FORWARD` expressed by *omission*: a state absent from it was
+#: reaped, and a state absent from `reap.DETACHED_STATES` was dispatched forward, and
+#: nothing checked that the two lists were complements. `assert_table_is_sound` now
+#: does, against a derived set rather than a third hand-written one — see
+#: `is_human_held`.
+ENTRY: dict[State, Action] = {
+    State.APPROVED: Action.CLAIM,
+    State.CLAIMED: Action.CONTEXT,
+    State.CONTEXT_LOADED: Action.SANDBOX,
+    State.SANDBOX_CREATING: Action.SANDBOX,
+    State.SANDBOX_READY: Action.WORKTREE,
+    State.WORKTREE_READY: Action.START_AGENT,
+    State.PLANNING: Action.REAP,
+    State.IMPLEMENTING: Action.REAP,
+    State.VERIFYING: Action.REAP,
+    State.REVIEWING: Action.REAP,
+    State.RESUMABLE: Action.RECOVER,
+    State.PR_READY: Action.DELIVER,
+}
+
+
+def is_human_held(state: State) -> bool:
+    """Is every way out of this state reserved for a human?
+
+    Derived, never listed. The set is `{blocked, awaiting_human, suspended, failed}`
+    today, and writing those four down is exactly the mistake `_WORKFLOW` made twice —
+    `resumable` missing from the cancel row, then `blocked` missing from
+    `sandbox_creating`. A list beside a table drifts from it, silently, in the direction
+    of the machine doing something nobody authorised.
+
+    The two stop edges are excluded because they are not ways *forward*: `blocked` and
+    `cancelled` are reachable from everywhere, so counting them would make every state
+    look partly automatic.
+    """
+    forward = TRANSITIONS[state] - {State.BLOCKED, State.CANCELLED}
+    return bool(forward) and all(requires_human_rule(state, target) for target in forward)
+
+
 AUTOMATIC = "auto"
 HUMAN = "human"
 
@@ -273,3 +343,22 @@ def assert_table_is_sound() -> None:
     unreachable = set(State) - seen
     if unreachable:
         raise AssertionError(f"unreachable states: {sorted(unreachable)}")
+
+    # Every state a run can sit in is either one the factory acts on or one it is waiting
+    # for a human in — and never both. Without this, a state added to `State` with no
+    # entry action is a run that stops moving and reports nothing, which is what
+    # `_FORWARD` did to `sandbox_creating` until someone noticed by hand.
+    for state in TRANSITIONS:
+        if state in TERMINAL:
+            continue
+        held = is_human_held(state)
+        if held and state in ENTRY:
+            raise AssertionError(
+                f"{state} is human-held but has entry action {ENTRY[state]}: "
+                "the factory would act on a state reserved for James"
+            )
+        if not held and state not in ENTRY:
+            raise AssertionError(
+                f"{state} has no entry action and is not human-held: a run there stops "
+                "moving and nothing says why"
+            )

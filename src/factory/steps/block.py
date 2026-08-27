@@ -26,15 +26,31 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from factory.intake.linear import LinearError
-from factory.steps import Context, effect_marker, record_effect
+from factory.machine import State
+from factory.steps import Context, effect_marker, record_effect, record_stop
 
-__all__ = ["IN_REVIEW", "NEEDS_INFO", "announce", "announce_awaiting_human"]
+__all__ = ["IN_REVIEW", "NEEDS_INFO", "announce", "announce_awaiting_human", "record"]
 
 STEP = "block"
 
 #: §13.1's blocked row. Already in `linear.BLOCKING_LABELS`, so this both explains the
 #: stop to a reader and prevents the next tick from claiming the ticket again.
 NEEDS_INFO = "needs-info"
+
+
+def record(ctx: Context, reason: str, detail: str) -> None:
+    """A run coming to rest at `blocked`: the column, the transition, the log, the tracker.
+
+    All four, in that order, from one place. `cli._block` was that place while `factory
+    run` and `factory tick` had a handler each; `driver.drive` is now the only handler,
+    and it must not reimplement any of this — a block recorded without the tracker write
+    is §13.1's failure, and a block recorded without `blocked_reason` is a run the
+    console shows as stopped with no reason to show.
+    """
+    ctx.store.update_run(ctx.run.id, blocked_reason=reason)
+    record_stop(ctx, State.BLOCKED, rule=reason, detail=detail)
+    ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
+    announce(ctx, reason, detail)
 
 
 def announce(ctx: Context, reason: str, detail: str) -> None:

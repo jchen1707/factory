@@ -22,13 +22,13 @@ from pathlib import Path
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, State
 from factory.sandbox.base import RunHandle, RunStatus
-from factory.steps import KILL_TARGET, Context
+from factory.steps import KILL_TARGET, Context, advance
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
 
-__all__ = ["AGENT_SESSION_STATES", "DETACHED_STATES", "Outcome", "Verdict", "reap"]
+__all__ = ["AGENT_SESSION_STATES", "DETACHED_STATES", "Outcome", "Verdict", "act", "reap"]
 
 #: The states whose entry action spawns a detached run inside a sandbox — a codex
 #: agent (planning, implementing, the review fan-out) or a node gate report (verify).
@@ -71,15 +71,99 @@ class Outcome(StrEnum):
     NEXT_STEP = "next-step"
     #: A detached state was entered with no attempt row — verify/review reached by the
     #: previous state's `collect` (which advanced the state but spawned nothing). The
-    #: tick must call that state's `start` to spawn the run. Mirrors NEXT_STEP: reap
-    #: returns a verdict, the drive loop acts; reap itself stays observation-only.
+    #: tick must call that state's `start` to spawn the run. Never escapes `act`.
     START_NEEDED = "start-needed"
+    #: `act`'s answer to either of the two above: a detached run is now live, and the
+    #: process that sees it next is the one that reaps it.
+    STARTED = "started"
+    #: `act`'s other answer to NEXT_STEP: the §16.4 ladder had no rung left, so the run
+    #: was parked at `resumable` rather than given another attempt.
+    EXHAUSTED = "exhausted"
 
 
 @dataclass(frozen=True)
 class Verdict:
     outcome: Outcome
     detail: str = ""
+
+
+def act(ctx: Context) -> Verdict:
+    """`reap`, plus the follow-on its verdict calls for. The `REAP` entry action.
+
+    The tempting shape is one action per `driver.step`: reap, return, and let the next
+    loop iteration start whatever comes next. **It does not terminate.** Both follow-on
+    verdicts are derived from state that only the follow-on changes — `NEXT_STEP` reads
+    a *finished* attempt row for `run.attempt`, and the only thing that increments
+    `runs.attempt` is `implement.start`, which is the follow-on. A driver that returned
+    between them would reap the same finished row forever. The daemon got away with the
+    split because a tick boundary is not a loop iteration; a foreground loop has no such
+    luck.
+
+    So the follow-on runs here, next to the verdict that produced it, and `driver` keeps
+    holding no domain judgement.
+    """
+    verdict = reap(ctx)
+    if verdict.outcome is Outcome.START_NEEDED:
+        return _start_detached(ctx)
+    if verdict.outcome is Outcome.NEXT_STEP:
+        return _start_next_attempt(ctx)
+    return verdict
+
+
+def _start_detached(ctx: Context) -> Verdict:
+    """Spawn the detached run for a verify/review state that `reap` found unstarted.
+
+    The only detached states that reach `START_NEEDED` are `verifying` and `reviewing` —
+    `planning`/`implementing` orphan instead, because their `start` is the sole entry
+    point and a missing row means it crashed before spawning. verify/review, by contrast,
+    are entered by the previous state's `collect`, so a missing row is the normal first
+    look, not a crash.
+    """
+    state = ctx.state
+    if state is State.VERIFYING:
+        verify_step.start(ctx)
+    else:
+        review_step.start(ctx)
+    return Verdict(Outcome.STARTED, f"{state} attempt {ctx.run.attempt} spawned")
+
+
+def _start_next_attempt(ctx: Context) -> Verdict:
+    """The attempt that follows a finished one the transition never left — chosen by the ladder.
+
+    The gate-fail loop-back (`verifying -> implementing`) is a normal transition, not a
+    recovery, so without the ladder here the factory would start implement attempts
+    unbounded: exactly the loop it must not run unattended. By the time a run reaches
+    `implementing` this way it is on rung 2 (a fresh implement) or rung 4 (the budget
+    spent); rung 3 is decided earlier, in `verify.collect`, where the `verifying ->
+    planning` edge exists. `recovery.next_attempt_disposition` routes it through
+    `decide`, the same authority `resume_run` uses, so the two cannot disagree about
+    when a rung is exhausted.
+
+    `FAIL` has no `implementing -> failed` edge, so the run parks at `resumable` and the
+    §16.4 ladder records `resumable -> failed` from there — the same shape a timed-out
+    implement attempt takes.
+
+    The `recovery` import is function-local: `recovery` imports `steps`, which imports
+    nothing back at module scope, and this is the pattern `recovery` itself already uses
+    in seven places.
+    """
+    from factory import recovery
+
+    verdict = recovery.next_attempt_disposition(ctx)
+    if verdict.disposition is recovery.Disposition.FAIL:
+        advance(ctx, State.RESUMABLE, rule=verdict.reason, detail=f"rung {verdict.rung}")
+        return Verdict(Outcome.EXHAUSTED, f"{verdict.reason} at rung {verdict.rung}")
+
+    # RESUME or RESTART: a fresh implement against the same worktree, rung 2.
+    session = (
+        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+        if verdict.disposition is recovery.Disposition.RESUME
+        else None
+    )
+    implement_step.start(
+        ctx, resume_session=session, continuation=recovery.continuation_prompt(ctx)
+    )
+    return Verdict(Outcome.STARTED, f"implement attempt {ctx.run.attempt} at rung {verdict.rung}")
 
 
 def reap(ctx: Context) -> Verdict:
@@ -90,7 +174,7 @@ def reap(ctx: Context) -> Verdict:
     orphan branch does **not** raise: it records the `resumable` transition itself,
     because there is no live call stack for the exception to unwind.
     """
-    state = ctx.run.state
+    state = ctx.state
     if state not in DETACHED_STATES:
         return Verdict(Outcome.NOT_APPLICABLE, f"{state} spawns no detached run")
 
@@ -158,7 +242,8 @@ def reap(ctx: Context) -> Verdict:
         # §16.1's last live row: the heartbeat is fresh, so the wrapper is alive, but
         # the state's own budget is spent. Signal it and *wait for the exit file*, so
         # the attempt ends with a real terminal record rather than a truncated one —
-        # the same thing `implement._await_exit` does at the end of a foreground run.
+        # the same thing every waiter did before there was one: signal, then wait for
+        # the record, rather than reporting a kill as a result.
         ctx.log("reap.timeout", level="warning", state=str(state), overrun_seconds=int(overrun))
         ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[state])
         deadline = time.monotonic() + KILL_GRACE_SECONDS

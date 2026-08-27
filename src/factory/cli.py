@@ -25,7 +25,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import artifacts, gc, machine, policy, recovery, repo
+from factory import artifacts, driver, gc, machine, policy, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
 from factory.delivery import github
@@ -50,15 +50,8 @@ from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
 from factory.steps import complete as complete_step
-from factory.steps import context as context_step
-from factory.steps import deliver as deliver_step
-from factory.steps import implement as implement_step
-from factory.steps import plan as plan_step
 from factory.steps import reap as reap_step
 from factory.steps import review as review_step
-from factory.steps import sandbox as sandbox_step
-from factory.steps import verify as verify_step
-from factory.steps import worktree as worktree_step
 from factory.store import Run, Store
 
 __all__ = ["main"]
@@ -201,6 +194,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         project=project.name,
         team=issue.team_key,
         full_review=args.full_review,
+        force_plan=args.plan,
     )
     if args.full_review:
         print("  NOTE  --full-review: Tier 2 runs whatever the §15.2 trigger rules decide")
@@ -241,20 +235,31 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     codex_stanzas_before = _codex_project_stanzas()
 
+    # The same loop the daemon runs, with `follow` on: `factory run` stays with the run
+    # instead of coming back next tick. It is not a second execution model — which is
+    # what buys it `reap`'s orphan detection and kill-grace, neither of which the old
+    # foreground chain had (the runbook's answer was `nohup`).
     try:
-        _drive(ctx, force_plan=args.plan)
+        result = _drive_foreground(ctx, follow=not args.no_follow)
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         _report(ctx)
         return 2
-    except Resumable as exc:
-        print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
-        record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
-        _report(ctx)
-        return 3
     finally:
         _assert_codex_config_untouched(codex_stanzas_before)
         ctx.store.release_lease(ctx.run.id)
+
+    if result.outcome is driver.Outcome.STOPPED and ctx.state is State.BLOCKED:
+        print(f"\nBLOCKED: {result.reason}")
+        _report(ctx)
+        return 2
+    if result.outcome is driver.Outcome.STOPPED and ctx.state in (
+        State.RESUMABLE,
+        State.FAILED,
+    ):
+        print(f"\n{ticket} is {ctx.state}: {result.reason or result.detail}")
+        _report(ctx)
+        return 3
 
     _report(ctx)
     ctx.refresh()
@@ -277,50 +282,38 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _drive(ctx: Context, *, force_plan: bool) -> None:
-    """The fixed per-ticket shape. Python decides control flow; the model decides only what
-    to write inside one step. No agent chooses the next state.
+def _drive_foreground(
+    ctx: Context, *, follow: bool, poll: float = driver.POLL_INTERVAL_SECONDS
+) -> driver.Result:
+    """`driver.drive`, plus the foreground's answer to an adapter failure.
 
-    Phase 3 extends the chain past `verifying`: the review step (which runs the red-phase
-    replay and the two-tier review) advances to `pr_ready` on a clean review or
-    `awaiting_human` on a finding/escalation, and the deliver step opens the PR. A
-    `Blocked` from either propagates to `cmd_run`, which records it and announces.
+    `driver` deliberately catches neither `GitError`, `SbxError` nor `LinearError`,
+    because the two callers want opposite things from them: a tick reports and leaves the
+    run where it was, so a transient Linear outage is a pause rather than a state change
+    (F17), while a human at a terminal wants the run stopped and legible. This is the
+    second answer, and it is a `Blocked` naming the state that died.
 
-    An adapter failure inside a step becomes a `Blocked` on the way out, so it takes that
-    same path. Before this, a `GitError` reached `main`'s catch-all instead: the process
-    exited 2, but the run row kept whatever state it had reached, `blocked_reason` stayed
-    empty and the tracker was never told — a stopped run that looks live to everything
-    that reads state. BAC-4's `1effc543d83a459a` sat at `reviewing` that way after the
-    red-phase replay's `git apply` failed. The slug names the state it died in, because
-    that is the part a human needs before reading anything else.
+    Before this existed the exception reached `main`'s catch-all: the process exited 2
+    while the run row kept whatever state it had, `blocked_reason` empty and the tracker
+    never told — a stopped run that looks live to everything that reads state. BAC-4's
+    `1effc543d83a459a` sat at `reviewing` that way after the red-phase replay's
+    `git apply` failed.
     """
     try:
-        claim_step.run(ctx)
-        context_step.run(ctx)
-        sandbox_step.run(ctx)
-        worktree_step.run(ctx)
-        if plan_step.should_plan(ctx, forced=force_plan):
-            plan_step.run(ctx)
-        implement_step.run(ctx)
-        verify_step.run(ctx)
-        review_step.run(ctx)
-        if ctx.state is State.PR_READY:
-            deliver_step.run(ctx)
+        return driver.drive(ctx, follow=follow, poll=poll)
     except (GitError, SbxError, LinearError) as exc:
         raise Blocked(f"{ctx.state}-step-failed", str(exc)) from exc
 
 
 def _block(ctx: Context, reason: str, detail: str) -> None:
-    """The one place a block is recorded, so §13.1's tracker write cannot be forgotten.
+    """Print the block a caller is recording itself. `block.record` does the four writes.
 
-    The transition is recorded before the announcement, so the comment can name the
-    state the run came to rest in rather than the one it was leaving.
+    `driver.drive` records every block a *step* raises; this is for the two blocks the
+    command line raises on its own — an ineligible ticket at intake, and an adapter
+    failure the driver deliberately does not catch.
     """
     print(f"\nBLOCKED: {reason}\n  {detail}")
-    ctx.store.update_run(ctx.run.id, blocked_reason=reason)
-    record_stop(ctx, State.BLOCKED, rule=reason, detail=detail)
-    ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
-    block_step.announce(ctx, reason, detail)
+    block_step.record(ctx, reason, detail)
 
 
 def _report(ctx: Context) -> None:
@@ -346,22 +339,17 @@ def _report(ctx: Context) -> None:
 #: that expired under a healthy holder is F13's failure, not a recovery.
 TICK_LEASE_SECONDS = 900
 
-#: Where the forward dispatch takes over from the poller. `implementing`, `planning`,
-#: `verifying` and `reviewing` are absent on purpose: those four are
-#: `steps/reap.py`'s, because the run in them is not waiting for the factory to do
-#: something, it is waiting for a detached run (a codex agent or the gate report) that
-#: a previous process started — or, for verify/review just entered by the previous
-#: state's collect, it is waiting for this tick to call `start`. `pr_ready` stays
-#: forward: `deliver` is a short host-side push + PR, synchronous by design.
-_FORWARD: dict[State, str] = {
-    State.APPROVED: "claim",
-    State.CLAIMED: "context",
-    State.CONTEXT_LOADED: "sandbox",
-    State.SANDBOX_CREATING: "sandbox",
-    State.SANDBOX_READY: "worktree",
-    State.WORKTREE_READY: "agent",
-    State.PR_READY: "deliver",
-}
+#: The tick's two sweeps, in the order §16 requires and derived from `machine.ENTRY`
+#: rather than listed. Reaping and recovery come first because a machine that claimed
+#: first would keep starting runs it had not yet noticed were broken; the forward states
+#: come second; new work comes last.
+#:
+#: `cli._FORWARD` used to be the second list, hand-written, and the first was
+#: `reap.DETACHED_STATES + [resumable]` — two lists that had to be exact complements with
+#: nothing checking that they were. They are now one partition of one table.
+_WATCHED = (machine.Action.REAP, machine.Action.RECOVER)
+_WATCHED_STATES: list[State] = [s for s, a in machine.ENTRY.items() if a in _WATCHED]
+_FORWARD_STATES: list[State] = [s for s, a in machine.ENTRY.items() if a not in _WATCHED]
 
 
 def cmd_tick(args: argparse.Namespace) -> int:
@@ -478,12 +466,12 @@ def tick_once(
 
     # Reaping and recovery come first, and claiming comes last. A machine that claimed
     # first would keep starting runs it had not yet noticed were broken.
-    for run in store.runs_in_states([*reap_step.DETACHED_STATES, State.RESUMABLE]):
+    for run in store.runs_in_states(_WATCHED_STATES):
         line = _work_on(store, run, build, verbose=verbose)
         if line:
             lines.append(line)
 
-    for run in store.runs_in_states(list(_FORWARD)):
+    for run in store.runs_in_states(_FORWARD_STATES):
         line = _work_on(store, run, build, verbose=verbose)
         if line:
             lines.append(line)
@@ -506,129 +494,17 @@ def _work_on(store: Store, run: Run, build: ContextFactory, *, verbose: bool) ->
     ctx: Context | None = None
     try:
         ctx = build(run)
-        return _drive_from_here(ctx)
-    except Blocked as exc:
-        if ctx is not None:
-            _block(ctx, exc.reason, exc.detail)
-            return f"{run.linear_id:<10} blocked: {exc.reason}"
-        return f"{run.linear_id:<10} blocked before its context loaded: {exc.reason}"
-    except Resumable as exc:
-        if ctx is not None:
-            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
-        return f"{run.linear_id:<10} resumable: {exc.reason}"
+        result = driver.drive(ctx)
+        return f"{run.linear_id:<10} {result.detail}" if result.detail else ""
     except (GitError, SbxError, LinearError, RegistryError) as exc:
         # An adapter failure is not a factory crash and must not end the pass. It is
         # reported and the run is left exactly where it was, so the next tick sees the
         # same state and can try again — which is what makes a transient Linear outage
-        # (F17) a pause rather than a state change.
+        # (F17) a pause rather than a state change. `factory run` answers the same
+        # exception differently, which is why `driver.drive` catches neither.
         return f"{run.linear_id:<10} adapter error, left in place: {exc}"
     finally:
         store.release_lease(run.id)
-
-
-def _drive_from_here(ctx: Context) -> str:
-    """Advance one run until it is waiting on something that is not the factory.
-
-    The loop ends when the state stops changing, which happens for exactly three
-    reasons: an agent is now running, a human is now needed, or the run finished. Every
-    body of the loop is a step that was already idempotent, so re-entering a state the
-    tick has seen before costs a database read and nothing else.
-    """
-    steps: list[str] = []
-    while True:
-        before = ctx.state
-        if before in reap_step.DETACHED_STATES:
-            verdict = reap_step.reap(ctx)
-            steps.append(f"{before}:{verdict.outcome}")
-            if verdict.outcome in (reap_step.Outcome.RUNNING, reap_step.Outcome.ORPHANED):
-                break
-            if verdict.outcome is reap_step.Outcome.START_NEEDED:
-                # Verify/review entered by the previous state's collect, with no
-                # attempt spawned yet. Start the detached run now and break: the next
-                # tick reaps it. `start` does not advance (the run is already in this
-                # state), so without this branch the loop would break without spawning.
-                _start_detached(ctx, before)
-                break
-            if verdict.outcome is reap_step.Outcome.NEXT_STEP:
-                _start_next_after_gate_fail(ctx)
-                break
-        elif before is State.RESUMABLE:
-            verdict_r = recovery.resume_run(ctx)
-            steps.append(f"resumable:{verdict_r.disposition}({verdict_r.reason})")
-            break
-        else:
-            action = _FORWARD.get(before)
-            if action is None:
-                break
-            _perform(ctx, action)
-            steps.append(f"{before}->{ctx.state}")
-        if ctx.state is before:
-            break
-    return f"{ctx.run.linear_id:<10} {'  '.join(steps)}" if steps else ""
-
-
-def _start_detached(ctx: Context, state: State) -> None:
-    """Spawn a detached run for a verify/review state that reap found unstarted.
-
-    The only detached states that reach `START_NEEDED` (no attempt row) are
-    `verifying` and `reviewing` — `planning`/`implementing` orphan instead, because
-    their `start` is the sole entry point and a no-row row means it crashed before
-    spawning. verify/review, by contrast, are entered by the previous state's
-    `collect`, so a no-row row is the normal first tick, not a crash.
-    """
-    if state is State.VERIFYING:
-        verify_step.start(ctx)
-    elif state is State.REVIEWING:
-        review_step.start(ctx)
-
-
-def _start_next_after_gate_fail(ctx: Context) -> None:
-    """The implement attempt that follows a gate-fail loop-back, chosen by the ladder.
-
-    The loop-back (`verifying -> implementing`) is a normal transition, not a recovery, so
-    without this the tick would start implement attempts unbounded — exactly the gate-fail
-    loop the daemon must not run unattended. By the time the run reaches `implementing`
-    here it is on rung 2 (a fresh implement) or rung 4 (the budget spent); rung 3 is
-    decided earlier, in `verify.collect`, where the `verifying -> planning` edge exists.
-    `recovery.next_attempt_disposition` routes the decision through `decide`, the same
-    authority `resume_run` uses, so the two paths cannot disagree about when a rung
-    exhausts.
-
-    `FAIL` has no `implementing -> failed` edge, so the run parks at `resumable` and the
-    next tick's `resume_run` records `resumable -> failed` under the same ladder — the
-    same shape a timed-out implement attempt takes.
-    """
-    verdict = recovery.next_attempt_disposition(ctx)
-    if verdict.disposition is recovery.Disposition.FAIL:
-        advance(ctx, State.RESUMABLE, rule=verdict.reason, detail=f"rung {verdict.rung}")
-        return
-    # RESUME or RESTART: a fresh implement against the same worktree, rung 2.
-    session = (
-        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
-        if verdict.disposition is recovery.Disposition.RESUME
-        else None
-    )
-    implement_step.start(
-        ctx, resume_session=session, continuation=recovery.continuation_prompt(ctx)
-    )
-
-
-def _perform(ctx: Context, action: str) -> None:
-    if action == "claim":
-        claim_step.run(ctx)
-    elif action == "context":
-        context_step.run(ctx)
-    elif action == "sandbox":
-        sandbox_step.run(ctx)
-    elif action == "worktree":
-        worktree_step.run(ctx)
-    elif action == "agent":
-        if plan_step.should_plan(ctx):
-            plan_step.start(ctx)
-        else:
-            implement_step.start(ctx)
-    elif action == "deliver":
-        deliver_step.run(ctx)
 
 
 def _context_for(
@@ -1408,7 +1284,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
             rule="escalation-cleared-is-james",
             detail=f"{rule} cleared: {note}",
         )
-        _drive_from_here(ctx)
+        driver.drive(ctx)
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         _report(ctx)
@@ -1521,7 +1397,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     try:
         recovery.resume(ctx, from_state=args.from_state, authorise=args.authorise)
-        _drive_from_here(ctx)
+        driver.drive(ctx)
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         _report(ctx)
@@ -1622,7 +1498,7 @@ def dispatch_control(
             recovery.resume_run(ctx, skip_backoff=True)
         else:  # resume
             recovery.resume(ctx)
-        _drive_from_here(ctx)
+        driver.drive(ctx)
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         return 2, f"{run.linear_id} blocked: {exc.reason} — {exc.detail}"
@@ -2128,6 +2004,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="evaluate the intake conditions and stop; writes nothing",
     )
     run.add_argument("--plan", action="store_true", help="force the planning step first")
+    run.add_argument(
+        "--no-follow",
+        action="store_true",
+        help="start the run and return as soon as an agent is detached, rather than "
+        "staying with it; `factory tick` picks it up from there",
+    )
     run.add_argument(
         "--full-review",
         action="store_true",
