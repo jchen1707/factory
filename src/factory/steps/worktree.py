@@ -45,17 +45,6 @@ def run(ctx: Context) -> None:
             f"{path} is not inside the mounted workspace {ctx.project.path}",
         )
 
-    if ctx.dry_run:
-        ctx.shadow_worktree = path
-        ctx.shadow_branch = branch
-        for argv in repo.WorktreePlan(
-            ctx.project.path, path, branch, ctx.project.base_ref
-        ).commands():
-            ctx.would(" ".join(argv))
-        ctx.would(f"copy staged context into {path}/.factory/context/")
-        advance(ctx, State.WORKTREE_READY)
-        return
-
     repo.fetch(ctx.project.path, ctx.project.base_branch)
 
     # The refusal that P0-11 asked for. `origin/feat/BAC-4-application-skeleton` is the
@@ -118,16 +107,6 @@ def _run_clone(ctx: Context, branch: str) -> None:
     The branch comes back to the host once, at the `reviewing` entry (`clone.fetch_back`),
     and everything from there on works against an ordinary host worktree.
     """
-    if ctx.dry_run:
-        ctx.shadow_worktree = ctx.project.path
-        ctx.shadow_branch = branch
-        ctx.would(
-            f"sbx exec {ctx.project.build_sandbox} git -C {ctx.project.path} "
-            f"checkout -b {branch} {ctx.project.base_ref}  # inside the clone"
-        )
-        ctx.would(f"copy staged context into {ctx.factory_dir}/context/")
-        advance(ctx, State.WORKTREE_READY)
-        return
 
     clone_step.create_branch(ctx, branch)
     ctx.store.update_run(

@@ -34,7 +34,6 @@ from factory.agent.codex import TranscriptError
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
-from factory.sandbox.sbx import exec_argv
 from factory.steps import KILL_TARGET, Context, advance
 
 __all__ = ["build_prompt", "collect", "run", "start"]
@@ -116,29 +115,6 @@ def start(
         resume_session=resume_session,
     )
     script = ctx.agent.wrapper_script(invocation)
-
-    if ctx.dry_run:
-        ctx.would(f"write {attempt_dir.prompt} ({len(prompt)} bytes)")
-        ctx.would(f"write {attempt_dir.schema} (copy of {schema_source})")
-        ctx.would(f"snapshot vault at {ctx.registry.vault.path}")
-        # Built by the same function the real call uses, so the printed command cannot
-        # drift from the executed one — which is the only thing that makes --dry-run
-        # worth reading.
-        preview = exec_argv(
-            ctx.project.build_sandbox,
-            ["/bin/sh", "-lc", "<the script below>"],
-            workdir=str(worktree),
-            env=dict(ctx.project.env),
-            detach=True,
-        )
-        ctx.would(" ".join(preview))
-        for line in script.strip().splitlines():
-            ctx.would(f"    {line}")
-        if ctx.state is not State.IMPLEMENTING:
-            advance(ctx, State.IMPLEMENTING, actor=actor)
-        ctx.would("poll heartbeat/exit; validate last-message.json; diff the vault")
-        advance(ctx, State.VERIFYING)
-        return None
 
     attempt_dir.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(schema_source, attempt_dir.schema)

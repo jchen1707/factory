@@ -43,10 +43,6 @@ def announce(ctx: Context, reason: str, detail: str) -> None:
     Called from the one place that handles a block, so a step raising `Blocked` never
     has to remember to do this.
     """
-    if ctx.dry_run:
-        ctx.would(f"linear: comment on {ctx.run.linear_id} (marker {effect_marker(ctx, STEP)})")
-        ctx.would(f"linear: add label {NEEDS_INFO!r} to {ctx.run.linear_id}")
-        return
 
     try:
         _comment(ctx, reason, detail)
@@ -140,12 +136,6 @@ def announce_awaiting_human(ctx: Context, *, pr_url: str | None, sections: Seque
     when the run reached `awaiting_human` without opening a PR (a review finding, a weakened
     assertion); the comment says so rather than inventing a link.
     """
-    if ctx.dry_run:
-        ctx.would(f"linear: move {ctx.run.linear_id} to {IN_REVIEW}")
-        ctx.would(
-            f"linear: comment on {ctx.run.linear_id} (awaiting_human; marker {effect_marker(ctx, _AWAITING_STEP)})"
-        )
-        return
 
     try:
         _move_in_review(ctx)

@@ -39,39 +39,6 @@ from tests.integration.test_pipeline import _fake, _to_verifying
 # --------------------------------------------------------------------------------
 
 
-def test_the_drive_calls_review_then_deliver_after_verify(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`_drive` walks the whole chain. A dry run records every would-print without spending a
-    model call, which is the cheapest proof that the wiring is in place."""
-    ctx.dry_run = True
-    # The dry-run steps must not touch the real adapters' side effects.
-    monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
-    monkeypatch.setattr(
-        cli,
-        "LinearClient",
-        lambda: FakeLinear(
-            __import__("tests.integration.test_pipeline", fromlist=["TICKET"]).TICKET
-        ),
-    )
-
-    cli._drive(ctx, force_plan=False)
-
-    planned = "\n".join(ctx.planned)
-    # review ran (red-phase + Tier 1 would-prints)
-    assert "review" in planned.lower() or "tier 1" in planned.lower()
-    # deliver ran (push + the PR + the awaiting_human transition)
-    assert "push" in planned
-    assert "gh pr create --base" in planned
-    assert "--draft" not in planned
-    assert f"transition {State.REVIEWING} -> {State.PR_READY}" in planned or "pr_ready" in planned
-
-
-# --------------------------------------------------------------------------------
-# review transitions
-# --------------------------------------------------------------------------------
-
-
 def _to_reviewing(ctx: Context) -> None:
     _to_verifying(ctx)
     verify_step.run(ctx)
@@ -401,36 +368,6 @@ def _capture(sink: list[list[str]], *, stdout: str = "") -> object:
         return subprocess.CompletedProcess(list(argv), 0, stdout=stdout, stderr="")
 
     return run
-
-
-def test_the_dry_run_preview_names_the_flags_gh_pr_create_actually_carries(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The preview is worth reading only while it describes the command that runs.
-
-    `--draft` lived in six places and moved out of all six at once; equality here is what
-    stops the *next* flag moving in one of them only. Both halves are measured — the argv
-    from `create_pr`, the preview from a real dry run — so neither can be restated.
-    """
-    _to_pr_ready(ctx, monkeypatch)
-    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
-
-    argv: list[list[str]] = []
-    monkeypatch.setattr(deliver_step.github.subprocess, "run", _capture(argv, stdout="url\n"))
-    deliver_step.github.create_pr(
-        Path(ctx.run.worktree or "."),
-        base="v2",
-        head="feat/x",
-        title="t",
-        body_file=Path("body.md"),
-    )
-    real = {token for token in argv[0] if token.startswith("--")}
-
-    ctx.dry_run = True
-    deliver_step.run(ctx)
-    start = next(i for i, line in enumerate(ctx.planned) if "gh pr create" in line)
-    preview = " ".join(ctx.planned[start : start + 2])
-    assert real == set(re.findall(r"--[a-z-]+", preview))
 
 
 def test_deliver_blocks_on_a_vendored_tree_edit(

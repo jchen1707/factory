@@ -39,7 +39,7 @@ costs a ticket, concurrency outgrows the laptop, or passthrough I/O dominates wa
 uv sync
 uv run factory doctor                    # is this machine able to run the factory
 uv run factory status --all              # every run, its state, attempt, lease, cost
-uv run factory run BAC-6 --dry-run        # print every command, execute none
+uv run factory run BAC-6 --check          # evaluate the intake conditions, write nothing
 uv run factory run BAC-6                 # drive one ticket in the foreground
 ```
 
@@ -86,7 +86,7 @@ who waits.
 
 ```sh
 uv run factory run BAC-6
-uv run factory run BAC-6 --dry-run        # print every command, execute none
+uv run factory run BAC-6 --check          # evaluate the intake conditions, write nothing
 uv run factory run BAC-6 --plan          # force the planning step first
 uv run factory run BAC-6 --full-review   # force Tier 2's full fan-out regardless of trigger
 ```

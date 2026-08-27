@@ -173,13 +173,29 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"  NOTE  a remote branch already mentions {ticket}: {', '.join(stale)}")
         print("        the factory will not reuse it; it is also a free oracle to diff against")
 
+    if args.check:
+        # §7.1's verdict, and nothing else. This is what `--dry-run` promised and did not
+        # deliver: everything above this line is a read, so the answer is the real one,
+        # produced by the same `assess` the tick acts on rather than by a simulation of it.
+        # The exit codes mirror `factory run` exactly, or it is a second opinion rather
+        # than a preview.
+        print("\nNothing was written: --check stops before the run row.")
+        if eligible:
+            print(f"{ticket} is eligible; `factory run {ticket}` would start it.")
+            return 0
+        if block_reason is None:
+            print(f"{ticket} is not eligible: {failures}")
+            return 1
+        print(f"{ticket} would be blocked: {block_reason} ({failures})")
+        return 2
+
     if not eligible:
         if block_reason is None:
             print(f"\n{ticket} is not eligible and no run was created: {failures}")
             return 1
         print(f"\n{ticket} is blocked: {block_reason} ({failures})")
 
-    store = _open_store(home, dry_run=args.dry_run)
+    store = _open_store(home)
     run = store.insert_run(
         linear_id=ticket,
         project=project.name,
@@ -189,7 +205,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.full_review:
         print("  NOTE  --full-review: Tier 2 runs whatever the §15.2 trigger rules decide")
 
-    if not args.dry_run and not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
         print(f"\n{ticket} is leased by another process ({run.lease_owner}); nothing to do.")
         return 0
 
@@ -205,7 +221,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         run=store.run_by_id(run.id) or run,
         issue=issue,
         harness=harness,
-        dry_run=args.dry_run,
     )
 
     if not eligible and block_reason:
@@ -234,39 +249,31 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     except Resumable as exc:
         print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
-        if not ctx.dry_run:
-            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
+        record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         _report(ctx)
         return 3
     finally:
-        if not ctx.dry_run:
-            _assert_codex_config_untouched(codex_stanzas_before)
-            ctx.store.release_lease(ctx.run.id)
+        _assert_codex_config_untouched(codex_stanzas_before)
+        ctx.store.release_lease(ctx.run.id)
 
     _report(ctx)
-    if ctx.dry_run:
-        print("\nDry run. These are the commands it would have executed:\n")
-        for line in ctx.planned:
-            print(f"  {line}")
-        print("\nNothing was written: no Linear call, no git write, no sandbox, no model call.")
+    ctx.refresh()
+    if ctx.run.pr_url:
+        print(
+            f"\nReview ran and a pull request is open for review: {ctx.run.pr_url}\n"
+            "Nothing has been merged — merge is a human's. "
+            "`factory status <TICKET> --evidence` reads the run back."
+        )
+    elif ctx.state is State.AWAITING_HUMAN:
+        print(
+            f"\nThe run stopped at `{ctx.state}` for a human to look. No pull request "
+            "was opened. `factory status <TICKET> --evidence` shows why."
+        )
     else:
-        ctx.refresh()
-        if ctx.run.pr_url:
-            print(
-                f"\nReview ran and a pull request is open for review: {ctx.run.pr_url}\n"
-                "Nothing has been merged — merge is a human's. "
-                "`factory status <TICKET> --evidence` reads the run back."
-            )
-        elif ctx.state is State.AWAITING_HUMAN:
-            print(
-                f"\nThe run stopped at `{ctx.state}` for a human to look. No pull request "
-                "was opened. `factory status <TICKET> --evidence` shows why."
-            )
-        else:
-            print(
-                f"\nThe run came to rest at `{ctx.state}`. "
-                "`factory status <TICKET> --evidence` reads it back."
-            )
+        print(
+            f"\nThe run came to rest at `{ctx.state}`. "
+            "`factory status <TICKET> --evidence` reads it back."
+        )
     return 0
 
 
@@ -310,10 +317,6 @@ def _block(ctx: Context, reason: str, detail: str) -> None:
     state the run came to rest in rather than the one it was leaving.
     """
     print(f"\nBLOCKED: {reason}\n  {detail}")
-    if ctx.dry_run:
-        ctx.would(f"block: {reason} ({detail})")
-        block_step.announce(ctx, reason, detail)
-        return
     ctx.store.update_run(ctx.run.id, blocked_reason=reason)
     record_stop(ctx, State.BLOCKED, rule=reason, detail=detail)
     ctx.log("run.blocked", level="error", reason=reason, detail=detail[:500])
@@ -321,8 +324,7 @@ def _block(ctx: Context, reason: str, detail: str) -> None:
 
 
 def _report(ctx: Context) -> None:
-    if not ctx.dry_run:
-        ctx.refresh()
+    ctx.refresh()
     tokens_in, tokens_out, usd = ctx.store.spend(ctx.run.id)
     print(f"\nstate      {ctx.state}")
     print(f"attempt    {ctx.run.attempt}")
@@ -390,7 +392,7 @@ def _tick_pass(home: Path, *, claim: bool, verbose: bool) -> int:
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
 
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ok, detail = store.integrity_ok()
     if not ok:
         print(f"tick refused: sqlite says {detail}", file=sys.stderr)
@@ -727,7 +729,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
     real sweep would do rather than a second implementation that could drift."""
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
 
     actions = gc.sweep(home, registry, store, SbxAdapter(), dry_run=args.dry_run, now=None)
     for action in actions:
@@ -755,7 +757,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
 
     if args.ticket:
         ticket = args.ticket.upper()
@@ -923,7 +925,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
     increment keeps reading the same directory the implementer wrote."""
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     run = store.live_run_for_ticket(args.ticket.upper())
     if run is None:
         print(f"no run for {args.ticket.upper()}")
@@ -973,7 +975,7 @@ def cmd_runtimes(args: argparse.Namespace) -> int:
     A sandbox not matching `^factory-(build|review)-` is operator-owned (`codex-*`); shown
     greyed (here, prefixed `*`) and offered no control (§18.5, F26)."""
     home = factory_home()
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     sandboxes = _sbx_ls_json()
     rows = console_views.runtimes(sandboxes, store)
     if not rows:
@@ -1164,7 +1166,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     Cancel control (§18.5 View 5)."""
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ticket = args.ticket.upper()
     run = store.run_by_ticket(ticket)
     if run is None:
@@ -1259,7 +1261,7 @@ def cmd_complete(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ticket = args.ticket.upper()
     run = store.run_by_ticket(ticket)
     if run is None:
@@ -1354,7 +1356,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ticket = args.ticket.upper()
     run = store.run_by_ticket(ticket)
     if run is None:
@@ -1447,7 +1449,7 @@ def cmd_suspend(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ticket = args.ticket.upper()
     run = store.run_by_ticket(ticket)
     if run is None:
@@ -1499,7 +1501,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
     routing = load_routing(home / "config" / "models.toml")
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ticket = args.ticket.upper()
     run = store.run_by_ticket(ticket)
     if run is None:
@@ -1526,8 +1528,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         return 2
     except Resumable as exc:
         print(f"\n{ticket} is resumable: {exc.reason} — {exc.detail}")
-        if not ctx.dry_run:
-            record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
+        record_stop(ctx, State.RESUMABLE, rule=exc.reason, detail=exc.detail)
         _report(ctx)
         return 3
     finally:
@@ -1751,7 +1752,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     )
 
     # -- state --------------------------------------------------------------------
-    store = _open_store(home, dry_run=False)
+    store = _open_store(home)
     ok, detail = store.integrity_ok()
     check("database", ok, f"{store.path} — {detail}")
 
@@ -2061,19 +2062,8 @@ def _deep_canary(registry: Registry) -> tuple[str, bool, str]:
 # --------------------------------------------------------------------------------
 
 
-def _open_store(home: Path, *, dry_run: bool) -> Store:
-    """A dry run gets its own throwaway database.
-
-    "`--dry-run` executes none" has to include the local writes, or the flag means
-    something weaker than it says. The real state file is not opened at all.
-    """
-    if dry_run:
-        path = home / "state" / "dry-run.db"
-        for suffix in ("", "-wal", "-shm"):
-            candidate = Path(str(path) + suffix)
-            if candidate.exists():
-                candidate.unlink()
-        return Store(path)
+def _open_store(home: Path) -> Store:
+    """The one state file. There is no second one to open."""
     return Store(home / "state" / "factory.db")
 
 
@@ -2132,7 +2122,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="drive one approved ticket")
     run.add_argument("ticket")
-    run.add_argument("--dry-run", action="store_true", help="print every command, execute none")
+    run.add_argument(
+        "--check",
+        action="store_true",
+        help="evaluate the intake conditions and stop; writes nothing",
+    )
     run.add_argument("--plan", action="store_true", help="force the planning step first")
     run.add_argument(
         "--full-review",

@@ -11,7 +11,7 @@ states away; `worktree.py` copies them into `.factory/` when there is a worktree
 
 from __future__ import annotations
 
-from factory.harness import cross_check_stack, gates_summary, load_harness_config
+from factory.harness import cross_check_stack, load_harness_config
 from factory.intake.linear import write_context
 from factory.machine import Blocked, State
 from factory.steps import Context, advance
@@ -41,16 +41,6 @@ def run(ctx: Context) -> None:
         raise Blocked("vault-unresolved", str(ctx.registry.vault.path))
 
     target = ctx.state_dir / "context"
-    if ctx.dry_run:
-        # The gates are the repository's, not the factory's. Printing them here is how
-        # a dry run shows what the Definition of Done actually is without the factory
-        # ever naming one.
-        ctx.would(f"read the Definition of Done from {ctx.project.path}/harness.config.json:")
-        for line in gates_summary(harness.gates).splitlines():
-            ctx.would(line)
-        ctx.would(f"write {target}/{{ticket,spec,breakdown,comments}}.md")
-        advance(ctx, State.CONTEXT_LOADED)
-        return
 
     written = write_context(target, ctx.issue)
     empty = [p.name for p in written if p.stat().st_size == 0]

@@ -751,7 +751,7 @@ def _store_for_this_thread(injected: Store | None, home: Path, open_store: Any) 
     database. Reconnecting to the *injected store's own path* satisfies both.
     """
     if injected is None:
-        return open_store(home, dry_run=False)
+        return open_store(home)
     if threading.get_ident() == getattr(injected, "_owner_thread", None):
         return injected
     try:
