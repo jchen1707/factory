@@ -59,7 +59,7 @@ from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, SandboxSpec, Workspace, detached_shell_script
-from factory.steps import Context, advance, redphase
+from factory.steps import KILL_TARGET, Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
 
@@ -362,9 +362,7 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
         time.sleep(POLL_INTERVAL_SECONDS)
 
     ctx.log("review.timeout", level="warning", seconds=timeout)
-    kill = getattr(ctx.sandbox, "kill_agent", None)
-    if kill is not None:
-        kill(handle.sandbox)
+    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.REVIEWING])
     for _ in range(12):
         if attempt_dir.exit_file.exists():
             break

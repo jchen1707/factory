@@ -1,9 +1,13 @@
 
 :root { color-scheme: light dark; --fg:#111; --muted:#666; --line:#d8d8d8; --bg:#fff;
-        --chip:#eee; --pass:#0a7f3f; --fail:#b3261e; --warn:#8a6100; }
+        --surface:#fff; --chip:#eee; --pass:#0a7f3f; --fail:#b3261e; --warn:#8a6100;
+        --lane-engineer:#64748b; --lane-planner:#7c3aed; --lane-builder:#0d9488;
+        --lane-reviewer:#2563eb; --lane-code:#9aa1a8; }
 @media (prefers-color-scheme: dark) {
-  :root { --fg:#e8e8e8; --muted:#9a9a9a; --line:#333; --bg:#151515; --chip:#262626;
-          --pass:#4ade80; --fail:#f87171; --warn:#fbbf24; }
+  :root { --fg:#e8e8e8; --muted:#9a9a9a; --line:#333; --bg:#151515; --surface:#1b1d20;
+          --chip:#262626; --pass:#4ade80; --fail:#f87171; --warn:#fbbf24;
+          --lane-engineer:#94a3b8; --lane-planner:#a78bfa; --lane-builder:#2dd4bf;
+          --lane-reviewer:#60a5fa; --lane-code:#9aa1a8; }
 }
 * { box-sizing: border-box; }
 body { margin:0; padding:1.5rem; background:var(--bg); color:var(--fg);
@@ -33,5 +37,77 @@ button:hover { border-color:var(--fg); }
 pre { background:var(--chip); padding:.6rem; overflow-x:auto; border-radius:3px;
       white-space:pre-wrap; word-break:break-word; }
 .note { border-left:2px solid var(--line); padding-left:.6rem; color:var(--muted); }
+
+/* run timeline — lane colour is identity (engineer/planner/builder/reviewer/code),
+   deliberately separate from the semantic pass/fail/warn above. */
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(248px,1fr)); gap:.7rem; margin:.4rem 0 1rem; }
+.card { position:relative; background:var(--surface); border:1px solid var(--line);
+        border-radius:6px; padding:.55rem .8rem .6rem 1rem; }
+.card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+                 border-radius:6px 0 0 6px; }
+.card.lane-planner::before { background:var(--lane-planner); }
+.card.lane-builder::before { background:var(--lane-builder); }
+.card.lane-reviewer::before { background:var(--lane-reviewer); }
+.cardhead { display:flex; justify-content:space-between; align-items:baseline; gap:.5rem; margin-bottom:.4rem; }
+.cardhead .muted { font-size:.72rem; font-weight:400; }
+.status { font-size:.66rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; }
+.status.st-live { color:var(--pass); }
+.status.st-done, .status.st-idle { color:var(--muted); }
+.cardctx { font-size:.74rem; margin-bottom:.3rem; }
+.cardctx .k, .cardrow .k { color:var(--muted); }
+.cardrow { font-size:.74rem; display:flex; gap:.4rem; }
+.cardrow .v { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.small { font-size:.7rem; color:var(--muted); }
+
+.wf-title { margin:1.2rem 0 .15rem; }
+.waterfall { background:var(--surface); border:1px solid var(--line); border-radius:6px;
+             padding:.7rem .8rem .6rem; margin-bottom:1rem; overflow-x:auto; }
+.wfaxis { position:relative; height:1.4rem; margin-left:92px; border-bottom:1px solid var(--line); }
+.wftick { position:absolute; top:0; bottom:0; border-left:1px solid var(--line);
+          color:var(--muted); font-size:.66rem; padding-left:.2rem; transform:translateX(-.5px); }
+.wfnow { position:absolute; top:-.15rem; bottom:0; width:2px; background:var(--fail); opacity:.5; }
+.wflane { position:relative; height:2.4rem; margin-left:92px; border-bottom:1px dashed var(--line); }
+.wflane:last-child { border-bottom:none; }
+.wflab { position:absolute; left:-92px; width:84px; top:0; bottom:0; display:flex;
+         align-items:center; gap:.35rem; font-size:.72rem; color:var(--muted); }
+.wfsw { width:8px; height:8px; border-radius:2px; display:inline-block; flex:none; }
+.wfsw.lane-engineer { background:var(--lane-engineer); }
+.wfsw.lane-planner { background:var(--lane-planner); }
+.wfsw.lane-builder { background:var(--lane-builder); }
+.wfsw.lane-reviewer { background:var(--lane-reviewer); }
+.wfsw.lane-code { background:var(--lane-code); }
+.wfsw.dead { background:repeating-linear-gradient(135deg,var(--chip),var(--chip) 3px,transparent 3px,transparent 6px);
+             border:1px dashed var(--muted); }
+.wfblk { position:absolute; top:5px; bottom:5px; border-radius:3px; border:1px solid transparent;
+         display:flex; align-items:center; overflow:hidden; white-space:nowrap; font-size:.66rem; min-width:2px; }
+.wfblk.lane-engineer { background:color-mix(in srgb,var(--lane-engineer) 14%,transparent);
+                      border-color:color-mix(in srgb,var(--lane-engineer) 38%,transparent); color:var(--lane-engineer); }
+.wfblk.lane-planner { background:color-mix(in srgb,var(--lane-planner) 14%,transparent);
+                      border-color:color-mix(in srgb,var(--lane-planner) 38%,transparent); color:var(--lane-planner); }
+.wfblk.lane-builder { background:color-mix(in srgb,var(--lane-builder) 14%,transparent);
+                      border-color:color-mix(in srgb,var(--lane-builder) 38%,transparent); color:var(--lane-builder); }
+.wfblk.lane-reviewer { background:color-mix(in srgb,var(--lane-reviewer) 14%,transparent);
+                       border-color:color-mix(in srgb,var(--lane-reviewer) 38%,transparent); color:var(--lane-reviewer); }
+.wfblk.lane-code { background:color-mix(in srgb,var(--lane-code) 14%,transparent);
+                   border-color:color-mix(in srgb,var(--lane-code) 34%,transparent); color:var(--muted); }
+.wfblk .wflabel { padding:0 .35rem; font-weight:500; }
+.wfblk .wfdur { margin-left:auto; padding-right:.35rem; opacity:.65; }
+.wfblk.dead { background:repeating-linear-gradient(135deg,var(--chip),var(--chip) 5px,transparent 5px,transparent 9px);
+              border:1px dashed var(--muted); color:var(--muted); }
+.wfblk.live::after { content:""; position:absolute; right:-1px; top:-1px; bottom:-1px; width:3px;
+                     background:var(--pass); border-radius:0 3px 3px 0; animation:wfpulse 1.4s infinite; }
+.wflegend { display:flex; flex-wrap:wrap; gap:.8rem; margin-top:.55rem; font-size:.7rem; color:var(--muted); }
+.wflegend span { display:inline-flex; align-items:center; gap:.3rem; }
+@keyframes wfpulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+@media (prefers-reduced-motion: reduce) { .wfblk.live::after { animation:none; opacity:.55; } }
+
+/* tool-call drill-down — type chip carries the lane colour of the agent that issues it */
+.ttype { font-size:.7rem; color:var(--muted); }
+.ttype::before { content:"●"; margin-right:.25rem; }
+.ttype.t-command_execution::before { color:var(--lane-builder); }
+.ttype.t-file_change::before { color:var(--lane-planner); }
+.ttype.t-agent_message::before { color:var(--lane-reviewer); }
+.ttype.t-error::before { color:var(--fail); }
+.exit.ok { color:var(--pass); } .exit.bad { color:var(--fail); } .exit.na { color:var(--muted); }
 """
 

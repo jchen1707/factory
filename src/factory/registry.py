@@ -75,6 +75,12 @@ class Defaults:
     #: creation. `sbx` fixes these at `create`, so this is a creation-time decision
     #: like the template and the static MCP set.
     deny_network: tuple[str, ...] = ()
+    #: Phase 2 — when true, the implement step spawns a host-side tailer that writes an
+    #: `events.timings.jsonl` sidecar (one `observed_at` per `events.jsonl` line), which the
+    #: console's run-timeline reads to defend a per-call `duration_s`. Off by default: the
+    #: writer is a boundary change (the console is otherwise read-only), so it is James's
+    #: call to arm per project in `[defaults]` of `projects.toml`.
+    timings: bool = False
 
 
 @dataclass(frozen=True)
@@ -181,6 +187,7 @@ def _defaults(raw: Mapping[str, Any]) -> Defaults:
         ),
         timeouts_seconds={str(k): int(v) for k, v in dict(raw.get("timeouts_seconds", {})).items()},
         deny_network=tuple(str(h) for h in raw.get("deny_network", ())),
+        timings=bool(raw.get("timings", False)),
     )
 
 

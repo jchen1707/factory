@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from factory import artifacts, policy
+from factory.agent import timings
 from factory.agent.base import (
     AgentInvocation,
     SchemaInvalid,
@@ -34,7 +35,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, Resumable, State
 from factory.sandbox.base import RunHandle
 from factory.sandbox.sbx import exec_argv
-from factory.steps import Context, advance
+from factory.steps import KILL_TARGET, Context, advance
 
 __all__ = ["build_prompt", "collect", "run", "start"]
 
@@ -186,6 +187,12 @@ def start(
         attempt_dir=attempt_dir.root,
     )
     ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    # Phase 2 (opt-in): a host-side tailer that stamps each `events.jsonl` line with an
+    # `observed_at`, so the run-timeline can defend a per-call `duration_s`. Gated by
+    # `registry.defaults.timings` — off by default, so the test suite (which does not set
+    # it) never spawns a real process, and arming the writer is James's call per project.
+    if ctx.registry.defaults.timings:
+        timings.spawn(attempt_dir.events, attempt_dir.exit_file)
     ctx.log(
         "implement.started",
         sandbox=handle.sandbox,
@@ -252,9 +259,7 @@ def _await_exit(ctx: Context, attempt_dir: AttemptDir, handle: RunHandle) -> Non
         time.sleep(POLL_INTERVAL_SECONDS)
 
     ctx.log("implement.timeout", level="warning", seconds=timeout)
-    kill = getattr(ctx.sandbox, "kill_agent", None)
-    if kill is not None:
-        kill(handle.sandbox)
+    ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[State.IMPLEMENTING])
     for _ in range(12):
         if attempt_dir.exit_file.exists():
             break

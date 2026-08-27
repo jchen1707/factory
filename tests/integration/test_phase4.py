@@ -539,6 +539,55 @@ def test_an_orphaned_verify_run_goes_resumable_and_is_rerun(
     assert ctx.run.state is State.VERIFYING
 
 
+def test_a_hung_gate_report_is_signalled_by_the_name_it_actually_runs_under(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `verifying` attempt past its timeout ends with a terminal record, not an orphan.
+
+    `kill_agent` is `pkill -x <proc>` — it matches the process name exactly and nothing
+    else. The gate report is a `node` process, so signalling `codex` at it selects nothing:
+    the wrapper is never asked to stop, no `exit` file lands, and the attempt is orphaned
+    with `exit_code = NULL` after the whole kill grace is spent. That is Phase 5 defect 3,
+    which `verify._await_exit` fixed for `factory run` and `reap` never learned — so under
+    the daemon, which is every unattended run, a hung gate report has never been signalled.
+
+    The assertion is the effect, not the argument: a test that checked `kill_agent` was
+    *called* with "node" would pass against an adapter that accepted the name and signalled
+    nothing, which is the shape of verification P0 already got wrong once.
+    """
+    _stub_redphase(monkeypatch)
+    _to_verifying(ctx)
+    # A gate report still in flight: an attempt row, a fresh heartbeat, no `exit`.
+    _fake(ctx).detach_without_finishing = True
+    started = verify_step.start(ctx)
+    assert started is not None
+    attempt_dir = started[0].root
+    assert _fake(ctx).detached_procs[-1] == "node"
+
+    # Past the state's timeout, measured from the transition into `verifying`.
+    with ctx.store.transaction() as conn:
+        conn.execute("UPDATE transitions SET at = at - 7200 WHERE run_id = ?", (ctx.run.id,))
+    ctx.refresh()
+    monkeypatch.setattr(reap_step, "KILL_GRACE_SECONDS", 1)
+
+    reap_step.reap(ctx)
+
+    # The signal reached the gate report, so the wrapper wrote `exit` and the attempt has a
+    # real terminal record. Unsignalled, none of these hold: no `exit` ever lands, the whole
+    # kill grace is spent, and the attempt is orphaned with `exit_code = NULL`.
+    assert (attempt_dir / "exit").exists(), "the signal never reached the gate report"
+    row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.VERIFYING)
+    assert row is not None
+    assert row["exit_code"] is not None
+    assert row["outcome"] == "timed-out"
+
+    # And the run is retryable, not blocked: a spent budget is the ladder's to answer.
+    ctx.refresh()
+    assert ctx.run.state is State.RESUMABLE
+    hop = ctx.store.transitions(ctx.run.id)[-1]
+    assert (hop["to_state"], hop["rule"]) == (str(State.RESUMABLE), "state-timeout")
+
+
 def test_a_verify_run_that_orphaned_past_the_ceiling_escalates_to_failed(
     ctx: Context,
 ) -> None:

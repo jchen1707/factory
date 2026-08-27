@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -266,7 +267,7 @@ def test_there_is_no_merge_button_on_any_page(ctx: Context) -> None:
     ctx.refresh()
     client = _client(ctx)
 
-    for path in ("/", "/runs/BAC-4", "/runtimes", "/config"):
+    for path in ("/", "/runs/BAC-4", "/runs/BAC-4/timeline", "/runtimes", "/config"):
         page = client.get(path).text
         assert "/merge" not in page, path
         assert ">Merge<" not in page, path
@@ -478,3 +479,185 @@ def test_a_build_sandbox_lists_the_run_implementing_in_it(ctx: Context) -> None:
     )
 
     assert rows[0].runs_using == ["BAC-4"]
+
+
+# --------------------------------------------------------------------------------
+# View 6 — the run timeline (agent status + runtime waterfall)
+# --------------------------------------------------------------------------------
+
+
+def test_the_waterfall_partitions_time_and_marks_the_dead_attempt(ctx: Context) -> None:
+    # The blocks are the transitions laid on a time axis: [start, end) partitions
+    # [created_at, now] with no gap or overlap, the last block is live, and an attempt that
+    # died via `-> resumable` is hatched (`dead=True`) while the resume that follows is not.
+    _to_implementing(ctx)
+    ctx.refresh()
+    run = ctx.run
+    ctx.store.record_transition(
+        run.id,
+        from_state=State.IMPLEMENTING,
+        to_state=State.RESUMABLE,
+        actor="tick",
+        rule="died",
+    )
+    ctx.store.record_transition(
+        run.id,
+        from_state=State.RESUMABLE,
+        to_state=State.IMPLEMENTING,
+        actor="tick",
+        rule="resume",
+    )
+    ctx.refresh()
+
+    blocks = console_views.run_timeline(
+        ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run
+    ).blocks
+
+    assert blocks  # non-empty
+    # the partition: first block starts at run creation, consecutive boundaries meet
+    assert blocks[0].start == ctx.run.created_at
+    for a, b in pairwise(blocks):
+        assert a.end == b.start
+    # the last block is the live resume; the dead attempt is the implementing before it
+    assert blocks[-1].live is True
+    assert blocks[-1].state == "implementing"
+    assert blocks[-1].dead is False
+    dead = [b for b in blocks if b.dead]
+    assert len(dead) == 1
+    assert dead[0].state == "implementing"
+    # the dead block belongs to the rung below the live one
+    assert dead[0].attempt == blocks[-1].attempt - 1
+
+
+def test_the_agent_cards_mark_the_live_role_and_hide_context_from_the_rest(
+    ctx: Context,
+) -> None:
+    # `_to_implementing` skips planning (`auto = false`), so on entry: builder is live,
+    # planner and reviewer are idle (never entered). The honesty table's central rule: only
+    # the live role can carry a context %; the others are `None` with a reason, never a
+    # number the stream cannot be attributed to.
+    _to_implementing(ctx)
+    ctx.refresh()
+
+    cards = {
+        c.role: c
+        for c in console_views.run_timeline(
+            ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run
+        ).cards
+    }
+    assert cards["builder"].status == "live"
+    assert cards["planner"].status == "idle"  # planning was never entered
+    assert cards["reviewer"].status == "idle"
+    # non-live roles carry no context number, only the reason
+    assert cards["planner"].context_pct is None
+    assert cards["reviewer"].context_pct is None
+    assert cards["planner"].context_reason is not None
+    # activity and heartbeat are live-role-only
+    assert cards["planner"].activity is None
+    assert cards["reviewer"].heartbeat_age is None
+
+    # advance to reviewing via legal hops: reviewer goes live, builder -> done (it ran)
+    run = ctx.run
+    ctx.store.record_transition(
+        run.id, from_state=State.IMPLEMENTING, to_state=State.VERIFYING, actor="tick"
+    )
+    ctx.store.record_transition(
+        run.id, from_state=State.VERIFYING, to_state=State.REVIEWING, actor="tick"
+    )
+    ctx.refresh()
+    cards = {
+        c.role: c
+        for c in console_views.run_timeline(
+            ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run
+        ).cards
+    }
+    assert cards["reviewer"].status == "live"
+    assert cards["builder"].status == "done"  # implementing was entered
+    assert cards["planner"].status == "idle"  # planning still never entered
+    assert cards["builder"].context_pct is None  # done role — no context number
+
+
+def test_the_run_timeline_page_renders_all_three_bands(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.refresh()
+
+    response = _client(ctx).get("/runs/BAC-4/timeline")
+
+    assert response.status_code == 200
+    page = response.text
+    # band 1 (head), band 2 (cards), band 3 (waterfall) are all present
+    assert "runtime · swim-lane waterfall" in page
+    for role in ("planner", "builder", "reviewer"):
+        assert role in page
+    assert "implementing" in page  # the live builder block
+    # the page subscribes to its own SSE stream
+    assert "EventSource('/sse/timeline/BAC-4')" in page
+    # read-only: no merge control, anywhere
+    assert "/merge" not in page
+    assert ">Merge<" not in page
+
+
+def test_the_timeline_lists_tool_calls_folded_from_events(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.refresh()
+    # the live attempt's events.jsonl gains a completed command; the timeline folds it
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    (attempt_dir / "events.jsonl").write_text(
+        json.dumps({"type": "thread.started", "thread_id": "01a0"})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "i1",
+                    "type": "command_execution",
+                    "command": "uv run pytest -q",
+                    "exit_code": 0,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    page = _client(ctx).get("/runs/BAC-4/timeline").text
+
+    assert "uv run pytest -q" in page
+    assert "command_execution" in page
+    # no timings sidecar → no dur column (the Phase 1 look, not a column of em dashes)
+    assert "<th>dur</th>" not in page
+
+
+def test_the_timeline_shows_call_durations_when_a_sidecar_exists(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.refresh()
+    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {"type": "thread.started", "thread_id": "01a0"},
+        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "i1",
+                "type": "command_execution",
+                "command": "uv run pytest -q",
+                "exit_code": 0,
+            },
+        },
+    ]
+    (attempt_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+    # the Phase 2 sidecar: one observed_at per events line, in order
+    (attempt_dir / "events.timings.jsonl").write_text(
+        "\n".join(json.dumps({"observed_at": t}) for t in (1000.0, 1000.0, 1042.0)) + "\n",
+        encoding="utf-8",
+    )
+
+    page = _client(ctx).get("/runs/BAC-4/timeline").text
+
+    # the dur column appears, with the defended duration (42s) rendered
+    assert "<th>dur</th>" in page
+    assert "42s" in page

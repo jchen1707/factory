@@ -177,6 +177,13 @@ class FakeSandbox:
     #: writes `exit` last. This is what gives a suspended attempt a real terminal record
     #: rather than a truncated one (§16.3b step 1).
     kill_writes_exit: bool = True
+    #: The in-VM process name each detached invocation actually runs under, parallel to
+    #: `detached`. Modelled because `kill_agent` is `pkill -x <proc>`, which matches on the
+    #: process name and nothing else: a caller that names the wrong process signals nothing,
+    #: the wrapper never traps, and no `exit` file lands. A fake that ignored the argument
+    #: reported a successful kill for every name and could not tell those two worlds apart —
+    #: which is how `reap` came to signal `codex` at a `verifying` attempt that runs `node`.
+    detached_procs: list[str] = field(default_factory=list)
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
@@ -365,6 +372,8 @@ class FakeSandbox:
         self._start(handle.sandbox)
         self.detached.append((handle.sandbox, script))
         self.detached_dirs.append(handle.attempt_dir)
+        # The gate report is `node gate_report.mjs`; every other detached body is `codex`.
+        self.detached_procs.append("node" if "gate_report.mjs" in script else "codex")
         if self.detach_without_finishing:
             directory = handle.attempt_dir
             directory.mkdir(parents=True, exist_ok=True)
@@ -463,11 +472,18 @@ class FakeSandbox:
         git(clone, "add", "-A")
         git(clone, "commit", "-m", "feat: the agent's turn")
 
-    def kill_agent(self, name: str) -> None:
-        # The real `kill_agent` signals `pkill -f "codex exec"`; the wrapper traps it and
-        # writes the `exit` file. The fake models that second step so a suspend gets a real
+    def kill_agent(self, name: str, proc: str = "codex") -> None:
+        # The real `kill_agent` runs `pkill -x <proc>`; the wrapper traps the signal and
+        # writes the `exit` file. The fake models both steps so a suspend gets a real
         # terminal record. The last detached run in this sandbox is the one to stop.
+        #
+        # `proc` is honoured rather than ignored: `pkill -x` matches the process name
+        # exactly, so naming the wrong one signals nothing at all and no `exit` ever
+        # lands. Returning early here is that world, and it is the one a `verifying`
+        # attempt lived in until `reap` learned to name `node`.
         if not self.kill_writes_exit or not self.detached_dirs:
+            return
+        if proc != self.detached_procs[-1]:
             return
         (self.detached_dirs[-1] / "exit").write_text(str(self.exit_code))
 

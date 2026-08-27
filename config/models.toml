@@ -17,7 +17,7 @@ model  = "gpt-5.6-sol"
 # were all in the factory's own plumbing, not in what the builder wrote. "medium" is
 # the next step down if this is still too expensive; "max" is above, and "ultra" is
 # never routable — the validation refuses it.
-effort = "high"
+effort = "medium"
 
 [roles.reviewer]
 model  = "gpt-5.6-terra"           # MUST differ from roles.builder.model
@@ -25,15 +25,15 @@ effort = "high"
 
 [roles.synthesiser]
 model  = "gpt-5.6-luna"
-effort = "medium"                  # merges findings; it does not read the diff
+effort = "high"                    # merges findings; it does not read the diff
 
 [roles.documenter]
-model  = "gpt-5.4-mini"
-effort = "low"
+model  = "gpt-5.6-luna"
+effort = "high"
 
 [budget]
-usd_per_run = 20.0                 # hard ceiling; the run blocks, never mid-write
-usd_warn_at = 12.0
+usd_per_run = 50.0                 # hard ceiling; the run blocks, never mid-write
+usd_warn_at = 30.0
 
 # The measured catalogue, seeded from ~/.codex/models_cache.json
 # (client_version 0.147.0, fetched 2026-08-20T23:00:06Z) — p0-12-models.md.
