@@ -11,9 +11,13 @@ only a clear diff is pushed.
 
 On a clean delivery the run transitions `pr_ready -> awaiting_human` and announces it
 (§13.1): the issue moves to In Review and the factory comments the PR link, the gate
-report, the review summary and the cost. The `pr_ready` "attach the PR URL" write is
-Linear's GitHub integration's job (the `Fixes <TEAM-NUM>` in the body triggers it); the
-factory records the URL on the run row and carries it in the awaiting_human comment.
+report, the review summary and the cost. **Every one of those Linear writes is the
+factory's own**, through `intake/linear.py` and the effects ledger — `issueUpdate` for the
+state move, `commentCreate` for the link — so the announcement does not depend on any
+forge-to-tracker integration being installed. What the GitHub integration adds on top is
+the *native* attachment: the `Fixes <TEAM-NUM>` in the body makes Linear render the PR as a
+linked resource on the issue. That is a nicety, not a load-bearing step, which is why a
+`gitlab` project loses nothing but the backlink chip.
 """
 
 from __future__ import annotations
@@ -23,7 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from factory import artifacts, policy, repo
-from factory.delivery import github
+from factory.delivery import body as pr_body
+from factory.delivery import forge as forge_dispatch
 from factory.machine import Blocked, State
 from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
@@ -88,16 +93,19 @@ def run(ctx: Context) -> None:
             "PR write. The value is compromised — rotation is James's call.",
         ) from exc
 
-    # 3. Push, then open or edit the PR (F16 duplicate guard).
-    github.push(worktree, branch)
-    existing = github.find_pr(worktree, branch)
+    # 3. Push, then open or edit the PR (F16 duplicate guard). Which forge is a registry
+    #    fact, resolved here rather than imported, so this step names a capability and not a
+    #    vendor — see `delivery/forge.py`.
+    forge = forge_dispatch.for_project(ctx.project)
+    forge.push(worktree, branch)
+    existing = forge.find_pr(worktree, branch)
     if existing:
         pr_url = existing
-        number = github.pr_number(existing)
+        number = forge.pr_number(existing)
         if number is not None:
-            github.edit_pr(worktree, number, body_file=body_path)
+            forge.edit_pr(worktree, number, body_file=body_path)
     else:
-        pr_url = github.create_pr(
+        pr_url = forge.create_pr(
             worktree,
             base=ctx.project.base_branch,
             head=branch,
@@ -143,7 +151,7 @@ def _render_body(ctx: Context) -> str:
     gates_doc = _read_json(attempt_dir / "gates.json")
     review_summary = _read_json(ctx.state_dir / "review" / "review-summary.json")
     tokens_in, tokens_out, usd = ctx.store.spend(ctx.run.id)
-    return github.render_pr_body(
+    return pr_body.render_pr_body(
         ticket=ctx.run.linear_id,
         title=ctx.issue.title if ctx.issue else ctx.run.linear_id,
         restatement=str(result.get("summary", "")),

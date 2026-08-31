@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from factory import gc
+from factory.delivery import github
 from factory.machine import Blocked, State
 from factory.steps import Context, advance
 from factory.steps import claim as claim_step
@@ -80,7 +81,7 @@ def _complete(
     monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
     monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
     monkeypatch.setattr(cli, "LinearClient", lambda: linear)
-    monkeypatch.setattr(cli.github, "pr_state", lambda cwd, url: pr_state)
+    monkeypatch.setattr(github, "pr_state", lambda cwd, url: pr_state)
     code = cli.cmd_complete(argparse.Namespace(ticket=ticket))
     return code, linear
 
@@ -229,7 +230,7 @@ def test_a_linear_outage_does_not_mask_the_transition(
     monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
     monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
     monkeypatch.setattr(cli, "LinearClient", lambda: linear)
-    monkeypatch.setattr(cli.github, "pr_state", lambda cwd, url: "MERGED")
+    monkeypatch.setattr(github, "pr_state", lambda cwd, url: "MERGED")
 
     code = cli.cmd_complete(argparse.Namespace(ticket=TICKET_ID))
     assert code == 0

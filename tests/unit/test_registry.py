@@ -48,8 +48,8 @@ build_sandbox = "factory-build-python-harness"
 
 def test_the_shipped_registry_loads() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert set(registry.projects) == {"python-harness", "frontend-harness"}
-    assert registry.projects["python-harness"].base_ref == "origin/v2"
+    assert set(registry.projects) == {"nemoclaw-dev", "frontend-harness"}
+    assert registry.projects["nemoclaw-dev"].base_ref == "origin/james/feat/prototype"
 
 
 def test_two_projects_claiming_one_team_refuse_to_load(tmp_path: Path) -> None:
@@ -77,14 +77,16 @@ def test_unknown_team_is_not_eligible_rather_than_an_error() -> None:
 
 def test_resolution_uses_the_identifier_prefix() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert registry.resolve("BAC-4").name == "python-harness"
+    # BAC was python-harness's until 2026-08-31; the retired block is commented out in
+    # `projects.toml` and the team key handed over, because two projects cannot claim one.
+    assert registry.resolve("BAC-4").name == "nemoclaw-dev"
     assert registry.resolve("FRO-7").name == "frontend-harness"
 
 
 def test_python_project_carries_the_measured_uv_environment_fix() -> None:
     # p0-3: a sandbox `uv sync` against the bind-mounted workspace destroyed the host
     # venv. This env var is the measured mitigation, so its absence is a regression.
-    project = load_registry(HOME / "config" / "projects.toml").projects["python-harness"]
+    project = load_registry(HOME / "config" / "projects.toml").projects["nemoclaw-dev"]
     assert project.env["UV_PROJECT_ENVIRONMENT"].startswith("/home/agent/")
 
 
@@ -164,3 +166,59 @@ def test_the_real_registry_declares_sensitive_paths_that_match_something() -> No
         for glob in project.sensitive_paths:
             assert glob.endswith("/**"), f"{project.name}: {glob} is not a directory glob"
             assert not glob.startswith("/"), f"{project.name}: {glob} is not repo-relative"
+
+
+# --------------------------------------------------------------------------------
+# the forge key — §13.2
+# --------------------------------------------------------------------------------
+
+
+def test_a_project_that_omits_the_forge_key_still_delivers_to_github() -> None:
+    # Every project predating the GitLab adapter omits the key, and the delivery path must
+    # not change under them. A default that had to be written out in `projects.toml` would
+    # have made this a migration.
+    registry = load_registry(HOME / "config" / "projects.toml")
+
+    assert registry.projects["frontend-harness"].forge == "github"
+
+
+def test_the_shipped_registry_routes_nemoclaw_to_gitlab() -> None:
+    # The first non-GitHub project. Pinned because `forge` decides which CLI's keyring
+    # credential a push authenticates with, and a silent revert to the default would push
+    # to a GitHub remote that does not exist rather than failing.
+    registry = load_registry(HOME / "config" / "projects.toml")
+
+    assert registry.projects["nemoclaw-dev"].forge == "gitlab"
+    assert registry.projects["nemoclaw-dev"].remote.startswith("git@172.18.194.183:")
+
+
+def test_a_project_can_name_gitlab(tmp_path: Path) -> None:
+    config = tmp_path / "projects.toml"
+    config.write_text(
+        SENSITIVE.replace('stack = "monorepo"', 'stack = "monorepo"\nforge = "gitlab"')
+    )
+
+    assert load_registry(config).projects["silent"].forge == "gitlab"
+
+
+def test_an_unknown_forge_is_a_load_error_not_a_delivery_error(tmp_path: Path) -> None:
+    # The point of validating here: a typo'd forge must fail when James edits the registry,
+    # not eight minutes into a run that has already spent model budget on an implement step.
+    config = tmp_path / "projects.toml"
+    config.write_text(
+        SENSITIVE.replace('stack = "monorepo"', 'stack = "monorepo"\nforge = "githib"')
+    )
+
+    with pytest.raises(RegistryError, match="names forge 'githib'"):
+        load_registry(config)
+
+
+def test_the_registry_and_the_dispatch_agree_on_the_forge_names() -> None:
+    """`registry._FORGES` is spelled out rather than imported, to avoid a cycle.
+
+    That duplication is only safe while something fails when the two drift, which is this.
+    """
+    from factory.delivery.forge import FORGES
+    from factory.registry import _FORGES
+
+    assert set(_FORGES) == set(FORGES)

@@ -28,7 +28,7 @@ from pathlib import Path
 from factory import artifacts, doctor, driver, gc, machine, policy, recovery, repo
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
-from factory.delivery import github
+from factory.delivery import forge as forge_dispatch
 from factory.harness import load_harness_config
 from factory.intake.linear import (
     Condition,
@@ -655,17 +655,23 @@ def _board_pr_state(
 ) -> Callable[[str, str], str | None]:
     """A ``pr_state(project_name, pr_url)`` closure for the board's merge check.
 
-    ``gh pr view <url>`` resolves the repo from the URL, so the cwd only needs to
-    be *some* path on this machine for `gh` to find its auth. The project's own
-    checkout is the natural one; a project missing from the registry (a run whose
-    project row was removed) falls back to the factory home so the row is still
-    asked about rather than silently dropped.
+    ``gh pr view <url>`` and ``glab mr view <url>`` both resolve the repo from the URL, so
+    the cwd only needs to be *some* path on this machine for the CLI to find its auth. The
+    project's own checkout is the natural one; a project missing from the registry (a run
+    whose project row was removed) falls back to the factory home so the row is still asked
+    about rather than silently dropped.
+
+    That fallback is also the one place the forge is read off the URL instead of the
+    registry (`forge.for_url`). `for_project` is the rule everywhere else and stays the
+    rule — but here there is no project row left to ask, and the alternative is defaulting
+    to GitHub and reporting every GitLab row as unreadable.
     """
 
     def _state(project_name: str, pr_url: str) -> str | None:
         project = registry.projects.get(project_name)
-        cwd = project.path if project is not None else factory_home()
-        return github.pr_state(cwd, pr_url)
+        if project is not None:
+            return forge_dispatch.for_project(project).pr_state(project.path, pr_url)
+        return forge_dispatch.for_url(pr_url).pr_state(factory_home(), pr_url)
 
     return _state
 
@@ -1158,10 +1164,10 @@ def cmd_complete(args: argparse.Namespace) -> int:
         return 1
 
     project = registry.resolve(run.linear_id)
-    state = github.pr_state(project.path, run.pr_url)
+    state = forge_dispatch.for_project(project).pr_state(project.path, run.pr_url)
     if state is None:
         print(
-            f"could not read {run.pr_url} with `gh` (unauthenticated, offline, or no repo "
+            f"could not read {run.pr_url} with the forge CLI (unauthenticated, offline, or no repo "
             f"at {project.path}). Nothing was changed; this is worth retrying."
         )
         return 1

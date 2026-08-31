@@ -56,6 +56,15 @@ def requires_human(source: State, target: State) -> str | None:
 HOST_EXECUTION_DENY: tuple[str, ...] = (
     ".husky/**",
     ".github/**",
+    # The GitLab half of `.github/**`, added with the `gitlab` forge adapter. Without
+    # these, a `forge = "gitlab"` project got a *weaker* guard than a GitHub one for no
+    # stated reason: `.gitlab-ci.yml` is the pipeline definition, `.gitlab/` holds the
+    # included templates and the CODEOWNERS/issue-template machinery, and a runner that
+    # picks either up executes agent-authored YAML on infrastructure the project owns.
+    # `**/.gitlab-ci.yml` because a monorepo's per-package pipelines are not at the root.
+    ".gitlab-ci.yml",
+    "**/.gitlab-ci.yml",
+    ".gitlab/**",
     ".pre-commit-config.yaml",
     "Makefile",
     "*.mk",

@@ -141,6 +141,63 @@ def test_no_pull_request_is_merged_through_the_rest_api_either() -> None:
         assert not re.search(r"pulls/[^\s\"']*/merge|/merge[\"'/]", body), path
 
 
+#: The `glab` half of the same surface. A second forge adapter walks straight past
+#: `_GH_ARGV` — `glab mr merge` contains no `"gh"` literal — so "the factory never merges"
+#: would have quietly become a claim about GitHub only, with no test failing to say so.
+#: Every forge added from here needs its pair of entries in this file, and that is the
+#: whole reason the adapters are kept to six functions.
+_GLAB_ARGV = re.compile(r'"glab"\s*,\s*"([a-z-]+)"\s*,\s*"([a-z-]+)"')
+
+ALLOWED_GLAB_CALLS = {
+    ("mr", "list"),  # the F16 duplicate guard
+    ("mr", "create"),  # deliver
+    ("mr", "update"),  # deliver, on a re-delivery — `gh pr edit`'s counterpart
+    ("mr", "view"),  # complete — evidence that James merged
+}
+
+
+def test_the_factory_never_merges_a_merge_request_either() -> None:
+    """The GitLab adapter is held to the same five-verb surface as the GitHub one.
+
+    GitLab spells approval `glab mr approve` and merge `glab mr merge`; it also has
+    `glab mr merge --when-pipeline-succeeds`, which is the same act deferred, and
+    `--auto-merge`, which is the same act named differently. All of them are absent, and
+    the set comparison below is what keeps them absent rather than this docstring.
+    """
+    found: set[tuple[str, str]] = set()
+    for _, body in _bodies():
+        found |= set(_GLAB_ARGV.findall(body))
+
+    assert ("mr", "merge") not in found
+    assert ("mr", "approve") not in found  # approving is James's too (§24.8)
+    assert found <= ALLOWED_GLAB_CALLS, (
+        f"unaccounted glab calls: {sorted(found - ALLOWED_GLAB_CALLS)}"
+    )
+    assert found == ALLOWED_GLAB_CALLS
+
+
+def test_no_merge_request_is_merged_through_the_gitlab_api_either() -> None:
+    # `PUT /projects/{id}/merge_requests/{iid}/merge`, and the auto-merge flags that are
+    # the same act with a delay on it. The `/merge[\"'/]` half of the GitHub test above
+    # already catches the bare path segment; these are the spellings it does not.
+    for path, body in _bodies():
+        assert not re.search(r"merge_requests/[^\s\"']*/merge", body), path
+        for flag in ("--auto-merge", "--when-pipeline-succeeds", "merge_when_pipeline"):
+            assert flag not in body, f"{flag} appears in {path}"
+
+
+def test_no_push_option_opens_a_merge_request_as_a_side_effect() -> None:
+    """GitLab can open an MR from the push itself, which would bypass the §13.2 body.
+
+    `git push -o merge_request.create` races the F16 duplicate guard and produces an MR
+    with no gate report, no review summary and no cost — the evidence the PR body exists to
+    carry. `gitlab.push` documents the omission; this is what enforces it.
+    """
+    for path, body in _bodies():
+        assert "merge_request.create" not in body, path
+        assert "merge_request.merge_when" not in body, path
+
+
 def test_no_source_records_a_transition_with_no_source_state() -> None:
     """`from_state=None` is the one way past `record_transition`'s §5.2 check.
 

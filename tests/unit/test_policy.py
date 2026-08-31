@@ -34,6 +34,10 @@ from factory.policy import (
         ".codex/hooks.json",
         "harness.config.json",
         ".gitattributes",
+        # The GitLab pipeline definitions, at the root and in a monorepo package.
+        ".gitlab-ci.yml",
+        "packages/api/.gitlab-ci.yml",
+        ".gitlab/ci/build.yml",
     ],
 )
 def test_every_deny_entry_escalates(path: str) -> None:

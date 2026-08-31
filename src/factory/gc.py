@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, policy, repo
-from factory.delivery import github
+from factory.delivery import forge as forge_dispatch
 from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
 from factory.sandbox.base import SandboxAdapter
@@ -201,7 +201,7 @@ def _delete_branch(project: Project, run: Run, why: str, *, dry_run: bool) -> li
     keep = repo.reason_to_keep_branch(project.path, branch, run.base_ref or project.base_ref)
     if keep:
         return [Action("branch-delete", branch, f"kept: {keep}", False)]
-    if github.find_pr(project.path, branch):
+    if forge_dispatch.for_project(project).find_pr(project.path, branch):
         return [Action("branch-delete", branch, "kept: it has an open pull request", False)]
     if dry_run:
         return [Action("branch-delete", branch, why, False)]

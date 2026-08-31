@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from factory import cli, recovery, repo
+from factory.delivery import github
 from factory.machine import Blocked, State
 from factory.steps import Context, advance, redphase
 from factory.steps import deliver as deliver_step
@@ -390,7 +391,7 @@ def test_deliver_routes_a_deny_list_path_to_awaiting_human_without_pushing(
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: [".husky/pre-commit"])
     pushed: list[str] = []
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: pushed.append(b))
+    monkeypatch.setattr(github, "push", lambda wt, b: pushed.append(b))
 
     deliver_step.run(ctx)
 
@@ -406,14 +407,14 @@ def test_deliver_opens_a_ready_for_review_pr_and_announces(
 ) -> None:
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: None)
-    monkeypatch.setattr(deliver_step.github, "find_pr", lambda wt, b: None)
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "find_pr", lambda wt, b: None)
     # `create_pr` is the seam the whole item turns on, so the real argv is captured
     # rather than the wrapper stubbed away — the draft flag is the one token that has to
     # be gone, and a stub that swallows argv could not tell you (§24.8).
     argv: list[list[str]] = []
     monkeypatch.setattr(
-        deliver_step.github.subprocess,
+        github.subprocess,
         "run",
         _capture(argv, stdout="https://github.com/jchen1707/python-harness/pull/11\n"),
     )
@@ -434,18 +435,16 @@ def test_a_duplicate_pr_is_edited_not_recreated(
 ) -> None:
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
     monkeypatch.setattr(
-        deliver_step.github,
+        github,
         "find_pr",
         lambda wt, b: "https://github.com/jchen1707/python-harness/pull/12",
     )
     created: list[str] = []
     edited: list[int] = []
-    monkeypatch.setattr(
-        deliver_step.github, "create_pr", lambda wt, **kw: created.append(kw["head"])
-    )
-    monkeypatch.setattr(deliver_step.github, "edit_pr", lambda wt, n, **kw: edited.append(n))
+    monkeypatch.setattr(github, "create_pr", lambda wt, **kw: created.append(kw["head"]))
+    monkeypatch.setattr(github, "edit_pr", lambda wt, n, **kw: edited.append(n))
 
     deliver_step.run(ctx)
 
@@ -462,12 +461,12 @@ def test_a_secret_in_the_pr_body_blocks_before_any_push(
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
     monkeypatch.setattr(
-        deliver_step.github,
+        deliver_step.pr_body,
         "render_pr_body",
         lambda **kw: "Fixes BAC-4\n\nleaked ghp_" + "A" * 36,
     )
     pushed: list[str] = []
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: pushed.append(b))
+    monkeypatch.setattr(github, "push", lambda wt, b: pushed.append(b))
 
     with pytest.raises(Blocked) as caught:
         deliver_step.run(ctx)
