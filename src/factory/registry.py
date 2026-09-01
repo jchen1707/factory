@@ -16,6 +16,7 @@ __all__ = [
     "Project",
     "Registry",
     "RegistryError",
+    "SandboxDelivery",
     "VaultConfig",
     "load_registry",
 ]
@@ -30,6 +31,41 @@ class RegistryError(Exception):
 #: constant is not worth a cycle. `tests/unit/test_registry.py` asserts the two agree, so
 #: the duplication cannot drift.
 _FORGES = ("github", "gitlab")
+
+
+@dataclass(frozen=True)
+class SandboxDelivery:
+    """A project that pushes and opens its merge request **from inside the VM** (§13.2,
+    deliberately reversed for this project and no other).
+
+    Declaring this sub-table is the whole opt-in. Everything downstream reads it rather
+    than a flag in `src/`: `steps/deliver.py` picks `delivery/sandbox_gitlab.py` over the
+    host adapter, `policy.capability_secrets` admits `placeholder_env` inside the VM, and the
+    preflight asserts the two things that must be true before any model spend. Deleting
+    the sub-table restores the full-strength boundary with **no code revert** — that
+    property is the reason the opt-in lives here and not in a constant, and it is worth
+    more than the four lines it costs.
+
+    `placeholder_env` is the *env name* of an `sbx secret set-custom` entry, and what the VM
+    receives under it is a `sbx-cs-…` **placeholder**, never the `glpat-…`. The proxy
+    substitutes the real token into the outbound request headers on the way to
+    `api_url`, so the agent gains a capability bounded to one host and one sandbox
+    scope, not a credential. `delivery/sandbox_gitlab.py` argues this at length; the
+    argument is the only reason this sub-table is defensible at all.
+    """
+
+    #: The instance root, e.g. `https://172.18.194.183`. `/api/v4` is appended.
+    api_url: str
+    #: `group/subgroup/project` as the API addresses it. From the registry rather than
+    #: parsed out of `remote`, so a repository that has moved fails loudly.
+    project_path: str
+    #: The `sbx secret set-custom` env name whose placeholder authenticates the VM.
+    #:
+    #: No CA path sits beside it, and that absence is load-bearing: measured 2026-09-01,
+    #: the VM is offered `sbx`'s proxy certificate rather than the instance's, and the
+    #: image already trusts that CA. A `ca_file` key here would pin the wrong certificate
+    #: and read like diligence while doing it.
+    placeholder_env: str
 
 
 @dataclass(frozen=True)
@@ -131,6 +167,10 @@ class Project:
     #: table held for `frontend` — an inert trigger reads exactly like a trigger that
     #: never fired, and nothing tells the two apart.
     sensitive_paths: tuple[str, ...] = ()
+    #: Set only by a `[projects.<name>.sandbox_delivery]` sub-table. `None` — the default
+    #: and the answer for every other project — means delivery is host-side, which is
+    #: what §13.2 says and what `delivery/github.py` and `delivery/gitlab.py` do.
+    sandbox_delivery: SandboxDelivery | None = None
 
     @property
     def base_ref(self) -> str:
@@ -203,6 +243,51 @@ def _defaults(raw: Mapping[str, Any]) -> Defaults:
     )
 
 
+def _sandbox_delivery(name: str, raw: Mapping[str, Any], *, forge: str) -> SandboxDelivery | None:
+    """Parse `[projects.<name>.sandbox_delivery]`, or `None` when it is absent.
+
+    Absent is the answer for every project but one, and it is the strong answer: §13.2
+    holds and delivery is host-side. Everything here is validated rather than defaulted,
+    because a half-specified opt-in would be discovered at the *end* of a run, after the
+    model spend, by a push that had nowhere to go.
+
+    Two of the three refusals are about the boundary rather than about typos:
+
+    - **`forge` must be `gitlab`.** `sandbox_gitlab.py` is the only in-VM adapter there is.
+      A `github` project with this sub-table would silently deliver host-side anyway, which
+      is a registry that says one thing and does another.
+    - **`requires_clone` must be false.** A clone sandbox's repository lives at the
+      project's path *inside* the VM, and the branch the run built is in the clone, not in
+      the host worktree this adapter would push from. That is a real design question, not a
+      line of code, so it fails here rather than pushing an empty branch.
+    """
+    body = raw.get("sandbox_delivery")
+    if body is None:
+        return None
+    if not isinstance(body, Mapping):
+        raise RegistryError(f"project {name!r}: [sandbox_delivery] must be a table")
+    if forge != "gitlab":
+        raise RegistryError(
+            f"project {name!r} declares [sandbox_delivery] with forge {forge!r}. In-VM "
+            "delivery exists only for gitlab (`delivery/sandbox_gitlab.py`); a github "
+            "project carrying this table would deliver host-side and say otherwise."
+        )
+    if bool(raw.get("requires_clone", False)):
+        raise RegistryError(
+            f"project {name!r} declares [sandbox_delivery] and requires_clone. The branch a "
+            "clone run builds lives in the VM's private clone, not in the worktree this "
+            "adapter pushes from, so the combination would push nothing and report success."
+        )
+    missing = [key for key in ("api_url", "project_path", "placeholder_env") if key not in body]
+    if missing:
+        raise RegistryError(f"project {name!r}: [sandbox_delivery] is missing {missing}")
+    return SandboxDelivery(
+        api_url=str(body["api_url"]).rstrip("/"),
+        project_path=str(body["project_path"]).strip("/"),
+        placeholder_env=str(body["placeholder_env"]),
+    )
+
+
 def _project(name: str, raw: Mapping[str, Any]) -> Project:
     required = ("team", "path", "remote", "base_branch", "stack", "build_sandbox")
     missing = [key for key in required if key not in raw]
@@ -219,6 +304,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
             f"project {name!r} names forge {forge!r}; the adapters are {sorted(_FORGES)}. "
             "A run must not discover this after it has spent model budget."
         )
+    sandbox_delivery = _sandbox_delivery(name, raw, forge=forge)
     return Project(
         name=name,
         team=str(raw["team"]),
@@ -240,6 +326,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
             str(n) for n in raw.get("acknowledged_env_credentials", ())
         ),
         sensitive_paths=tuple(str(g) for g in raw.get("sensitive_paths", ())),
+        sandbox_delivery=sandbox_delivery,
     )
 
 

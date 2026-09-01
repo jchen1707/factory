@@ -11,6 +11,7 @@ reason `_Adapter` is a two-method Protocol.
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -85,22 +86,24 @@ def test_the_token_never_appears_in_argv_or_env(sbx: _FakeSandbox) -> None:
     passing `-e PRIVATE_TOKEN=...`. An author who "simplifies" that back to an env var
     re-opens the hole without changing a single visible behaviour.
     """
-    sg.install_credential(
-        sbx, "factory-build-nemoclaw-dev", ca_pem="---PEM---", placeholder=FAKE_PLACEHOLDER
-    )
+    sg.install_credential(sbx, "factory-build-nemoclaw-dev", placeholder=FAKE_PLACEHOLDER)
 
-    assert FAKE_PLACEHOLDER not in sbx.all_argv, "the token reached argv"
-    assert FAKE_PLACEHOLDER not in sbx.all_env, "the token reached the environment"
-    # It crossed on stdin, which is the only channel that is not in /proc.
+    basic = base64.b64encode(f"oauth2:{FAKE_PLACEHOLDER}".encode()).decode()
+    assert FAKE_PLACEHOLDER not in sbx.all_argv, "the placeholder reached argv"
+    assert FAKE_PLACEHOLDER not in sbx.all_env, "the placeholder reached the environment"
+    # The git half is base64, so a search for the plain string alone would pass while the
+    # credential sat in argv in an encoding that authenticates just as well.
+    assert basic not in sbx.all_argv, "the Basic credential reached argv"
+    assert basic not in sbx.all_env, "the Basic credential reached the environment"
+    # Both crossed on stdin, which is the only channel that is not in /proc.
     assert any(FAKE_PLACEHOLDER in str(c["stdin"] or "") for c in sbx.calls)
+    assert any(basic in str(c["stdin"] or "") for c in sbx.calls)
 
 
 def test_the_credential_files_are_created_before_they_are_written(sbx: _FakeSandbox) -> None:
     # `umask 077` has to precede the redirect: `cat > f` creates the file first, so a
     # umask set afterwards leaves a window where the token is world-readable.
-    sg.install_credential(
-        sbx, "factory-build-nemoclaw-dev", ca_pem="---PEM---", placeholder=FAKE_PLACEHOLDER
-    )
+    sg.install_credential(sbx, "factory-build-nemoclaw-dev", placeholder=FAKE_PLACEHOLDER)
 
     for call in sbx.calls:
         script = call["argv"][-1]
@@ -111,9 +114,7 @@ def test_install_raises_without_leaking_the_token(sbx: _FakeSandbox) -> None:
     sbx.queue.append(_Completed(returncode=1, stderr="permission denied"))
 
     with pytest.raises(sg.SandboxGitlabError) as exc:
-        sg.install_credential(
-            sbx, "factory-build-nemoclaw-dev", ca_pem="p", placeholder=FAKE_PLACEHOLDER
-        )
+        sg.install_credential(sbx, "factory-build-nemoclaw-dev", placeholder=FAKE_PLACEHOLDER)
 
     assert FAKE_PLACEHOLDER not in str(exc.value)
 
@@ -125,21 +126,44 @@ def test_revoke_removes_both_files(sbx: _FakeSandbox) -> None:
 
     script = sbx.calls[0]["argv"][-1]
     assert script.startswith("rm -f")
-    assert sg.CA_PATH in script
     assert sg.HEADER_PATH in script
+    assert sg.GITCONFIG_PATH in script
 
 
 # --------------------------------------------------------------------------------
-# every call must pin the CA — the image does not trust the internal issuer
+# the two credential surfaces, which take two different credentials
 # --------------------------------------------------------------------------------
 
 
-def test_every_api_call_pins_the_ca_and_reads_the_header_from_a_file(
+def test_install_writes_a_private_token_header_and_a_basic_git_config(
+    sbx: _FakeSandbox,
+) -> None:
+    """Measured 2026-09-01: `/api/v4` takes `PRIVATE-TOKEN` and refuses `oauth2:` Basic;
+    git-over-HTTPS takes Basic and refuses `PRIVATE-TOKEN` (`could not read Username`).
+    One file for both would work for exactly one of them, and the other would fail at
+    delivery, after the spend, with an error that reads like a permissions problem."""
+    sg.install_credential(sbx, "factory-build-nemoclaw-dev", placeholder=FAKE_PLACEHOLDER)
+
+    written = {call["argv"][-1].split("cat > ")[-1]: call["stdin"] for call in sbx.calls}
+    assert written[sg.HEADER_PATH] == f"PRIVATE-TOKEN: {FAKE_PLACEHOLDER}\n"
+    basic = base64.b64encode(f"oauth2:{FAKE_PLACEHOLDER}".encode()).decode()
+    assert f"extraHeader = Authorization: Basic {basic}" in written[sg.GITCONFIG_PATH]
+    # In the same file as the credential on purpose: a push cannot pick up the one
+    # without the other, so the agent's hooks can never run on the factory's push.
+    assert "hooksPath = /dev/null" in written[sg.GITCONFIG_PATH]
+
+
+def test_no_api_call_pins_a_ca(
     sbx: _FakeSandbox, forge: sg.SandboxGitlabForge, tmp_path: Path
 ) -> None:
-    """Measured 2026-08-31 in factory-build-python-harness-2: without --cacert, curl
-    exits 60; with it the same request returns 401. A call that forgets it does not
-    degrade, it fails outright — but it fails at delivery, after the model spend."""
+    """The correction that cost the most to learn, so it is pinned rather than trusted.
+
+    The VM never sees the instance's certificate: `sbx`'s proxy terminates TLS and
+    re-presents its own, under a CA the image already trusts. Measured 2026-09-01 with no
+    `--cacert` at all — `/api/v4/version` answered 401 and `/api/v4/user` answered 200
+    with the placeholder. Re-adding `--cacert <the ORAN leaf>` would pin a certificate the
+    VM is never offered, and it would read like diligence.
+    """
     body = tmp_path / "body.md"
     body.write_text("Fixes BAC-9\n")
     sbx.queue.append(_Completed(stdout=json.dumps([])))
@@ -149,25 +173,28 @@ def test_every_api_call_pins_the_ca_and_reads_the_header_from_a_file(
     forge.create_pr(tmp_path, base="main", head="feat/x", title="t", body_file=body)
 
     for call in sbx.calls:
-        argv = call["argv"]
-        assert "--cacert" in argv
-        assert sg.CA_PATH in argv
-        assert f"@{sg.HEADER_PATH}" in argv
+        assert "--cacert" not in call["argv"]
+        assert f"@{sg.HEADER_PATH}" in call["argv"]
 
 
-def test_the_push_pins_the_ca_and_keeps_the_token_out_of_the_remote_url(
+def test_the_push_reads_its_credential_from_a_file_and_never_the_url_or_argv(
     sbx: _FakeSandbox, forge: sg.SandboxGitlabForge, tmp_path: Path
 ) -> None:
-    # A token in the remote URL lands in .git/config, in reflogs, and in whatever error
-    # message git prints on a bad push.
+    """Three ways to lose the credential, all of which still push successfully.
+
+    In the remote URL it lands in `.git/config`, in reflogs and in every error git
+    prints. In `-c http.extraHeader="$(cat …)"` — the obvious spelling — it lands in
+    git's own argv, which any process in the VM reads out of `/proc`. And `-u` writes
+    whatever URL it was given into the branch's upstream config, which is what makes the
+    first mistake permanent.
+    """
     forge.push(tmp_path, "feat/x")
 
     script = sbx.calls[0]["argv"][-1]
-    assert f"http.sslCAInfo={sg.CA_PATH}" in script
-    assert f"cat {sg.HEADER_PATH}" in script
-    assert "http.extraHeader=" in script
+    assert f"GIT_CONFIG_GLOBAL={sg.GITCONFIG_PATH}" in script
+    assert "http.extraHeader" not in script, "the credential is back in git's argv"
     assert "@172.18.194.183" not in script, "credential embedded in the remote URL"
-    assert "core.hooksPath=/dev/null" in script
+    assert " -u " not in script, "-u writes the push URL into .git/config"
 
 
 # --------------------------------------------------------------------------------

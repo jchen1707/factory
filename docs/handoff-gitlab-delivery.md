@@ -1,13 +1,20 @@
 # Handoff — GitLab delivery, and the in-sandbox bypass
 
-Written 2026-08-31. Two commits land with this file:
+Written 2026-08-31, **updated 2026-09-01 when the wiring landed and a real merge request
+was opened from inside a sandbox.** Read [the 2026-09-01 section](#2026-09-01--wired-proven-and-two-corrections)
+first: it corrects two claims below that measurement overturned, and it replaces "What is
+left" almost entirely.
 
-1. **GitLab delivery from the host** — complete, tested, verified against the live
-   instance. This is the default and it works today.
-2. **In-sandbox delivery** — `delivery/sandbox_gitlab.py`, complete and unit-tested but
-   **not wired to anything**. It is a checkpoint, not a feature. Nothing calls it.
+Three commits land with this file:
 
-Read the second half before touching the second commit. It reverses a boundary the rest of
+1. **GitLab delivery from the host** (2026-08-31) — complete, tested, verified against the
+   live instance. This is still the default, and the only path for GitHub projects.
+2. **In-sandbox delivery** (2026-08-31) — `delivery/sandbox_gitlab.py`, unit-tested but
+   wired to nothing. A checkpoint, not a feature.
+3. **The wiring** (2026-09-01) — registry, policy, deliver, doctor, preflight, and the two
+   corrections that the first real push forced.
+
+Read the second half before touching any of them. It reverses a boundary the rest of
 this repository is built on, James approved that reversal deliberately, and the reasons the
 approval was safe are properties a careless edit can remove without failing a test.
 
@@ -23,7 +30,7 @@ the design, and every claim below was measured rather than assumed.
 | Cert SAN | `IP:172.18.194.183` **and** `DNS:gitlab.ric.teluslabs.net` — but that name is NXDOMAIN, so the IP is the host string |
 | Cert validity | to 2035-02-22, so pinning the leaf is stable |
 | Host `git` | works already: all `~/nexus-core/*` remotes are SSH via `~/.ssh/id_ed25519_gitlab` |
-| Sandbox image | `gh`, `curl`, `git` present; **`glab` MISSING**; ORAN CA not trusted; no `~/.ssh` |
+| Sandbox image | `gh`, `curl`, `git` present; **`glab` MISSING**; no `~/.ssh`. ORAN CA not trusted **and not needed** — see correction 1 |
 | `glab` version | 1.115.0 — **there is no `--use-keyring`**; the keyring is the default and `--insecure-storage` is the opt-out |
 
 ### Host-side delivery (commit 1)
@@ -122,25 +129,91 @@ These are machine state, not code, and they are **not** reverted by reverting a 
 
 ## What is left
 
-1. **Registry keys** — a `[projects.<name>.forge]` sub-table: `delivery = "sandbox"`,
-   `api_url`, `project_path`, `ca_file`, and the custom-secret placeholder's source.
-2. **`policy`** — admit the declared name in `capability_env_names` / `capability_secrets`.
-   Gate it on the project's declaration rather than weakening the guard, so that removing
-   the declaration restores full strength with **no code revert**. That is the whole reason
-   James asked whether this could be put back afterwards, and the answer is yes only if it
-   is built this way.
-3. **`steps/deliver.py`** — choose the forge, `install_credential` before the push and
-   `revoke_credential` in a `finally`. A sandbox outlives one run (§16.5), so a placeholder
-   left behind is one available to whatever runs in it next.
-4. **`AGENTS.md`** — amend the credential clause to say what is now true. Do not delete it.
-5. **A real run**, which is the only thing that will prove any of this end to end.
+Exactly one thing, and it is James's because it needs the credential:
+
+```
+sbx secret set-custom --sandbox factory-build-nemoclaw-dev \
+    --host 172.18.194.183 --env FACTORY_GITLAB_TOKEN --value <the glpat>
+```
+
+`set-custom` has no stdin flag, so the value lands in the shell history and, briefly, in
+the process table. Read it into a variable first (`read -rs`), and `unset` it after.
+
+`factory doctor` reports this as a `FAIL` row until it is done, and the sandbox preflight
+fails the run before any model spend rather than discovering it at the push. Nothing else
+is outstanding.
 
 ## What is verified, and what is not
 
-Verified: host `glab` auth against the live instance (`glab mr list` answers for
-`nemoclaw-test`); TLS trust with verification **on**; the sandbox reaching `/api/v4` with an
-injected CA; proxy substitution returning 200; the full suite, ruff, and mypy green.
+Verified on the host: `glab` auth against the live instance, TLS trust with verification
+**on**, the full suite / ruff / mypy green.
 
-Not verified: any merge request actually created by either adapter, and `git push` from
-inside a sandbox over HTTPS. `sandbox_gitlab.py` is driven entirely by a recording fake. The
-first real run is the proof, and it has not happened.
+Verified from inside a sandbox, 2026-09-01, in `factory-build-python-harness-2`:
+
+| Measured | Result |
+| --- | --- |
+| `curl https://172.18.194.183/api/v4/version`, **no** `--cacert` | `401` — TLS fine, the proxy's CA is trusted |
+| the same with `PRIVATE-TOKEN: <placeholder>` on `/api/v4/user` | `200` |
+| `git ls-remote` with `http.extraHeader: PRIVATE-TOKEN` | `could not read Username` — GitLab wants Basic |
+| `git ls-remote` with `Authorization: Basic base64(oauth2:<placeholder>)` | refs listed — the proxy substitutes inside the base64 |
+| `git clone`, commit, `git push` over HTTPS | branch `factory/delivery-probe` pushed |
+| `POST /merge_requests` targeting `james/feat/prototype` | `!1` opened |
+
+**Not** verified: a full `factory run` end to end through the in-VM path. The adapter, the
+dispatch, the credential lifecycle and the preflight all have tests, and the mechanism
+they drive has now been exercised for real — but no ticket has been taken from claim to
+merge request through it. That remains the first real run, and it needs the secret above.
+
+Housekeeping from the probe: MR `!1` and the branch `factory/delivery-probe` on
+`nemoclaw-test` exist only as that proof, and can be closed and deleted. The credential
+files the probe wrote into the sandbox were removed.
+
+## 2026-09-01 — wired, proven, and two corrections
+
+The four wiring steps are done:
+
+1. **Registry** — `[projects.<name>.sandbox_delivery]` with `api_url`, `project_path` and
+   `placeholder_env`. Validated at load: refused for a `github` forge, refused alongside
+   `requires_clone`, refused half-specified. **No `ca_file` key**, see below.
+2. **Policy** — `capability_secrets(..., declared=…)` admits the declared name, and only
+   when `sbx inspect` reports `source: custom`. A *service* secret of the same name still
+   blocks, because that would be a real credential wearing the declaration's clothes. The
+   admission travels on `SandboxSpec.allowed_custom_secrets`, so `SbxAdapter.ensure`
+   applies the same rule. Deleting the sub-table restores full strength with **no code
+   revert**, and `tests/unit/test_policy.py` pins exactly that.
+3. **`steps/deliver.py`** — `forge.for_delivery` (separate from `for_project`, so a read
+   cannot accidentally get the in-VM adapter and a write cannot accidentally miss it),
+   `install_credential` before the push, `revoke_credential` in a `finally`. A missing
+   placeholder is a named `Blocked` that prints the provisioning command.
+4. **`AGENTS.md`** — the credential clause now carries the one declared exception and why
+   it is still literally true.
+
+Plus two that were not on the list: a `sandbox delivery` row in `factory doctor`, and a
+preflight check, so an unprovisioned secret fails at the start of a run rather than at the
+end of a paid one.
+
+### Correction 1: there is no CA to inject
+
+The host needs the ORAN issuer. The sandbox does not, because it never sees it. All
+sandbox egress goes through `HTTPS_PROXY=http://gateway.docker.internal:3128`, which
+terminates TLS and re-presents its own leaf under `Docker Sandboxes Proxy CA` — already in
+the image trust store, and also in `PROXY_CA_CERT_B64`. Pinning the ORAN leaf as `--cacert`
+would pin a certificate the VM is never offered. `CA_PATH` and the registry's `ca_file` key
+are both gone.
+
+The earlier "without it curl exits 60" measurement is not reproducible and was most likely
+taken before the egress allow rule existed, when the failure was a proxy refusal rather
+than a trust failure.
+
+### Correction 2: git needs Basic, and the proxy substitutes inside base64
+
+`PRIVATE-TOKEN` authenticates `/api/v4` and nothing else. GitLab's git endpoint answers
+`401 WWW-Authenticate: Basic`. The useful part is that `sbx`'s proxy substitutes the
+placeholder **inside the base64 of a Basic credential**, so
+`Authorization: Basic base64("oauth2:<placeholder>")` pushes — while the same header on
+`/api/v4` does not authenticate, because the API does not take `oauth2:` Basic.
+
+So `install_credential` writes **two** files: `header` for curl and `gitconfig` for git.
+`push` reaches the second through `GIT_CONFIG_GLOBAL` rather than
+`git -c http.extraHeader="$(cat …)"`, which would put the credential back into git's argv
+— the exact `/proc` exposure the file exists to avoid.

@@ -198,6 +198,38 @@ def test_no_push_option_opens_a_merge_request_as_a_side_effect() -> None:
         assert "merge_request.merge_when" not in body, path
 
 
+def test_the_factory_never_creates_or_changes_a_custom_secret() -> None:
+    """The real `glpat-` must never pass through the control plane.
+
+    `sbx secret set-custom` takes the *credential*, which is why provisioning it is
+    James's act at a terminal and not a step in a run. The factory only ever **reads**
+    the placeholder back out of `sbx secret ls`, which is not a secret at all. A helpful
+    future author who makes the delivery path self-provisioning has moved a live
+    corporate token into an unattended process, and no test below this line would notice.
+    """
+    for path, body in _bodies():
+        # The quoted form, because that is how an argv element is spelled. `deliver.py`
+        # names the command *unquoted*, inside the block message that tells James what to
+        # run — telling a human how to provision a secret is the opposite of provisioning
+        # one, and a grep that could not tell those apart would have to delete the help.
+        assert '"set-custom"' not in body, f"{path} provisions a credential"
+        assert "glpat" not in body, f"{path} names a GitLab personal access token"
+
+
+def test_the_in_vm_credential_is_installed_under_the_name_it_must_have() -> None:
+    """`install_credential(..., placeholder=...)`, never `token=`.
+
+    The whole defence of in-VM delivery is that what crosses is a proxy-substituted
+    placeholder rather than a credential. Both would *work*; only one is the change that
+    was approved. The parameter name is the guard that makes a wrong call site read
+    wrong, so it is pinned here rather than left to review.
+    """
+    source = (SRC / "factory" / "delivery" / "sandbox_gitlab.py").read_text(encoding="utf-8")
+    assert "def install_credential(adapter: _Adapter, sandbox: str, *, placeholder: str)" in source
+    for call in re.findall(r"install_credential\(([^)]*)\)", "\n".join(b for _, b in _bodies())):
+        assert "token=" not in call, f"install_credential called with a token: {call}"
+
+
 def test_no_source_records_a_transition_with_no_source_state() -> None:
     """`from_state=None` is the one way past `record_transition`'s §5.2 check.
 

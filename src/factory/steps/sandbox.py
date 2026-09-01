@@ -75,6 +75,9 @@ def build_spec(ctx: Context) -> SandboxSpec:
         deny_network=ctx.registry.defaults.deny_network,
         env=dict(ctx.project.env),
         clone=ctx.project.requires_clone,
+        allowed_custom_secrets=(
+            (ctx.project.sandbox_delivery.placeholder_env,) if ctx.project.sandbox_delivery else ()
+        ),
     )
 
 
@@ -135,8 +138,24 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     #    are what make that exclusion safe rather than merely convenient.
     info = ctx.sandbox.inspect(spec.name)
     secrets = info.get("secrets") or []
-    offending = capability_secrets(secrets)
+    offending = capability_secrets(secrets, declared=spec.allowed_custom_secrets)
     checks.append(("no-secrets-in-vm", not offending, json.dumps(secrets)))
+
+    # 3d. The other half of that admission. A project that has opted into in-VM delivery
+    #     has told the preflight to stop objecting to one name — so the preflight has to
+    #     prove the thing that name is *for* is actually there. Without this, a missing or
+    #     renamed custom secret is discovered by the push, at the end of a run that has
+    #     already spent its whole model budget, and the failure reads like a network fault.
+    if ctx.project.sandbox_delivery is not None:
+        declared = ctx.project.sandbox_delivery.placeholder_env
+        placeholder = ctx.sandbox.custom_secret_placeholder(spec.name, declared)
+        checks.append(
+            (
+                "sandbox-delivery-provisioned",
+                placeholder is not None,
+                f"{declared} -> {placeholder or 'no custom secret scoped to this sandbox'}",
+            )
+        )
 
     # 3b. The other channel. `sbx inspect` reports proxy-managed secrets and cannot see
     #     an environment variable, so a credential injected into the VM's environment

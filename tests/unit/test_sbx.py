@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from factory.sandbox import sbx as sbx_module
-from factory.sandbox.base import RunHandle, SandboxSpec, Workspace
+from factory.sandbox.base import Completed, RunHandle, SandboxSpec, Workspace
 from factory.sandbox.sbx import SbxAdapter, SbxError, create_argv, exec_argv
 
 
@@ -153,6 +154,74 @@ def test_ensure_accepts_a_sandbox_carrying_only_the_gateway_credential() -> None
     # Unsatisfiable otherwise: `sbx` uploads it into every sandbox whenever any MCP
     # server is registered, and offers no per-sandbox opt-out.
     _adapter_seeing([{"name": "mcpgateway", "source": "uploaded"}]).ensure(_spec())
+
+
+def test_ensure_accepts_the_custom_secret_the_project_declared() -> None:
+    # In-VM delivery: the sandbox holds a `sbx-cs-…` placeholder under this name, and the
+    # spec carries the declaration that admits it. Without this, `ensure` refuses the
+    # sandbox on every tick after the secret is provisioned, and the project cannot run.
+    _adapter_seeing([{"name": "FACTORY_GITLAB_TOKEN", "source": "custom"}]).ensure(
+        _spec(allowed_custom_secrets=("FACTORY_GITLAB_TOKEN",))
+    )
+
+
+def test_ensure_still_refuses_that_secret_for_a_project_that_did_not_declare_it() -> None:
+    # The reversibility property, at the adapter: the admission travels on the spec, so a
+    # project whose `[sandbox_delivery]` table is deleted goes back to refusing the same
+    # sandbox with no code change anywhere.
+    with pytest.raises(SbxError, match="FACTORY_GITLAB_TOKEN"):
+        _adapter_seeing([{"name": "FACTORY_GITLAB_TOKEN", "source": "custom"}]).ensure(_spec())
+
+
+#: What `sbx secret ls --sandbox <name>` prints on v0.38.0, copied from the live host on
+#: 2026-09-01. Whitespace-aligned, no `--json` flag (`unknown flag: --json`), and the
+#: header row contains the word PLACEHOLDER — which is why the reader matches on the
+#: `sbx-cs-` prefix rather than on a column index or on the header's position.
+MEASURED_LISTING = """CUSTOM SECRETS
+SCOPE                            TARGETS          ENV                    PLACEHOLDER               SECRET
+factory-build-nemoclaw-dev       172.18.194.183   FACTORY_GITLAB_TOKEN   sbx-cs-AFlXreOjVPUyNl4k   glpat-******...******9VtS
+"""
+
+
+def _adapter_listing(stdout: str, *, ok: bool = True) -> SbxAdapter:
+    adapter = SbxAdapter()
+
+    def run(argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None):  # type: ignore[no-untyped-def]
+        return Completed(tuple(argv), 0 if ok else 1, stdout, "")
+
+    adapter._run = run  # type: ignore[method-assign]
+    return adapter
+
+
+def test_the_placeholder_is_read_out_of_the_secret_listing() -> None:
+    adapter = _adapter_listing(MEASURED_LISTING)
+    assert (
+        adapter.custom_secret_placeholder("factory-build-nemoclaw-dev", "FACTORY_GITLAB_TOKEN")
+        == "sbx-cs-AFlXreOjVPUyNl4k"
+    )
+
+
+def test_a_secret_in_another_sandboxs_scope_is_not_this_sandboxs_placeholder() -> None:
+    # `sbx secret ls` with no `--sandbox` prints global entries and every other scope's.
+    # Reading a row that names a different sandbox would hand the delivery path a
+    # placeholder the proxy will not substitute for it — a 401 at the end of a paid run.
+    listing = MEASURED_LISTING.replace("factory-build-nemoclaw-dev", "codex-python-harness")
+    assert (
+        _adapter_listing(listing).custom_secret_placeholder(
+            "factory-build-nemoclaw-dev", "FACTORY_GITLAB_TOKEN"
+        )
+        is None
+    )
+
+
+def test_no_placeholder_is_none_rather_than_an_empty_string() -> None:
+    # None is what `steps/deliver.py` turns into a named `Blocked`; "" would be installed
+    # as a credential file and fail at the push with a bare 401.
+    assert _adapter_listing("", ok=False).custom_secret_placeholder("factory-build-x", "E") is None
+    assert (
+        _adapter_listing("CUSTOM SECRETS\n").custom_secret_placeholder("factory-build-x", "E")
+        is None
+    )
 
 
 # --------------------------------------------------------------------------------

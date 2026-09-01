@@ -49,6 +49,12 @@ SBX_EXEC_PID = "sbx-exec.pid"
 #: every start, so it is looked up rather than remembered; this is the stable half.
 GIT_DAEMON_PORT = 9418
 
+#: The prefix `sbx secret set-custom` gives its substitution placeholders. Not a
+#: credential: the real value stays on the host and the proxy swaps this string into the
+#: outbound request. Named for the prefix rather than for what it stands in for, because
+#: ruff S105 reads any constant whose name says "secret" or "token" as a hardcoded one.
+_PLACEHOLDER_PREFIX = "sbx-cs-"
+
 #: How long `exec_detached` waits for the wrapper's first heartbeat before calling the
 #: start a failure. Generous because it covers `sbx exec` starting a stopped sandbox,
 #: and cheap because the common case returns as soon as the file appears.
@@ -233,7 +239,9 @@ class SbxAdapter:
         # the sandbox rather than assumed from how it was made — a sandbox created
         # while a secret was still global keeps it, because `sbx` fixes the secret set
         # at creation. Recreating is the only fix, which is what the message says.
-        offending = capability_secrets(info.get("secrets") or [])
+        offending = capability_secrets(
+            info.get("secrets") or [], declared=spec.allowed_custom_secrets
+        )
         if offending:
             raise SbxError(
                 f"sandbox {spec.name} has injected secrets {offending}; factory "
@@ -271,6 +279,40 @@ class SbxAdapter:
                     continue
                 host = port.get("host_ip") or "127.0.0.1"
                 return f"git://{host}:{int(port['host_port'])}"
+        return None
+
+    def custom_secret_placeholder(self, name: str, env: str) -> str | None:
+        """The `sbx-cs-…` placeholder for `env` in `name`'s scope, or None if there is none.
+
+        The one host-side read the in-VM delivery path needs. The placeholder is not a
+        secret — off the proxy, or aimed at any host but the one its rule names, it is a
+        meaningless string — so it is fetched here and handed to the sandbox, rather than
+        relying on `set-custom --env` to export it. That flag is EXPERIMENTAL and measured
+        2026-08-31 it never reaches an `sbx exec` session: absent before *and* after a
+        stop/restart, while `sbx inspect` went on listing the secret. A delivery path
+        depending on it would fail at the last step of a run that had already been paid for.
+
+        Parsed out of the table `sbx secret ls` prints, because there is no `--json` on
+        `secret ls` (v0.38.0: `unknown flag`). Scoped with `--sandbox` deliberately — the
+        same command with no scope prints global entries too, and a global custom secret
+        is a rule that fires for `codex-*` sandboxes as well, which is not a thing this
+        path should be able to reach for by accident.
+
+        Matched on the placeholder's own `sbx-cs-` prefix rather than on a column index:
+        the output is whitespace-aligned with values that contain no spaces, so a column
+        count is the fragile way to read it and the prefix is the stable one.
+        """
+        assert_factory_sandbox(name)
+        result = self._run(["sbx", "secret", "ls", "--sandbox", name], timeout=60)
+        if not result.ok:
+            return None
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if name not in fields or env not in fields:
+                continue
+            for field_value in fields:
+                if field_value.startswith(_PLACEHOLDER_PREFIX):
+                    return field_value
         return None
 
     def stop(self, name: str) -> None:

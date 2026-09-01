@@ -84,6 +84,15 @@ class SandboxSpec:
     #: a macOS host (p0-10); the python path uses `UV_PROJECT_ENVIRONMENT` instead.
     clone: bool = False
     share_skills: bool = True
+    #: Custom-secret names this project's registry entry declares (`[sandbox_delivery]`),
+    #: which `policy.capability_secrets` therefore admits inside the VM. Empty for every
+    #: project that has not opted in, which is the strong default.
+    #:
+    #: Carried on the spec rather than looked up where it is checked, because the check
+    #: lives in `SbxAdapter._assert_spec_matches`, which has a sandbox name and no
+    #: registry. Not a creation-time field — it appears in no `create_argv` — so changing
+    #: it does not force a new sandbox name.
+    allowed_custom_secrets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -156,6 +165,8 @@ class SandboxAdapter(Protocol):
     def collect(self, handle: RunHandle) -> RunResult: ...
 
     def git_daemon_url(self, name: str) -> str | None: ...
+
+    def custom_secret_placeholder(self, name: str, env: str) -> str | None: ...
 
     def stop(self, name: str) -> None: ...
 

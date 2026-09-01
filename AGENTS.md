@@ -35,13 +35,25 @@ in `src/` is a review failure; `uv` and `pnpm` appear only as *expectations to c
   same grep test proves that too.
 - **The control plane owns every tracker and GitHub write**, from the host, through the
   effects ledger. The agent writes neither. **No credential that grants the agent a
-  capability enters a sandbox** — `policy.capability_secrets()` is the one place that
-  judgement is made, and the preflight reads it from `sbx inspect`, because `sbx` secrets
+  capability enters a sandbox** — with one declared exception, below —
+  `policy.capability_secrets()` is the one place that judgement is made, and the preflight reads it from `sbx inspect`, because `sbx` secrets
   are proxy-managed and an env scan inside the VM would find nothing and look green. The
   single exclusion is the MCP gateway's own token, which `sbx` uploads unconditionally and
   no flag removes; it is argued in full at `GATEWAY_CREDENTIAL` and compensated by
   `deny_network`. Widening that exclusion is not a simplification, it is a boundary
   change.
+- **One project delivers from inside its own sandbox, and the clause above still holds
+  literally.** `nemoclaw-dev` declares `[sandbox_delivery]` in `projects.toml`: its build
+  sandbox pushes the branch and opens the merge request itself. What enters the VM is an
+  `sbx secret set-custom` **placeholder**, not the `glpat-`; the real token stays on the
+  host and the proxy substitutes it into the outbound request. So the agent gains a
+  *capability*, bounded to one host and one sandbox scope, and holds no credential —
+  measured, and proven end to end on 2026-09-01. James approved this reversal of §13.2
+  after the concern was raised twice. It is reversible by deleting the sub-table, with no
+  code change, and `delivery/sandbox_gitlab.py` carries the argument in full. Widening it
+  — a real token in the VM, a second project, a `github` forge — is a new decision, not a
+  refactor.
+
 - **Sandboxes are `factory-build-*` and `factory-review-*`.** Never attach to, stop or
   remove a `codex-*` sandbox — that is James's live `csbx` session, and an unattended
   writer inside a live human session is the failure this rule exists to prevent.

@@ -157,9 +157,9 @@ path           = "/Users/james/nexus-core/nemoclaw-dev"
 # ~/.ssh/config with IdentitiesOnly), which sidesteps the instance's internal CA — the
 # ORAN issuer is not in the System keychain and an HTTPS remote would fail verification.
 remote         = "git@172.18.194.183:nexus-core/ran-ai-agents/nemoclaw-test.git"
-# §13.2 — delivery goes through `glab`, host-side, exactly as the GitHub projects go
-# through `gh`. The sandbox reaches neither: `sbx policy check network 172.18.194.183:443`
-# is a default-deny, and nothing here asks it to be otherwise.
+# §13.2 — the forge is GitLab. *Where* the push happens is the `[sandbox_delivery]`
+# sub-table at the bottom of this block; without it, delivery is host-side through `glab`
+# exactly as the GitHub projects go through `gh`.
 forge          = "gitlab"
 # Must exist on the remote as `origin/james/feat/prototype` — `Project.base_ref` is always
 # the remote ref, and worktree creation resolves it before any model spend.
@@ -173,10 +173,10 @@ static_mcp     = []
 build_sandbox  = "factory-build-nemoclaw-dev"
 review_sandbox = "factory-review-nemoclaw-dev"
 vault_mount    = "rw"
-# No `github.com` and no GitLab host. The python stack's gates need an index and a
-# toolchain; they do not need a forge, because the factory never delivers from inside the
-# VM. Adding the instance IP here would hand an unattended agent egress to the corp
-# network for a capability it does not use.
+# Dead config, kept for the same reason the rest of the file keeps its findings: parsed
+# into `Project` and read by nothing. Egress is decided entirely by daemon-side `sbx
+# policy` rules, and the instance is reachable from this project's sandbox because of a
+# *global* allow rule, not because of anything in this list.
 network_allow  = ["pypi.org", "*.pythonhosted.org", "astral.sh"]
 # Inherited from the measured finding on the retired project: `sbx` puts a 40-character
 # `gho_` value in every sandbox's environment, invisible to `sbx inspect`. It does not
@@ -189,6 +189,31 @@ acknowledged_env_credentials = ["GH_TOKEN"]
 # never fired — the mistake the frontend entry made — so this stays empty until there is
 # something to name.
 sensitive_paths = []
+
+# §13.2, deliberately reversed for this project and no other. James asked for the
+# sandbox to open its own merge requests; the concern was raised twice and the decision
+# is his. Deleting these four lines restores the full-strength boundary with **no code
+# revert** — `policy.capability_secrets` admits `placeholder_env` only because this table
+# names it, and `delivery/forge.py` picks the in-VM adapter only when this table exists.
+# That reversibility is the condition the reversal was approved under.
+#
+# What crosses into the VM is an `sbx secret set-custom` **placeholder**, never the
+# `glpat-`. The proxy substitutes the real token into the outbound request on the way to
+# `api_url`, so the agent gains a capability bounded to one host and one sandbox scope;
+# off-proxy the string means nothing. Proven end to end on 2026-09-01: a push and merge
+# request `!1` on nemoclaw-test, from inside a sandbox holding no credential.
+#
+# There is no `ca_file` key and that absence is load-bearing — the VM is offered the sbx
+# proxy's certificate, not the instance's, and the image already trusts that CA.
+# `delivery/sandbox_gitlab.py` has the measurements.
+#
+# Provision the secret before the first run (the preflight fails the run if it is absent):
+#   sbx secret set-custom --sandbox factory-build-nemoclaw-dev \
+#       --env FACTORY_GITLAB_TOKEN --target 172.18.194.183
+[projects.nemoclaw-dev.sandbox_delivery]
+api_url      = "https://172.18.194.183"
+project_path = "nexus-core/ran-ai-agents/nemoclaw-test"
+placeholder_env  = "FACTORY_GITLAB_TOKEN"
 
 [projects.nemoclaw-dev.env]
 # The bind-mount hazard, unchanged: a sandbox `uv sync` against the bind-mounted

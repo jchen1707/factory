@@ -11,13 +11,24 @@ cycle and no base class anybody has to remember to inherit.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from factory.delivery import github, gitlab
+from factory.delivery import github, gitlab, sandbox_gitlab
 from factory.registry import Project
+from factory.sandbox.base import SandboxAdapter
 
-__all__ = ["FORGES", "Forge", "UnknownForge", "for_name", "for_project", "for_url"]
+__all__ = [
+    "FORGES",
+    "Forge",
+    "SandboxSite",
+    "UnknownForge",
+    "for_delivery",
+    "for_name",
+    "for_project",
+    "for_url",
+]
 
 
 class UnknownForge(Exception):
@@ -83,3 +94,46 @@ def for_project(project: Project) -> Forge:
     "which forge am I about to write to" more than to anything else in the file.
     """
     return for_name(project.forge)
+
+
+@dataclass(frozen=True)
+class SandboxSite:
+    """Where an in-VM delivery would run: which sandbox, and where in it.
+
+    A parameter object rather than three arguments, because the three are only ever
+    meaningful together and `for_delivery` should not be the place someone can pass a
+    sandbox name with another sandbox's workdir.
+    """
+
+    adapter: SandboxAdapter
+    name: str
+    #: The absolute path of the worktree, which is the same string on the host and in the
+    #: VM for a bind-mounted project. `Project.requires_clone` is refused alongside
+    #: `[sandbox_delivery]` at registry load precisely so that identity holds here.
+    workdir: str
+
+
+def for_delivery(project: Project, *, sandbox: SandboxSite) -> Forge:
+    """The adapter that will **push and open the merge request** for this project.
+
+    Separate from `for_project` rather than an optional argument on it, and the split is
+    the point. `for_project` answers reads — `cli.py` and `gc.py` ask it for `pr_state`
+    about a URL that already exists, and those stay host-side whatever a project has
+    opted into. This one answers the write, and it is the only caller that can return the
+    in-VM adapter, so a call site that wants one has to say so.
+
+    An optional `sandbox=None` on a single function was the obvious alternative and is
+    worse: a delivery step that forgot to pass it would silently get the host adapter,
+    push over SSH from the host, and look exactly like a working run — a registry saying
+    one thing while the machine does another, with nothing failing to say so.
+    """
+    declared = project.sandbox_delivery
+    if declared is None:
+        return for_name(project.forge)
+    return sandbox_gitlab.SandboxGitlabForge(
+        sandbox.adapter,
+        sandbox.name,
+        base_url=declared.api_url,
+        project_path=declared.project_path,
+        workdir=sandbox.workdir,
+    )

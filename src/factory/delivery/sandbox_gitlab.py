@@ -36,22 +36,50 @@ fixes at creation — every factory sandbox would need a new name. `curl` is alr
 so the same six operations are spoken directly to `/api/v4`. The host adapter in
 `gitlab.py` stays the tested default; this is the opt-in sibling.
 
-Two facts the image forces, both measured in the same sandbox:
+## Two things this module got wrong until they were measured
 
-- The instance's CA is **not** in the image trust store, so every call passes `--cacert`
-  at a path the caller wrote into the VM. Without it curl exits 60; with it the same
-  request returns 401 rather than a TLS error, which is what proves the path works.
-- There is **no `~/.ssh`**, so a push cannot use the host's SSH key. The remote is
-  rewritten to HTTPS for the push only, with the token supplied out of band.
+Both were corrected on 2026-09-01, by the first real push and the first real merge request
+(`!1` on `nexus-core/ran-ai-agents/nemoclaw-test`). Each is written down because the wrong
+version *looked* more careful than the right one, and would be re-added by anyone
+reasoning from the host's constraints instead of the VM's.
 
-The token is never an argv element and never an environment variable of the *agent's*
-process: it is written to a file inside the VM by `install_credential` and read back by
-`curl --header @file` / git's `credential.helper`. argv is world-readable in `/proc` on
-Linux, and an agent that can run `ps` is an agent that can read a token passed that way.
+**There is no CA to inject.** The instance's ORAN issuer is in no default trust store, so
+the host needs it — but the sandbox never sees the ORAN certificate at all. Every byte of
+sandbox egress goes through `sbx`'s proxy (`HTTPS_PROXY=http://gateway.docker.internal:3128`),
+which terminates TLS and re-presents its own leaf under `Docker Sandboxes Proxy CA` — a CA
+the image already trusts, and which `PROXY_CA_CERT_B64` also carries in the environment.
+Measured in `factory-build-python-harness-2`: with no `--cacert` at all, `/api/v4/version`
+answers `401` and `/api/v4/user` with the placeholder answers `200`. Passing the ORAN leaf
+as `--cacert` would be *worse* than useless — it is not the certificate the VM is offered.
+So the trust anchor is the proxy's, the same as for every other host the sandbox reaches,
+and this module writes no PEM into the VM.
+
+**`git` over HTTPS will not take a `PRIVATE-TOKEN` header.** That header authenticates
+`/api/v4` and nothing else; GitLab's git endpoint answers `401 WWW-Authenticate: Basic`,
+which git reports as `could not read Username for ...`, measured on both
+`http.extraHeader: PRIVATE-TOKEN:` and `Authorization: Bearer`. Basic is the only shape it
+accepts. The useful discovery is that the proxy substitutes the placeholder **inside the
+base64 of a Basic credential**: `Authorization: Basic $(printf 'oauth2:<placeholder>' |
+base64)` clones and pushes, while the same header on `/api/v4` does not authenticate (the
+API does not accept `oauth2:` Basic). So the two surfaces need two different credential
+files, which is why `install_credential` writes two.
+
+There is **no `~/.ssh`** in the image, so a push cannot use the host's SSH key. The remote
+is named as an HTTPS URL for the push only, and the credential never appears in it: a
+token in a remote URL lands in `.git/config`, in reflogs, and in every error git prints.
+
+The placeholder is never an argv element and never an environment variable of the *agent's*
+process: it is written to files inside the VM by `install_credential` and read back by
+`curl --header @file` and by git through `GIT_CONFIG_GLOBAL`. argv is world-readable in
+`/proc` on Linux, and an agent that can run `ps` is an agent that can read anything passed
+that way — which is also why `push` points git at a config *file* rather than doing the
+obvious `git -c http.extraHeader="$(cat …)"`, which would put the value straight back into
+the argv this paragraph exists to keep it out of.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import shlex
@@ -60,7 +88,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 __all__ = [
-    "CA_PATH",
+    "GITCONFIG_PATH",
     "HEADER_PATH",
     "SandboxGitlabError",
     "SandboxGitlabForge",
@@ -72,9 +100,8 @@ class SandboxGitlabError(Exception):
     """A `git` or `curl` command inside the sandbox that failed, with its output."""
 
 
-#: Fixed paths inside the VM. Not configurable: two of them hold a credential and a trust
-#: anchor, and a path that varies per project is a path that gets logged somewhere
-#: eventually.
+#: Fixed paths inside the VM. Not configurable: both hold a credential, and a path that
+#: varies per project is a path that gets logged somewhere eventually.
 #:
 #: Under the agent's home rather than `/tmp`, deliberately. `/tmp` is world-writable, so a
 #: second process in the VM could pre-create the header path and read what lands in it —
@@ -82,8 +109,12 @@ class SandboxGitlabError(Exception):
 #: it sits in. `/home/agent` is the same home `UV_PROJECT_ENVIRONMENT` uses in
 #: `projects.toml`, so it is a path this codebase already relies on existing.
 _CRED_DIR = "/home/agent/.factory-forge"
-CA_PATH = f"{_CRED_DIR}/ca.pem"
+#: `curl --header @HEADER_PATH` — the `/api/v4` surface.
 HEADER_PATH = f"{_CRED_DIR}/header"
+#: `GIT_CONFIG_GLOBAL=GITCONFIG_PATH git …` — the git-over-HTTPS surface, which takes
+#: Basic and nothing else. A separate file from the header because the two surfaces
+#: genuinely disagree about the credential's shape, not because it was tidier.
+GITCONFIG_PATH = f"{_CRED_DIR}/gitconfig"
 
 
 class _Adapter(Protocol):
@@ -102,26 +133,43 @@ class _Adapter(Protocol):
     ) -> Any: ...
 
 
-def install_credential(adapter: _Adapter, sandbox: str, *, ca_pem: str, placeholder: str) -> None:
-    """Write the CA and the `PRIVATE-TOKEN` header file into the VM, `0600`.
+def install_credential(adapter: _Adapter, sandbox: str, *, placeholder: str) -> None:
+    """Write the two credential files into the VM, `0600`.
 
     `placeholder` is the `sbx-cs-…` substitution token from `sbx secret ls`, **never** a
     real credential. Passing a `glpat-…` here would work, and would silently turn this into
     the much wider bypass the module docstring says it is not. The parameter is named for
     what it must be so that a call site passing the wrong thing reads wrong.
 
+    Two files because the two surfaces take two different credentials, measured 2026-09-01:
+    `/api/v4` takes `PRIVATE-TOKEN`, and git-over-HTTPS takes Basic and refuses everything
+    else. The Basic value is `base64("oauth2:<placeholder>")`, and the proxy substitutes the
+    real token *inside* that base64 on the way out — which is the fact that makes an
+    in-sandbox push possible at all.
+
     Called once per run, before delivery. Both values arrive on **stdin**, never in argv:
     `sbx exec ... -e X=...` would put the value in the *host* process table, and a shell
     heredoc would put it in the VM's. `sh -c 'umask 077; mkdir -m 700 …; cat > path'`
     creates the file unreadable to anything but the agent user before a byte is written.
 
-    The header file is why this is not simply an argument. `curl --header @f` reads the
-    name and value from the file, so even the placeholder stays out of `/proc/*/cmdline`,
-    where any other process in the VM could read it.
+    Files rather than arguments throughout. `curl --header @f` reads the name and value
+    from the file, and git reads its header from `GIT_CONFIG_GLOBAL`, so neither value ever
+    reaches `/proc/*/cmdline`, where any other process in the VM could read it.
     """
+    basic = base64.b64encode(f"oauth2:{placeholder}".encode()).decode()
     for path, content in (
-        (CA_PATH, ca_pem),
         (HEADER_PATH, f"PRIVATE-TOKEN: {placeholder}\n"),
+        # `core.hooksPath = /dev/null` lives here rather than on the command line for the
+        # reason `gitlab.push` gives on the host: the hooks belong to the agent's edits,
+        # not to the factory's push. Putting it in the same file means the push cannot
+        # pick up the credential without also disarming the hooks.
+        (
+            GITCONFIG_PATH,
+            "[http]\n"
+            f"\textraHeader = Authorization: Basic {basic}\n"
+            "[core]\n"
+            "\thooksPath = /dev/null\n",
+        ),
     ):
         completed = adapter.exec_sync(
             sandbox,
@@ -148,7 +196,7 @@ def revoke_credential(adapter: _Adapter, sandbox: str) -> None:
     (§16.5 keeps it for `sandbox_idle_hours`), so a token left behind is a token
     available to whatever runs next in it."""
     adapter.exec_sync(
-        sandbox, ["sh", "-c", f"rm -f {shlex.quote(CA_PATH)} {shlex.quote(HEADER_PATH)}"]
+        sandbox, ["sh", "-c", f"rm -f {shlex.quote(HEADER_PATH)} {shlex.quote(GITCONFIG_PATH)}"]
     )
 
 
@@ -162,14 +210,16 @@ def _api_argv(method: str, url: str, *, fields: Mapping[str, str] | None = None)
     message; plain `--fail` swallows the body, which is the difference between "403" and
     "403: insufficient_scope". `--data-urlencode` keeps branch names and MR titles from
     being reinterpreted as query syntax.
+
+    No `--cacert`. The VM is offered the sbx proxy's certificate rather than the
+    instance's, and the image already trusts that CA — pinning the ORAN leaf here would
+    pin the wrong certificate. The module docstring has the measurement.
     """
     argv = [
         "curl",
         "--silent",
         "--show-error",
         "--fail-with-body",
-        "--cacert",
-        CA_PATH,
         "--header",
         f"@{HEADER_PATH}",
         "--request",
@@ -239,27 +289,27 @@ class SandboxGitlabForge:
     # -- the Forge surface -----------------------------------------------------
 
     def push(self, worktree: Path, branch: str) -> None:
-        """Push from inside the VM over HTTPS, authenticating from the header file.
+        """Push from inside the VM over HTTPS, authenticating from the git config file.
 
-        `worktree` is accepted and ignored: the sandbox has the workspace mounted at
-        `self._workdir`, and the host path is not the VM path for a `--clone` sandbox.
-        Taking the argument keeps the signature identical to the host adapters, which is
-        what lets `deliver` stay branchless.
+        `worktree` is accepted and ignored: the sandbox has the workspace bind-mounted at
+        `self._workdir`, at the identical path, so the host path *is* the VM path. Taking
+        the argument keeps the signature identical to the host adapters, which is what lets
+        `deliver` stay branchless.
 
-        The credential reaches git through `http.extraHeader` read from the same file, so
-        it is not in the remote URL — a token in a URL lands in `.git/config`, in reflogs,
-        and in any error message git prints.
+        `GIT_CONFIG_GLOBAL` rather than `git -c http.extraHeader=…`: the second spelling is
+        shorter and puts the credential into git's argv, where any process in the VM can
+        read it out of `/proc`. The file is the whole point.
 
-        `core.hooksPath=/dev/null` for the reason `gitlab.push` gives on the host: the
-        hooks belong to the agent's edits, not to the factory's push.
+        The remote is named as a URL and carries no credential. `git push <url> <branch>`
+        with no `-u`, because `-u` writes that URL into `.git/config` as the branch's
+        upstream — harmless while the URL is clean, and exactly the habit that puts a
+        token there the day someone decides the URL is a simpler place for it.
         """
         remote = f"{self._base}/{self._project}.git"
         script = (
             f"set -e; cd {shlex.quote(self._workdir)}; "
-            f"git -c core.hooksPath=/dev/null "
-            f"-c http.sslCAInfo={shlex.quote(CA_PATH)} "
-            f'-c http.extraHeader="$(cat {shlex.quote(HEADER_PATH)})" '
-            f"push -u {shlex.quote(remote)} {shlex.quote(branch)}"
+            f"GIT_CONFIG_GLOBAL={shlex.quote(GITCONFIG_PATH)} "
+            f"git push {shlex.quote(remote)} {shlex.quote(branch)}"
         )
         completed = self._adapter.exec_sync(
             self._sandbox, ["sh", "-c", script], workdir=self._workdir, timeout=300

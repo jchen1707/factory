@@ -222,3 +222,91 @@ def test_the_registry_and_the_dispatch_agree_on_the_forge_names() -> None:
     from factory.registry import _FORGES
 
     assert set(_FORGES) == set(FORGES)
+
+
+SANDBOX_DELIVERY = """
+[vault]
+path = "/tmp/vault"
+
+[projects.one]
+team = "BAC"
+path = "/tmp/one"
+remote = "git@example.invalid:g/one.git"
+base_branch = "v2"
+stack = "python"
+forge = "gitlab"
+build_sandbox = "factory-build-one"
+{extra}
+
+[projects.one.sandbox_delivery]
+{table}
+"""
+
+_FULL_TABLE = """
+api_url = "https://10.0.0.1/"
+project_path = "/g/sub/one/"
+placeholder_env = "FACTORY_GITLAB_TOKEN"
+"""
+
+
+def _sandbox_delivery(tmp_path: Path, *, table: str = _FULL_TABLE, extra: str = "") -> Path:
+    path = tmp_path / "projects.toml"
+    path.write_text(SANDBOX_DELIVERY.format(table=table, extra=extra))
+    return path
+
+
+def test_sandbox_delivery_is_absent_for_every_project_that_does_not_declare_it() -> None:
+    """The strong default, asserted on the shipped file rather than on a fixture.
+
+    `None` is what keeps §13.2 true: `forge.for_delivery` returns the host adapter and
+    `policy.capability_secrets` admits nothing. A project acquiring this table by accident
+    would be a boundary change with no diff in `src/`.
+    """
+    registry = load_registry(HOME / "config" / "projects.toml")
+    assert registry.projects["frontend-harness"].sandbox_delivery is None
+    declared = registry.projects["nemoclaw-dev"].sandbox_delivery
+    assert declared is not None
+    assert declared.placeholder_env == "FACTORY_GITLAB_TOKEN"
+
+
+def test_the_sandbox_delivery_table_is_normalised(tmp_path: Path) -> None:
+    # A trailing slash on `api_url` and a leading one on `project_path` both produce a
+    # URL with `//` in it, which GitLab answers with a redirect that curl does not follow
+    # — a 301 with an empty body, reported as "returned no web_url".
+    declared = load_registry(_sandbox_delivery(tmp_path)).projects["one"].sandbox_delivery
+    assert declared is not None
+    assert declared.api_url == "https://10.0.0.1"
+    assert declared.project_path == "g/sub/one"
+
+
+def test_a_github_project_cannot_declare_in_vm_delivery(tmp_path: Path) -> None:
+    # `sandbox_gitlab.py` is the only in-VM adapter. A github project carrying this table
+    # would deliver host-side and look, in the registry, as though it did not.
+    path = tmp_path / "projects.toml"
+    path.write_text(
+        SANDBOX_DELIVERY.format(table=_FULL_TABLE, extra="").replace(
+            'forge = "gitlab"', 'forge = "github"'
+        )
+    )
+    with pytest.raises(RegistryError, match="only for gitlab"):
+        load_registry(path)
+
+
+def test_a_clone_project_cannot_declare_in_vm_delivery(tmp_path: Path) -> None:
+    # The branch a clone run builds lives in the VM's private clone, not in the worktree
+    # this adapter pushes from: the combination pushes nothing and reports success.
+    with pytest.raises(RegistryError, match="requires_clone"):
+        load_registry(_sandbox_delivery(tmp_path, extra="requires_clone = true"))
+
+
+@pytest.mark.parametrize("missing", ["api_url", "project_path", "placeholder_env"])
+def test_a_half_specified_sandbox_delivery_table_refuses_to_load(
+    tmp_path: Path, missing: str
+) -> None:
+    """Validated at load, not at delivery. Delivery is the *last* step of a run: a table
+    that is discovered to be incomplete there has already spent the whole model budget."""
+    table = "\n".join(
+        line for line in _FULL_TABLE.strip().splitlines() if not line.startswith(missing)
+    )
+    with pytest.raises(RegistryError, match=missing):
+        load_registry(_sandbox_delivery(tmp_path, table=table))

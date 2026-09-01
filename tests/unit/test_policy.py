@@ -210,3 +210,41 @@ def test_acknowledging_one_name_does_not_acknowledge_another() -> None:
 
 def test_nothing_set_in_the_environment_is_clean() -> None:
     assert capability_env_names([], acknowledged=("GH_TOKEN",)) == ([], [])
+
+
+# --------------------------------------------------------------------------------
+# §8.7 — the one declared exception, and the three ways it must not widen
+# --------------------------------------------------------------------------------
+
+_DECLARED = "FACTORY_GITLAB_TOKEN"
+
+
+def test_a_declared_custom_secret_is_admitted() -> None:
+    """The in-VM delivery opt-in. What the sandbox holds under this name is a
+    `sbx-cs-…` placeholder the proxy substitutes on the way out — a capability bounded to
+    one host and one sandbox scope, not a credential."""
+    assert capability_secrets([{"name": _DECLARED, "source": "custom"}], declared=[_DECLARED]) == []
+
+
+def test_the_same_name_still_blocks_when_the_project_has_not_declared_it() -> None:
+    """The property the whole design rests on: deleting `[sandbox_delivery]` from
+    `projects.toml` restores the full-strength guard with **no code revert**. If this
+    passes with `declared=()`, the opt-in has become a constant and the reversal is no
+    longer reversible."""
+    assert capability_secrets([{"name": _DECLARED, "source": "custom"}]) == [_DECLARED]
+
+
+def test_a_service_secret_wearing_the_declared_name_still_blocks() -> None:
+    """`source` is why the admission is narrow. A *custom* secret is a proxy substitution
+    rule, so the VM can only hold the placeholder. A **service** secret of the same name
+    is a real credential in the sandbox — the exact thing §8.7 forbids — and the
+    declaration must not launder it."""
+    assert capability_secrets([{"name": _DECLARED, "source": "service"}], declared=[_DECLARED]) == [
+        _DECLARED
+    ]
+
+
+def test_declaring_one_name_does_not_admit_another() -> None:
+    assert capability_secrets([{"name": "github", "source": "custom"}], declared=[_DECLARED]) == [
+        "github"
+    ]
