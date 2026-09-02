@@ -14,9 +14,11 @@ from factory.policy import (
     capability_env_names,
     capability_secrets,
     diff_vault,
+    disallowed_vault_writes,
     host_execution_verdict,
     sandbox_is_factory_owned,
     snapshot_vault,
+    unattributable_vault_changes,
     vault_writes_outside_allowlist,
 )
 
@@ -248,3 +250,53 @@ def test_declaring_one_name_does_not_admit_another() -> None:
     assert capability_secrets([{"name": "github", "source": "custom"}], declared=[_DECLARED]) == [
         "github"
     ]
+
+
+# --------------------------------------------------------------------------------
+# Attribution: what a whole-vault diff can and cannot prove
+# --------------------------------------------------------------------------------
+
+_ALLOW = ["Project Learnings/**", "_VAULT_INDEX.md"]
+
+
+def test_a_change_outside_the_allowlist_is_unattributable_not_disallowed() -> None:
+    # The BAC-10 file. Nothing in a before/after diff says who wrote it, and the vault is
+    # edited by a human while runs are live, so this is evidence and not an offence.
+    changes = [VaultChange("Getting Promoted/Daily takeaways/Raw notes.md", "modified")]
+    assert unattributable_vault_changes(changes, _ALLOW) == changes
+    assert disallowed_vault_writes(changes, _ALLOW) == []
+
+
+def test_a_deletion_inside_the_allowlist_is_disallowed_not_merely_unattributable() -> None:
+    # Inside the allowlist the writer is known and never deletes, so this one is the run's.
+    changes = [VaultChange("Project Learnings/2026-08-19.md", "deleted")]
+    assert disallowed_vault_writes(changes, _ALLOW) == changes
+    assert unattributable_vault_changes(changes, _ALLOW) == []
+
+
+def test_a_write_inside_the_allowlist_is_neither() -> None:
+    changes = [VaultChange("Project Learnings/2026-09-02.md", "added")]
+    assert disallowed_vault_writes(changes, _ALLOW) == []
+    assert unattributable_vault_changes(changes, _ALLOW) == []
+
+
+def test_the_two_halves_partition_what_the_old_check_blocked_on() -> None:
+    """No offence the old rule caught is dropped — each one is now routed, not discarded.
+
+    The change is what the factory *does* with each half, and a partition is the way to
+    say that in a test: `vault_writes_outside_allowlist` is still the honest answer to
+    "what moved that the allowlist does not sanction", and it is exactly the union.
+    """
+    changes = [
+        VaultChange("Getting Promoted/Raw notes.md", "modified"),
+        VaultChange("Project Learnings/2026-08-19.md", "deleted"),
+        VaultChange("Project Learnings/2026-09-02.md", "added"),
+        VaultChange("Upskilling/notes.md", "added"),
+    ]
+    blocking = disallowed_vault_writes(changes, _ALLOW)
+    unattributable = unattributable_vault_changes(changes, _ALLOW)
+
+    assert not set(blocking) & set(unattributable), "a change belongs to exactly one half"
+    assert set(blocking) | set(unattributable) == set(
+        vault_writes_outside_allowlist(changes, _ALLOW)
+    )

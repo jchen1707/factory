@@ -366,33 +366,71 @@ def _check_vault(ctx: Context, attempt: int, before: dict[str, tuple[int, int, s
     """The §8.5 workaround: bound the blast radius by observation, not by permission.
 
     `protect_paths.mjs` cannot help here — its globs are repo-relative and the vault is
-    not the repo — so the factory takes a snapshot either side and blocks on any write
-    outside the two locations layer A's own hooks own.
+    not the repo — so the factory takes a snapshot either side of the attempt.
+
+    What it does with the difference is now split, because a whole-vault diff attributes
+    **by time** and time is not cause. The vault is a live Obsidian vault that James edits
+    while runs are in flight, and with `concurrency_per_project` above 1 two attempts share
+    a window and see each other's legitimate writes. Blocking on everything the diff showed
+    could only ever have been right while exactly one run existed and nobody was typing.
+
+    - Inside the allowlist the writer is known — layer A's distiller hook, which only adds
+      or rewrites its own dated note — so a **deletion** there is the run's, and blocks.
+    - Outside it, nothing identifies the writer. Those changes are recorded as a `warn` and
+      the attempt continues.
+
+    BAC-10 attempt 1 is the case this was rewritten for: failed for
+    `Getting Promoted/Daily takeaways/Raw notes.md`, a file the agent had itself listed
+    under `out_of_scope` and never touched. A control that spends an attempt on that is not
+    protecting anything; it is adding a random failure to every run long enough to overlap
+    a human. The evidence is still written either way, which is the half worth keeping.
     """
     after = policy.snapshot_vault(
         ctx.registry.vault.path, exclude=ctx.registry.vault.snapshot_exclude
     )
     changes = policy.diff_vault(before, after)
-    offending = policy.vault_writes_outside_allowlist(changes, ctx.registry.vault.write_allowlist)
+    allowlist = ctx.registry.vault.write_allowlist
+    blocking = policy.disallowed_vault_writes(changes, allowlist)
+    unattributable = policy.unattributable_vault_changes(changes, allowlist)
 
     snapshot_dir = ctx.state_dir / "vault"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     artifacts.write_json(snapshot_dir / f"before-{attempt}.json", before)
     artifacts.write_json(snapshot_dir / f"after-{attempt}.json", after)
 
+    if blocking:
+        status = "fail"
+    elif unattributable:
+        status = "warn"
+    else:
+        status = "pass"
     ctx.store.record_check(
         ctx.run.id,
         attempt,
         "vault_snapshot",
-        "fail" if offending else "pass",
+        status,
+        # The reason names which half fired, so a `warn` row is not read as a near-miss
+        # of the blocking rule. They are different findings about different evidence.
+        reason=(
+            f"{len(unattributable)} change(s) outside the allowlist, attributed to nobody"
+            if status == "warn"
+            else None
+        ),
         detail=json.dumps([{"path": c.path, "kind": c.kind} for c in changes])[:2000],
         artifact=str(snapshot_dir),
     )
-    if offending:
+    if unattributable:
+        ctx.log(
+            "vault.changed_outside_allowlist",
+            level="warning",
+            count=len(unattributable),
+            paths=[c.path for c in unattributable][:20],
+        )
+    if blocking:
         raise Blocked(
             "vault-write-outside-allowlist",
-            "the run changed vault files it does not own: "
-            + ", ".join(f"{c.kind} {c.path}" for c in offending),
+            "the run deleted vault files it does not own: "
+            + ", ".join(f"{c.kind} {c.path}" for c in blocking),
         )
 
 

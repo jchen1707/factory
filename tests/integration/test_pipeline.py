@@ -245,19 +245,65 @@ def test_a_preflight_that_cannot_produce_a_refusal_blocks(ctx: Context) -> None:
     assert caught.value.reason == "enforcement-disabled"
 
 
-# §22 F21 — a write outside the vault allowlist blocks; both snapshots kept, no PR.
-def test_a_write_outside_the_vault_allowlist_blocks_the_run(
+# §22 F21 — a change outside the vault allowlist is recorded, never blamed on the run.
+def test_a_change_outside_the_vault_allowlist_warns_instead_of_blocking(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """BAC-10 attempt 1, as a test.
+
+    That attempt was failed for `Getting Promoted/Daily takeaways/Raw notes.md` — a file
+    the agent named in its own `out_of_scope` and never touched. The snapshot diffs the
+    whole vault either side of the attempt, so it attributes by *time*; James edits that
+    vault in Obsidian while runs are in flight, and two runs at `concurrency_per_project`
+    2 overlap each other's windows. Nothing in the diff says who wrote.
+
+    So the change is recorded and the attempt continues. The evidence is the half worth
+    keeping; the blame was never supportable.
+    """
     vault = ctx.registry.vault.path
     original = _fake(ctx).exec_detached
 
-    def also_write_the_vault(handle, script, env):  # type: ignore[no-untyped-def]
+    def a_human_edits_their_vault(handle, script, env):  # type: ignore[no-untyped-def]
         original(handle, script, env)
         (vault / "Upskilling").mkdir(exist_ok=True)
-        (vault / "Upskilling" / "notes.md").write_text("the agent wrote here")
+        (vault / "Upskilling" / "notes.md").write_text("James, mid-run, in Obsidian")
 
-    monkeypatch.setattr(ctx.sandbox, "exec_detached", also_write_the_vault)
+    monkeypatch.setattr(ctx.sandbox, "exec_detached", a_human_edits_their_vault)
+
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+    worktree_step.run(ctx)
+    advance_state(ctx, until=State.VERIFYING)  # no Blocked
+
+    status, reason, detail = _vault_check(ctx)
+    assert status == "warn"
+    assert "outside the allowlist" in reason
+    assert "Upskilling/notes.md" in detail
+    # Both snapshots are kept, so a wrong write is still reconstructible after the fact.
+    assert (ctx.state_dir / "vault" / "before-1.json").exists()
+    assert (ctx.state_dir / "vault" / "after-1.json").exists()
+
+
+def test_a_deletion_inside_the_allowlist_still_blocks(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that survives, and the only half that was ever attributable.
+
+    Inside the allowlist the writer is known: layer A's distiller hook, which only adds or
+    rewrites its own dated note. It never deletes, so a deletion there belongs to whatever
+    was executing — which is this run.
+    """
+    vault = ctx.registry.vault.path
+    victim = vault / "Project Learnings" / "2026-08-19.md"
+    victim.write_text("an earlier run's note")
+    original = _fake(ctx).exec_detached
+
+    def also_delete_a_learning(handle, script, env):  # type: ignore[no-untyped-def]
+        original(handle, script, env)
+        victim.unlink(missing_ok=True)
+
+    monkeypatch.setattr(ctx.sandbox, "exec_detached", also_delete_a_learning)
 
     claim_step.run(ctx)
     context_step.run(ctx)
@@ -266,10 +312,23 @@ def test_a_write_outside_the_vault_allowlist_blocks_the_run(
     with pytest.raises(Blocked) as caught:
         advance_state(ctx, until=State.VERIFYING)
     assert caught.value.reason == "vault-write-outside-allowlist"
-    assert "Upskilling/notes.md" in caught.value.detail
-    # Both snapshots are kept, so a wrong write is reconstructible after the fact.
-    assert (ctx.state_dir / "vault" / "before-1.json").exists()
-    assert (ctx.state_dir / "vault" / "after-1.json").exists()
+    assert "Project Learnings/2026-08-19.md" in caught.value.detail
+
+
+def _vault_check(ctx: Context) -> tuple[str, str, str]:
+    """`(status, reason, detail)` of the run's latest vault check.
+
+    Read straight from the table because the check is recorded on *every* attempt now,
+    pass or warn, and its status is the assertion — a helper that surfaced only blocking
+    verdicts could not tell "warned and continued" from "never ran".
+    """
+    row = ctx.store._conn.execute(
+        "SELECT status, reason, detail FROM checks WHERE run_id=? AND check_name='vault_snapshot' "
+        "ORDER BY rowid DESC LIMIT 1",
+        (ctx.run.id,),
+    ).fetchone()
+    assert row is not None, "the vault check must be recorded whatever its verdict"
+    return str(row[0]), str(row[1] or ""), str(row[2] or "")
 
 
 def test_a_write_inside_the_allowlist_is_fine(
