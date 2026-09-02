@@ -167,6 +167,17 @@ class Project:
     #: table held for `frontend` — an inert trigger reads exactly like a trigger that
     #: never fired, and nothing tells the two apart.
     sensitive_paths: tuple[str, ...] = ()
+    #: §11.3's writer limit, for this project alone. `None` — the default and the answer
+    #: for every project that has not thought about it — means `[defaults]` decides, so
+    #: raising the floor for everything is still one edit in one place.
+    #:
+    #: It is per project because the constraint is per project: the limit exists because
+    #: concurrent writers share one `.git`, and how many a repository can carry is a fact
+    #: about *that* repository — its worktree layout, its test suite's tolerance for
+    #: parallel runs, its sandbox's memory. A global number is either too low for the
+    #: repository that could take four or too high for the one that cannot take two.
+    #: Resolve it with `Registry.concurrency_for`, never by reading this attribute.
+    concurrency_per_project: int | None = None
     #: Set only by a `[projects.<name>.sandbox_delivery]` sub-table. `None` — the default
     #: and the answer for every other project — means delivery is host-side, which is
     #: what §13.2 says and what `delivery/github.py` and `delivery/gitlab.py` do.
@@ -187,6 +198,20 @@ class Registry:
     vault: VaultConfig
     defaults: Defaults
     projects: Mapping[str, Project]
+
+    def concurrency_for(self, project: Project) -> int:
+        """§11.3's writer limit for one project: its own override, else `[defaults]`.
+
+        The single place the fallback is spelled. Both enforcement sites — the poller's
+        admission check and `steps/claim.py`'s refusal — go through here, because a limit
+        that two call sites resolve differently is a limit the poller admits work against
+        and the claim then blocks, once per tick, forever.
+        """
+        return (
+            project.concurrency_per_project
+            if project.concurrency_per_project is not None
+            else self.defaults.concurrency_per_project
+        )
 
     def resolve(self, identifier: str) -> Project:
         """§10.2 steps 1 to 3. Zero matches is "not eligible"; two is a config error.
@@ -305,6 +330,15 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
             "A run must not discover this after it has spent model budget."
         )
     sandbox_delivery = _sandbox_delivery(name, raw, forge=forge)
+    concurrency = raw.get("concurrency_per_project")
+    if concurrency is not None:
+        concurrency = int(concurrency)
+        if concurrency < 1:
+            raise RegistryError(
+                f"project {name!r} sets concurrency_per_project={concurrency}; the limit is a "
+                "count of writers and zero would make the project unclaimable rather than "
+                "paused. Remove the project to stop claiming for it."
+            )
     return Project(
         name=name,
         team=str(raw["team"]),
@@ -326,6 +360,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
             str(n) for n in raw.get("acknowledged_env_credentials", ())
         ),
         sensitive_paths=tuple(str(g) for g in raw.get("sensitive_paths", ())),
+        concurrency_per_project=concurrency,
         sandbox_delivery=sandbox_delivery,
     )
 

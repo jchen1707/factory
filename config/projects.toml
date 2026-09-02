@@ -189,6 +189,13 @@ acknowledged_env_credentials = ["GH_TOKEN"]
 # never fired — the mistake the frontend entry made — so this stays empty until there is
 # something to name.
 sensitive_paths = []
+# Above the `[defaults]` floor of 1, for this project only (§11.3). Two unattended runs
+# share this repository's `.git`, so the raise is a claim about *this* repository: each
+# ticket still gets its own worktree and branch, and the second writer's `git worktree
+# add` is the only contended operation. Two is deliberately not four — it is the smallest
+# raise that proves the per-project limit works, and the number to revisit once a run
+# pair has actually overlapped here.
+concurrency_per_project = 2
 
 # §13.2, deliberately reversed for this project and no other. James asked for the
 # sandbox to open its own merge requests; the concern was raised twice and the decision
@@ -219,7 +226,14 @@ placeholder_env  = "FACTORY_GITLAB_TOKEN"
 # The bind-mount hazard, unchanged: a sandbox `uv sync` against the bind-mounted
 # workspace overwrites the host's .venv with a linux-aarch64 one and leaves
 # .venv/bin/python a broken symlink (p0-3-toolchain.md).
-UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/nemoclaw-dev"
+#
+# `{run}` is per *ticket*, and it is what makes `concurrency_per_project = 2` above
+# safe. The build sandbox is named once per project, so two tickets running at once
+# share one VM: pointed at a single directory, a `uv sync` in one run rewrites the
+# virtualenv the other is running its gates against — the same hazard again, moved
+# inside the VM, and invisible from the victim's transcript. `Context.env` substitutes
+# the ticket per exec. It costs one `uv sync` per run.
+UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/nemoclaw-dev/{run}"
 
 [projects.frontend-harness]
 team           = "FRO"

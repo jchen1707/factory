@@ -468,6 +468,28 @@ class SbxAdapter:
         assert_factory_sandbox(name)
         self._run(["sbx", "exec", name, "pkill", "-x", proc], timeout=60)
 
+    def kill_group(self, name: str, pgid: int) -> None:
+        """Signal one run's body by its in-VM pid. The concurrency-safe kill.
+
+        `kill_agent` above matches on a process *name*, and the build sandbox is named
+        once per project (`steps/sandbox.py`), so `pkill -x codex` in a VM holding two
+        concurrent runs signals both. The second run's wrapper then writes `exit 143` and
+        the factory reads it as that run's own timeout — a wrong terminal record for a
+        run that was doing nothing wrong, and nothing in the artifacts says otherwise.
+
+        A process group cannot make that mistake. The wrapper publishes its pgid
+        (`detached_shell_script`) and removes the file once the body is reaped, so a
+        readable pgid always names a live group belonging to this attempt. It is a group
+        rather than a pid because a body may be compound — `steps/review.py` runs one
+        codex block per axis — and because a group also reaches whatever the body spawned.
+
+        `-TERM` is what `pkill` sent by default, kept so the wrapper's exit-code path is
+        unchanged: the body dies, the wrapper survives, `wait` returns 143 and `exit`
+        lands. The negative pid is the POSIX spelling for "the whole group".
+        """
+        assert_factory_sandbox(name)
+        self._run(["sbx", "exec", name, "kill", "-TERM", f"-{pgid}"], timeout=60)
+
     # -- observation --------------------------------------------------------------
 
     def poll(self, handle: RunHandle) -> RunStatus:

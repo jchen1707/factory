@@ -39,6 +39,11 @@ PLAN_FILES = ("plan.md", "test-plan.md")
 #: be told this name, or a finished plan reads as an attempt that never ended.
 PLAN_EXIT_NAME = "plan-exit"
 
+#: The plan phase's own pgid file, for the same reason it has its own exit file: a
+#: rewind's two phases share one attempt directory, and a single `pgid` there would let a
+#: timeout in one phase signal a process group the other phase started.
+PLAN_PGID_NAME = "plan-pgid"
+
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
     """Is this ticket large or ambiguous enough to plan first?
@@ -111,8 +116,9 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         stderr_path=attempt_dir.path("plan-stderr.log"),
         exit_path=attempt_dir.path(PLAN_EXIT_NAME),
         heartbeat_path=attempt_dir.heartbeat,
+        pgid_path=attempt_dir.path(PLAN_PGID_NAME),
         vault_directory=str(ctx.registry.vault.path),
-        env=dict(ctx.project.env),
+        env=ctx.env,
     )
     script = ctx.agent.wrapper_script(invocation)
 
@@ -140,8 +146,9 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         workdir=str(worktree),
         attempt_dir=attempt_dir.root,
         exit_name=PLAN_EXIT_NAME,
+        pgid_name=PLAN_PGID_NAME,
     )
-    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.sandbox.exec_detached(handle, script, ctx.env)
     ctx.log("plan.started", model=role.model, effort=role.effort)
     return attempt_dir, handle, invocation.exit_path
 

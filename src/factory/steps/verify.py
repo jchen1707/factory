@@ -120,6 +120,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         heartbeat_path=attempt_dir.heartbeat,
         exit_path=attempt_dir.exit_file,
         body=body,
+        pgid_path=attempt_dir.pgid_file,
     )
 
     ctx.store.start_attempt(
@@ -144,7 +145,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         workdir=str(worktree),
         attempt_dir=attempt_dir.root,
     )
-    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.sandbox.exec_detached(handle, script, ctx.env)
     ctx.log("verify.started", sandbox=handle.sandbox, base_ref=base_ref)
     return attempt_dir, handle
 

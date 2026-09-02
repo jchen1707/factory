@@ -81,6 +81,9 @@ class AgentInvocation:
     stderr_path: Path
     exit_path: Path
     heartbeat_path: Path
+    #: Where the wrapper publishes the agent's in-VM process group, so a timeout signals
+    #: *this* run and not every codex in a shared build sandbox (`detached_shell_script`).
+    pgid_path: Path
     vault_directory: str
     env: Mapping[str, str] = field(default_factory=dict)
     resume_session: str | None = None

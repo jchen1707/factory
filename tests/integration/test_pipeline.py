@@ -8,6 +8,7 @@ no model call. This is the suite that runs on every commit.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import shlex
 from pathlib import Path
@@ -18,7 +19,7 @@ import pytest
 from factory import repo
 from factory.intake.linear import LinearError
 from factory.machine import Blocked, Resumable, State
-from factory.steps import Context
+from factory.steps import Context, signal_attempt
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
 from factory.steps import sandbox as sandbox_step
@@ -321,6 +322,32 @@ def test_a_second_writer_on_the_same_project_is_refused(ctx: Context) -> None:
     with pytest.raises(Blocked) as caught:
         claim_step.run(ctx)
     assert caught.value.reason == "project-busy"
+
+
+def test_a_project_that_raised_its_own_limit_admits_the_second_writer(ctx: Context) -> None:
+    """The same state that refuses above, under a project-level `concurrency_per_project`.
+
+    Paired with the test before it deliberately: the store, the run and the second writer
+    are identical, and the registry is the only thing that changed. Against a `claim` that
+    read `defaults.concurrency_per_project` this raises `project-busy`, because the
+    project's own answer would never be consulted.
+    """
+    other = ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
+    ctx.store.record_transition(
+        other.id, from_state=None, to_state=State.IMPLEMENTING, actor="auto"
+    )
+    assert ctx.registry.defaults.concurrency_per_project == 1
+    raised = dataclasses.replace(ctx.project, concurrency_per_project=2)
+    ctx = dataclasses.replace(
+        ctx,
+        project=raised,
+        registry=dataclasses.replace(
+            ctx.registry, projects={**ctx.registry.projects, "python-harness": raised}
+        ),
+    )
+
+    claim_step.run(ctx)
+    assert ctx.run.state is State.CLAIMED
 
 
 def test_a_run_that_lost_its_lease_cannot_advance(ctx: Context) -> None:
@@ -975,3 +1002,129 @@ def test_an_acknowledged_credential_is_warned_about_rather_than_blocking(
     assert len(warned) == 1
     assert warned[0]["status"] == "warn"
     assert "GH_TOKEN" in warned[0]["detail"]
+
+
+# --------------------------------------------------------------------------------
+# Two tickets, one repository, one sandbox — §11.3 raised above 1
+# --------------------------------------------------------------------------------
+
+
+def _to_implementing(ctx: Context) -> None:
+    """Take a run to a *live, unfinished* attempt — the only state this section is about.
+
+    Not `_drive`: that one settles at `verifying`, which a detached attempt with no `exit`
+    never reaches. What these tests need is the state a tick hands to the next tick.
+    """
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    sandbox_step.run(ctx)
+    worktree_step.run(ctx)
+    advance_state(ctx, until=State.IMPLEMENTING)
+
+
+def _second_run_in(ctx: Context, ticket: str) -> Context:
+    """A second live run on the same project, sharing its build sandbox.
+
+    The project's own `concurrency_per_project` is raised to 2, because a second writer is
+    the whole premise: at the `[defaults]` floor of 1 the claim below refuses, correctly.
+    """
+    raised = dataclasses.replace(ctx.project, concurrency_per_project=2)
+    run = ctx.store.insert_run(linear_id=ticket, project=ctx.project.name, team="BAC")
+    ctx.store.acquire_lease(run.id, ttl_seconds=600)
+    # Its own issue, so it gets its own branch. `FakeLinear` answers every lookup with the
+    # one ticket, and two runs deriving the same branch name is a fixture artefact rather
+    # than anything the factory would do.
+    assert ctx.issue is not None
+    leased = ctx.store.run_by_id(run.id)
+    assert leased is not None
+    return dataclasses.replace(
+        ctx,
+        run=leased,
+        issue=dataclasses.replace(ctx.issue, identifier=ticket),
+        project=raised,
+        registry=dataclasses.replace(
+            ctx.registry, projects={**ctx.registry.projects, ctx.project.name: raised}
+        ),
+    )
+
+
+def test_a_timeout_on_one_run_does_not_signal_the_other_run_in_the_same_sandbox(
+    ctx: Context,
+) -> None:
+    """The defect that made same-project concurrency unsafe, as a test.
+
+    Both runs detach into `factory-build-python-harness-2` — one VM, because the sandbox
+    is named per project. Signalling by process name is `pkill -x codex` in that VM, which
+    reaches both agents: the second run's wrapper writes an `exit` it never earned, and
+    the factory reads it as that run's own result. Signalling the published process group
+    reaches one.
+
+    The assertion is on the *other* run's attempt directory, because that is where the
+    damage showed: an `exit` file is a terminal record, and there is nothing in it that
+    says which kill produced it.
+    """
+    fake = _fake(ctx)
+    fake.detach_without_finishing = True
+    _to_implementing(ctx)
+    other = _second_run_in(ctx, "BAC-9")
+    _to_implementing(other)
+
+    assert len(fake.detached_pgids) == 2, "both runs must be live in the one sandbox"
+    victim_dir = fake.detached_dirs[-1]
+    assert not (victim_dir / "exit").exists()
+
+    # The timeout path's kill, for the first run only.
+    signal_attempt(ctx, ctx.project.build_sandbox, fake.detached_dirs[0], State.IMPLEMENTING)
+
+    assert (fake.detached_dirs[0] / "exit").exists(), "the run that timed out is signalled"
+    assert not (victim_dir / "exit").exists(), (
+        "the other ticket's agent was signalled by a timeout that had nothing to do with it"
+    )
+
+
+def test_the_kill_falls_back_to_the_process_name_when_no_group_was_published(
+    ctx: Context,
+) -> None:
+    # An attempt started under the previous wrapper is still running and has no `pgid`
+    # file. Signalling it by name is worse than a group and better than nothing.
+    fake = _fake(ctx)
+    fake.detach_without_finishing = True
+    _to_implementing(ctx)
+    attempt_dir = fake.detached_dirs[0]
+    (attempt_dir / "pgid").unlink()
+
+    how = signal_attempt(ctx, ctx.project.build_sandbox, attempt_dir, State.IMPLEMENTING)
+
+    assert "no pgid file" in how
+    assert (attempt_dir / "exit").exists()
+
+
+def test_each_run_gets_its_own_virtualenv_inside_the_shared_sandbox(ctx: Context) -> None:
+    """`{run}` in the registry's env, resolved per ticket.
+
+    One VM, two runs: a single `UV_PROJECT_ENVIRONMENT` means a `uv sync` in one run
+    rewrites the venv the other one's gates execute against. The failure surfaces in the
+    victim's gate output with no cause anywhere in its own transcript, which is why this
+    is asserted rather than left to a comment.
+    """
+    project = dataclasses.replace(
+        ctx.project, env={"UV_PROJECT_ENVIRONMENT": "/home/agent/venvs/python-harness/{run}"}
+    )
+    first = dataclasses.replace(ctx, project=project)
+    other = _second_run_in(first, "BAC-9")
+    second = dataclasses.replace(other, project=dataclasses.replace(project, name=project.name))
+
+    assert first.env["UV_PROJECT_ENVIRONMENT"] == "/home/agent/venvs/python-harness/BAC-4"
+    assert second.env["UV_PROJECT_ENVIRONMENT"] == "/home/agent/venvs/python-harness/BAC-9"
+    assert first.env != second.env
+
+
+def test_the_creation_time_env_never_carries_an_unresolved_token(ctx: Context) -> None:
+    # The sandbox is created once per project, so there is no run to resolve against.
+    # A literal `{run}` baked in at `sbx create` would be a real path inside the VM.
+    project = dataclasses.replace(
+        ctx.project,
+        env={"UV_PROJECT_ENVIRONMENT": "/home/agent/venvs/x/{run}", "PLAIN": "kept"},
+    )
+    spec = sandbox_step.build_spec(dataclasses.replace(ctx, project=project))
+    assert spec.env == {"PLAIN": "kept"}

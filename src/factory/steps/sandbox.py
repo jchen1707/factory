@@ -73,7 +73,13 @@ def build_spec(ctx: Context) -> SandboxSpec:
         kits=ctx.project.kits,
         static_mcp=ctx.project.static_mcp,
         deny_network=ctx.registry.defaults.deny_network,
-        env=dict(ctx.project.env),
+        # Creation-time env, so per-run values are deliberately *left out* rather than
+        # resolved: §9.1 fixes this at `sbx create` and the sandbox is named once per
+        # project, so there is no single run to resolve them against. Every step passes
+        # the resolved set per exec (`Context.env`), which is what the agent actually
+        # sees; baking a literal `{run}` in here would put an unexpanded token on a real
+        # path inside the VM and it would fail somewhere far from this line.
+        env={k: v for k, v in ctx.project.env.items() if "{run}" not in v},
         clone=ctx.project.requires_clone,
         allowed_custom_secrets=(
             (ctx.project.sandbox_delivery.placeholder_env,) if ctx.project.sandbox_delivery else ()

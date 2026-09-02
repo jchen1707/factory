@@ -221,6 +221,15 @@ class FakeSandbox:
     #: reported a successful kill for every name and could not tell those two worlds apart —
     #: which is how `reap` came to signal `codex` at a `verifying` attempt that runs `node`.
     detached_procs: list[str] = field(default_factory=list)
+    #: The in-VM process group of each detached invocation, parallel to `detached`, and
+    #: the fake's whole reason for existing at this level of detail. The real wrapper
+    #: publishes its pgid and `kill_group` signals that group alone; a fake that stopped
+    #: "the last detached run" — which is what `kill_agent` below still models, correctly,
+    #: for the name-matching path — could not tell a scoped kill from an unscoped one, and
+    #: that difference *is* the safety property for two tickets sharing one sandbox.
+    detached_pgids: list[int] = field(default_factory=list)
+    #: Handed out in order, so a test can name the group it expects to survive.
+    next_pgid: int = 1000
 
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
@@ -431,6 +440,14 @@ class FakeSandbox:
         self.detached_dirs.append(handle.attempt_dir)
         # The gate report is `node gate_report.mjs`; every other detached body is `codex`.
         self.detached_procs.append("node" if "gate_report.mjs" in script else "codex")
+        # Model the wrapper publishing its process group. `pgid` for every phase but the
+        # plan half of a rewind, which writes its own so the two cannot signal each other.
+        self.next_pgid += 1
+        self.detached_pgids.append(self.next_pgid)
+        pgid_name = "plan-pgid" if "plan-exit" in script else "pgid"
+        handle.attempt_dir.mkdir(parents=True, exist_ok=True)
+        if "__FACTORY_BODY__" in script:
+            (handle.attempt_dir / pgid_name).write_text(str(self.next_pgid))
         if self.detach_without_finishing:
             directory = handle.attempt_dir
             directory.mkdir(parents=True, exist_ok=True)
@@ -543,6 +560,23 @@ class FakeSandbox:
         if proc != self.detached_procs[-1]:
             return
         (self.detached_dirs[-1] / "exit").write_text(str(self.exit_code))
+
+    def kill_group(self, name: str, pgid: int) -> None:
+        """Signal exactly the attempt that published this pgid, and nothing else.
+
+        The contrast with `kill_agent` above is the point of the fake: that one stops
+        "the last detached run in this sandbox", because `pkill -x` genuinely cannot do
+        better, and this one stops the one run it was asked to. A project running two
+        tickets at once shares one build sandbox, so the difference between those two
+        behaviours is the difference between a timeout on one run and a wrong terminal
+        record on the other.
+        """
+        if not self.kill_writes_exit:
+            return
+        for index, published in enumerate(self.detached_pgids):
+            if published == pgid:
+                (self.detached_dirs[index] / "exit").write_text(str(self.exit_code))
+                return
 
     def stop(self, name: str) -> None:
         self.stop_sandbox(name)
