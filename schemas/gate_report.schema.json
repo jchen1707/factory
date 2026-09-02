@@ -9,6 +9,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "root": { "type": "string" },
+    "requestedKinds": { "type": "array", "items": { "type": "string" } },
     "targets": {
       "type": "array",
       "items": {
@@ -39,6 +40,7 @@
         "additionalProperties": false,
         "properties": {
           "name": { "type": "string" },
+          "app": { "type": "string" },
           "kind": { "type": "string" },
           "status": {
             "enum": [

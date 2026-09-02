@@ -9,8 +9,12 @@ without a context, a sandbox or a store.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from factory.agent.base import validate_against_schema
 from factory.harness import Gate, HarnessConfig
 from factory.steps.verify import (
     _CLAIM_SATISFIED,
@@ -109,6 +113,41 @@ def test_every_status_the_step_accepts_is_one_the_schema_allows() -> None:
     )
     allowed = set(schema["properties"]["gates"]["items"]["properties"]["status"]["enum"])
     assert allowed >= _CLAIM_SATISFIED, _CLAIM_SATISFIED - allowed
+
+
+def test_the_schema_accepts_the_document_the_vendored_hook_actually_emits() -> None:
+    """The drift guard one level up from the enum test above, and the reason it exists.
+
+    That test proves the schema knows every *status* the step accepts. It cannot see a new
+    top-level *property*, and `additionalProperties: false` rejects one — so when layer A
+    added `requestedKinds` (the `--kinds` narrowing echoed back), every verify step began
+    blocking on `schema-invalid`: `$: unexpected properties ['requestedKinds']`. Measured
+    on BAC-10 attempt 2, which had already committed three green commits when it blocked.
+
+    Neither side was wrong. The report is produced by the *consuming repo's* vendored hook
+    and validated against *this* repo's schema, so the two drift independently and nothing
+    compared them. This runs the hook and validates what it really emits, which is the only
+    check that covers the whole class rather than one field of it.
+
+    `--kinds lint` keeps it to the cheapest gate; the assertion is on the document's shape,
+    not its verdict, so a failing lint here would still be a passing test.
+    """
+    root = Path(__file__).resolve().parents[2]
+    hook = root / ".agents" / "vendor" / "harness" / "hooks" / "gate_report.mjs"
+    if not hook.exists():  # pragma: no cover - the vendored tree is always present in CI
+        pytest.skip(f"{hook} is not vendored here")
+    proc = subprocess.run(
+        ["node", str(hook), "--json", "--kinds", "lint"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+        check=False,
+    )
+    report = json.loads(proc.stdout)
+    schema = json.loads((root / "schemas" / "gate_report.schema.json").read_text())
+    # The same validator the step uses, so a keyword this schema may not rely on cannot
+    # make the test pass where the run would block.
+    validate_against_schema(report, schema)
 
 
 # -- the evidence-mismatch cross-check (§15.1) --------------------------------
