@@ -2,13 +2,35 @@
 description: Run this repository's test suite and report results
 ---
 
-Read `harness.config.json` at the repository root. Run every gate whose `kind` is `test`.
+Run the gate report, narrowed to the test kind:
 
-Run an `e2e` or `integration` gate as well when its `when` clause applies to this change —
-those tiers need a browser or a container, so they are opt-in rather than part of the default
-loop. If the manifest or lockfile changed, run `install` first.
+```sh
+node ../hooks/gate_report.mjs --kinds test --force
+```
 
-Report the pass/fail summary and every failure **verbatim**, with `file:line`.
+The path is relative to **this file**. Layer A ships `commands/` and `hooks/` as siblings in
+both delivery adapters, so `../hooks/gate_report.mjs` resolves whether you are reading this
+from the plugin or from a vendored tree. `--force` because you were asked: the change filter
+exists for the Stop hook, not for a person who typed the command.
+
+An `e2e` or `integration` gate is opt-in, and the report will not run one unless you assert
+it. When a gate's `when` clause applies to this change, name it:
+
+```sh
+node ../hooks/gate_report.mjs --kinds test,e2e --force --gate <gate-name>
+```
+
+Assert them **one at a time, by name**. `--all` asserts every opt-in `when` clause at once,
+including clauses that are plainly false for your change, and a gate that should never have
+executed can block a run it had no business blocking.
+
+If the manifest or lockfile changed, run the config's `install` command first. The report
+never installs.
+
+Report the pass/fail summary and every failure **verbatim**, with `file:line`. Report any gate
+the report marked `unavailable` — a missing browser or container is not a failing test, and
+handing an agent "the test failed" for a gate that never started sends it to fix code that was
+never wrong.
 
 **Do not modify tests or source to make a failing test pass.** Diagnose the root cause and
 propose a fix. A test edited until it agrees with the code has stopped being evidence — that

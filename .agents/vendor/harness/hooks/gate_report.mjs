@@ -18,7 +18,8 @@
  * silently — the single failure this repository exists to prevent.
  *
  * ```
- * node gate_report.mjs [--gate <name>]... [--all] [--json] [--base <ref>] [--cwd <dir>]
+ * node gate_report.mjs [--gate <name>]... [--all] [--kinds <a,b>] [--force] [--json]
+ *                       [--base <ref>] [--cwd <dir>]
  * ```
  *
  * The `e2e`/`integration` gates are opt-in: without an assertion they are `not_applicable`,
@@ -45,7 +46,25 @@
  * (the committed change since a base ref). The factory passes this — it commits the agent's
  * work before it verifies, so the working tree is clean and `git status` would see nothing;
  * against the run's base ref the diff sees the change instead. The Stop hook never passes
- * it, so its `gatedChange` is unchanged. See `gatedChangeSince` in `verify.mjs`.
+ * it, so it reads the working tree exactly as before. Both modes are the one
+ * `gatedChange` in `verify.mjs`, which takes the base as an option.
+ *
+ * `--kinds <a,b>` narrows the run to the named gate kinds -- the form `/lint` and `/test`
+ * use, where the point is to run the fast subset rather than the whole Definition of Done.
+ * A gate outside the requested kinds is `not_applicable`, the same status an unasserted
+ * opt-in gate carries, because the reason is the same in both: the caller did not ask for
+ * it. The document echoes the request back as `requestedKinds` so a reader can tell the two
+ * apart without inferring it from the rows. Without the flag every kind is eligible, which
+ * is what the Stop-hook path and the factory both want.
+ *
+ * `--force` runs the eligible gates whether or not the app's gated paths changed. The
+ * change filter is what makes the Stop hook cheap -- it fires at the end of every turn and
+ * most turns touch nothing it gates -- but it is wrong for a caller who asked. A human
+ * typing `/lint` on a clean tree means "lint this repository", not "lint it if git says
+ * something moved", and without this they would get a screen of `skipped_unchanged` and a
+ * green verdict, which is the vacuous green this document exists to refuse. The Stop hook
+ * and the cross-stack job both leave it off, because for them "nothing changed" is the
+ * honest answer rather than an obstacle.
  *
  * `--json` emits the document below. Without it, a compact human-readable summary goes to
  * stdout and the same exit code is returned, so an interactive run is legible without a
@@ -58,7 +77,7 @@
  * | `pass` | exit 0, and the gate actually started |
  * | `fail` | non-zero exit |
  * | `unavailable` | the gate did not run: either the process could not be spawned (`result.error`) — the case `verify.mjs` must swallow and a report must not — or its `requires` probe said the environment is not there, in which case the gate was never attempted and carries no `exit` |
- * | `not_applicable` | `kind` is `e2e`/`integration` and the caller asserted neither `--gate <name>` nor `--all` |
+ * | `not_applicable` | the caller did not ask for this gate: either `kind` is `e2e`/`integration` and neither `--gate <name>` nor `--all` asserted it, or `--kinds` named other kinds |
  * | `skipped_unchanged` | the app's `gatedChange()` was false — a monorepo app the turn never touched |
  * | `disabled` | `enabled: false` in config — the gate is declared but switched off |
  *
@@ -81,7 +100,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
 import { loadConfig, repoRelative, runArgv, tail } from './lib.mjs';
-import { dispatch, gatedChange, gatedChangeSince, STOP_KINDS } from './verify.mjs';
+import { dispatch, gatedChange, STOP_KINDS } from './verify.mjs';
 
 const MAX_LINES = 40;
 const GATE_TIMEOUT = 540_000;
@@ -113,6 +132,7 @@ export const EXIT = { pass: 0, fail: 1, incomplete: 3 };
  *
  * @typedef {Object} GateEntry
  * @property {string} name
+ * @property {string} app
  * @property {string} kind
  * @property {string} status
  * @property {number|null} exit
@@ -171,11 +191,13 @@ export function requirementMet(probe) {
  * @param {Object} gate
  * @param {string} status
  * @param {GateRun|null} run
+ * @param {string} [app=''] - The declaring app's name, `''` in a single-config repo.
  * @returns {GateEntry}
  */
-function gateEntry(gate, status, run) {
+function gateEntry(gate, status, run, app = '') {
   const entry = {
     name: gate.name,
+    app,
     kind: gate.kind,
     status,
     exit: null,
@@ -249,6 +271,8 @@ export function exitCode(verdict) {
  * @param {string[]} args.missing - Apps named in the root config with no config of their own.
  * @param {boolean} [args.all=false] - Whether the caller asserted every opt-in `when` clause.
  * @param {string[]} [args.gates=[]] - Opt-in gate names the caller asserted individually.
+ * @param {string[]} [args.kinds=[]] - Gate kinds the caller asked for; empty means every kind.
+ * @param {boolean} [args.force=false] - Run eligible gates even where `isChanged` is false.
  * @param {(target: Object) => boolean} args.isChanged
  * @param {(gate: Object, target: Object) => GateRun} args.runGate
  * @param {(gate: Object, target: Object) => GateRun} [args.probeGate]
@@ -260,6 +284,8 @@ export function buildReport({
   missing,
   all = false,
   gates: asserted = [],
+  kinds: requestedKinds = [],
+  force = false,
   isChanged,
   runGate,
   probeGate = () => ({ status: 0, stdout: '', stderr: '', error: null, durationMs: null }),
@@ -269,11 +295,19 @@ export function buildReport({
   // declares is inert rather than an error — the caller named a gate this repo does not have,
   // which is the same nothing as not naming it.
   const assertedNames = new Set(asserted);
+  // Empty means "every kind is eligible", which is what the Stop-hook path and the factory
+  // both want. A requested kind no gate declares is inert, like an asserted name no config
+  // declares: the caller asked for something this repo does not have, which is the same
+  // nothing as not asking.
+  const wanted = new Set(requestedKinds);
   const gates = [];
   for (const target of targets) {
     const prefix = repoRelative(target.root, root.root);
     const dir = prefix || '.';
-    const changed = isChanged(target);
+    // `isChanged` is not consulted at all under `--force`: it shells out to git, and a
+    // caller who has already said "run them" should not pay for an answer that cannot
+    // change the outcome.
+    const changed = force || isChanged(target);
     // The same filter the Stop hook uses: a gate without a `run` argv is malformed config,
     // not a gate to attempt. Reporting it would mean executing `undefined`.
     const declared = target.gates.filter((gate) => gate && Array.isArray(gate.run));
@@ -289,11 +323,19 @@ export function buildReport({
       // to start that was meant to start. `computeVerdict` special-cases only `fail` and
       // `unavailable`, so this falls through to `pass` on its own.
       if (gate.enabled === false) {
-        gates.push(gateEntry(gate, 'disabled', null));
+        gates.push(gateEntry(gate, 'disabled', null, target.name));
+        continue;
+      }
+      // Narrowed by the caller, and that is a property of the *request* -- like
+      // `enabled: false` is a property of the config -- so it is settled before anything
+      // about the tree's state is consulted. `/lint` asking for three kinds should get the
+      // same three rows whether or not the app was touched.
+      if (wanted.size > 0 && !wanted.has(gate.kind)) {
+        gates.push(gateEntry(gate, 'not_applicable', null, target.name));
         continue;
       }
       if (!changed) {
-        gates.push(gateEntry(gate, 'skipped_unchanged', null));
+        gates.push(gateEntry(gate, 'skipped_unchanged', null, target.name));
         continue;
       }
       // The opt-in kinds are exactly the ones the Stop hook does not run — the complement
@@ -305,7 +347,7 @@ export function buildReport({
       // a caller naming `playwright` gets `playwright`, and does not silently also assert
       // `lighthouse`'s unrelated `when` clause.
       if (!STOP_KINDS.has(gate.kind) && !all && !assertedNames.has(gate.name)) {
-        gates.push(gateEntry(gate, 'not_applicable', null));
+        gates.push(gateEntry(gate, 'not_applicable', null, target.name));
         continue;
       }
       // The environment assertion, after every reason not to run and before the run itself.
@@ -319,7 +361,7 @@ export function buildReport({
       if (Array.isArray(gate.requires) && gate.requires.length > 0) {
         const probe = probeGate(gate, target);
         if (!requirementMet(probe)) {
-          const entry = gateEntry(gate, 'unavailable', null);
+          const entry = gateEntry(gate, 'unavailable', null, target.name);
           entry.outputTail =
             tail((probe.stdout ?? '') + (probe.stderr ?? ''), MAX_LINES) ||
             probe.error?.message ||
@@ -331,7 +373,7 @@ export function buildReport({
       // Run once: `runGate` shells out in production, so calling it twice would run every
       // gate twice. The result is classified and recorded from the same run.
       const run = runGate(gate, target);
-      gates.push(gateEntry(gate, classifyRun(run), run));
+      gates.push(gateEntry(gate, classifyRun(run), run, target.name));
     }
   }
 
@@ -344,6 +386,9 @@ export function buildReport({
       dir: repoRelative(target.root, root.root) || '.',
     })),
     missingApps: missing,
+    // Echoed back so a reader can tell a gate the caller never asked for from an opt-in
+    // gate nobody asserted. Both are `not_applicable`; only this says which.
+    requestedKinds: [...wanted],
     gates,
     verdict,
   };
@@ -357,7 +402,8 @@ function timedRun(argv, options) {
 }
 
 /**
- * Parse the CLI flags. Deliberately tiny: `--gate <name>` (repeatable), `--all`, `--json`,
+ * Parse the CLI flags. Deliberately tiny: `--gate <name>` (repeatable), `--all`,
+ * `--kinds <a,b>` (comma-separated and repeatable), `--json`,
  * `--base <ref>`, `--cwd <dir>` (or `--gate=<name>` / `--cwd=<dir>` / `--base=<ref>`). No
  * abbreviations, no `--no-*` — a report's caller is a machine or a person who read the help
  * line above, and a forgiving parser is a parser that silently does the wrong thing.
@@ -367,15 +413,23 @@ function timedRun(argv, options) {
  * reading of that.
  */
 export function parseArgs(argv) {
-  const args = { all: false, gates: [], json: false, base: '', cwd: '' };
+  const args = { all: false, gates: [], kinds: [], force: false, json: false, base: '', cwd: '' };
   const addGate = (name) => {
     if (name) args.gates.push(name);
+  };
+  // Comma-separated, and repeatable, because both spellings are things a caller writes
+  // without thinking about it. Empty segments are dropped rather than filtering on `''`.
+  const addKinds = (value) => {
+    for (const kind of value.split(',')) if (kind.trim()) args.kinds.push(kind.trim());
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === '--all') args.all = true;
+    else if (flag === '--force') args.force = true;
     else if (flag === '--gate') addGate(argv[++i] ?? '');
     else if (flag.startsWith('--gate=')) addGate(flag.slice('--gate='.length));
+    else if (flag === '--kinds') addKinds(argv[++i] ?? '');
+    else if (flag.startsWith('--kinds=')) addKinds(flag.slice('--kinds='.length));
     else if (flag === '--json') args.json = true;
     else if (flag === '--base') args.base = argv[++i] ?? '';
     else if (flag.startsWith('--base=')) args.base = flag.slice('--base='.length);
@@ -388,10 +442,29 @@ export function parseArgs(argv) {
 /** One line per gate for a human reader, then the verdict. ASCII only, like the hook's stderr. */
 function humanReport(report) {
   const lines = [];
+  if (report.requestedKinds?.length) {
+    // Said before the rows, not after: a narrowed run is a subset of the Definition of
+    // Done, and a reader who takes its `pass` for the whole thing has been misled by the
+    // one line that was supposed to prevent exactly that.
+    lines.push(`narrowed to kinds: ${report.requestedKinds.join(', ')}`);
+  }
   for (const gate of report.gates) {
-    const where = report.targets.length > 1 ? ` (${gate.name})` : '';
+    const where = report.targets.length > 1 && gate.app ? ` (${gate.app})` : '';
     lines.push(`${gate.status}\t${gate.name}${where}`);
-    if (gate.caveat && (gate.status === 'pass' || gate.status === 'not_applicable')) {
+    // A caveat says how a gate can pass while checking nothing, so it belongs beside a
+    // green result and beside an opt-in gate the caller chose not to assert -- both are
+    // cases where a reader might take the absence of a failure for evidence. It does not
+    // belong beside a gate the caller narrowed away with `--kinds`: nobody was going to
+    // read that row as evidence of anything, and printing it buries the rows that matter.
+    const narrowedOut =
+      gate.status === 'not_applicable' &&
+      report.requestedKinds?.length > 0 &&
+      !report.requestedKinds.includes(gate.kind);
+    if (
+      gate.caveat &&
+      !narrowedOut &&
+      (gate.status === 'pass' || gate.status === 'not_applicable')
+    ) {
       lines.push(`\tcaveat: ${gate.caveat}`);
     }
   }
@@ -414,15 +487,12 @@ async function main() {
     missing,
     all: args.all,
     gates: args.gates,
+    kinds: args.kinds,
+    force: args.force,
     isChanged: (target) =>
-      args.base
-        ? gatedChangeSince(
-            target.root,
-            target.hooks,
-            repoRelative(target.root, root.root),
-            args.base,
-          )
-        : gatedChange(target.root, target.hooks, repoRelative(target.root, root.root)),
+      gatedChange(target.root, target.hooks, repoRelative(target.root, root.root), {
+        base: args.base,
+      }),
     runGate: (gate, target) => timedRun(gate.run, { cwd: target.root, timeout: GATE_TIMEOUT }),
     // A far shorter timeout than a gate's: a requirement probe that has not answered in
     // thirty seconds is not a slow probe, it is a hung one, and its whole reason to exist

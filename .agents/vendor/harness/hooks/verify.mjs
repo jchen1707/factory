@@ -129,55 +129,41 @@ export function isGated(path, hooks, prefix = '') {
  * The pathspec names every gated location explicitly rather than asking git about the whole
  * tree: a repo-wide `git status` in a large checkout is slow enough to notice on every
  * turn, and narrowing it here is what makes the filter affordable.
+ *
+ * **Two modes, one filter.** Without a `base` this reads uncommitted working-tree edits
+ * (`git status --porcelain`), which is exactly right for the Stop hook: it fires at turn-end
+ * over the agent's not-yet-committed edits. With one, it reads the committed change since a
+ * ref (`git diff --name-only <base>..HEAD`) — the factory's post-commit case, where the
+ * implement step has already committed the agent's work, the working tree is clean, and
+ * `git status` would see nothing at all. Both outputs are repo-root-relative whatever
+ * directory git ran in, so the same `isGated` filter and the same `prefix` reconciliation
+ * apply to each; only the argv and the per-line path extraction differ. A porcelain line is
+ * two status chars then the path; a diff rename line is `old\tnew`, whose last segment is
+ * the path that exists.
+ *
+ * These were two near-identical functions until the pathspec construction and the `isGated`
+ * filter had been copied four times — twice here and twice more as doubles in the test
+ * suite, which could not drive the real thing because the `git` call was welded in. `exec`
+ * is that seam, defaulting to the real runner, and it is the same injection `buildReport`
+ * takes in `gate_report.mjs`. A unit test must not shell out; it must also not test a copy.
  */
-export function gatedChange(cwd, hooks, prefix = '') {
+export function gatedChange(cwd, hooks, prefix = '', { base = '', exec = run } = {}) {
   const pathspec = [...hooks.gatedPaths, ...hooks.gatedFiles];
   if (pathspec.length === 0) return false; // Nothing declared -> nothing to gate.
 
   // The pathspec is resolved by git against `cwd`, so it is declared as written. The
   // *output* is repo-root-relative regardless, which is what `prefix` reconciles.
-  const result = run('git', ['status', '--porcelain', '--', ...pathspec], {
-    cwd,
-    timeout: 30_000,
-  });
+  const argv = base
+    ? ['diff', '--name-only', `${base}..HEAD`, '--', ...pathspec]
+    : ['status', '--porcelain', '--', ...pathspec];
+  const extract = base ? (line) => line.split('\t').pop() : porcelainPath;
+
+  const result = exec('git', argv, { cwd, timeout: 30_000 });
   if (result.status !== 0) return false; // Can't tell -> don't block.
   return result.stdout
     .split(/\r?\n/)
     .filter(Boolean)
-    .map(porcelainPath)
-    .some((path) => isGated(path, hooks, prefix));
-}
-
-/**
- * True if the commits `<base>..HEAD` touched gated source — the factory's post-commit
- * analogue of `gatedChange`.
- *
- * `gatedChange` reads uncommitted working-tree edits (`git status --porcelain`), which is
- * exactly right for the Stop hook: it fires at turn-end over the agent's not-yet-committed
- * edits. The factory verifies *after* the implement step has committed the agent's work, so
- * the working tree is clean, `git status` is empty, and `gatedChange` sees nothing — every
- * gate would be `skipped_unchanged` regardless of what the change touched. Against a base
- * ref, `git diff --name-only` sees the committed change instead. `gate_report.mjs --base
- * <ref>` switches on this; the Stop hook never passes a base, so `gatedChange` is unchanged.
- *
- * The diff output is repo-root-relative, like porcelain, so the same `isGated` filter and
- * `prefix` reconciliation apply. A rename line is `old\tnew`; the last segment is the path
- * that exists.
- */
-export function gatedChangeSince(cwd, hooks, prefix = '', base) {
-  const pathspec = [...hooks.gatedPaths, ...hooks.gatedFiles];
-  if (pathspec.length === 0) return false; // Nothing declared -> nothing to gate.
-  if (!base) return false; // No base ref -> nothing to diff against.
-
-  const result = run('git', ['diff', '--name-only', `${base}..HEAD`, '--', ...pathspec], {
-    cwd,
-    timeout: 30_000,
-  });
-  if (result.status !== 0) return false; // Can't tell -> don't block.
-  return result.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => line.split('\t').pop())
+    .map(extract)
     .some((path) => isGated(path, hooks, prefix));
 }
 
