@@ -54,7 +54,6 @@ import {
   declaredPath,
   dispatch,
   gatedChange,
-  gatedChangeSince,
   isGated,
   missingNote,
   porcelainPath,
@@ -568,7 +567,7 @@ describe('gate report — base diff (factory post-commit)', () => {
       assert.ok(args.includes('origin/v2..HEAD'), 'diffs the base ref against HEAD');
       return { status: 0, stdout: 'src/app/ai/retrieval/ingestion.py\n', stderr: '', error: null };
     };
-    assert.equal(gatedChangeSinceWith(diffRunner, hooks, 'origin/v2'), true);
+    assert.equal(gatedChangeWith(diffRunner, hooks, { base: 'origin/v2' }), true);
   });
 
   it('reads the destination of a rename, which is the file that exists', () => {
@@ -578,7 +577,7 @@ describe('gate report — base diff (factory post-commit)', () => {
       stderr: '',
       error: null,
     });
-    assert.equal(gatedChangeSinceWith(diffRunner, hooks, 'origin/v2'), true);
+    assert.equal(gatedChangeWith(diffRunner, hooks, { base: 'origin/v2' }), true);
   });
 
   it('is false when the diff touches only ungated prose', () => {
@@ -588,22 +587,26 @@ describe('gate report — base diff (factory post-commit)', () => {
       stderr: '',
       error: null,
     });
-    assert.equal(gatedChangeSinceWith(diffRunner, hooks, 'origin/v2'), false);
+    assert.equal(gatedChangeWith(diffRunner, hooks, { base: 'origin/v2' }), false);
   });
 
-  it('does not ask git anything when no base ref is given', () => {
-    let asked = false;
-    const runner = () => {
-      asked = true;
+  it('reads the working tree, not a diff, when no base ref is given', () => {
+    // The Stop hook's path. Previously this asserted that a separate `gatedChangeSince`
+    // refused to run without a base; there is one function now, and what matters is which
+    // question it asks git — a `diff` here would silently re-scope the Stop gate.
+    let argv = null;
+    const runner = (_cmd, args) => {
+      argv = args;
       return { status: 0, stdout: '', stderr: '', error: null };
     };
-    assert.equal(gatedChangeSinceWith(runner, hooks, ''), false);
-    assert.equal(asked, false);
+    assert.equal(gatedChangeWith(runner, hooks, { base: '' }), false);
+    assert.equal(argv[0], 'status');
+    assert.ok(argv.includes('--porcelain'));
   });
 
   it('does not block when git cannot produce the diff', () => {
     const failing = () => ({ status: 1, stdout: '', stderr: 'boom', error: null });
-    assert.equal(gatedChangeSinceWith(failing, hooks, 'origin/v2'), false);
+    assert.equal(gatedChangeWith(failing, hooks, { base: 'origin/v2' }), false);
   });
 
   it('parses --base <ref> and --base=<ref>', () => {
@@ -704,39 +707,16 @@ describe('gate report — base diff integration (real git)', () => {
 });
 
 /**
- * `gatedChange` shells out to git, which a unit test must not do. Rather than mock the
- * module, re-run its decision against an injected runner: the pathspec construction and the
- * `isGated` filter are the parts worth pinning, and both are visible here.
+ * The real `gatedChange`, driven with a fake `exec` so the suite never shells out to git.
+ *
+ * These were two hand-written re-implementations of the function's body — one per mode —
+ * because the `git` call was welded in and there was nothing to inject. That made the two
+ * things a unit test must not do into a single choice: shell out, or test a copy. The copy
+ * won, and it meant a change to the real pathspec construction left this suite green.
+ * `exec` is the seam that removes the choice, and it is the same one `buildReport` takes.
  */
-function gatedChangeWith(runner, hooks) {
-  const pathspec = [...hooks.gatedPaths, ...hooks.gatedFiles];
-  if (pathspec.length === 0) return false;
-  const result = runner('git', ['status', '--porcelain', '--', ...pathspec]);
-  if (result.status !== 0) return false;
-  return result.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(porcelainPath)
-    .some((path) => isGated(path, hooks));
-}
-
-/**
- * `gatedChangeSince` re-run against an injected runner, the same way `gatedChangeWith` keeps
- * the Stop gate's pathspec test off the shell. This is the factory's post-commit path: it
- * diffs `<base>..HEAD` instead of reading uncommitted `git status`, because the implement
- * step has already committed the agent's work by the time verify runs.
- */
-function gatedChangeSinceWith(runner, hooks, base) {
-  const pathspec = [...hooks.gatedPaths, ...hooks.gatedFiles];
-  if (pathspec.length === 0) return false;
-  if (!base) return false;
-  const result = runner('git', ['diff', '--name-only', `${base}..HEAD`, '--', ...pathspec]);
-  if (result.status !== 0) return false;
-  return result.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => line.split('\t').pop())
-    .some((path) => isGated(path, hooks));
+function gatedChangeWith(exec, hooks, options = {}) {
+  return gatedChange('.', hooks, '', { ...options, exec });
 }
 
 /**
@@ -1985,9 +1965,141 @@ describe('gate report — document shape', () => {
     assert.equal(report.root, root.root);
     assert.deepEqual(report.targets, [{ name: 'solo', dir: '.' }]);
     assert.deepEqual(report.missingApps, []);
+    assert.deepEqual(report.requestedKinds, []);
     assert.deepEqual(
       Object.keys(report.gates[0]).sort(),
-      ['caveat', 'durationMs', 'exit', 'kind', 'name', 'outputTail', 'status', 'when'].sort(),
+      [
+        'app',
+        'caveat',
+        'durationMs',
+        'exit',
+        'kind',
+        'name',
+        'outputTail',
+        'status',
+        'when',
+      ].sort(),
     );
+  });
+
+  it("names the declaring app on every row, whatever the row's status", () => {
+    // The human summary prints this beside a gate name in a monorepo. It used to print the
+    // gate name twice, because the entry did not carry the app at all.
+    const { root, targets, missing } = dispatched({
+      name: 'solo',
+      gates: [
+        { name: 'ran', kind: 'lint', run: ['true'] },
+        { name: 'off', kind: 'lint', run: ['true'], enabled: false },
+        { name: 'optin', kind: 'e2e', run: ['true'] },
+      ],
+      hooks: { gatedPaths: ['src'], gatedExtensions: ['.py'] },
+    });
+    const report = buildReport({
+      root,
+      targets,
+      missing,
+      isChanged: () => true,
+      runGate: () => runResult(0),
+    });
+    for (const gate of report.gates) assert.equal(gate.app, 'solo', `${gate.name} lost its app`);
+  });
+});
+
+describe('gate report — --kinds narrows the run', () => {
+  const declared = {
+    name: 'solo',
+    gates: [
+      { name: 'eslint', kind: 'lint', run: ['true'] },
+      { name: 'tsc', kind: 'types', run: ['true'] },
+      { name: 'vitest', kind: 'test', run: ['true'] },
+    ],
+    hooks: { gatedPaths: ['src'], gatedExtensions: ['.ts'] },
+  };
+
+  /** The report for one `--kinds` request, recording which gates actually ran. */
+  function reportFor(kinds) {
+    const { root, targets, missing } = dispatched(declared);
+    const ran = [];
+    const report = buildReport({
+      root,
+      targets,
+      missing,
+      kinds,
+      isChanged: () => true,
+      runGate: (gate) => {
+        ran.push(gate.name);
+        return runResult(0);
+      },
+    });
+    return { report, ran };
+  }
+
+  it('runs only the requested kinds', () => {
+    const { report, ran } = reportFor(['lint', 'types']);
+    assert.deepEqual(ran, ['eslint', 'tsc']);
+    assert.equal(report.gates.find((g) => g.name === 'vitest').status, 'not_applicable');
+  });
+
+  it('reports the narrowed-out gates rather than omitting them', () => {
+    // Same doctrine as a `disabled` row: a suite that does not check something and a suite
+    // that never claimed to are different, and only a row can say which this was.
+    const { report } = reportFor(['lint']);
+    assert.equal(report.gates.length, 3);
+  });
+
+  it('echoes the request back so not_applicable is not ambiguous', () => {
+    const { report } = reportFor(['lint']);
+    assert.deepEqual(report.requestedKinds, ['lint']);
+  });
+
+  it('still passes: a kind the caller did not ask for is not a gate that failed to run', () => {
+    const { report } = reportFor(['lint']);
+    assert.equal(report.verdict, 'pass');
+  });
+
+  it('treats no kinds as every kind, which is what the Stop path and the factory want', () => {
+    const { ran } = reportFor([]);
+    assert.deepEqual(ran, ['eslint', 'tsc', 'vitest']);
+  });
+
+  it('is inert when asked for a kind this repo does not declare', () => {
+    const { report, ran } = reportFor(['build']);
+    assert.deepEqual(ran, []);
+    assert.equal(report.verdict, 'pass');
+  });
+
+  it('runs a gate the change filter would have skipped, when the caller forced it', () => {
+    // The `/lint` path: a human asked, so "git says nothing moved" is not an answer. Without
+    // this the command reports a screen of skipped_unchanged and a green verdict, which is
+    // the vacuous green the report exists to refuse.
+    const { root, targets, missing } = dispatched(declared);
+    const ran = [];
+    const report = buildReport({
+      root,
+      targets,
+      missing,
+      kinds: ['lint'],
+      force: true,
+      isChanged: () => assert.fail('isChanged must not be consulted under --force'),
+      runGate: (gate) => {
+        ran.push(gate.name);
+        return runResult(0);
+      },
+    });
+    assert.deepEqual(ran, ['eslint']);
+    assert.equal(report.verdict, 'pass');
+  });
+
+  it('parses --force, and leaves it off by default', () => {
+    assert.equal(parseArgs(['--force']).force, true);
+    assert.equal(parseArgs([]).force, false);
+  });
+
+  it('parses --kinds a,b, repeated flags, and --kinds=', () => {
+    assert.deepEqual(parseArgs(['--kinds', 'lint,types']).kinds, ['lint', 'types']);
+    assert.deepEqual(parseArgs(['--kinds=lint']).kinds, ['lint']);
+    assert.deepEqual(parseArgs(['--kinds', 'lint', '--kinds', 'test']).kinds, ['lint', 'test']);
+    assert.deepEqual(parseArgs(['--kinds', 'lint, ,types']).kinds, ['lint', 'types']);
+    assert.deepEqual(parseArgs([]).kinds, []);
   });
 });
