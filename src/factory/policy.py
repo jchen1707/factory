@@ -28,10 +28,12 @@ __all__ = [
     "capability_env_names",
     "capability_secrets",
     "diff_vault",
+    "disallowed_vault_writes",
     "host_execution_verdict",
     "requires_human",
     "sandbox_is_factory_owned",
     "snapshot_vault",
+    "unattributable_vault_changes",
     "vault_writes_outside_allowlist",
 ]
 
@@ -319,7 +321,53 @@ def vault_writes_outside_allowlist(
     A deletion or truncation *inside* the allowed set counts too: the distiller only
     ever adds or rewrites its own dated note, so a delete there is not the hook's work
     either.
+
+    The union of the two functions below, kept because it is the honest answer to "what
+    in this vault moved that the allowlist does not sanction". What it is *not* is a list
+    of things this run did — see `unattributable_vault_changes`.
     """
     offending = [c for c in changes if not _matches(c.path, allowlist)]
     offending += [c for c in changes if _matches(c.path, allowlist) and c.kind == "deleted"]
     return sorted(set(offending), key=lambda c: (c.kind, c.path))
+
+
+def disallowed_vault_writes(
+    changes: Sequence[VaultChange], allowlist: Sequence[str]
+) -> list[VaultChange]:
+    """The subset a run can be *blamed* for: a deletion inside its own allowed set.
+
+    The vault is mounted whole and read-write, so the snapshot sees every change in it —
+    but seeing a change and attributing one are different things, and only inside the
+    allowlist are they the same. There, the factory knows who the writer is: layer A's
+    distiller hook, which only ever adds or rewrites its own dated note. A deletion is
+    therefore not the hook's work and belongs to the run that was executing.
+    """
+    return sorted(
+        {c for c in changes if _matches(c.path, allowlist) and c.kind == "deleted"},
+        key=lambda c: (c.kind, c.path),
+    )
+
+
+def unattributable_vault_changes(
+    changes: Sequence[VaultChange], allowlist: Sequence[str]
+) -> list[VaultChange]:
+    """Everything that moved outside the allowlist during the attempt window.
+
+    Recorded, never blocking, and the distinction cost a real attempt to learn. BAC-10
+    attempt 1 was failed for `Getting Promoted/Daily takeaways/Raw notes.md` — a file the
+    agent had explicitly named in its own `out_of_scope` and did not touch. The vault is a
+    live Obsidian vault that James edits while runs are in flight, so a whole-vault diff
+    taken either side of an attempt attributes *by time*, and time is not cause.
+
+    Two runs in one window make it worse rather than better: with `concurrency_per_project`
+    above 1 the windows overlap, so each run sees the other's legitimate writes as its own
+    offence. Blocking on this could only ever have been right while exactly one run existed.
+
+    It stays a warning rather than nothing because the evidence is still worth having. If an
+    agent ever does write outside its lane, the record is here, in the attempt that was
+    running when it happened — which is where someone would look.
+    """
+    return sorted(
+        {c for c in changes if not _matches(c.path, allowlist)},
+        key=lambda c: (c.kind, c.path),
+    )
