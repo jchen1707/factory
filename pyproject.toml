@@ -78,6 +78,7 @@ ignore = ["E501"]
 "src/factory/intake/linear.py" = ["S603", "S607"]
 "src/factory/steps/sandbox.py" = ["S603", "S607"]
 "src/factory/delivery/github.py" = ["S603", "S607"]
+"src/factory/delivery/gitlab.py" = ["S603", "S607"]
 "src/factory/cli.py" = ["S603", "S607"]
 # `doctor` shells out to git, gh, codex and sbx by name, exactly as `cli` did before
 # the checks moved here; the argv lists are literals in this file.

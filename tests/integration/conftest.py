@@ -267,6 +267,19 @@ class FakeSandbox:
         finds it at the `reviewing` entry: stopped, and serving nothing."""
         self.running.discard(name)
 
+    #: `env name -> sbx-cs-… placeholder`, as `sbx secret ls --sandbox <name>` reports it
+    #: for a project that has opted into in-VM delivery. Empty is the shape of every
+    #: sandbox that has not, which is all of them but one.
+    custom_secrets: dict[str, str] = field(default_factory=dict)
+
+    #: `(exit code, body)` for each `curl` the in-VM delivery adapter makes, in order.
+    #: Empty answers every call with an empty JSON array, which is what `find_pr` reads
+    #: as "no merge request open for this branch".
+    api_replies: list[tuple[int, str]] = field(default_factory=list)
+
+    def custom_secret_placeholder(self, name: str, env: str) -> str | None:
+        return self.custom_secrets.get(env)
+
     def git_daemon_url(self, name: str) -> str | None:
         """Published only while the sandbox is running — the constraint that broke.
 
@@ -376,6 +389,13 @@ class FakeSandbox:
                 json.dumps(self.gate_report, indent=2),
                 "",
             )
+        if argv and argv[0] == "curl":
+            # The in-VM GitLab adapter's `/api/v4` calls. Canned in order rather than
+            # routed by URL: what these tests are about is the *lifecycle* around the
+            # calls — the credential installed before them and removed after — and the
+            # adapter's own request shapes are pinned by `tests/unit/test_sandbox_gitlab`.
+            code, body = self.api_replies.pop(0) if self.api_replies else (0, "[]")
+            return Completed(tuple(argv), code, body, "")
         if argv and argv[-1].endswith("protect_paths.mjs"):
             return Completed(
                 tuple(argv), self.canary_exit, "", "Refusing to edit uv.lock - regenerate it."

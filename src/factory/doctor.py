@@ -51,7 +51,7 @@ from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import LinearError, keychain_secret
 from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.routing import MODEL_CACHE, RoutingError, load_routing
-from factory.sandbox.sbx import sbx_available
+from factory.sandbox.sbx import SbxAdapter, sbx_available
 from factory.steps import review as review_step
 from factory.store import Store
 
@@ -249,6 +249,58 @@ def _sensitive_paths(ctx: DoctorContext) -> list[Result]:
     return results
 
 
+def _sandbox_delivery(ctx: DoctorContext) -> list[Result]:
+    """For each project that delivers from inside its own sandbox: is it provisioned?
+
+    Only one project declares `[sandbox_delivery]`, and for every other one this check
+    contributes no rows at all — which is the right shape. A row saying "not applicable"
+    for four projects would bury the one row that means something.
+
+    The placeholder is host state, not code: it survives a `git revert` and it disappears
+    with an `sbx secret rm` nobody remembers doing. `steps/sandbox.py` already fails the
+    preflight on its absence, but that is a *run* failing, and a doctor exists so the
+    machine can be asked before a run is started.
+
+    `skipped` rather than `fail` with no `sbx`. The placeholder cannot be looked up at
+    all then, and "I could not check this" is the honest answer — the same distinction
+    this module's header draws for every other check that depends on an external tool.
+    """
+    registry = ctx.registry
+    if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
+        return []
+    declared = [
+        (project, project.sandbox_delivery)
+        for project in registry.projects.values()
+        if project.sandbox_delivery is not None
+    ]
+    if not declared:
+        return []
+    available, _ = sbx_available()
+    if not available:
+        return [
+            Result(f"sandbox delivery for {project.name}", Status.SKIPPED, "sbx is not available")
+            for project, _ in declared
+        ]
+    adapter = SbxAdapter()
+    results: list[Result] = []
+    for project, delivery in declared:
+        name = delivery.placeholder_env
+        placeholder = adapter.custom_secret_placeholder(project.build_sandbox, name)
+        results += _one(
+            f"sandbox delivery for {project.name}",
+            placeholder is not None,
+            f"{name} -> {placeholder}"
+            if placeholder
+            else (
+                f"no custom secret {name!r} is scoped to {project.build_sandbox}; "
+                f"`sbx secret set-custom --sandbox {project.build_sandbox} --host "
+                f"{delivery.api_url.removeprefix('https://')} --env {name} --value <token>` "
+                "provisions it (the token stays on the host; the sandbox sees a placeholder)"
+            ),
+        )
+    return results
+
+
 def _plan_copy(ctx: DoctorContext) -> list[Result]:
     return _from_triple(_plan_copy_check(ctx.home))
 
@@ -278,6 +330,7 @@ CHECKS: tuple[Check, ...] = (
     Check("disk", _disk),
     Check("vendored layer A", _vendored_layer_a, needs=("registry",)),
     Check("sensitive paths", _sensitive_paths, needs=("registry",)),
+    Check("sandbox delivery", _sandbox_delivery, needs=("registry",)),
     Check("plan copy", _plan_copy),
     Check("price table", _prices),
     Check("codex hook canary", _canary, needs=("registry",), deep=True),

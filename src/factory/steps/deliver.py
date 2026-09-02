@@ -1,9 +1,16 @@
 """`pr_ready -> awaiting_human` — host-execution guard, push, PR (§13.2, §17.4, §24.8).
 
-The last automatic step. The factory pushes from the host (the sandbox has no remote
-credential) and opens the PR **ready for review** — the gates and the review have already
-run, so "draft" was the wrong word for it (`delivery/github.py: create_pr` argues this in
-full). Merge is always his.
+The last automatic step. The factory pushes and opens the PR **ready for review** — the
+gates and the review have already run, so "draft" was the wrong word for it
+(`delivery/github.py: create_pr` argues this in full). Merge is always his.
+
+*Where* the push happens is a registry fact. By default it is the host, and the sandbox
+holds no remote credential — that is §13.2 and it is still the answer for every GitHub
+project. A project that declares `[sandbox_delivery]` reverses it: the push and the merge
+request come from inside its own build sandbox, authenticated by a proxy-substituted
+placeholder rather than a credential. `delivery/sandbox_gitlab.py` carries the whole
+argument for why that is safe, and `_sandbox_credential` below is the lifecycle that keeps
+it bounded to the length of one delivery.
 Before any host-side command runs, the host-execution guard inspects the diff: a touch of
 the vendored tree is a block (the enforcement layer is broken), a touch of a host-execution
 deny-list path (`.husky`, `.github`, …) routes to `awaiting_human` rather than a push, and
@@ -11,19 +18,27 @@ only a clear diff is pushed.
 
 On a clean delivery the run transitions `pr_ready -> awaiting_human` and announces it
 (§13.1): the issue moves to In Review and the factory comments the PR link, the gate
-report, the review summary and the cost. The `pr_ready` "attach the PR URL" write is
-Linear's GitHub integration's job (the `Fixes <TEAM-NUM>` in the body triggers it); the
-factory records the URL on the run row and carries it in the awaiting_human comment.
+report, the review summary and the cost. **Every one of those Linear writes is the
+factory's own**, through `intake/linear.py` and the effects ledger — `issueUpdate` for the
+state move, `commentCreate` for the link — so the announcement does not depend on any
+forge-to-tracker integration being installed. What the GitHub integration adds on top is
+the *native* attachment: the `Fixes <TEAM-NUM>` in the body makes Linear render the PR as a
+linked resource on the issue. That is a nicety, not a load-bearing step, which is why a
+`gitlab` project loses nothing but the backlink chip.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from factory import artifacts, policy, repo
-from factory.delivery import github
+from factory.delivery import body as pr_body
+from factory.delivery import forge as forge_dispatch
+from factory.delivery import sandbox_gitlab
 from factory.machine import Blocked, State
 from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
@@ -88,22 +103,15 @@ def run(ctx: Context) -> None:
             "PR write. The value is compromised — rotation is James's call.",
         ) from exc
 
-    # 3. Push, then open or edit the PR (F16 duplicate guard).
-    github.push(worktree, branch)
-    existing = github.find_pr(worktree, branch)
-    if existing:
-        pr_url = existing
-        number = github.pr_number(existing)
-        if number is not None:
-            github.edit_pr(worktree, number, body_file=body_path)
-    else:
-        pr_url = github.create_pr(
-            worktree,
-            base=ctx.project.base_branch,
-            head=branch,
-            title=pr_title,
-            body_file=body_path,
-        )
+    # 3. Push, then open or edit the PR (F16 duplicate guard). Which forge is a registry
+    #    fact, resolved here rather than imported, so this step names a capability and not a
+    #    vendor — see `delivery/forge.py`.
+    forge = forge_dispatch.for_delivery(
+        ctx.project,
+        sandbox=forge_dispatch.SandboxSite(ctx.sandbox, ctx.project.build_sandbox, str(worktree)),
+    )
+    with _sandbox_credential(ctx):
+        pr_url = _open_or_edit(ctx, forge, worktree, branch, pr_title, body_path)
     ctx.store.update_run(ctx.run.id, pr_url=pr_url)
     ctx.log("deliver.pr_opened", url=pr_url, draft=False)
 
@@ -131,6 +139,80 @@ def run(ctx: Context) -> None:
     )
 
 
+def _open_or_edit(
+    ctx: Context,
+    forge: forge_dispatch.Forge,
+    worktree: Path,
+    branch: str,
+    pr_title: str,
+    body_path: Path,
+) -> str:
+    """Push, then open the PR or bring the existing one's body up to date (F16).
+
+    Lifted out of `run` when the credential lifecycle arrived, so that the `with` block
+    holding a capability open wraps exactly these four calls and nothing else. The
+    archive, the announcement and the Linear writes all happen after it closes.
+    """
+    forge.push(worktree, branch)
+    existing = forge.find_pr(worktree, branch)
+    if existing:
+        number = forge.pr_number(existing)
+        if number is not None:
+            forge.edit_pr(worktree, number, body_file=body_path)
+        return existing
+    return forge.create_pr(
+        worktree,
+        base=ctx.project.base_branch,
+        head=branch,
+        title=pr_title,
+        body_file=body_path,
+    )
+
+
+@contextmanager
+def _sandbox_credential(ctx: Context) -> Iterator[None]:
+    """Hold the in-VM delivery capability open for the length of the push, and no longer.
+
+    A no-op for every project that has not declared `[sandbox_delivery]`, which is all of
+    them but one — the context manager is entered unconditionally so this step has one
+    shape rather than two.
+
+    The `finally` is the load-bearing half. §16.5 keeps a sandbox for `sandbox_idle_hours`
+    after the run that used it, so a credential file left behind is one available to
+    whatever runs in that sandbox next — including the agent of the following ticket,
+    which nobody would think to look for it. `revoke_credential` is best-effort by
+    design: a delivery that succeeded and then failed to tidy up must still report the
+    merge request it opened, and the alternative (raising) would lose the URL.
+
+    What crosses is a `sbx-cs-…` placeholder, read from the host's own `sbx secret ls`.
+    Its absence is a `Blocked` and not a warning: without it the push authenticates as
+    nobody, and the run would fail at its last step having paid for everything before it.
+    """
+    declared = ctx.project.sandbox_delivery
+    if declared is None:
+        yield
+        return
+    sandbox = ctx.project.build_sandbox
+    placeholder = ctx.sandbox.custom_secret_placeholder(sandbox, declared.placeholder_env)
+    if placeholder is None:
+        raise Blocked(
+            "sandbox-delivery-unprovisioned",
+            f"project {ctx.project.name} delivers from inside {sandbox}, but no custom "
+            f"secret named {declared.placeholder_env!r} is scoped to it. Provision it with "
+            f"`sbx secret set-custom --sandbox {sandbox} --host "
+            f"{declared.api_url.removeprefix('https://')} --env {declared.placeholder_env} "
+            "--value <the token>` — the real token stays on the host and the sandbox "
+            "receives only the placeholder. There is no stdin flag on that command, so "
+            "the value lands in the shell history and the process table: read it into a "
+            "variable first.",
+        )
+    sandbox_gitlab.install_credential(ctx.sandbox, sandbox, placeholder=placeholder)
+    try:
+        yield
+    finally:
+        sandbox_gitlab.revoke_credential(ctx.sandbox, sandbox)
+
+
 # --------------------------------------------------------------------------------
 # evidence gathering
 # --------------------------------------------------------------------------------
@@ -143,7 +225,7 @@ def _render_body(ctx: Context) -> str:
     gates_doc = _read_json(attempt_dir / "gates.json")
     review_summary = _read_json(ctx.state_dir / "review" / "review-summary.json")
     tokens_in, tokens_out, usd = ctx.store.spend(ctx.run.id)
-    return github.render_pr_body(
+    return pr_body.render_pr_body(
         ticket=ctx.run.linear_id,
         title=ctx.issue.title if ctx.issue else ctx.run.linear_id,
         restatement=str(result.get("summary", "")),

@@ -56,6 +56,15 @@ def requires_human(source: State, target: State) -> str | None:
 HOST_EXECUTION_DENY: tuple[str, ...] = (
     ".husky/**",
     ".github/**",
+    # The GitLab half of `.github/**`, added with the `gitlab` forge adapter. Without
+    # these, a `forge = "gitlab"` project got a *weaker* guard than a GitHub one for no
+    # stated reason: `.gitlab-ci.yml` is the pipeline definition, `.gitlab/` holds the
+    # included templates and the CODEOWNERS/issue-template machinery, and a runner that
+    # picks either up executes agent-authored YAML on infrastructure the project owns.
+    # `**/.gitlab-ci.yml` because a monorepo's per-package pipelines are not at the root.
+    ".gitlab-ci.yml",
+    "**/.gitlab-ci.yml",
+    ".gitlab/**",
     ".pre-commit-config.yaml",
     "Makefile",
     "*.mk",
@@ -178,7 +187,7 @@ def assert_no_skip_verify(env: Mapping[str, str]) -> None:
 GATEWAY_CREDENTIAL = "mcpgateway"
 
 
-def capability_secrets(secrets: Iterable[Any]) -> list[str]:
+def capability_secrets(secrets: Iterable[Any], *, declared: Iterable[str] = ()) -> list[str]:
     """The injected secrets that hand the VM a capability it must not have (§8.7).
 
     `sbx` secrets are **proxy-managed**: the token never lands on the sandbox
@@ -193,12 +202,28 @@ def capability_secrets(secrets: Iterable[Any]) -> list[str]:
     which reads the other.
 
     Everything is a capability except `GATEWAY_CREDENTIAL`, whose exclusion is argued in
-    full at its definition. Returned sorted so a failure message is stable.
+    full at its definition, and the names in `declared`. Returned sorted so a failure
+    message is stable.
+
+    `declared` is the project's own `[sandbox_delivery] placeholder_env` and nothing else. It
+    is threaded from the registry rather than added to a constant here, so that **deleting
+    the sub-table restores the full-strength guard with no code revert** — the property
+    James asked about when he approved the reversal, and the only version of the reversal
+    that is reversible.
+
+    Admitted only when the entry's `source` is `custom`. That is not decoration: a custom
+    secret is a proxy *substitution rule*, so what the VM can hold under that name is a
+    `sbx-cs-…` placeholder bounded to one host and one sandbox scope. A **service** secret
+    of the same name would be a real credential wearing the declaration's clothes, and it
+    still blocks. Measured shape, 2026-08-31: `{"name": ..., "source": "custom"}`.
     """
+    admitted = set(declared)
     names = [
         str(entry.get("name"))
         for entry in secrets
-        if isinstance(entry, Mapping) and entry.get("name")
+        if isinstance(entry, Mapping)
+        and entry.get("name")
+        and not (str(entry.get("name")) in admitted and entry.get("source") == "custom")
     ]
     return sorted(name for name in names if name != GATEWAY_CREDENTIAL)
 
@@ -221,6 +246,13 @@ def capability_env_names(
     recorded as a warning on every run instead of passing in silence; anything else
     blocks. Acknowledgement is a judgement about a specific name in a specific project,
     which is why it lives in the registry rather than here.
+
+    No `declared` parameter, unlike `capability_secrets`, and the asymmetry is deliberate.
+    This function only ever sees names the *repository* declared in `secretVars`; a
+    `[sandbox_delivery] placeholder_env` is not one of those, so admitting it here would be a
+    branch nothing can reach. Measured besides: `set-custom --env` never puts its value in
+    an `sbx exec` session's environment at all. If that ever changes, the name arrives
+    here as an unrecognised one and blocks — which is the right way round.
     """
     known = set(acknowledged)
     names = sorted(set(present))

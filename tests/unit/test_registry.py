@@ -48,8 +48,8 @@ build_sandbox = "factory-build-python-harness"
 
 def test_the_shipped_registry_loads() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert set(registry.projects) == {"python-harness", "frontend-harness"}
-    assert registry.projects["python-harness"].base_ref == "origin/v2"
+    assert set(registry.projects) == {"nemoclaw-dev", "frontend-harness"}
+    assert registry.projects["nemoclaw-dev"].base_ref == "origin/james/feat/prototype"
 
 
 def test_two_projects_claiming_one_team_refuse_to_load(tmp_path: Path) -> None:
@@ -77,14 +77,16 @@ def test_unknown_team_is_not_eligible_rather_than_an_error() -> None:
 
 def test_resolution_uses_the_identifier_prefix() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert registry.resolve("BAC-4").name == "python-harness"
+    # BAC was python-harness's until 2026-08-31; the retired block is commented out in
+    # `projects.toml` and the team key handed over, because two projects cannot claim one.
+    assert registry.resolve("BAC-4").name == "nemoclaw-dev"
     assert registry.resolve("FRO-7").name == "frontend-harness"
 
 
 def test_python_project_carries_the_measured_uv_environment_fix() -> None:
     # p0-3: a sandbox `uv sync` against the bind-mounted workspace destroyed the host
     # venv. This env var is the measured mitigation, so its absence is a regression.
-    project = load_registry(HOME / "config" / "projects.toml").projects["python-harness"]
+    project = load_registry(HOME / "config" / "projects.toml").projects["nemoclaw-dev"]
     assert project.env["UV_PROJECT_ENVIRONMENT"].startswith("/home/agent/")
 
 
@@ -164,3 +166,147 @@ def test_the_real_registry_declares_sensitive_paths_that_match_something() -> No
         for glob in project.sensitive_paths:
             assert glob.endswith("/**"), f"{project.name}: {glob} is not a directory glob"
             assert not glob.startswith("/"), f"{project.name}: {glob} is not repo-relative"
+
+
+# --------------------------------------------------------------------------------
+# the forge key — §13.2
+# --------------------------------------------------------------------------------
+
+
+def test_a_project_that_omits_the_forge_key_still_delivers_to_github() -> None:
+    # Every project predating the GitLab adapter omits the key, and the delivery path must
+    # not change under them. A default that had to be written out in `projects.toml` would
+    # have made this a migration.
+    registry = load_registry(HOME / "config" / "projects.toml")
+
+    assert registry.projects["frontend-harness"].forge == "github"
+
+
+def test_the_shipped_registry_routes_nemoclaw_to_gitlab() -> None:
+    # The first non-GitHub project. Pinned because `forge` decides which CLI's keyring
+    # credential a push authenticates with, and a silent revert to the default would push
+    # to a GitHub remote that does not exist rather than failing.
+    registry = load_registry(HOME / "config" / "projects.toml")
+
+    assert registry.projects["nemoclaw-dev"].forge == "gitlab"
+    assert registry.projects["nemoclaw-dev"].remote.startswith("git@172.18.194.183:")
+
+
+def test_a_project_can_name_gitlab(tmp_path: Path) -> None:
+    config = tmp_path / "projects.toml"
+    config.write_text(
+        SENSITIVE.replace('stack = "monorepo"', 'stack = "monorepo"\nforge = "gitlab"')
+    )
+
+    assert load_registry(config).projects["silent"].forge == "gitlab"
+
+
+def test_an_unknown_forge_is_a_load_error_not_a_delivery_error(tmp_path: Path) -> None:
+    # The point of validating here: a typo'd forge must fail when James edits the registry,
+    # not eight minutes into a run that has already spent model budget on an implement step.
+    config = tmp_path / "projects.toml"
+    config.write_text(
+        SENSITIVE.replace('stack = "monorepo"', 'stack = "monorepo"\nforge = "githib"')
+    )
+
+    with pytest.raises(RegistryError, match="names forge 'githib'"):
+        load_registry(config)
+
+
+def test_the_registry_and_the_dispatch_agree_on_the_forge_names() -> None:
+    """`registry._FORGES` is spelled out rather than imported, to avoid a cycle.
+
+    That duplication is only safe while something fails when the two drift, which is this.
+    """
+    from factory.delivery.forge import FORGES
+    from factory.registry import _FORGES
+
+    assert set(_FORGES) == set(FORGES)
+
+
+SANDBOX_DELIVERY = """
+[vault]
+path = "/tmp/vault"
+
+[projects.one]
+team = "BAC"
+path = "/tmp/one"
+remote = "git@example.invalid:g/one.git"
+base_branch = "v2"
+stack = "python"
+forge = "gitlab"
+build_sandbox = "factory-build-one"
+{extra}
+
+[projects.one.sandbox_delivery]
+{table}
+"""
+
+_FULL_TABLE = """
+api_url = "https://10.0.0.1/"
+project_path = "/g/sub/one/"
+placeholder_env = "FACTORY_GITLAB_TOKEN"
+"""
+
+
+def _sandbox_delivery(tmp_path: Path, *, table: str = _FULL_TABLE, extra: str = "") -> Path:
+    path = tmp_path / "projects.toml"
+    path.write_text(SANDBOX_DELIVERY.format(table=table, extra=extra))
+    return path
+
+
+def test_sandbox_delivery_is_absent_for_every_project_that_does_not_declare_it() -> None:
+    """The strong default, asserted on the shipped file rather than on a fixture.
+
+    `None` is what keeps §13.2 true: `forge.for_delivery` returns the host adapter and
+    `policy.capability_secrets` admits nothing. A project acquiring this table by accident
+    would be a boundary change with no diff in `src/`.
+    """
+    registry = load_registry(HOME / "config" / "projects.toml")
+    assert registry.projects["frontend-harness"].sandbox_delivery is None
+    declared = registry.projects["nemoclaw-dev"].sandbox_delivery
+    assert declared is not None
+    assert declared.placeholder_env == "FACTORY_GITLAB_TOKEN"
+
+
+def test_the_sandbox_delivery_table_is_normalised(tmp_path: Path) -> None:
+    # A trailing slash on `api_url` and a leading one on `project_path` both produce a
+    # URL with `//` in it, which GitLab answers with a redirect that curl does not follow
+    # — a 301 with an empty body, reported as "returned no web_url".
+    declared = load_registry(_sandbox_delivery(tmp_path)).projects["one"].sandbox_delivery
+    assert declared is not None
+    assert declared.api_url == "https://10.0.0.1"
+    assert declared.project_path == "g/sub/one"
+
+
+def test_a_github_project_cannot_declare_in_vm_delivery(tmp_path: Path) -> None:
+    # `sandbox_gitlab.py` is the only in-VM adapter. A github project carrying this table
+    # would deliver host-side and look, in the registry, as though it did not.
+    path = tmp_path / "projects.toml"
+    path.write_text(
+        SANDBOX_DELIVERY.format(table=_FULL_TABLE, extra="").replace(
+            'forge = "gitlab"', 'forge = "github"'
+        )
+    )
+    with pytest.raises(RegistryError, match="only for gitlab"):
+        load_registry(path)
+
+
+def test_a_clone_project_cannot_declare_in_vm_delivery(tmp_path: Path) -> None:
+    # The branch a clone run builds lives in the VM's private clone, not in the worktree
+    # this adapter pushes from: the combination pushes nothing and reports success.
+    with pytest.raises(RegistryError, match="requires_clone"):
+        load_registry(_sandbox_delivery(tmp_path, extra="requires_clone = true"))
+
+
+@pytest.mark.parametrize("missing", ["api_url", "project_path", "placeholder_env"])
+def test_a_half_specified_sandbox_delivery_table_refuses_to_load(
+    tmp_path: Path, missing: str
+) -> None:
+    """Validated at load, not at delivery. Delivery is the *last* step of a run: a table
+    that is discovered to be incomplete there has already spent the whole model budget."""
+    table = "\n".join(
+        line for line in _FULL_TABLE.strip().splitlines() if not line.startswith(missing)
+    )
+    with pytest.raises(RegistryError, match=missing):
+        load_registry(_sandbox_delivery(tmp_path, table=table))

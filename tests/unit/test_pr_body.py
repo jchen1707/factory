@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from factory.delivery.github import pr_number, render_pr_body
+from factory.delivery.body import render_pr_body
+from factory.delivery.github import pr_number
 
 GATES: list[dict[str, Any]] = [
     {"name": "ruff check", "kind": "lint", "status": "pass", "caveat": None},

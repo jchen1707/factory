@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 
 from factory import cli, recovery, repo
+from factory.delivery import github, gitlab, sandbox_gitlab
 from factory.machine import Blocked, State
+from factory.registry import SandboxDelivery
 from factory.steps import Context, advance, redphase
 from factory.steps import deliver as deliver_step
 from factory.steps import review as review_step
@@ -390,7 +392,7 @@ def test_deliver_routes_a_deny_list_path_to_awaiting_human_without_pushing(
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: [".husky/pre-commit"])
     pushed: list[str] = []
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: pushed.append(b))
+    monkeypatch.setattr(github, "push", lambda wt, b: pushed.append(b))
 
     deliver_step.run(ctx)
 
@@ -406,14 +408,14 @@ def test_deliver_opens_a_ready_for_review_pr_and_announces(
 ) -> None:
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: None)
-    monkeypatch.setattr(deliver_step.github, "find_pr", lambda wt, b: None)
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "find_pr", lambda wt, b: None)
     # `create_pr` is the seam the whole item turns on, so the real argv is captured
     # rather than the wrapper stubbed away — the draft flag is the one token that has to
     # be gone, and a stub that swallows argv could not tell you (§24.8).
     argv: list[list[str]] = []
     monkeypatch.setattr(
-        deliver_step.github.subprocess,
+        github.subprocess,
         "run",
         _capture(argv, stdout="https://github.com/jchen1707/python-harness/pull/11\n"),
     )
@@ -434,18 +436,16 @@ def test_a_duplicate_pr_is_edited_not_recreated(
 ) -> None:
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
     monkeypatch.setattr(
-        deliver_step.github,
+        github,
         "find_pr",
         lambda wt, b: "https://github.com/jchen1707/python-harness/pull/12",
     )
     created: list[str] = []
     edited: list[int] = []
-    monkeypatch.setattr(
-        deliver_step.github, "create_pr", lambda wt, **kw: created.append(kw["head"])
-    )
-    monkeypatch.setattr(deliver_step.github, "edit_pr", lambda wt, n, **kw: edited.append(n))
+    monkeypatch.setattr(github, "create_pr", lambda wt, **kw: created.append(kw["head"]))
+    monkeypatch.setattr(github, "edit_pr", lambda wt, n, **kw: edited.append(n))
 
     deliver_step.run(ctx)
 
@@ -462,12 +462,12 @@ def test_a_secret_in_the_pr_body_blocks_before_any_push(
     _to_pr_ready(ctx, monkeypatch)
     monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
     monkeypatch.setattr(
-        deliver_step.github,
+        deliver_step.pr_body,
         "render_pr_body",
         lambda **kw: "Fixes BAC-4\n\nleaked ghp_" + "A" * 36,
     )
     pushed: list[str] = []
-    monkeypatch.setattr(deliver_step.github, "push", lambda wt, b: pushed.append(b))
+    monkeypatch.setattr(github, "push", lambda wt, b: pushed.append(b))
 
     with pytest.raises(Blocked) as caught:
         deliver_step.run(ctx)
@@ -691,3 +691,102 @@ def test_a_forced_tier2_says_so_in_the_pull_request_body(
     assert "Tier 2 ran" in line
     assert "--full-review" in line
     assert "skipped" not in line
+
+
+# --------------------------------------------------------------------------------
+# in-VM delivery — the §13.2 reversal, and the lifecycle that bounds it
+# --------------------------------------------------------------------------------
+
+PLACEHOLDER_ENV = "FACTORY_GITLAB_TOKEN"
+MR_URL = "https://172.18.194.183/nexus-core/ran-ai-agents/nemoclaw-test/-/merge_requests/7"
+
+
+def _delivering_from_the_sandbox(ctx: Context) -> None:
+    """Point the fixture's project at in-VM delivery, and provision the placeholder.
+
+    Both halves, because either alone is a state the machine must refuse: a declaration
+    with no secret blocks, and a secret with no declaration is a capability nothing asked
+    for and `capability_secrets` still rejects.
+    """
+    ctx.project = replace(
+        ctx.project,
+        forge="gitlab",
+        sandbox_delivery=SandboxDelivery(
+            api_url="https://172.18.194.183",
+            project_path="nexus-core/ran-ai-agents/nemoclaw-test",
+            placeholder_env=PLACEHOLDER_ENV,
+        ),
+    )
+    _fake(ctx).custom_secrets[PLACEHOLDER_ENV] = "sbx-cs-NOTAREALPLACEHOLDER"
+
+
+def test_a_declared_project_pushes_and_opens_its_merge_request_from_the_sandbox(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole reversal, end to end through the step rather than the adapter.
+
+    The host must run no forge command at all: if `subprocess.run` is reached, delivery
+    went out over the host's SSH key and the registry's declaration did nothing.
+    """
+    _to_pr_ready(ctx, monkeypatch)
+    _delivering_from_the_sandbox(ctx)
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
+    for module in (github, gitlab):
+        # Both, because the project's forge is `gitlab`: watching only the GitHub module
+        # would let a regression that fell back to the *host* GitLab adapter pass, which
+        # is precisely the fallback `for_delivery` exists to make impossible.
+        monkeypatch.setattr(
+            module.subprocess, "run", lambda *a, **k: pytest.fail("delivery ran on the host")
+        )
+    fake = _fake(ctx)
+    fake.api_replies = [(0, json.dumps([])), (0, json.dumps({"web_url": MR_URL}))]
+
+    deliver_step.run(ctx)
+
+    assert ctx.state is State.AWAITING_HUMAN
+    assert ctx.store.run_by_id(ctx.run.id).pr_url == MR_URL  # type: ignore[union-attr]
+    scripts = " ".join(" ".join(argv) for _, argv in fake.sync_calls)
+    assert "git push" in scripts
+    assert MR_URL in (ctx.linear.comments[-1])  # type: ignore[attr-defined]
+
+
+def test_the_delivery_credential_is_removed_even_when_the_push_fails(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§16.5 keeps the sandbox for hours after the run. A credential file left behind is
+    one the *next* ticket's agent inherits, in a sandbox nobody would think to look in —
+    and a failed delivery is exactly the path where a `finally` is easy to omit."""
+    _to_pr_ready(ctx, monkeypatch)
+    _delivering_from_the_sandbox(ctx)
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
+    monkeypatch.setattr(
+        sandbox_gitlab.SandboxGitlabForge,
+        "push",
+        lambda self, wt, b: (_ for _ in ()).throw(sandbox_gitlab.SandboxGitlabError("no")),
+    )
+
+    with pytest.raises(sandbox_gitlab.SandboxGitlabError):
+        deliver_step.run(ctx)
+
+    scripts = [" ".join(argv) for _, argv in _fake(ctx).sync_calls]
+    assert any(script.startswith("sh -c rm -f") for script in scripts), (
+        f"the credential outlived the failed delivery: {scripts[-3:]}"
+    )
+
+
+def test_delivery_blocks_by_name_when_the_placeholder_was_never_provisioned(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the placeholder the push authenticates as nobody. A named block that says
+    how to provision it beats a 401 from inside a VM at the end of a paid run."""
+    _to_pr_ready(ctx, monkeypatch)
+    _delivering_from_the_sandbox(ctx)
+    _fake(ctx).custom_secrets.clear()
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
+
+    with pytest.raises(Blocked) as caught:
+        deliver_step.run(ctx)
+
+    assert caught.value.reason == "sandbox-delivery-unprovisioned"
+    assert PLACEHOLDER_ENV in str(caught.value)
+    assert ctx.state is State.PR_READY
