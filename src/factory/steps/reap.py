@@ -22,7 +22,7 @@ from pathlib import Path
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, State
 from factory.sandbox.base import RunHandle, RunStatus
-from factory.steps import KILL_TARGET, Context, advance
+from factory.steps import Context, advance, signal_attempt
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import review as review_step
@@ -245,11 +245,11 @@ def reap(ctx: Context) -> Verdict:
         # the same thing every waiter did before there was one: signal, then wait for
         # the record, rather than reporting a kill as a result.
         ctx.log("reap.timeout", level="warning", state=str(state), overrun_seconds=int(overrun))
-        ctx.sandbox.kill_agent(handle.sandbox, KILL_TARGET[state])
+        how = signal_attempt(ctx, handle.sandbox, attempt_dir.root, state)
         deadline = time.monotonic() + KILL_GRACE_SECONDS
         while time.monotonic() < deadline and not attempt_dir.exit_file.exists():
             time.sleep(5)
-        detail = f"{state} ran {int(overrun)}s past its timeout and was signalled"
+        detail = f"{state} ran {int(overrun)}s past its timeout and was signalled ({how})"
         # Resumable, not collected. A killed body did not finish its work, so its artifacts
         # are truncated by definition — and `collect` reads them as a *verdict*: a signalled
         # gate report has no `gates.stdout.txt`, which `verify.collect` reports as

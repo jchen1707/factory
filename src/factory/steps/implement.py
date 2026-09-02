@@ -92,8 +92,9 @@ def start(
         stderr_path=attempt_dir.stderr,
         exit_path=attempt_dir.exit_file,
         heartbeat_path=attempt_dir.heartbeat,
+        pgid_path=attempt_dir.pgid_file,
         vault_directory=str(ctx.registry.vault.path),
-        env=dict(ctx.project.env),
+        env=ctx.env,
         resume_session=resume_session,
     )
     script = ctx.agent.wrapper_script(invocation)
@@ -144,7 +145,7 @@ def start(
         workdir=str(worktree),
         attempt_dir=attempt_dir.root,
     )
-    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.sandbox.exec_detached(handle, script, ctx.env)
     # Phase 2 (opt-in): a host-side tailer that stamps each `events.jsonl` line with an
     # `observed_at`, so the run-timeline can defend a per-call `duration_s`. Gated by
     # `registry.defaults.timings` — off by default, so the test suite (which does not set

@@ -519,6 +519,7 @@ def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
         stderr_path=tmp_path / "stderr.log",
         exit_path=tmp_path / "exit",
         heartbeat_path=tmp_path / "heartbeat",
+        pgid_path=tmp_path / "pgid",
         vault_directory="/Users/james/Documents/Obsidian Vault",
     )
     script = CodexAdapter().wrapper_script(invocation)

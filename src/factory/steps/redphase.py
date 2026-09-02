@@ -176,7 +176,7 @@ def replay(ctx: Context) -> ReplayOutcome:
             ctx.project.build_sandbox,
             list(test_gate.run),
             workdir=str(scratch),
-            env=dict(ctx.project.env),
+            env=ctx.env,
             timeout=ctx.timeout_for(State.VERIFYING),
         )
         outcome, detail = _classify(completed, test_files)

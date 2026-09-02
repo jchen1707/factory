@@ -310,3 +310,81 @@ def test_a_half_specified_sandbox_delivery_table_refuses_to_load(
     )
     with pytest.raises(RegistryError, match=missing):
         load_registry(_sandbox_delivery(tmp_path, table=table))
+
+
+# --------------------------------------------------------------------------------
+# §11.3's writer limit, per project
+# --------------------------------------------------------------------------------
+
+CONCURRENCY = """
+[vault]
+path = "/tmp/vault"
+
+[defaults]
+concurrency_per_project = 1
+
+[projects.raised]
+team = "AAA"
+path = "/tmp/raised"
+remote = "https://example.invalid/a.git"
+base_branch = "v2"
+stack = "python"
+build_sandbox = "factory-build-a"
+concurrency_per_project = 3
+
+[projects.silent]
+team = "BBB"
+path = "/tmp/silent"
+remote = "https://example.invalid/b.git"
+base_branch = "v2"
+stack = "python"
+build_sandbox = "factory-build-b"
+"""
+
+
+def test_a_project_can_raise_its_own_writer_limit(tmp_path: Path) -> None:
+    # How many writers a repository can carry is a fact about that repository, so the
+    # raise belongs to the project and not to every project at once.
+    path = tmp_path / "projects.toml"
+    path.write_text(CONCURRENCY)
+    registry = load_registry(path)
+    assert registry.concurrency_for(registry.projects["raised"]) == 3
+
+
+def test_a_project_that_says_nothing_falls_back_to_the_defaults(tmp_path: Path) -> None:
+    # The fallback is the whole point of the field being optional: raising the floor for
+    # everything stays one edit in `[defaults]`.
+    path = tmp_path / "projects.toml"
+    path.write_text(CONCURRENCY)
+    registry = load_registry(path)
+    silent = registry.projects["silent"]
+    assert silent.concurrency_per_project is None
+    assert registry.concurrency_for(silent) == 1
+    assert registry.concurrency_for(silent) == registry.defaults.concurrency_per_project
+
+
+def test_the_defaults_move_the_projects_that_did_not_decide(tmp_path: Path) -> None:
+    path = tmp_path / "projects.toml"
+    path.write_text(
+        CONCURRENCY.replace("concurrency_per_project = 1", "concurrency_per_project = 2")
+    )
+    registry = load_registry(path)
+    assert registry.concurrency_for(registry.projects["silent"]) == 2
+    assert registry.concurrency_for(registry.projects["raised"]) == 3  # its own answer stands
+
+
+def test_a_zero_writer_limit_refuses_to_load(tmp_path: Path) -> None:
+    # Zero is not "paused", it is a project that can never be claimed and says nothing
+    # about why — the failure a poller would report once per tick, forever.
+    path = tmp_path / "projects.toml"
+    path.write_text(
+        CONCURRENCY.replace("concurrency_per_project = 3", "concurrency_per_project = 0")
+    )
+    with pytest.raises(RegistryError, match="unclaimable"):
+        load_registry(path)
+
+
+def test_the_shipped_registry_gives_nemoclaw_two_writers() -> None:
+    registry = load_registry(HOME / "config" / "projects.toml")
+    assert registry.concurrency_for(registry.projects["nemoclaw-dev"]) == 2
+    assert registry.concurrency_for(registry.projects["frontend-harness"]) == 1

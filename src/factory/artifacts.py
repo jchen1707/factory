@@ -120,7 +120,14 @@ class AttemptDir:
         this same directory for the planning half of a rewind, and those belong to an
         invocation that already finished.
         """
-        for name in ("exit", "last-message.json", "events.jsonl", "stderr.log", "heartbeat"):
+        for name in (
+            "exit",
+            "last-message.json",
+            "events.jsonl",
+            "stderr.log",
+            "heartbeat",
+            "pgid",
+        ):
             (self.root / name).unlink(missing_ok=True)
 
     def clear_liveness(self) -> None:
@@ -135,7 +142,7 @@ class AttemptDir:
         (`sbx-exec.pid`, `sbx-exec.stderr`) are overwritten by `exec_detached`, so they
         need no explicit clear here.
         """
-        for name in ("exit", "heartbeat"):
+        for name in ("exit", "heartbeat", "pgid"):
             (self.root / name).unlink(missing_ok=True)
 
     @property
@@ -168,6 +175,16 @@ class AttemptDir:
     @property
     def last_message(self) -> Path:
         return self.root / "last-message.json"
+
+    @property
+    def pgid_file(self) -> Path:
+        """The body's in-VM process group while it is running, absent once it is reaped.
+
+        Cleared alongside `exit` and `heartbeat` rather than left to be overwritten: a
+        stale pgid is worse than a missing one, because the numbers are reused and the
+        reader's only use for this file is deciding what to signal.
+        """
+        return self.root / "pgid"
 
     @property
     def heartbeat(self) -> Path:
