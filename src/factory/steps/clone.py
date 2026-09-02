@@ -93,7 +93,7 @@ def _exec(
         ctx.project.build_sandbox,
         argv,
         workdir=workdir,
-        env=dict(ctx.project.env),
+        env=ctx.env,
         timeout=600,
         stdin=stdin,
     )
@@ -131,7 +131,7 @@ def create_branch(ctx: Context, branch: str) -> None:
     exists = ctx.sandbox.exec_sync(
         ctx.project.build_sandbox,
         ["git", "-C", project_path, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-        env=dict(ctx.project.env),
+        env=ctx.env,
         timeout=120,
     ).ok
     if exists:
@@ -164,7 +164,7 @@ def refresh_base(ctx: Context) -> None:
     fetched = ctx.sandbox.exec_sync(
         ctx.project.build_sandbox,
         ["git", "-C", project_path, "fetch", "origin", ctx.project.base_branch, "--prune"],
-        env=dict(ctx.project.env),
+        env=ctx.env,
         timeout=600,
     )
     if not fetched.ok:
@@ -205,7 +205,7 @@ def release_branch(sandbox: SandboxAdapter, project: Project, run: Run) -> list[
         return []
     branch = run.branch
     project_path = str(project.path)
-    env = dict(project.env)
+    env = {k: v.replace("{run}", run.linear_id) for k, v in project.env.items()}
 
     def git(*argv: str) -> Completed:
         return sandbox.exec_sync(
@@ -266,7 +266,7 @@ def ensure_on_branch(ctx: Context) -> None:
     exists = ctx.sandbox.exec_sync(
         ctx.project.build_sandbox,
         ["git", "-C", project_path, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-        env=dict(ctx.project.env),
+        env=ctx.env,
         timeout=120,
     ).ok
     if not exists:
@@ -465,7 +465,7 @@ def scratch_add(ctx: Context, scratch: Path, base_ref: str) -> None:
             "-c",
             f'[ -d "{dependencies}" ] && ln -s "{dependencies}" "{scratch / _DEPENDENCIES}"',
         ],
-        env=dict(ctx.project.env),
+        env=ctx.env,
         timeout=120,
     )
     ctx.log("clone.scratch_ready", scratch=str(scratch), dependencies_linked=linked.ok)

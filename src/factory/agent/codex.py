@@ -100,6 +100,7 @@ class CodexAdapter:
             heartbeat_path=invocation.heartbeat_path,
             exit_path=invocation.exit_path,
             body=body,
+            pgid_path=invocation.pgid_path,
         )
 
     def read_transcript(self, events: Path, stderr: Path) -> Transcript:

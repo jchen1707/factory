@@ -233,6 +233,10 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         heartbeat_path=attempt_dir.heartbeat,
         exit_path=attempt_dir.exit_file,
         body=body,
+        # Compound — one codex block per axis — which is why the envelope signals a
+        # process *group* and not `$!`. The review sandbox is named once per project like
+        # the build one, so two tickets reviewing at the same time share it.
+        pgid_path=attempt_dir.pgid_file,
     )
 
     ctx.store.start_attempt(
@@ -253,7 +257,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         workdir=str(ctx.worktree),
         attempt_dir=attempt_dir.root,
     )
-    ctx.sandbox.exec_detached(handle, script, dict(ctx.project.env))
+    ctx.sandbox.exec_detached(handle, script, ctx.env)
     ctx.log("review.started", axes=len(axes), tier2=tier2_rule)
     return attempt_dir, handle
 

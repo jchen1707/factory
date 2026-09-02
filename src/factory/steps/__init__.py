@@ -39,6 +39,7 @@ __all__ = [
 
 LEASE_TTL_SECONDS = 900
 
+
 #: The in-VM process name each detached state's body actually runs under.
 #:
 #: `SbxAdapter.kill_agent` is `pkill -x <proc>`: it matches the process name exactly, so a
@@ -54,6 +55,48 @@ LEASE_TTL_SECONDS = 900
 #:
 #: Indexed, never `.get(state, "codex")`. A detached state added without an entry here
 #: should raise on the spot; the default is what made the wrong name invisible for a phase.
+def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) -> str:
+    """Stop one attempt's body, and say how it was stopped.
+
+    The process group first, the process name only as a fallback. Both sandboxes are
+    named once per project (`steps/sandbox.py`), so `pkill -x <name>` reaches every
+    concurrent run in the same repository — which is why `KILL_TARGET` below cannot be
+    the primary mechanism once a project runs more than one ticket at a time.
+
+    The fallback is not dead code and not politeness: an attempt started before this
+    envelope existed is still running under the old wrapper and has no `pgid` file, and
+    signalling it by name is strictly better than not signalling it at all. It is
+    narrower than it looks — the file is absent only for those attempts and for a body
+    that died before publishing, and in the second case there is nothing left to signal.
+    """
+    pgid = read_pgid(attempt_dir / _pgid_name(state))
+    if pgid is not None:
+        ctx.sandbox.kill_group(sandbox, pgid)
+        return f"group {pgid}"
+    ctx.sandbox.kill_agent(sandbox, KILL_TARGET[state])
+    return f"name {KILL_TARGET[state]} (no pgid file; pre-upgrade attempt)"
+
+
+def _pgid_name(state: State) -> str:
+    from factory.steps.plan import PLAN_PGID_NAME
+
+    return PLAN_PGID_NAME if state is State.PLANNING else "pgid"
+
+
+def read_pgid(path: Path) -> int | None:
+    """The published process group, or `None` when there is nothing safe to signal.
+
+    A non-positive value is refused rather than passed on: `kill -TERM -0` signals the
+    caller's *own* group, which inside the VM is the wrapper the factory is relying on to
+    write the `exit` file.
+    """
+    try:
+        pgid = int(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return pgid if pgid > 0 else None
+
+
 KILL_TARGET: dict[State, str] = {
     State.PLANNING: "codex",
     State.IMPLEMENTING: "codex",
@@ -128,6 +171,31 @@ class Context:
         records. Per-ticket subdirectories inside it are free; the *mount* is what is fixed.
         """
         return self.home / "state" / "clone" / self.project.name
+
+    @property
+    def env(self) -> dict[str, str]:
+        """`[projects.<name>.env]` resolved for *this run*, and what every step passes.
+
+        `{run}` in a value is replaced with the run's ticket. That token is the whole
+        mechanism, and it exists because a project's env is applied to a sandbox that is
+        named once per project: two tickets running at once in one repository get one VM,
+        so any env var naming a mutable *path* names the same path for both of them.
+
+        `UV_PROJECT_ENVIRONMENT` is the live case. Pointed at one directory, a `uv sync`
+        in one run rewrites the virtualenv the other run is executing its gates against —
+        the host bind-mount hazard from `p0-3-toolchain.md`, moved inside the VM, and just
+        as invisible: the second run fails a gate for a reason that is nowhere in its own
+        transcript. Pointed at `/home/agent/venvs/<project>/{run}` it is per ticket, which
+        costs a `uv sync` per run and buys an answer that means something.
+
+        Substitution rather than a dedicated registry key, because the factory has no
+        business knowing what `uv` is (§3.2). The registry says which variable is per-run;
+        layer D only knows how to spell a run.
+        """
+        return {
+            key: value.replace("{run}", self.run.linear_id)
+            for key, value in self.project.env.items()
+        }
 
     @property
     def factory_dir(self) -> Path:

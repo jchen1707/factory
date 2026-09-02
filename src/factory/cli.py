@@ -564,7 +564,7 @@ def _claim_new_work(
             lines.append(f"{ticket:<10} not claimable: {exc}")
             continue
         busy = store.active_runs_for_project(project.name)
-        if len(busy) >= registry.defaults.concurrency_per_project:
+        if len(busy) >= registry.concurrency_for(project):
             if verbose:
                 lines.append(f"{ticket:<10} {project.name} is at its writer limit; waiting")
             continue

@@ -71,10 +71,10 @@ def _refuse_second_writer(ctx: Context) -> None:
 
     Structural rather than advisory: two unattended writers in one repository would
     share a `.git`, and the second one's `git worktree add` would race the first one's
-    index. Raising the limit is a registry edit, and each ticket still gets its own
-    worktree and branch.
+    index. Raising the limit is a registry edit — `[projects.<name>]` for one project,
+    `[defaults]` for the rest — and each ticket still gets its own worktree and branch.
     """
-    limit = ctx.registry.defaults.concurrency_per_project
+    limit = ctx.registry.concurrency_for(ctx.project)
     active = [
         run for run in ctx.store.active_runs_for_project(ctx.project.name) if run.id != ctx.run.id
     ]
