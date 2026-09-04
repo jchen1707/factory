@@ -31,6 +31,7 @@ def render_pr_body(
     review_summary: dict[str, Any] | None,
     redphase: dict[str, str] | None,
     escalations: Sequence[dict[str, str]] = (),
+    disputed_findings: Sequence[dict[str, str]] = (),
     out_of_scope: Sequence[str],
     artifact_path: str,
     tokens_in: int,
@@ -41,9 +42,9 @@ def render_pr_body(
 
     `Fixes <TEAM-NUM>`, the one-paragraph restatement, the gate report table (every
     `not_applicable`/`unavailable`/`skipped` row with its caveat), the review summary (Tier-1
-    findings + the skipped-Tier-2 rule name), the red-phase replay result, any §15.3
-    escalation a human cleared to let the review run, out-of-scope notes, the attempt
-    artifact path, and the cost.
+    findings + the skipped-Tier-2 rule name), any explicit human acceptance of blocking
+    review findings, the red-phase replay result, any §15.3 escalation a human cleared to
+    let the review run, out-of-scope notes, the attempt artifact path, and the cost.
 
     `escalations` is empty on the ordinary run — the guards did not fire — and a reader
     should be able to tell the two apart without knowing the section exists, so the heading
@@ -104,6 +105,19 @@ def render_pr_body(
     else:
         lines.append("_No review summary recorded._")
     lines.append("")
+    if disputed_findings:
+        lines.append("## Disputed review findings")
+        lines.append("")
+        lines.append(
+            "The critical/high review findings above remain unresolved. James explicitly "
+            "accepted them for this delivery; the review and the human judgement are both "
+            "recorded rather than one replacing the other."
+        )
+        lines.append("")
+        for dispute in disputed_findings:
+            note = dispute.get("note", "").strip()
+            lines.append(f"- {note or '_No acceptance note recorded._'}")
+        lines.append("")
     lines.append("## Red-phase replay (§15.3)")
     lines.append("")
     if redphase:

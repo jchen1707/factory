@@ -122,7 +122,13 @@ def test_a_test_weakening_guard_routes_to_awaiting_human(
     assert "test-weakening" in linear.comments[-1]
 
 
-def _accept(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> int:
+def _accept(
+    ctx: Context,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    note: str | None = None,
+    review_finding: bool = False,
+) -> int:
     """`factory accept <ticket>` against the fixture home, with only Linear faked."""
     target = ctx.home / "config" / "models.toml"
     if not target.exists():
@@ -130,7 +136,13 @@ def _accept(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> int:
     monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
     monkeypatch.setattr(cli, "SbxAdapter", FakeSandbox)
     monkeypatch.setattr(cli, "LinearClient", lambda: ctx.linear)
-    return cli.cmd_accept(argparse.Namespace(ticket=ctx.run.linear_id, note=None))
+    return cli.cmd_accept(
+        argparse.Namespace(
+            ticket=ctx.run.linear_id,
+            note=note,
+            review_finding=review_finding,
+        )
+    )
 
 
 def test_a_cleared_weakening_escalation_lets_the_interrupted_review_run(
@@ -243,6 +255,360 @@ def test_accept_refuses_an_escalation_it_does_not_clear(
     assert code == 1
     ctx.refresh()
     assert ctx.state is State.AWAITING_HUMAN
+
+
+def test_accept_review_finding_records_the_dispute_and_enters_delivery(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "requires hardening outside this POC",
+            }
+        ]
+    }
+    from factory.steps import block as block_step
+
+    with pytest.raises(Blocked) as caught:
+        advance_state(ctx)
+    block_step.record(ctx, caught.value.reason, caught.value.detail)
+    assert ctx.state is State.BLOCKED
+
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app.py"])
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "find_pr", lambda wt, b: None)
+    bodies: list[str] = []
+
+    def create_pr(worktree: Path, **kwargs: object) -> str:
+        body_file = kwargs["body_file"]
+        assert isinstance(body_file, Path)
+        bodies.append(body_file.read_text(encoding="utf-8"))
+        return "https://github.com/jchen1707/python-harness/pull/49"
+
+    monkeypatch.setattr(github, "create_pr", create_pr)
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="James accepts this as post-POC hardening.",
+        review_finding=True,
+    )
+
+    assert code == 0
+    ctx.refresh()
+    assert ctx.state is State.AWAITING_HUMAN
+    assert ctx.run.pr_url == "https://github.com/jchen1707/python-harness/pull/49"
+    transition = next(
+        row
+        for row in ctx.store.transitions(ctx.run.id)
+        if row["rule"] == "accept-review-finding-is-james"
+    )
+    assert (
+        transition["from_state"],
+        transition["to_state"],
+        transition["actor"],
+        transition["rule"],
+    ) == (
+        str(State.BLOCKED),
+        str(State.PR_READY),
+        "human",
+        "accept-review-finding-is-james",
+    )
+    accepted = [
+        row
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == review_step.REVIEW_FINDING_ACCEPTED
+    ]
+    assert len(accepted) == 1
+    assert accepted[0]["reason"] == review_step.REVIEW_FINDING
+    assert accepted[0]["detail"] == "James accepts this as post-POC hardening."
+    assert len(bodies) == 1
+    body = bodies[0]
+    assert "Disputed review findings" in body
+    assert "requires hardening outside this POC" in body
+    assert "James accepts this as post-POC hardening." in body
+
+
+def test_accept_review_finding_requires_an_explicit_note(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    from factory.steps import block as block_step
+
+    block_step.record(ctx, review_step.REVIEW_FINDING, "one high finding")
+
+    code = _accept(ctx, monkeypatch, review_finding=True)
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_blocked_to_delivery_cannot_advance_automatically(ctx: Context) -> None:
+    _to_reviewing(ctx)
+    from factory.steps import block as block_step
+
+    block_step.record(ctx, review_step.REVIEW_FINDING, "one high finding")
+
+    with pytest.raises(Blocked) as caught:
+        advance(ctx, State.PR_READY)
+
+    assert caught.value.reason == "requires-human"
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_requires_recorded_blocking_review_evidence(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    from factory.steps import block as block_step
+
+    ctx.store.start_attempt(
+        ctx.run.id,
+        ctx.run.attempt,
+        State.REVIEWING,
+        sandbox=ctx.project.review_sandbox,
+        artifact_dir=str(ctx.state_dir / "review"),
+    )
+    ctx.store.finish_attempt(
+        ctx.run.id,
+        ctx.run.attempt,
+        State.REVIEWING,
+        exit_code=0,
+        outcome="ran",
+    )
+    block_step.record(ctx, review_step.REVIEW_FINDING, "claimed without a review summary")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="This must not be enough on its own.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+    assert not any(
+        row["check_name"] == review_step.REVIEW_FINDING_ACCEPTED
+        for row in ctx.store.checks(ctx.run.id)
+    )
+
+
+def test_accept_review_finding_requires_a_passing_gate_verdict(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "requires hardening outside this POC",
+            }
+        ]
+    }
+    from factory.steps import block as block_step
+
+    with pytest.raises(Blocked) as caught:
+        advance_state(ctx)
+    block_step.record(ctx, caught.value.reason, caught.value.detail)
+    gates_path = ctx.factory_dir / "run" / str(ctx.run.attempt) / "gates.json"
+    gates = json.loads(gates_path.read_text(encoding="utf-8"))
+    gates["verdict"] = "fail"
+    gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="A dispute cannot waive failed gates.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_requires_a_schema_valid_gate_report(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "requires hardening outside this POC",
+            }
+        ]
+    }
+    from factory.steps import block as block_step
+
+    with pytest.raises(Blocked) as caught:
+        advance_state(ctx)
+    block_step.record(ctx, caught.value.reason, caught.value.detail)
+    gates_path = ctx.factory_dir / "run" / str(ctx.run.attempt) / "gates.json"
+    gates = json.loads(gates_path.read_text(encoding="utf-8"))
+    del gates["schemaVersion"]
+    gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="A partial gate document cannot authorize delivery.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_requires_critical_or_high_review_evidence(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "medium",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "ordinary non-blocking feedback",
+            }
+        ]
+    }
+    advance_state(ctx)
+    assert ctx.state is State.PR_READY
+    from factory.steps import block as block_step
+
+    block_step.record(ctx, review_step.REVIEW_FINDING, "claimed a blocking review")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="This must not waive non-blocking feedback through the wrong path.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_requires_a_canonical_review_summary(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "requires hardening outside this POC",
+            }
+        ]
+    }
+    from factory.steps import block as block_step
+
+    with pytest.raises(Blocked) as caught:
+        advance_state(ctx)
+    block_step.record(ctx, caught.value.reason, caught.value.detail)
+    summary_path = ctx.state_dir / "review" / "review-summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["findings"][0]["severity"] = "HIGH"
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="Noncanonical review evidence cannot authorize delivery.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_refuses_a_conflicting_retry_note(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "src/app.py",
+                "line": 9,
+                "summary": "requires hardening outside this POC",
+            }
+        ]
+    }
+    from factory.steps import block as block_step
+
+    with pytest.raises(Blocked) as caught:
+        advance_state(ctx)
+    block_step.record(ctx, caught.value.reason, caught.value.detail)
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        review_step.REVIEW_FINDING_ACCEPTED,
+        "accepted",
+        reason=review_step.REVIEW_FINDING,
+        detail="The originally recorded judgement.",
+    )
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="A different judgement on retry.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
+
+
+def test_accept_review_finding_refuses_a_different_blocker(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    from factory.steps import block as block_step
+
+    block_step.record(ctx, "secret-in-artifact", "a security boundary fired")
+
+    code = _accept(
+        ctx,
+        monkeypatch,
+        note="A review dispute cannot waive the artifact scanner.",
+        review_finding=True,
+    )
+
+    assert code == 1
+    ctx.refresh()
+    assert ctx.state is State.BLOCKED
 
 
 def test_parked_on_reads_the_last_escalation_not_the_first(ctx: Context) -> None:

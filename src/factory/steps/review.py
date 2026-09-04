@@ -14,8 +14,8 @@ made mechanical.
 
 **Reviewers never repair.** The reviewer sandbox cannot write. A critical-or-high finding
 is a human decision (AGENTS.md reserves "is this finding real or over-engineering bait?"),
-so the run goes to `awaiting_human` rather than auto-looping; the §15.2 "finding goes back
-to the implementer's session" repair loop is deferred to Phase 4's resume-by-session-id.
+so the run blocks rather than auto-looping. James may reopen implementation or explicitly
+accept a disputed finding for delivery; either decision remains in the audit trail.
 
 The red-phase replay (§15.3) runs here too, as the first thing at the REVIEWING entry: the
 machine makes `verifying -> awaiting_human` illegal while §15.3's `escalate` option routes
@@ -36,8 +36,8 @@ One trigger rule is narrowed by the split. `_decide_tier2`'s `tier1_has_human` r
 ("Tier-1 found a critical/high → run the full fan-out") needs Tier-1's findings, which are
 not available at `start` time because Tier-1 runs inside the detached script. `start`
 computes the trigger with `tier1_has_human=False`, so the rule does not fire from the
-two-phase path. A Tier-1 critical/high still routes the run to `awaiting_human` via the
-transition below; only the *extra* Tier-2 findings in the narrow case (small diff, no
+two-phase path. A Tier-1 critical/high still blocks the run via the decision below; only
+the *extra* Tier-2 findings in the narrow case (small diff, no
 diff-based trigger, Tier-1 critical/high) are lost — and `--full-review` covers it on
 demand. The rule stays in `_decide_tier2` for its table-driven test.
 """
@@ -62,7 +62,13 @@ from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
 
-__all__ = ["collect", "start"]
+__all__ = [
+    "REVIEW_FINDING",
+    "REVIEW_FINDING_ACCEPTED",
+    "collect",
+    "has_blocking_findings",
+    "start",
+]
 
 STEP = "review"
 
@@ -87,10 +93,56 @@ _TIER2_LINE_THRESHOLD = 400
 #: `medium`/`low` finding is recorded and carried in the PR body but does not stop delivery.
 _HUMAN_SEVERITIES = frozenset({"critical", "high"})
 
+#: The blocking reason and durable human-acceptance check for a disputed review. The
+#: findings remain in `review-summary.json`; acceptance records James's contrary judgement
+#: rather than deleting, downgrading or re-running them until a model happens to agree.
+REVIEW_FINDING = "review-finding"
+REVIEW_FINDING_ACCEPTED = "review_finding_accepted"
+
+_SUMMARY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["tier2", "findings"],
+    "additionalProperties": False,
+    "properties": {
+        "tier2": {"type": "string"},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["severity", "file", "line", "summary"],
+                "additionalProperties": False,
+                "properties": {
+                    "severity": {"enum": ["critical", "high", "medium", "low"]},
+                    "file": {"type": "string"},
+                    "line": {"type": ["number", "null"]},
+                    "summary": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
 #: The vendored layer-A findings schema, passed to `codex exec --output-schema` and
 #: used to validate what comes back. One file, so the Codex path and the workflow path
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
+
+
+def has_blocking_findings(payload: object) -> bool:
+    """Whether a canonical review summary records an exact critical/high finding."""
+    try:
+        validate_against_schema(payload, _SUMMARY_SCHEMA)
+    except SchemaInvalid:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        return False
+    return any(
+        isinstance(finding, dict) and finding.get("severity") in _HUMAN_SEVERITIES
+        for finding in findings
+    )
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
@@ -376,7 +428,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     if tier1_has_human or any(f["severity"] in _HUMAN_SEVERITIES for f in findings):
         human = [f for f in findings if f["severity"] in _HUMAN_SEVERITIES]
         raise Blocked(
-            "review-finding",
+            REVIEW_FINDING,
             "the review returned a finding that needs a human to triage:\n"
             + "\n".join(
                 f"- [{f['severity']}] {f.get('file', '?')}: {f['summary']}" for f in human[:10]
@@ -594,6 +646,10 @@ def _target(base_ref: str) -> str:
     """
     return (
         f"\n\n---\n\nReview the diff: `git diff {base_ref}...HEAD`\n\n"
+        "Inspect the net diff and current tree only. Do not run `git show`, `git log -p`, "
+        "or otherwise print per-commit patches: historical patches can contain "
+        "credential-shaped test fixtures that must not enter the review transcript. Never "
+        "print credential-like values; use current source or path/stat metadata instead.\n\n"
         "Report ONLY real defects in this diff. An empty findings list is a valid and "
         "common result — do not manufacture findings to look thorough."
     )

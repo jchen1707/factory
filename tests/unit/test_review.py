@@ -221,6 +221,8 @@ def test_axis_prompt_returns_frame_only_when_no_checklist(tmp_path: Path) -> Non
     # The frame, plus the two lines that name the target — never a review criterion.
     assert prompt.startswith("frame only body")
     assert "git diff origin/v2...HEAD" in prompt
+    assert "Do not run `git show`, `git log -p`" in prompt
+    assert "must not enter the review transcript" in prompt
     assert "An empty findings list is a valid" in prompt
 
 

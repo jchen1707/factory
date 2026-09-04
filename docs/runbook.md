@@ -113,9 +113,11 @@ is merged by the factory, and that is a unit-tested invariant
 - **A secret reached the PR body:** the run already failed with `secret-in-artifact`
   before the push. Rotate the credential; the value is compromised regardless of whether
   the push happened.
-- **A disputed review finding:** the PR body records both positions under "Disputed
-  findings". Decide on GitHub; the factory does not override a finding the implementer
-  declined to fix.
+- **A disputed review finding:** after reading the recorded critical/high findings, James
+  may run `factory accept <TICKET> --review-finding --note "<reason>"` on a run blocked by
+  `review-finding`. The command requires passing gates and a recorded blocking finding,
+  writes James's judgement to the checks ledger, and enters delivery. The PR body keeps the
+  findings and records James's position separately under "Disputed review findings".
 
 ## The daemon did nothing / is not running
 

@@ -216,6 +216,14 @@ Clears a §15.3 escalation (a test-weakening finding that routed the run to `awa
 for a human decision) and lets the interrupted review run. The note is carried into the PR
 body's cleared-escalations section.
 
+If the escalation is rejected instead, preserve the existing worktree and start a fresh
+implementation attempt. The continuation names the escalation and tells the new attempt to
+preserve or strengthen the existing test guarantees:
+
+```sh
+uv run factory resume BAC-6 --from implementing
+```
+
 ### `suspend` / `resume` — park and resume a run
 
 ```sh
