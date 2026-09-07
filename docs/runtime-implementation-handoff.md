@@ -16,6 +16,51 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
+## Current resume — after #84 merge, 2026-09-07
+
+James merged #84 as `f17ba61db887f13ecaad3759c64138f1d7dd62d0`.
+The implementation/consumer merge sequence and authorized writer restart are complete.
+The timer has executed eight times with last exit 0; console HTTP 200 was rechecked.
+The live store is schema 5. The disposable project has no live runs or operator
+overrides: it retains legacy exec, existing model routing, repository-default Prototype,
+and explicit concurrency 1. Isolated FRO-12 remains blocked on review at attempt 2.
+
+Read-only deployment inspection found a retargeting gap: the reused reviewer sandbox
+still mounts `artifacts/crud-runtime-test/state/review/factory-crud-verification`,
+whereas live review needs `state/review/factory-crud-verification`. The old build also
+belongs to the isolated factory home, whose clone protocol/authority/vault mounts differ.
+Both old VMs are stopped and retained. The live registry now uses separate names,
+`factory-build-crud-live-20260907` and `factory-review-crud-live-20260907`, so factory
+will create its live specifications instead of reusing isolated mounts and parked work.
+Both new names were absent at inspection. No new sandbox or model was started.
+The isolated sandboxes' credential acknowledgement was removed from the live entry:
+fresh environments must pass their own preflight. This can block intake if an inherited
+capability is found; an old sandbox's invalid-token finding cannot authorize a new one.
+The registry loader verified only these disposable-project fields changed, with other
+project/default/vault settings unchanged. Console reload follows the configuration edit.
+Private backup and check: `artifacts/runtime-live-fro-checkpoint/`.
+
+The full gate run exposed five shipped-registry assertions still naming frontend-harness
+after #84's retarget (`5 failed, 971 passed`). Updated those assertions to the approved
+disposable target, retaining GitHub host delivery, absence of sandbox delivery, prefix
+routing and concurrency assertions. The focused registry suite passes (28 tests).
+The first failing report is retained as `factory-gates.json`; the post-correction full
+report is `factory-gates-final.json` in the checkpoint artifact directory.
+Final verdict **PASS**: Ruff check, Ruff format, mypy and pytest all exit 0 with
+empty output tails. Mypy covers configured paths; no new source directory was added.
+The fake-adapter suite does not establish compatibility of the uncreated live VMs.
+
+**Next:** the named rollout target is now `factory-crud-verification`; do not ask James
+to choose it again or restart the completed merge sequence. The approved feature acceptance
+scope remains complete with the limits below. For an app-server rollout, first validate
+the two new live sandbox specifications and credentials, then capture all six compatibility
+checks for their exact runtime and current worker. Only then present concrete settings
+for James's adapter-selection decision. Keep concurrency 1 and existing models unless
+explicitly switched. Existing scratch manifests cannot authorize these new sandbox names.
+Longitudinal delivery metrics follow actual use; no CRUD completion is required.
+Writer restart and live FRO routing are already authorized and applied; the older requests
+for those approvals are superseded. Do not repeat schema migration or resume FRO-12.
+
 ## Live FRO retarget — 2026-09-07 06:32 UTC
 
 James explicitly approved replacing frontend-harness in live FRO routing.
@@ -48,7 +93,7 @@ invocation exited successfully. No migration was repeated.
 This supersedes earlier statements that production writers remain stopped or their
 restart still needs approval. Project adapters, models, profiles and concurrency were
 not changed. App-server selection for a different deployment environment still requires
-its exact compatibility evidence. FRO-12 remains outside the live registry.
+its exact compatibility evidence. The isolated FRO-12 run remains outside the live store.
 
 ## Latest checkpoint — merged stack pins, 2026-09-07
 
@@ -73,7 +118,7 @@ James merged harness #34 as `cc7bf33474e41b202906525f12fc7b7de7ce68ea`.
 Post-merge Meta run `34090825991` and Generate main run `34090825987` both
 succeeded. The retained Meta log confirms `--pins --current` ran and passed;
 its prior stale-pin failure is resolved. This closes the implementation/consumer
-repository merge sequence. Factory #84 remains the open documentation-only handoff PR.
+repository merge sequence. Factory #84 subsequently merged; see the current resume above.
 
 **Next:** choose the named deployment project and concrete settings with James before
 production activation. No feature implementation or disposable-ticket completion is
