@@ -141,6 +141,22 @@ def collect(
                 "requests": [asdict(e) for e in estimates],
                 "reason": None if complete else "request pricing evidence incomplete",
             }
+        children = _linked_children(normalized, transcript.session_id)
+        if children:
+            reason = "linked child threads are not included in parent accounting"
+            payload["nested_accounting"] = {
+                "complete": False,
+                "parent_thread_id": transcript.session_id,
+                "child_thread_ids": children,
+                "reason": reason,
+            }
+            payload["parent_estimate"] = payload["estimate"]
+            payload["estimate"] = {
+                **payload["estimate"],
+                "complete": False,
+                "usd": None,
+                "reason": reason,
+            }
     ctx.store.runtime.observe(invocation_id, len(valid), payload)
     # Reconcile even a duplicate observation: a process may have died after the
     # telemetry commit and before its cost update. Never regress to an older payload.
@@ -160,6 +176,30 @@ def collect(
         cached_tokens=usage.cached_input_tokens,
         usd=payload["estimate"]["usd"],
     )
+
+
+def _linked_children(events: list[dict[str, Any]], parent: str | None) -> list[str]:
+    """Positive runtime ancestry only; unrelated threads do not establish nesting."""
+    children: set[str] = set()
+    if not parent:
+        return []
+    for row in events:
+        if row.get("type") != "factory.runtime":
+            continue
+        event = row.get("event", {})
+        params = event.get("params", {})
+        child = None
+        if event.get("method") in {"item/started", "item/completed"}:
+            item = params.get("item", {})
+            if params.get("threadId") == parent and item.get("type") == "subAgentActivity":
+                child = item.get("agentThreadId")
+        elif event.get("method") == "thread/started":
+            thread = params.get("thread", {})
+            if thread.get("parentThreadId") == parent:
+                child = thread.get("id")
+        if isinstance(child, str) and child and child != parent:
+            children.add(child)
+    return sorted(children)
 
 
 def collect_active(ctx: Context) -> None:
