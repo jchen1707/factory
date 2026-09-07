@@ -398,7 +398,7 @@ def test_runtime_selection_validates_executing_version_and_retains_baseline(
 ) -> None:
     import hashlib
 
-    from factory.agent import selection
+    from factory.agent import app_server, selection
     from factory.agent.app_server import COMPATIBILITY_CHECKS, AppServerAdapter
     from factory.sandbox.base import Completed
 
@@ -414,6 +414,9 @@ def test_runtime_selection_validates_executing_version_and_retains_baseline(
     capture.write_text("synthetic protocol fixture, not activation evidence")
     report = {
         "runtime_version": "codex-cli 0.153.4",
+        "worker_sha256": hashlib.sha256(
+            Path(app_server.__file__).with_name("app_server_worker.py").read_bytes()
+        ).hexdigest(),
         "sandbox": ctx.project.build_sandbox,
         "checks": {
             name: {
@@ -440,10 +443,29 @@ def test_runtime_selection_validates_executing_version_and_retains_baseline(
     assert isinstance(ctx.agent, AppServerAdapter)
     ctx.store.runtime.start_invocation("prior", ctx.run.id, 1, "implement", {})
     ctx.store.runtime.observe(
-        "prior", 1, {"thread_id": "thread", "thread_total_wire": {"inputTokens": 12}}
+        "prior",
+        1,
+        {
+            "thread_id": "thread",
+            "thread_total_wire": {
+                "inputTokens": 12,
+                "cachedInputTokens": 0,
+                "outputTokens": 0,
+                "reasoningOutputTokens": 0,
+                "totalTokens": 12,
+            },
+        },
     )
     selection.select(ctx)
-    assert ctx.agent.baselines == {"thread": {"inputTokens": 12}}
+    assert ctx.agent.baselines == {
+        "thread": {
+            "inputTokens": 12,
+            "cachedInputTokens": 0,
+            "outputTokens": 0,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 12,
+        }
+    }
     report["runtime_version"] = "older"
     manifest.write_text(json.dumps(report))
     with pytest.raises(Blocked, match="compatibility"):

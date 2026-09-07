@@ -323,7 +323,13 @@ def run(request: dict[str, Any]) -> int:
             "cwd": request["workdir"],
             "approvalPolicy": "never",
             "sandbox": "read-only" if request.get("readonly") else "danger-full-access",
-            "config": hook_overrides(hooks, request["workdir"]),
+            # Child launches have no factory admission callback. Measured on
+            # 0.146.0: this thread override disables nesting on start and resume;
+            # the CLI features.multi_agent=false override alone does not.
+            "config": {
+                **hook_overrides(hooks, request["workdir"]),
+                "agents.enabled": False,
+            },
         }
         if request.get("resume_session"):
             params["threadId"] = request["resume_session"]

@@ -180,7 +180,8 @@ def test_thread_sandbox_uses_executing_runtime_wire_values(
     assert thread["method"] == ("thread/resume" if resume else "thread/start")
     assert thread["params"]["sandbox"] == ("read-only" if readonly else "danger-full-access")
     assert thread["params"]["config"] == {
-        "hooks.state": {"project-hook": {"trusted_hash": "sha256:" + "a" * 64}}
+        "hooks.state": {"project-hook": {"trusted_hash": "sha256:" + "a" * 64}},
+        "agents.enabled": False,
     }
     assert any(message["method"] == "hooks/list" for message in sent)
     assert not any(message["method"].startswith("config/") for message in sent)

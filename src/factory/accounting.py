@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from factory.agent.base import Usage
 from factory.agent.codex import parse_events
-from factory.agent.telemetry import ThreadTelemetry
+from factory.agent.telemetry import CurrentContext, ThreadTelemetry
 from factory.machine import Blocked
 from factory.pricing import PriceBook, RequestUsage
 
@@ -109,6 +109,10 @@ def collect(
                 telemetry.observe(
                     event["event"], sequence=sequence, observed_at=event["observed_at"]
                 )
+            elif event.get("type") == "factory.context.invalidated":
+                telemetry.context = CurrentContext(
+                    unavailable=str(event.get("reason", "context invalidated"))
+                )
         payload["context"] = asdict(telemetry.context)
         payload["compactions"] = telemetry.compactions
         payload["model_changes"] = telemetry.model_changes
@@ -140,6 +144,15 @@ def collect(
                 "known_usd": known,
                 "requests": [asdict(e) for e in estimates],
                 "reason": None if complete else "request pricing evidence incomplete",
+            }
+        if telemetry.invalid_events:
+            payload["runtime_observation_errors"] = telemetry.invalid_events
+            payload["usage_complete"] = False
+            payload["estimate"] = {
+                **payload["estimate"],
+                "complete": False,
+                "usd": None,
+                "reason": "invalid runtime observations; retained priced lower bound only",
             }
         children = _linked_children(normalized, transcript.session_id)
         if children:
@@ -187,14 +200,22 @@ def _linked_children(events: list[dict[str, Any]], parent: str | None) -> list[s
         if row.get("type") != "factory.runtime":
             continue
         event = row.get("event", {})
+        if not isinstance(event, dict):
+            continue
         params = event.get("params", {})
+        if not isinstance(params, dict):
+            continue
         child = None
         if event.get("method") in {"item/started", "item/completed"}:
             item = params.get("item", {})
+            if not isinstance(item, dict):
+                continue
             if params.get("threadId") == parent and item.get("type") == "subAgentActivity":
                 child = item.get("agentThreadId")
         elif event.get("method") == "thread/started":
             thread = params.get("thread", {})
+            if not isinstance(thread, dict):
+                continue
             if thread.get("parentThreadId") == parent:
                 child = thread.get("id")
         if isinstance(child, str) and child and child != parent:
