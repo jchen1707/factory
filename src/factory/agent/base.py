@@ -134,6 +134,7 @@ _SUPPORTED = frozenset(
         "minLength",
         "minimum",
         "minItems",
+        "uniqueItems",
     }
 )
 
@@ -185,6 +186,10 @@ def validate_against_schema(instance: Any, schema: Mapping[str, Any], path: str 
             raise SchemaInvalid(f"{path}: shorter than minLength {floor}")
 
     if isinstance(instance, list):
+        if schema.get("uniqueItems"):
+            values = [_json_value(item) for item in instance]
+            if len(set(values)) != len(values):
+                raise SchemaInvalid(f"{path}: duplicate uniqueItems")
         min_items: Any = schema.get("minItems")
         if min_items is not None and len(instance) < int(min_items):
             raise SchemaInvalid(f"{path}: fewer than minItems {min_items}")
@@ -205,3 +210,14 @@ def validate_against_schema(instance: Any, schema: Mapping[str, Any], path: str 
         for name, value in instance.items():
             if name in properties:
                 validate_against_schema(value, properties[name], f"{path}.{name}")
+
+
+def _json_value(value: Any) -> Any:
+    """Hashable JSON equality: booleans differ from numbers, numeric 1 equals 1.0."""
+    if isinstance(value, dict):
+        return ("object", tuple(sorted((key, _json_value(item)) for key, item in value.items())))
+    if isinstance(value, list):
+        return ("array", tuple(_json_value(item) for item in value))
+    if isinstance(value, bool):
+        return ("boolean", value)
+    return ("scalar", value)

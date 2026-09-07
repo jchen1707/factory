@@ -79,6 +79,12 @@ class RuntimeJobs:
                 "SELECT 1 FROM agent_leases WHERE parent_id=? AND status='active'", (invocation_id,)
             ).fetchone():
                 raise ValueError("reconcile children before finalizing parent")
+            if self.runtime.db.execute(
+                "SELECT 1 FROM delegation_requests WHERE parent_id=? "
+                "AND status NOT IN ('completed','failed','cancelled')",
+                (invocation_id,),
+            ).fetchone():
+                raise ValueError("reconcile delegation requests before finalizing parent")
             row = self.runtime.db.execute(
                 "SELECT * FROM agent_leases WHERE invocation_id=?", (invocation_id,)
             ).fetchone()

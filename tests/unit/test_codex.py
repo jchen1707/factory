@@ -293,3 +293,12 @@ def test_every_property_is_required_because_openai_rejects_otherwise() -> None:
 def test_a_boolean_is_not_accepted_where_a_number_is_wanted() -> None:
     with pytest.raises(SchemaInvalid, match="boolean"):
         validate_against_schema(True, {"type": "integer"})
+
+
+def test_schema_unique_items_uses_json_equality() -> None:
+    schema = {"type": "array", "uniqueItems": True}
+    validate_against_schema([True, 1, "1"], schema)
+    validate_against_schema([{"x": True}, {"x": 1}], schema)
+    for repeated in (["src", "src"], [1, 1.0], [{"x": [1]}, {"x": [1.0]}]):
+        with pytest.raises(SchemaInvalid, match="uniqueItems"):
+            validate_against_schema(repeated, schema)

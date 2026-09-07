@@ -2,12 +2,12 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: checked sandbox cleanup is implemented and validated in a fresh disposable
-VM. Automatic certification and prepared-launch identity validation retain their previous
-acceptance. Child broker/execution, isolated integration, controls and rollout remain unfinished.
-See **Checked sandbox cleanup checkpoint** at the end; earlier sections are historical.
-Neither prior workflow VM is assumed available. Fresh observations/certification are required
-before future paid execution.
+Latest checkpoint: the durable host child broker is implemented and connected to child launch
+admission/cancellation fences and parent finalization. Actual app-server child transport,
+read-only sandbox preparation/certification, controller signaling and full child execution are
+still unfinished. See **Durable child broker checkpoint** at the end. Earlier sections are
+historical; neither prior workflow VM is assumed available. No live changes or child model
+calls were made in this checkpoint.
 
 ## Objective and approved scope
 
@@ -1174,3 +1174,89 @@ Ruff check exit0/80ms, Ruff format exit0/48ms, mypy exit0/202ms, pytest exit0/13
 all output tails empty, no skips. Configured mypy paths cover all changed source/tests.
 Fake-sandbox test caveat applies; the real cleanup observation above supplies separate sbx
 behavior evidence. No production source changed after this report. Both review axes clear.
+
+
+## Durable child broker checkpoint
+
+Continued from b32ddab. Objective remains factory workflow/feature acceptance on synthetic
+workloads, not ticket completion/hardening. Live services/settings, schema, concurrency4,
+consumer pins, shared source and tracker/forge/customer work remain unchanged. No sandbox
+or model call was made. Shared harness remains e3fc8ad, unmerged; shared sync still pending.
+
+Implemented:
+- New host service src/factory/delegation.py, DelegationBroker(store, parent_id, source_root).
+  Parent identity and source root are controller arguments, never tool data. request, requests,
+  inspect, bind_child, authorize_launch, cancel and publish_result operate on existing schema6
+  delegation_requests. No new DDL or second accounting ledger.
+- Read the exact shared request schema from the immutable authority snapshot; validate its
+  integrity and parent policy revision. Read-only requests only for active root builder parents,
+  within project capability and bounded pending-child limits. Reject forged fields, oversized
+  arguments, noncanonical/traversing/duplicate paths and symlinks. Shared schema fixture comes
+  from e3fc8ad; production still consumes target authority. No vendored file edited.
+- Added uniqueItems support to the factory schema validator so the shared schema works unchanged.
+  Tests distinguish JSON booleans/numbers and detect equal numeric/nested duplicate values.
+- Persist before returning a pending handle. Exact owned replay returns the retained handle even
+  after policy changes, disabling delegation, scope deletion or parent completion. Changed task
+  or source root cannot reuse a call identity. Two real spawned controller processes prove one
+  request identity and atomic pending-child limits against isolated SQLite.
+- Host-prepared child invocations bind once to matching run/attempt/parent/policy/semantic role.
+  AgentLaunches checks broker status/current authority/paths inside its existing atomic launch
+  transaction. Separate child approval and common capacity/budget admission remain in force;
+  cancellation of an unlaunched child fences admission before approval can be consumed.
+- Existing launch intents survive restart with no duplicate spawn. Active cancellation stays
+  cancelling and retains slots until execution is terminal/reconciled. RuntimeJobs refuses parent
+  finalization while broker requests/results remain outstanding, including queued children.
+- Host result publication requires a terminal reconciled child lease and retains an immutable,
+  size-bounded result. Child output never advances verification or independent review. Existing
+  accounting.collect_invocation retains child usage once across repeated collection and leaves
+  unpriced fixture usage USD=None. Result completion is NOT a tree-cost completeness claim.
+
+Evidence and limits:
+- Twenty-three broker cases pass, including real independent-process request races; existing
+  launch/admission/schema regression suites pass. Tests use actual temporary SQLite/filesystem
+  and fake detached sandbox execution. This does not prove child model execution or isolation.
+- Spec review reproduced an initial replay bug (current admission checked before old request).
+  Four new RED cases reproduced it; lookup now precedes new-admission checks. Re-review clear.
+  Standards review clear; optional shared extraction of duplicated settings interpretation was
+  deferred until controls expand. No hard findings remain for this bounded slice.
+- Source is not yet wired into a worker tool or workflow controller. bind_child is host-only and
+  attaches an already prepared invocation; it does NOT construct a fresh sandbox, immutable
+  prompt, model route or certificate. AgentLaunches alone does not certify/read-only-isolate a
+  child. cancel records intent; it does NOT send a signal. publish_result is host collector-only,
+  not a dynamic tool. These limitations must remain explicit until next work is accepted.
+
+Exact next work:
+1. Connect app-server dynamic-tool registration and request/result transport to this broker on
+   the measured supported full runtime package. Current worker receive rejects every server
+   request with method+id; agents.enabled remains false. Bind transport to the executing parent
+   and its owned mailbox/channel. Bound reads/paths, persist broker request before responding,
+   and return pending handles without waiting for human child approval. Never expose Store,
+   bind_child, authorize_launch or publish_result as model tools. Unknown tools fail closed.
+2. Implement host read-only child preparation/controller advancement: fresh thread, trusted
+   task/authority/base handoff, routed model/effort/preset, private scratch and source/authority
+   mounted read-only. Use accounting.begin with a unique child step and parent_id metadata,
+   then bind_child. Freeze launch inputs and validate a fresh complete sandbox fingerprint
+   before calling AgentLaunches.start(parent_id=...). Keep its existing no-duplicate intent.
+   The parent/run identity and source root passed to broker must come from host launch records.
+3. Wire owned pending requests and active children into observation/recovery/suspend/cancel.
+   Kill only recorded child process groups, retain ambiguous holders and partial usage, collect
+   terminal costs before releasing child slots, publish schema-validated bounded results from
+   controller-selected evidence paths, and only then finalize the parent. Parent completion
+   must drain or cancel pending broker requests, or its lease correctly remains held.
+4. Real synthetic acceptance: two read-only children, exact approvals/capacity, actual write
+   refusal, result transport, restart and targeted cancellation, repeated accounting. New worker
+   bytes/full runtime require fresh certification; old absent workflow VMs/certificates do not
+   authorize execution. No need to complete/harden synthetic tickets.
+5. Isolated writable child integration, controls, shared merge/exact sync and reviewed rollout
+   remain later work. James owns merges, live schema5→6 approval, deployment and activation.
+
+Plans remain implementing/untracked. This checkpoint is the commit containing this section.
+No push/PR opened. Final canonical gate evidence is recorded below after verification.
+
+Final canonical verification: artifacts/runtime-child-broker/gates-final.json PASS.
+Ruff check exit0/43ms, Ruff format exit0/41ms, mypy exit0/236ms, pytest exit0/136341ms;
+all output tails empty, no skips. Mypy covers154 source/test files including new broker/tests.
+Fake sandbox caveat applies: there is no real child execution claim. Separate spawned-process
+SQLite races are covered in the broker tests. No production source changed after the final
+report. Standards review clear; Spec replay finding fixed and re-review clear. Earlier passing
+pre-fix gate report retained as gates-before-replay-fix.json, not the final evidence.

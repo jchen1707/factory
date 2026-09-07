@@ -86,6 +86,20 @@ class AgentLaunches:
                 if prior.external_id != contract:
                     raise ValueError("launch contract is immutable")
                 return False
+            delegation = self.store.runtime.db.execute(
+                "SELECT id,parent_id,request FROM delegation_requests WHERE child_id=?",
+                (invocation_id,),
+            ).fetchone()
+            if delegation is not None:
+                from factory.delegation import DelegationBroker
+
+                if delegation["parent_id"] != parent_id:
+                    raise ValueError("delegation parent mismatch")
+                DelegationBroker(
+                    self.store,
+                    delegation["parent_id"],
+                    Path(json.loads(delegation["request"])["source_root"]),
+                ).authorize_launch(delegation["id"], invocation_id)
             if self.store.runtime.db.execute(
                 "SELECT 1 FROM agent_leases WHERE invocation_id=?", (invocation_id,)
             ).fetchone():
