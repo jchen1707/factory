@@ -4,7 +4,7 @@ Status: implementation in progress; feature is not complete.
 
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
 launch enforcement are implemented in the isolated worktree. Real acceptance is INCOMPLETE. See
-**Automatic certification service checkpoint** at the end; earlier sections are historical.
+**Real compatibility acceptance checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -599,3 +599,94 @@ pending build/review jobs have no paid phases yet; do not mark them passed or re
 results as complete certificates. Approved plan files remain untracked intentionally; preserve them.
 
 Shared source checkpoint is `e3fc8ad` in /Users/james/harness-runtime-certification (unpublished/unmerged). Factory checkpoint is the commit containing this handoff; retrieve it with `git log -1 --oneline`. No PR or push was performed.
+
+## Real compatibility acceptance checkpoint
+
+Continued from factory a733980 / harness e3fc8ad. Objective remains synthetic factory feature
+validation, not ticket completion. Live services, settings, templates, schema and consumer pins
+remain unchanged. Overall acceptance is NOT complete: the build service passed, but certified
+reviewer shell execution has a reproduced native re-execution defect. Do not activate this build.
+
+Implemented correction: the usage client required a stderr pipe while shared start_server inherited
+stderr. Added an explicit keyword-only capture_stderr option, requested only by the usage client;
+ordinary application/legacy callers preserve inherited stderr. Both native-bound and legacy launch
+branches honor it. The shared-launcher/Client regression failed before the fix and passes afterward.
+Focused worker/usage tests pass; two-axis bounded review found no issues. No shared source change.
+
+Real findings and evidence (all under ignored artifacts/runtime-certification-service/, preserve):
+- The original tiny fixture used hooks.protected strings, while the source hook consumes objects
+  with a glob field. The resumed build canary actually modified protected.txt; this was NOT hook
+  enforcement. Raw events and failed-fixture-protected.txt preserve those bytes. retire-fixture.py
+  stopped the owned fixtures, marked those jobs failed, and corrected/committed the tiny fixture
+  configuration. configure.py refreshed the explicit observed hook hashes. Do not rerun the old
+  setup.py without correcting its protected-path shape first.
+- Stopping the first build interrupt left no terminal file. collect-stopped.py independently
+  confirmed the exact VM state stopped, retained partial usage, and released that isolated failed
+  reservation as an operator recovery. It fabricated no exit file. operator-stopped-proof.json
+  is evidence. Automatic recovery did NOT resolve that orphan; this intervention must stay counted.
+- Corrected canaries in BOTH VMs produced actual blocked hook/completed events. Build job
+  4f267c5959384779ba567a70d02ad4fe then proved detached interruption (41.695 seconds, exact owned
+  group, exit 143) and same-thread recovery before failing usage-initial with
+  "app-server pipes unavailable". That failure motivated the committed pipe correction.
+- Final build job 8bb83b69220c4fffbb110bbb622447f1 completed all NINE separately admitted phases
+  and published all SIX checks through the real service. Its compatibility.json and
+  summary-index.json contain exact identity, raw captured events and measurements. Sol→Terra,
+  compaction notification/reset and thread-scoped cumulative usage across resumed controller
+  connections were measured on native 0.146.0. Compaction attribution remains visibly incomplete.
+  This report certifies only its exact build fingerprint, not reviewer or production identities.
+- controller-restarts.jsonl records separate short-lived controllers for every tick and independent
+  build/review progress. concurrent-passed-requests.json records two simultaneous fresh controllers
+  reusing the same passed build job. This does not claim a real same-VM race at first paid admission;
+  that case remains covered offline and still needs a real acceptance measurement.
+- fresh-refusals.json: fresh original validation passed; altering host summary-index.json refused;
+  restoring exact original bytes passed; a freshly observed changed invocation environment refused
+  with certification-stale. No certificate was rewritten to accept changed identity/evidence.
+- frozen-paths.py exercised the real Linux frozen wrapper with spaces AND single quotes in paths,
+  after replacing the writable staged worker/request. The retained source returned the native model
+  catalogue. This is command/staging acceptance, not a paid application turn.
+- application.py then ran one schema-valid no-tool synthetic application through AppServerAdapter,
+  freeze_script, fresh Certifications.validate and AgentLaunches admission. A new controller
+  collected its exit 0, {"ok":true} and usage (application-result.json). This exercises the actual
+  adapter/admission composition, not full Context/selection→builder/reviewer/recovery wiring.
+  The experiment initially omitted required metadata.adapter, causing collection to refuse. The
+  original metadata was saved, the isolated correction audited, and collection then completed
+  without a second launch. Production snapshots were not changed; this script correction is not
+  evidence that normal workflow callers omit metadata.
+
+Remaining blocking runtime finding:
+- Review job 22b6cede534b46f6a36122e4fb6b00b4 failed the interrupt phase. Actual shell requests
+  (/bin/bash and /bin/sh) returned CreateProcess / No such file or directory. A model returning
+  {"ok":false} or a schema-valid final answer cannot satisfy durability.
+- native-helper-repro.py reduces this to NO model call: native `codex sandbox -- /bin/true`
+  succeeds through the installed path; the same command through production sealed start_server
+  fails exit 1 / ENOENT. native-helper-{sealed,path}.json retain the pair. The initial experiment
+  mistakenly included a `linux` subcommand; the corrected reproduction removes it.
+- Upstream 0.146 arg0 code derives self/helper paths from current_exe and creates helper aliases;
+  a memfd executable reports a deleted, non-reopenable filesystem name. Retained upstream source
+  is in upstream/. Reference:
+  https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/arg0/src/lib.rs
+  This explains why catalogue/schema/build commands can pass while read-only shell execution fails.
+  Do NOT fix by disabling the reviewer sandbox, dropping native binding, or executing a mutable
+  candidate path. The sealed-byte guarantee and read-only enforcement both remain required.
+
+Exact next work:
+1. Resolve stable, immutable native self/helper re-execution, using native-helper-repro.py as the
+   fast red signal. Investigate a trusted read-only executable mount/namespace or runtime-supported
+   helper binding; neither is an implemented/approved final design here. Bind any new helper or
+   launcher dependency into fresh identity. Retain mutation/seal refusal guarantees and validate
+   real read-only shell execution before buying more reviewer turns. Do not retry the failed job
+   unchanged or synthesize its report.
+2. Worker/helper changes invalidate the passed build certificate. Rerun both complete service
+   matrices against the final source, then real initial-admission concurrent controllers and full
+   automatic workflow selection/launch/recovery refusal paths. Existing real evidence above is
+   useful but must not be promoted to those unexecuted claims.
+3. Remaining children/execution/accounting/cancellation/subtree recovery, isolated integration,
+   controls and rollout work remains as previously recorded. Shared e3fc8ad remains unpublished;
+   source merge/sync, template pin, live schema 5→6 and deployment remain James's decisions.
+
+Canonical gate report gates-stderr-fix.json: PASS, no skips. Ruff check exit 0 (98 ms), Ruff format
+exit 0 (43 ms), mypy exit 0 (535 ms), pytest exit 0 (142,960 ms); every output tail empty. Mypy's
+configured source paths include this change. The fake-sandbox caveat applies to the suite; separate
+real measurements above establish the listed runtime behavior and expose the remaining defect.
+Approved plans remain intentionally untracked. Both owned service VMs are stopped again, zero active
+leases; acceptance-stopped-checkpoint.json records final jobs, accounting completeness and state.

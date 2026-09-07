@@ -41,7 +41,10 @@ def exercise(
     monkeypatch.setattr(usage, "helpers", lambda: app_server_worker)
     launched = []
 
-    def start(argv: list[str], request: dict[str, Any]) -> subprocess.Popen[str]:
+    def start(
+        argv: list[str], request: dict[str, Any], *, capture_stderr: bool = False
+    ) -> subprocess.Popen[str]:
+        assert capture_stderr
         launched.append(request)
         assert "hooks=" in argv[-1]
         return subprocess.Popen(
@@ -122,3 +125,16 @@ def test_missing_native_identity_never_launches(
     monkeypatch.setattr(app_server_worker, "start_server", forbidden)
     assert usage.run({"stage": "initial"}) == 1
     assert "native runtime identity" in capsys.readouterr().out
+
+
+def test_usage_transport_accepts_the_shared_launcher_pipes() -> None:
+    process = app_server_worker.start_server(
+        [sys.executable, "-u", "-c", 'print("ready")'], {}, capture_stderr=True
+    )
+    client = usage.Client(process, 5)
+    try:
+        assert process.stderr is not None
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "ready"
+    finally:
+        client.close()

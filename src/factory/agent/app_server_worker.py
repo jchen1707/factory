@@ -174,14 +174,22 @@ def close_server(process: subprocess.Popen[str]) -> None:
             process.wait()
 
 
-def start_server(argv: list[str], request: dict[str, Any]) -> subprocess.Popen[str]:
+def start_server(
+    argv: list[str], request: dict[str, Any], *, capture_stderr: bool = False
+) -> subprocess.Popen[str]:
     """Bind certified starts (including hook fallback) to the checked open ELF.
 
     Absent binding preserves manual legacy execution. Presence never falls back to
     PATH, even when malformed. The host still owns full attestation validation.
     """
     if "runtime_identity" not in request:
-        return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)  # noqa: S603
+        return subprocess.Popen(  # noqa: S603
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if capture_stderr else None,
+            text=True,
+        )
     identity = request["runtime_identity"]
     if not isinstance(identity, dict) or set(identity) != {"runtime_path", "runtime_sha256"}:
         raise RuntimeError("invalid certified runtime binding")
@@ -230,6 +238,7 @@ def start_server(argv: list[str], request: dict[str, Any]) -> subprocess.Popen[s
                 pass_fds=(descriptor,),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE if capture_stderr else None,
                 text=True,
             )
 

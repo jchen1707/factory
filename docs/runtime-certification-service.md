@@ -2,6 +2,9 @@
 
 Implementation is opt-in. Production rollout and complete real compatibility acceptance are
 pending; see runtime-certification-implementation-handoff.md for measured scope and remaining work.
+The disposable build service has passed all six checks. Reviewer read-only shell execution fails
+with the sealed native launch because native helper re-execution cannot reopen its executable path.
+Do not activate until immutable helper execution and the final build/review matrix pass.
 
 `factory configure --project PROJECT --agent-adapter app-server --certification-mode automatic
 --certification-config /absolute/host/config.json` selects automatic certification for new runs.

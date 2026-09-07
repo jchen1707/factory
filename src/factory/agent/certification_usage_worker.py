@@ -164,7 +164,7 @@ def run(request: dict[str, Any]) -> int:
             "-c",
             "hooks=" + worker.toml_literal(definitions),
         ]
-        client = Client(worker.start_server(argv, request), timeout)
+        client = Client(worker.start_server(argv, request, capture_stderr=True), timeout)
         client.rpc(
             "initialize",
             {
