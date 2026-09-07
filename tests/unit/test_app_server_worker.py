@@ -39,6 +39,7 @@ def run_client(
     monkeypatch: pytest.MonkeyPatch,
     events: list[dict[str, Any]],
     *,
+    model: str = "gpt-5.6-sol",
     baseline: dict[str, int] | None = None,
     resume: bool = False,
     readonly: bool = False,
@@ -68,7 +69,7 @@ def run_client(
             "result": {
                 "data": [
                     {
-                        "model": "gpt-5.6-sol",
+                        "model": model,
                         "supportedReasoningEfforts": [{"reasoningEffort": "high"}],
                     }
                 ]
@@ -141,7 +142,7 @@ def run_client(
     (tmp_path / "schema").write_text('{"type":"object"}')
     result = worker.run(
         {
-            "model": "gpt-5.6-sol",
+            "model": model,
             "effort": "high",
             "vault": "/vault",
             "workdir": str(tmp_path),
@@ -531,3 +532,29 @@ def test_normalized_usage_survives_a_stream_cut_before_turn_completion(
     assert len(observed["requests"]) == 1
     assert not observed["complete"]
     assert not observed["pricing_complete"]
+
+
+@pytest.mark.parametrize(
+    "model", ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "unknown-model"]
+)
+@pytest.mark.parametrize("input_tokens", [272000, 272001])
+def test_request_context_band_uses_per_request_input_for_supported_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str, input_tokens: int
+) -> None:
+    # The cumulative input exceeds the threshold even for two short requests.
+    one = counts(input_tokens)
+    two = {key: value * 2 for key, value in one.items()}
+    updates = [usage_event(one, one), usage_event(two, one), usage_event(two, one)]
+    for update in updates:
+        update["params"]["tokenUsage"]["modelContextWindow"] = 1050000
+    code, emitted, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), *updates, turn_end()],
+        model=model,
+    )
+    assert code == 0
+    observed = [e for e in emitted if e["type"] == "factory.usage"][-1]
+    assert len(observed["requests"]) == 2
+    expected = None if model == "unknown-model" else input_tokens > 272000
+    assert [r["long_context"] for r in observed["requests"]] == [expected, expected]

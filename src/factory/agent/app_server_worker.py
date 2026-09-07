@@ -404,7 +404,13 @@ def run(request: dict[str, Any]) -> int:
                                     "observed_at": time.time(),
                                     "service_tier": "standard",
                                     "long_context": (delta["input_tokens"] > 272000)
-                                    if model in {"gpt-6-astra", "gpt-5.6-sol"}
+                                    if model
+                                    in {
+                                        "gpt-6-astra",
+                                        "gpt-5.6-sol",
+                                        "gpt-5.6-terra",
+                                        "gpt-5.6-luna",
+                                    }
                                     else None,
                                 }
                             )
