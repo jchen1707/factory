@@ -2,9 +2,9 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: root workflow launch wiring is now implemented in this worktree. The
-foundation-only statements below describe earlier checkpoints; see **Workflow launch
-integration checkpoint** at the end for current behavior and remaining work.
+Latest checkpoint: sandbox generation and explicit native runtime observation are implemented
+and measured. Earlier sections are historical checkpoints; see **Runtime identity observation
+checkpoint** at the end for current behavior and exact remaining work.
 
 ## Objective and approved scope
 
@@ -352,3 +352,75 @@ Final attestation gate report: `artifacts/runtime-certification-attestations/gat
 PASS: Ruff check, Ruff format --check, mypy and pytest all exited 0, no skips, empty output
 tails. Pytest ran for 124,949 ms. Configured mypy coverage includes the two new files (136
 source/test files). The fake-sandbox caveat applies; no real runtime acceptance was performed.
+
+
+## Runtime identity observation checkpoint
+
+`SbxAdapter.generation` now reads the creation UUID from `sbx ls --json` on every call.
+The previous concern was specific to `inspect`, which does not expose the UUID. A new
+owned disposable VM proved that its UUID survives stop/start and changes after same-name
+removal/recreation. No fallback nonce is needed for the measured v0.38.0 listing contract;
+missing, malformed or ambiguous identity fails closed. No IDs are inferred from names.
+
+`SbxAdapter.observe_runtime` reads generation and image identity, refuses capability
+credentials, and executes a standalone metadata observer with isolated Python imports.
+The observer requires an explicit absolute native ELF path, hashes the open executable,
+queries its version through that same inherited descriptor, and rechecks bytes/path before
+returning. It refuses wrappers and detects replacement during observation. Nonblocking opens
+refuse FIFO inputs. The adapter rechecks generation, image and secret classification after
+the query. No model turn or app-server is started by this observer.
+
+The real template's `codex` is a JavaScript launcher, so hashing it is insufficient. The
+measured native path is:
+`/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex`.
+This is evidence for the experiment image, not a new hardcoded production path or template
+upgrade. The caller must eventually launch the observed absolute native binary with the same
+environment; current application workers still resolve `codex` and are NOT wired to this API.
+No claim of certification-to-launch race closure is made.
+
+Real evidence is in this worktree at `artifacts/runtime-certification-identity/`:
+- `created.json`, `stopped.json`, `restarted.json`: UUID
+  `b9a92ac6-ea4a-41f7-8297-d4e3a8c6593d` remained stable.
+- `recreated.json`: same name received `a45373ad-ce24-412b-ae67-c0bb7821146f`.
+- `native-observation.json`, `isolated-native-observation.json`: actual 0.146.0 native SHA
+  `cb5e8cb8a333a408ce6adbe0d4fad1845c69772c2216af7c1f88c98a11460dc6`;
+  image digest `sha256:8ab3deaa75f9c10fb0e95d866a57280bc1494950c1a90b2cc636c8b1391fd574`.
+- `same-version-changed-binary.json`: appending bytes to a disposable `/tmp` binary copy
+  retained the version while changing the observed SHA. The image binary was not modified.
+- `wrapper-refusal.txt`: the npm launcher cannot stand in for native binary evidence.
+
+Experiment name: `factory-build-cert-identity-20260907`, using only the local artifact
+workspace, template `codex-pnpm:v1`, one CPU and 2 GiB. It was stopped after final measurements;
+its private `/tmp` copy and intentionally hostile fixture `workspace/json.py` remain evidence.
+No application work was present. The first noninteractive `sbx rm` refused terminal input;
+explicit `sbx rm --force` removed only this newly created experiment before recreating it.
+Do not use the existing adapter's unchecked `remove` return as proof of removal.
+
+Review reproduced a forged identity via candidate `json.py`/PYTHONPATH before the fix.
+The adapter now uses `/usr/bin/python3 -I -S`; the regression and real VM both prove the
+candidate import does not execute. Standards found no hard violations; spec review confirmed
+that fix. Reviewers did not independently run tests. Focused tests also cover malformed
+UUID listings, namespace refusal, recreation during query, changed bytes at the same version,
+concurrent replacement and FIFO refusal. Full-feature acceptance remains unfinished.
+
+Exact next steps:
+1. Compose the full fingerprint from these fresh observations plus canonical actual/requested
+   spec/mount/layout/environment, trusted authority/hook and source-owned probe inputs. Pin the
+   measured native command through worker preparation and recovery, then enforce fresh identity
+   immediately before paid application launch. Do not feed retained job identity to `validate`.
+2. Implement the source-owned probe runner and deterministic preflight, common paid admission,
+   durable ensure/advance/reconcile/status, and automatic/manual configuration. An expired
+   certification lease must reconcile its detached launch rather than authorize another probe.
+   The six prior checks and attestation validator are inputs, not an automatic runner.
+3. Continue child broker/execution/accounting, subtree recovery, isolated writable integration,
+   controls and real synthetic acceptance from the approved plan. Do not revisit CRUD completion.
+4. Shared merge/consumer sync, template pin, migration and rollout remain pending. James owns
+   merges, deployment and live schema 5→6 approval. No live setting/service/database, shared
+   source, consumer pin, tracker or forge change occurred here. No DDL changed.
+
+Final canonical gate evidence: `artifacts/runtime-certification-identity/gates-final.json`.
+PASS: Ruff check (67 ms), Ruff format (40 ms), mypy (231 ms), pytest (125,071 ms), each
+exit 0 with empty output tails; none skipped. Mypy includes the new source/test paths
+(138 files). The offline suite's fake-boundary caveat remains; the separate real VM
+observations above establish only this identity slice, not automatic certification or
+child-workflow acceptance. The two reviews have no remaining blocking findings.

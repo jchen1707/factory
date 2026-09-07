@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
+from factory.agent import runtime_identity
 from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
     Completed,
@@ -193,6 +196,96 @@ class SbxAdapter:
         return Completed(tuple(argv), proc.returncode, proc.stdout, proc.stderr)
 
     # -- lifecycle ----------------------------------------------------------------
+
+    def generation(self, name: str) -> str:
+        """Fresh creation UUID from `sbx ls`, never the reusable sandbox name.
+
+        `inspect` omits this field on v0.38.0. Missing or ambiguous listing data
+        cannot authorize reuse of certification evidence.
+        """
+        assert_factory_sandbox(name)
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        try:
+            if not result.ok:
+                raise ValueError
+            rows = json.loads(result.stdout)["sandboxes"]
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError
+            matches = [row for row in rows if row.get("name") == name]
+            if len(matches) != 1:
+                raise ValueError
+            value = matches[0]["id"]
+            if not isinstance(value, str) or str(UUID(value)) != value:
+                raise ValueError
+            return value
+        except (ValueError, KeyError, TypeError):
+            raise SbxError(f"sandbox generation unavailable: {name}") from None
+
+    def observe_runtime(
+        self,
+        name: str,
+        *,
+        binary: str,
+        workdir: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Fresh native binary/image/generation evidence, without a model turn.
+
+        This is not a certificate or the full spec/mount/hook preflight. The
+        certifier must supply the same explicit binary and environment at launch.
+        Capability credentials refuse even metadata execution on this path.
+        """
+        assert_factory_sandbox(name)
+        if not Path(binary).is_absolute():
+            raise SbxError("runtime binary path must be absolute")
+        generation = self.generation(name)
+        info = self.inspect(name)
+        image = info.get("image_digest")
+        if not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+            raise SbxError(f"sandbox image identity unavailable: {name}")
+        if not isinstance(info.get("secrets"), list) or capability_secrets(info["secrets"]):
+            raise SbxError(f"sandbox capability preflight failed: {name}")
+        result = self.exec_sync(
+            name,
+            # Candidate cwd/PYTHONPATH/site imports must not replace probe modules.
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                "-c",
+                Path(runtime_identity.__file__).read_text(),
+                binary,
+            ],
+            workdir=workdir,
+            env=env,
+            timeout=60,
+        )
+        try:
+            observed = json.loads(result.stdout)
+            if (
+                not result.ok
+                or not isinstance(observed, dict)
+                or set(observed) != {"runtime_path", "runtime_version", "runtime_sha256"}
+            ):
+                raise ValueError
+            if not all(isinstance(value, str) for value in observed.values()):
+                raise ValueError
+            if (
+                not Path(observed["runtime_path"]).is_absolute()
+                or not re.fullmatch(r"[0-9a-f]{64}", observed["runtime_sha256"])
+                or not re.fullmatch(r"codex-cli [0-9][A-Za-z0-9.+-]*", observed["runtime_version"])
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise SbxError(f"native runtime identity unavailable: {name}") from None
+        current = self.inspect(name)
+        if (
+            self.generation(name) != generation
+            or current.get("image_digest") != image
+            or current.get("secrets") != info["secrets"]
+        ):
+            raise SbxError(f"sandbox changed during runtime observation: {name}")
+        return {"generation": generation, "image_digest": image, **observed}
 
     def exists(self, name: str) -> bool:
         """`sbx inspect` is non-zero when the sandbox is absent.
