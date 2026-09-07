@@ -24,8 +24,9 @@ contains identity, isolation, interruption, usage results, `verified-summary.jso
 `factory-build-crud-live-20260907.json` and
 `factory-review-crud-live-20260907.json`. Both pass production `validate_compatibility`.
 Production configuration and build/review selection were also rehearsed in the
-separate validation store; both selected `AppServerAdapter`. No setting was written
-to the live store. `proposed-live-settings.json` is the exact next operator change.
+separate validation store; both selected `AppServerAdapter`. The rehearsal wrote no setting to the live store. James subsequently approved those
+exact settings and they were applied; see `artifacts/runtime-live-app-server-selection/`.
+`proposed-live-settings.json` retains the exact selected values.
 
 James explicitly approved the project-only inherited credential acknowledgement.
 Both authenticated GitHub API probes returned HTTP 401 at measurement. The registry

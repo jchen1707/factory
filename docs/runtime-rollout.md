@@ -1,5 +1,17 @@
 # Runtime rollout
 
+## App-server selected — 2026-09-07
+
+James approved and applied app-server selection for new `factory-crud-verification`
+runs. Live store read-back confirms the exact validated compatibility directory;
+other operator settings, model routing and concurrency 1 are unchanged. Console
+HTTP 200. There were zero live disposable runs at confirmation, so this is selection
+verification rather than a completed live workload. Evidence and rollback are in the
+[current handoff](runtime-implementation-handoff.md) and
+`artifacts/runtime-live-app-server-selection/`. No further activation approval is
+pending. Observe actual approved use; do not complete CRUD tickets merely for rollout.
+
+
 ## Live compatibility passed — 2026-09-07
 
 James approved the disposable project's credential acknowledgement; it is applied.

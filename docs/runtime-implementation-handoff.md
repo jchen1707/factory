@@ -16,7 +16,39 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current resume — live compatibility passed, 2026-09-07
+## Current resume — app-server selected, 2026-09-07
+
+James explicitly approved app-server selection for new `factory-crud-verification`
+runs. Applied the exact configure command below to `/Users/james/factory/state/factory.db`.
+Read-back confirms project setting revision 1, adapter `app-server`, and compatibility
+directory `/Users/james/factory/artifacts/runtime-live-sandbox-validation/compatibility`.
+Both exact runtime/worker manifests were revalidated immediately before selection.
+Other project/run settings are unchanged; existing model routing and concurrency 1
+are preserved. No migration or service restart was needed. Console HTTP 200.
+
+Evidence: `artifacts/runtime-live-app-server-selection/verified-selection.json` and
+`operator-settings-before.json`. A consistent SQLite online backup, integrity-checked
+and mode 0600, is retained there as `factory-before-selection.db`. Live writers were
+not stopped for this ordinary supported configuration update; no schema was changed.
+
+There were zero live disposable-project runs at read-back. This checkpoint proves
+activation configuration, not a completed live workload. Real sandbox compatibility
+is separately proven below. Existing attempts remain on their original adapter.
+FRO-12 remains parked in its isolated store; no ticket or readiness label changed.
+
+**Next:** James merges factory #87, which carries the approved credential registry
+change and these deployment records. The adapter selection is already applied; do
+not ask for it again or repeat activation. Observe actual approved use for failures,
+interventions and accounting metrics. Start or advance a disposable workload only
+for a specifically missing factory check; CRUD completion is not the objective.
+No additional implementation or compatibility experiment is currently required.
+
+Operator rollback, if requested: `uv run factory configure --project
+factory-crud-verification --agent-adapter codex-exec` from this repository. It affects
+new runs; existing run snapshots retain their selected adapter. Do not restore the
+whole database backup to undo this setting, since that would discard subsequent work.
+
+## Previous resume — live compatibility passed, 2026-09-07
 
 James explicitly approved the project-only credential acknowledgement. Applied to
 `factory-crud-verification` in `config/projects.toml`; other projects are unchanged.
