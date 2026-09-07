@@ -166,6 +166,32 @@ def test_capacity_queue_preserves_preparation_and_changed_environment_refuses(
     store.close()
 
 
+def test_observing_build_does_not_retire_the_same_runs_queued_reviewer(tmp_path: Path) -> None:
+    store = Store(tmp_path / "db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    sandbox, driver = Sandbox(), Driver(tmp_path)
+    service = runner(store, tmp_path, sandbox, driver)
+    reviewer = replace(identity(), sandbox="factory-review-synthetic")
+    service.observe = lambda: reviewer
+    review_job = service.ensure(run.id, automatic=True)
+    service.observe = identity
+    build_job = service.ensure(run.id, automatic=True)
+    assert service.status(review_job["id"])["status"] == "pending"
+    store.close()
+
+    reopened = Store(tmp_path / "db")
+    service = runner(reopened, tmp_path, sandbox, driver)
+    service.observe = lambda: replace(identity(), generation="recreated")
+    replacement = service.ensure(run.id, automatic=True)
+    assert replacement["id"] != build_job["id"]
+    assert service.status(build_job["id"])["status"] == "failed"
+    assert service.status(review_job["id"])["status"] == "pending"
+    service.observe = lambda: reviewer
+    assert service.ensure(run.id, automatic=True)["id"] == review_job["id"]
+    assert sandbox.handles == []
+    reopened.close()
+
+
 def test_budget_exhaustion_prevents_probe_and_retains_incomplete_cost(tmp_path: Path) -> None:
     store = Store(tmp_path / "db")
     run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")

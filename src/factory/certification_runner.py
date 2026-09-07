@@ -209,7 +209,11 @@ class CertificationRunner:
     def _retire_stale(self, job_id: str, current: CertificationIdentity) -> None:
         with self.store.runtime.transaction():
             job = self.status(job_id)
-            if job["identity"] == asdict(current) or job["status"] not in {"pending", "checking"}:
+            if (
+                job["identity"]["sandbox"] != current.sandbox
+                or job["identity"] == asdict(current)
+                or job["status"] not in {"pending", "checking"}
+            ):
                 return
             if self.store.runtime.db.execute(
                 "SELECT 1 FROM agent_leases a JOIN invocations i ON i.id=a.invocation_id "

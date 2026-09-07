@@ -158,3 +158,55 @@ PASS, no skips: Ruff check exit0/39ms, format exit0/42ms, mypy exit0/432ms, pyte
 exit0/132645ms. Every output tail empty. Changed paths are covered by mypy. The fake-sandbox
 caveat applies to the suite; real measurements are separately retained above. No production
 source changed after the final report.
+
+
+## Usage request pricing and concurrent sandbox retirement
+
+Continued from cad2f6e. The usage worker previously retained only aggregate counters. It now
+emits request records when an observed delta from the accepted baseline equals latest-request
+usage, reusing the application worker's usage-delta contract. Every accepted observation flushes
+partial evidence before reading more runtime events. Completion is required for complete pricing.
+Unknown scopes, combined requests, regressions, compaction and reroutes retain incompleteness.
+Prior-turn notifications are excluded. No retained raw histories are rewritten or fabricated.
+
+Observed RED/GREEN tests cover initial request pricing, reroutes, prior turns, partial flush,
+automatic compaction and a review-discovered initial resumed regression: baseline100, then90,
+then110/latest20 must not price20 old/new mixed tokens. Preserve the baseline; later120/latest10
+can price only10, while the invocation remains incomplete. Duplicate/combined/request-scope
+cases also pass. Standards review clear, optional shared metadata extraction deferred; final
+spec review clear after this correction.
+
+Concurrent real workflow-drive.py build/review found _retire_stale retired a queued reviewer
+when observing the build sandbox. Both spec fingerprints were unchanged. The runner now scopes
+retirement to the observed sandbox name; same-name generation changes still invalidate evidence.
+The RED/GREEN store-reopen test preserves the reviewer while retiring a recreated build. This
+is a new diagnosed failure and does not explain the historical028c transient specification hash.
+
+The first changed-worker job9b2cd2a4e16b4738a1d17470b14ece3c ran three probes before review
+correction; jobed0f7b430ed54b2492ae00488237bc98 ran five before the cross-sandbox fix. Both were
+collected/retired for changed implementation identities, not reset. Incorrectly retired reviewer
+a346574dec24432583b337df2550d1ed had one prepared canary and no paid launch. Costs/history remain.
+
+Final source: concurrent controllers under the unchanged disposable one-agent cap completed
+build bbc1d006fa5240c5a5d1e81abb6388d7 (ticks0–14) and review
+0cd7ca3b3b1a4f5a80ee9dc913ac3ad9 (ticks0–20), each nine phases/all six checks. Both retained one
+job through capacity waits. Final18 invocations:14 complete estimates; two compactions and two
+interrupted probes incomplete. Ten ordinary usage phases all have complete request pricing.
+Known API-equivalent lower bounds: build USD0.1308816, reviewer USD0.0937736.
+
+Run `uv run python artifacts/runtime-certification-service/usage-pricing-result.py` to inspect
+and replay the final jobs without paid work. It asserts unchanged event digests, repeated
+accounting totals, request completeness boundaries and zero leases. Result is retained at
+artifacts/runtime-workflow-real/usage-pricing-result.json. The existing workflow-stop.py then
+collected all retained history and stopped both owned VMs:59 invocation records (includes an
+unlaunched preparation),28 incomplete, USD0.920936 known lower bound. Target clean, zero active
+leases, unchanged generations. Neither full-history spend completeness nor account charges
+are claimed. The earlier stopped report has a separate before-usage-pricing copy.
+
+Final gates: artifacts/runtime-workflow-real/gates-usage-pricing-final.json PASS; Ruff check
+exit0/71ms, format exit0/43ms, mypy exit0/119ms, pytest exit0/154832ms; empty tails, no skips.
+Forty focused tests; all changed source/test files in configured mypy coverage. The fake-sandbox
+caveat applies, with real evidence separately retained above. No production source changed after
+that report. No new application/ticket completion, live changes, migration or consumer sync.
+Prepared-launch environment/generation cases, old transient diagnosis, child execution and safe
+integration, controls, matching full runtime package and rollout remain unfinished.

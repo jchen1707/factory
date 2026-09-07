@@ -5,7 +5,7 @@ Status: implementation in progress; feature is not complete.
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
 launch enforcement are implemented in the isolated worktree. Final disposable build/reviewer six-check
 acceptance now PASSES; full workflow/child acceptance and rollout remain incomplete. See
-**Independent reviewer and pricing checkpoint** at the end; earlier sections are historical.
+**Usage request accounting and sandbox-scoped retirement checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -947,3 +947,90 @@ all output tails empty, no skips. Changed paths are in mypy coverage; fake-sandb
 limitations apply, with separate real reviewer evidence above. No production source changed
 after this report. Standards review clear; spec review's evidence-identity finding fixed and
 re-review clear. No push or PR opened.
+
+
+## Usage request accounting and sandbox-scoped retirement checkpoint
+
+Continued from cad2f6e in the isolated implementation worktree. Objective remains factory
+feature/workflow validation using synthetic workloads, not ticket completion or hardening.
+No live services/settings, migrations, consumer pins, tracker/forge or customer work changed.
+Shared harness remains e3fc8ad; both approved plans remain untracked and implementing.
+
+Implemented and reviewed:
+- Usage probes now retain request-level price evidence only when a known-baseline counter
+  delta equals the observed latest request. Duplicate notifications add no requests; combined
+  requests remain incomplete. Preserve the accepted high-water counter, including when the
+  first resumed observation is below the retained baseline. Request records carry model,
+  observation time, service tier and known long-context classification.
+- Flush partial accounted observations before reading more runtime events, so interruption
+  does not depend on finally executing. Only terminal success can mark usage/pricing complete.
+  Unknown resumed scopes, compaction and reroutes retain explicit pricing incompleteness;
+  stale-turn notifications do not become this invocation's requests. No historical backfill.
+- Real concurrent build/reviewer certification exposed another bug: ensure(build) retired
+  the queued reviewer as stale because retirement scanned all same-run identities. Retirement
+  now applies only to the observed sandbox. Same-name generation changes still retire the
+  old job. The regression also covers reopening the store and reusing the reviewer job.
+- Observed RED/GREEN cases: missing request pricing, model reroute, prior-turn usage,
+  preterminal flush, automatic compaction, first-resume counter regression, cross-sandbox
+  retirement. Forty focused tests pass; mypy covers all four changed source/test paths.
+- Standards review has no violations (optional shared request-metadata extraction deferred);
+  spec review's resumed-baseline finding fixed and final extended re-review clear.
+
+Final canonical gates: artifacts/runtime-workflow-real/gates-usage-pricing-final.json PASS;
+Ruff check exit0/71ms, format exit0/43ms, mypy exit0/119ms, pytest exit0/154832ms. All output
+tails empty, no skips. Configured mypy coverage includes changed files. Fake-sandbox suite
+limitations apply; real certification/accounting evidence is recorded separately below.
+No production source changed after that report.
+
+Real acceptance completed:
+- Two independent workflow-drive.py controllers drove build/review concurrently under the
+  isolated project's existing one-agent cap. Both jobs retained their IDs while alternating
+  active/queued work: build bbc1d006fa5240c5a5d1e81abb6388d7 (ticks0–14), reviewer
+  0cd7ca3b3b1a4f5a80ee9dc913ac3ad9 (ticks0–20). Both pass all nine phases/six checks.
+- Final 18 invocations:14 complete estimates /4 incomplete (two explicit compaction stages,
+  two interrupted probes). All ten ordinary usage stages have complete request-level pricing.
+  Known API-equivalent USD0.1308816 build +0.0937736 review, lower bounds due to incompleteness.
+  usage-pricing-result.py replays retained accounting repeatedly, checks unchanged raw digests,
+  requests/estimates, partial flush and zero leases. Result: usage-pricing-result.json.
+- workflow-stop.py reconciled all retained history and stopped only the two owned workflow
+  VMs. stopped-checkpoint.json:59 invocation records,28 incomplete, known lower bound
+  USD0.920936, clean target, zero active agent leases. This includes earlier failed fixtures
+  and a prepared but never launched canary; it is not59 paid invocations or account charges.
+  Previous stop report preserved as stopped-checkpoint-before-usage-pricing.json.
+- Generations unchanged: build c51effe9-c5ff-44dd-b5c6-29f56513457b; reviewer
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73. Both STOPPED. Older service VMs remain stopped.
+  No synthetic application/ticket work was repeated; original reviewer finding is untouched.
+
+Interventions/failed experiments retained:
+- Job9b2cd2a4e16b4738a1d17470b14ece3c ran three probes before the review finding caused
+  controller pause/source correction; it was reconciled and retired for the changed probe hash.
+- Jobed0f7b430ed54b2492ae00488237bc98 ran five probes before the cross-sandbox defect caused
+  another pause/correction. Its costs remain retained; the final implementation invalidated it.
+- Queued reviewer a346574dec24432583b337df2550d1ed was incorrectly retired by build observation.
+  Its canary was prepared but had no paid launch. The real stable spec hashes establish this
+  new cross-sandbox retirement cause; they do NOT explain the earlier028c spec-hash transient.
+  No failed job was reset or reused as passing evidence. Final fixed-source jobs above are fresh.
+
+Evidence directory: artifacts/runtime-workflow-real/; exact controllers and accounting/cleanup
+scripts: artifacts/runtime-certification-service/{workflow-drive.py,usage-pricing-result.py,
+workflow-stop.py}. build-ticks.jsonl/review-ticks.jsonl retain earlier failed runs as well as final
+runs; use job IDs to distinguish them. Shared source remains e3fc8ad, unchanged/unmerged.
+
+Exact next work:
+1. Complete the prepared application launch environment/generation refusal matrix. Existing
+   actual builder/recovery/reviewer launches and authority/evidence refusals already pass.
+   The old transient spec digest change remains unexplained; capture the underlying observation
+   before/after if it recurs. Cross-sandbox retirement is fixed, not an explanation of that event.
+2. Implement the durable child broker and read-only child execution/result transport on the
+   measured supported runtime. Existing runtime_jobs records/admission are foundations only:
+   app_server_worker still has no factory child transport, and child lifecycle is unfinished.
+   Include per-child accounting/approval, targeted cancellation and subtree restart recovery.
+3. Add isolated writable child environments and safe serialized integration preserving dirty
+   parent work; remaining console/CLI controls and real synthetic acceptance matrix follow.
+4. Prepare matching full runtime package/template, shared merge/exact consumer sync and rollout.
+   Binary-only Astra experiments still do not authorize the production bundled launcher.
+   James owns merge, live schema5→6 approval, deployment and activation. No live activation.
+
+Do not backfill old undigested/unknown request histories or mark compaction/interrupted
+accounting complete. Current conservative incompleteness is intentional. No need to complete
+or harden the synthetic ticket. Checkpoint is the commit containing this section; no push/PR.

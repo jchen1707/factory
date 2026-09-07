@@ -140,6 +140,36 @@ def run(request: dict[str, Any]) -> int:
     baseline = request.get("usage_baseline")
     if stage == "initial" or scope == "connection":
         baseline = {}
+    previous = baseline
+    requests: list[dict[str, Any]] = []
+    pricing_complete = stage != "compact" and isinstance(baseline, dict)
+    attributable = pricing_complete and (stage == "initial" or scope != "unknown")
+    model = request.get("model")
+
+    def publish_usage(*, final: bool = False) -> None:
+        delta = (
+            worker.usage_delta(total, baseline) if total and isinstance(baseline, dict) else None
+        )
+        complete = final and status == "completed" and consistent and delta is not None
+        # Compaction request attribution and unknown resumed counter scopes are unproven.
+        if stage == "compact" or (stage != "initial" and scope == "unknown"):
+            complete = False
+        emit(
+            {
+                "type": "factory.usage",
+                "thread_id": thread,
+                "model": model,
+                "observed_at": time.time(),
+                "thread_total": total,
+                "usage_scope": scope,
+                "usage": delta,
+                "complete": complete,
+                "requests": requests,
+                "pricing_complete": complete and pricing_complete,
+                "reason": None if complete else "certification usage attribution incomplete",
+            }
+        )
+
     try:
         if stage not in {"initial", "second", "compact", "postcompact", "modelchange", "resume"}:
             raise ValueError("invalid certification usage stage")
@@ -214,19 +244,52 @@ def run(request: dict[str, Any]) -> int:
             if params.get("threadId") not in {None, thread}:
                 raise RuntimeError("unexpected thread notification")
             if method == "thread/tokenUsage/updated":
+                if params.get("threadId") != thread or (
+                    stage != "compact" and params.get("turnId") != turn
+                ):
+                    continue
                 usage = params["tokenUsage"]
                 observed = usage.get("total")
                 if not counts(observed) or not counts(usage.get("last")):
                     consistent = False
                     continue
-                if total and worker.usage_delta(observed, total) is None:
-                    consistent = False
+                delta = (
+                    worker.usage_delta(observed, previous) if isinstance(previous, dict) else None
+                )
+                if isinstance(previous, dict) and delta is None:
+                    # Preserve both the retained baseline and accepted high-water mark.
+                    consistent = pricing_complete = False
+                    continue
+                if delta is None:
+                    pricing_complete = False
+                elif any(delta.values()):
+                    if not attributable or delta != worker.usage_delta(usage["last"], {}):
+                        pricing_complete = False
+                    else:
+                        requests.append(
+                            {
+                                "model": model,
+                                "usage": delta,
+                                "observed_at": time.time(),
+                                "service_tier": "standard",
+                                "long_context": (delta["input_tokens"] > 272000)
+                                if model
+                                in {"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+                                else None,
+                            }
+                        )
                 total, last = observed, usage["last"]
+                previous = total
+                publish_usage()
+            elif method == "model/rerouted":
+                model = params["toModel"]
+                attributable = pricing_complete = False
             elif (
                 method == "item/completed"
                 and params.get("item", {}).get("type") == "contextCompaction"
             ):
                 compacted = True
+                attributable = pricing_complete = False
             elif method == "turn/completed":
                 completed = params["turn"]
                 if turn is not None and completed["id"] != turn:
@@ -247,28 +310,7 @@ def run(request: dict[str, Any]) -> int:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 consistent = False
                 emit({"type": "factory.certification.cleanup_failed", "error": str(exc)})
-        delta = (
-            worker.usage_delta(total, baseline) if total and isinstance(baseline, dict) else None
-        )
-        complete = status == "completed" and consistent and delta is not None
-        # Compaction request attribution and unknown resumed counter scopes are unproven.
-        if stage == "compact" or (stage != "initial" and scope == "unknown"):
-            complete = False
-        emit(
-            {
-                "type": "factory.usage",
-                "thread_id": thread,
-                "model": request.get("model"),
-                "observed_at": time.time(),
-                "thread_total": total,
-                "usage_scope": scope,
-                "usage": delta,
-                "complete": complete,
-                "requests": [],
-                "pricing_complete": False,
-                "reason": None if complete else "certification usage attribution incomplete",
-            }
-        )
+        publish_usage(final=True)
         emit(
             {
                 "type": "factory.certification.phase",
