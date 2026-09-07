@@ -296,3 +296,59 @@ tails empty, none skipped. Mypy covered 134 source/test files including the new 
 The first full suite had 1,038 passes and two failures expecting old approval-key text;
 those assertions now require exact invocation IDs and the final run passes. The sandbox
 fake caveat applies: this is not real-runtime acceptance or full-feature completion.
+
+## Attestation validation checkpoint
+
+Added `certification.Certifications` and an immutable `CertificationIdentity`. The identity
+requires sandbox generation, canonical spec digest (including mounts/layout), image identity,
+absolute runtime path/version/binary digest, worker digest, authority/hook digest, probe-suite
+digest and explicit measured usage scope. These are inputs from a trusted controller observer,
+not measurements performed by this module. A missing identity component is refused.
+
+The service requests the existing fingerprinted durable job, validates a host-authored report
+at `<host-root>/<job-id>/compatibility.json`, and publishes the report plus its digest using the
+existing fenced SQLite transition. A report file alone never authorizes a launch. Publication
+requires all existing compatibility checks and exact job/fingerprint/identity binding. Validation
+rereads all evidence, compares the published report and its digest, and refuses changed identity,
+pending jobs, altered reports and evidence. Reopening the store preserves the attestation.
+The caller must supply a freshly observed identity at publication and launch. Candidate model
+output is not a host-authored report, even if it contains matching hashes or says `pass`.
+
+Evidence roots are rejected beneath configured candidate-writable roots, including aliases.
+Compatibility evidence reads now use bounded regular-file reads through directory descriptors:
+absolute references, traversal and symlink components are refused. This also tightens manual
+manifest validation; manual report evidence must reside beneath its report directory. Existing
+manual manifests are not promoted to generation-bound certificates. Malformed check lists now
+produce a classified refusal instead of an AttributeError. AppServerAdapter revalidates its
+manifest/evidence and rejects a changed report before copying the worker/preparing a request.
+This closes selection-to-preparation evidence staleness; it does NOT establish fresh runtime
+identity at the actual detached launch boundary.
+
+Focused verification: 28 tests passed across attestation publication/reopen, generation change,
+evidence tampering, missing identity fields, candidate-writable roots, path escapes, malformed
+reports and changed evidence after adapter selection. Path escapes, malformed check lists and
+post-selection evidence changes were reproduced failing before their fixes. The new service's
+first test failed because the implementation module did not exist. Fixtures use local files
+and SQLite only: no runtime/model observations or automatic certification acceptance are claimed.
+Both review axes found no blocking issues within this bounded checkpoint.
+
+Next work is still Step 4 orchestration, not another attestation-only implementation:
+1. Implement and measure the sandbox generation observer/fallback and exact executing binary
+   provenance. Do not fill `CertificationIdentity` from retained job data or a version string.
+2. Load source-owned probe contracts, perform deterministic preflight, and run/reconcile the six
+   bounded real checks through common paid admission/accounting. Preserve detached probe ownership
+   across lease expiry; an expired certification lease never authorizes duplicate execution.
+3. Supply fresh identity to this service at publication and immediately before application launch;
+   wire ensure/advance/status into build/reviewer/recovery and explicit automatic/manual settings.
+4. Continue broker children, subtree recovery, isolated writable integration, remaining controls,
+   real synthetic acceptance and rollout preparation. Synthetic feature assertions remain the
+   objective; CRUD ticket completion and live workload changes are unnecessary.
+
+No schema DDL, shared source, consumer pins, live services/settings/database, sandbox/template,
+tracker or forge writes occurred. The earlier copy-only migration rehearsal still applies.
+Overall plan remains implementing; the automatic runner and child features remain unfinished.
+
+Final attestation gate report: `artifacts/runtime-certification-attestations/gates-final.json`.
+PASS: Ruff check, Ruff format --check, mypy and pytest all exited 0, no skips, empty output
+tails. Pytest ran for 124,949 ms. Configured mypy coverage includes the two new files (136
+source/test files). The fake-sandbox caveat applies; no real runtime acceptance was performed.

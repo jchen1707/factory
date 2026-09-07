@@ -91,3 +91,66 @@ def test_worker_change_after_selection_is_refused_before_copy(
         adapter.prepare(invocation)
     assert not (attempt / "app_server_worker.py").exists()
     assert not invocation.prompt_path.with_suffix(".app-server.json").exists()
+
+
+@pytest.mark.parametrize("reference", ["../outside.txt", "/outside.txt", "linked.txt"])
+def test_evidence_cannot_escape_manifest_directory(tmp_path: Path, reference: str) -> None:
+    root = tmp_path / "reports"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("unrelated evidence")
+    path = manifest(root)
+    (root / "linked.txt").symlink_to(outside)
+    report = json.loads(path.read_text())
+    check = report["checks"]["hook_enforcement"]
+    check["evidence"] = str(outside) if reference == "/outside.txt" else reference
+    check["sha256"] = hashlib.sha256(outside.read_bytes()).hexdigest()
+    path.write_text(json.dumps(report))
+    with pytest.raises(Blocked, match="app-server-compatibility-incomplete"):
+        app_server.validate_compatibility(
+            path, runtime_version="fixture", sandbox="factory-build-fixture"
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("checks", list(app_server.COMPATIBILITY_CHECKS)), ("usage_scope", []), ("checks", None)],
+)
+def test_malformed_report_refuses_without_crashing(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    path = manifest(tmp_path)
+    report = json.loads(path.read_text())
+    report[field] = value
+    path.write_text(json.dumps(report))
+    with pytest.raises(Blocked, match="app-server-compatibility-incomplete"):
+        app_server.validate_compatibility(
+            path, runtime_version="fixture", sandbox="factory-build-fixture"
+        )
+
+
+def test_evidence_change_after_selection_is_refused_before_preparation(tmp_path: Path) -> None:
+    path = manifest(tmp_path)
+    adapter = app_server.AppServerAdapter(
+        path, runtime_version="fixture", sandbox="factory-build-fixture"
+    )
+    (tmp_path / "evidence.txt").write_text("changed after adapter selection")
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    invocation = AgentInvocation(
+        model="fixture",
+        effort="low",
+        workdir=str(attempt),
+        prompt_path=attempt / "prompt.md",
+        schema_path=attempt / "schema.json",
+        output_path=attempt / "output.json",
+        events_path=attempt / "events.jsonl",
+        stderr_path=attempt / "stderr",
+        exit_path=attempt / "exit",
+        heartbeat_path=attempt / "heartbeat",
+        pgid_path=attempt / "pgid",
+        vault_directory=str(attempt),
+    )
+    with pytest.raises(Blocked, match="app-server-compatibility-incomplete"):
+        adapter.prepare(invocation)
+    assert not (attempt / "app_server_worker.py").exists()
