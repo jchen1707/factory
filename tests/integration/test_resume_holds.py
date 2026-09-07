@@ -43,7 +43,7 @@ def test_cli_resume_reports_hold_without_launch_or_tracker_write(
     output = capsys.readouterr().out
     if reason == "approval":
         assert "waiting for approval" in output
-        assert "2:implement:1" in output
+        assert f"{ctx.run.id}:2:implement" in output
     else:
         assert "queued" in output
         assert "waiting for a project slot" in output

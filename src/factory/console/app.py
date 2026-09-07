@@ -172,6 +172,7 @@ def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
         model = telemetry.get("current_model", metadata.get("model", "unknown"))
         cards.append(
             f"<article><h3>{_e(invocation['role'])} · attempt {invocation['attempt']}</h3>"
+            f"<p>Invocation ID: <code>{_e(invocation['id'])}</code></p>"
             f"<p>{_e(model)} · {_e(metadata.get('effort', 'unknown'))} · {_e(metadata.get('preset', 'existing'))}</p>"
             f"<p>Context: {context} · {_e(reading.status)}{age}</p>"
             f"<p>API-equivalent estimate: {spend}</p>"
@@ -540,7 +541,8 @@ def create_app(
         body += f"<h2>Effective delivery policy</h2><pre>{_e(json.dumps(policy, indent=2))}</pre>"
         body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
         body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
-        body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><label>Next invocation <input name="invocation" placeholder="2:implement:1" required></label><button>Approve next attempt</button></form>'
+        waiting = settings.get("waiting_invocation") or ""
+        body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><label>Next invocation ID <input name="invocation" value="{_e(waiting)}" required></label><button>Approve next attempt</button></form>'
         body += f'<p><a href="/runs/{_e(run.linear_id)}">Run and Suspend controls</a></p>'
         body += "<h2>Invocations</h2><p>API-equivalent estimated USD. These are not Codex account charges.</p>"
         body += _invocation_cards(st.runtime.invocations(run.id))

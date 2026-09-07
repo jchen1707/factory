@@ -327,13 +327,8 @@ class Store:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
+        with RuntimeState(self._conn).transaction():
             yield self._conn
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
-        self._conn.execute("COMMIT")
 
     # -- runs ---------------------------------------------------------------------
 

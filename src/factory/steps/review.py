@@ -302,7 +302,7 @@ def _launch_next(
     ctx: Context, plan: dict[str, Any], *, actor: str = AUTOMATIC
 ) -> tuple[AttemptDir, RunHandle]:
     """One host admission per model process, with the previous usage already retained."""
-    from factory import accounting, authority, execution
+    from factory import accounting, authority, execution, workflow_launches
     from factory.agent.selection import select
     from factory.harness import load_harness_config
 
@@ -324,7 +324,9 @@ def _launch_next(
     scratch = _review_scratch(ctx)
     ctx.sandbox.ensure(_review_spec(ctx, scratch))
     select(ctx, review=True)
-    launch = execution.guard(ctx, ctx.run.attempt, "review")
+    launch = execution.guard(
+        ctx, ctx.run.attempt, "review", invocation_role=f"review:{axis['label']}"
+    )
     if axis.get("invocation_id"):
         axis.setdefault("history", []).append(
             {key: value for key, value in axis.items() if key not in {"history", "prompt_text"}}
@@ -355,24 +357,31 @@ def _launch_next(
         body=_axis_script_block(entry),
         pgid_path=attempt_dir.pgid_file,
     )
-    ctx.store.start_attempt(
-        ctx.run.id,
-        ctx.run.attempt,
-        State.REVIEWING,
-        sandbox=ctx.project.review_sandbox,
-        artifact_dir=str(attempt_dir.root),
-    )
-    ctx.refresh()
-    if ctx.state is not State.REVIEWING:
-        advance(ctx, State.REVIEWING, actor=actor)
-    handle = RunHandle(
-        run_id=ctx.run.id,
-        attempt=ctx.run.attempt,
-        sandbox=ctx.project.review_sandbox,
-        workdir=str(ctx.worktree),
-        attempt_dir=attempt_dir.root,
-    )
-    ctx.sandbox.exec_detached(handle, script, ctx.env)
+    with workflow_launches.preparation(ctx):
+        ctx.store.start_attempt(
+            ctx.run.id,
+            ctx.run.attempt,
+            State.REVIEWING,
+            sandbox=ctx.project.review_sandbox,
+            artifact_dir=str(attempt_dir.root),
+        )
+        ctx.refresh()
+        if ctx.state is not State.REVIEWING:
+            advance(ctx, State.REVIEWING, actor=actor)
+        handle = RunHandle(
+            run_id=ctx.run.id,
+            attempt=ctx.run.attempt,
+            sandbox=ctx.project.review_sandbox,
+            workdir=str(ctx.worktree),
+            attempt_dir=attempt_dir.root,
+        )
+        prompt_path = Path(axis["prompt"])
+        inputs: tuple[Path, ...] = (prompt_path, _authority_root(ctx) / _FINDINGS_SCHEMA)
+        worker_request = prompt_path.with_suffix(".app-server.json")
+        if worker_request.exists():
+            inputs += (worker_request,)
+        workflow_launches.prepare(ctx, axis["invocation_id"], handle, script, inputs=inputs)
+    workflow_launches.resume(ctx)
     ctx.log("review.axis_started", axis=axis["label"], invocation=axis["invocation_id"])
     return attempt_dir, handle
 

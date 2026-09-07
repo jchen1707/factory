@@ -697,6 +697,10 @@ def test_invocation_controls_show_context_freshness_and_incomplete_cost(ctx: Con
     assert "warn" in page.text
     assert "$0.2500 · incomplete" in page.text
     assert "gpt-5.6-sol" in page.text
+    ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "observed"})
+    page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
+    assert 'name="invocation" value="observed"' in page.text
+    assert "Invocation ID: <code>observed</code>" in page.text
     ctx.store.runtime.observe(
         "observed",
         2,

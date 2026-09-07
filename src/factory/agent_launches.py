@@ -72,6 +72,13 @@ class AgentLaunches:
             sort_keys=True,
         )
         with self.store.runtime.transaction():
+            preparation = self.store.find_effect(
+                handle.run_id, handle.attempt, invocation_id, "agent-preparation", "launch"
+            )
+            if preparation is not None and preparation.status == "cancelled":
+                from factory.machine import Blocked
+
+                raise Blocked("launch-cancelled", invocation_id)
             prior = self.store.find_effect(
                 handle.run_id, handle.attempt, invocation_id, "agent-launch", "spawn"
             )
@@ -142,7 +149,7 @@ class AgentLaunches:
         incomplete. Orphaned holders require targeted recovery, not automatic release.
         """
         handle = self.handle(invocation_id)
-        if self.sandbox.poll(handle) != RunStatus.EXITED:
+        if not (handle.attempt_dir / handle.exit_name).exists():
             return False
         code = int((handle.attempt_dir / handle.exit_name).read_text().strip())
         collect()

@@ -1181,7 +1181,10 @@ def test_approval_change_between_review_axes_preserves_completed_observation(
     assert len(review_invocations) == 1
     assert review_invocations[0]["role"] == "review:standards"
     ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
-    with pytest.raises(execution.AgentApprovalRequired, match=f"{ctx.run.attempt}:review:2"):
+    with pytest.raises(
+        execution.AgentApprovalRequired,
+        match=f"{ctx.run.id}:{ctx.run.attempt}:review:spec:launch-2",
+    ):
         review_step.collect(ctx, first_dir, ctx.run.attempt)
     plan = review_step._read_plan(ctx.state_dir / "review")
     assert plan["axes"][0]["complete"]

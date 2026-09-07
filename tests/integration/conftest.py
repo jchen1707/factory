@@ -517,7 +517,11 @@ class FakeSandbox:
     def poll(self, handle: RunHandle) -> RunStatus:
         if self.poll_status is not None:
             return self.poll_status
-        return RunStatus.EXITED if (handle.attempt_dir / "exit").exists() else RunStatus.RUNNING
+        return (
+            RunStatus.EXITED
+            if (handle.attempt_dir / handle.exit_name).exists()
+            else RunStatus.RUNNING
+        )
 
     def collect(self, handle: RunHandle) -> RunResult:
         return RunResult(

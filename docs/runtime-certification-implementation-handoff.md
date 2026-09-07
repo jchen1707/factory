@@ -2,6 +2,10 @@
 
 Status: implementation in progress; feature is not complete.
 
+Latest checkpoint: root workflow launch wiring is now implemented in this worktree. The
+foundation-only statements below describe earlier checkpoints; see **Workflow launch
+integration checkpoint** at the end for current behavior and remaining work.
+
 ## Objective and approved scope
 
 Implement the approved automatic certification, Astra resolution, and controlled delegation
@@ -228,3 +232,67 @@ skipped. New source/tests are within configured mypy coverage. The pytest caveat
 fake sandbox tests establish controller behavior, not real runtime compatibility. Spec reviewer
 re-ran the bare-reservation reproduction after the fix and confirmed no launch; both findings
 are resolved. No full-feature acceptance claim is made.
+
+## Workflow launch integration checkpoint
+
+Builder, execution-brief/test-design/diagnosis and individual reviewer launches now use
+`workflow_launches` and `AgentLaunches`; deterministic verification remains outside paid agent
+capacity. The workflow attempt, state transition and prepared request commit together;
+invocations are retained before launch (review bookkeeping is staged earlier). SQLite
+savepoints cover nested accounting transactions; failed preparation also
+refreshes the in-memory Context back to the committed state.
+
+Capacity waits retain one prepared invocation. Reaping resumes the recorded script and handle
+without rerunning preparation or advancing attempt/launch counters. Admission still checks
+current approval, known spend and limits. Prepared inputs (prompt/schema/worker request),
+candidate HEAD, environment digest, authority integrity, policy revision and compatibility
+report are checked before launch. No environment values are copied into the prepared record.
+The execution timeout starts from the durable launch timestamp, excluding time queued.
+
+New planning phases use `run/<attempt>/planning` to keep their liveness/evidence independent
+of the builder. Legacy planning rows continue to use recorded paths and filenames; builder
+handoff loading follows that recorded directory. New approval prompts identify the exact
+invocation, legacy attempt/group approvals are translated at the workflow guard, and the
+console pre-fills the waiting invocation ID without submitting approval automatically.
+
+Reaping and scheduling collect terminal invocation usage before freeing slots. Orphan recovery
+signals only a recorded process group belonging to an owned launch, and releases capacity only
+after a valid terminal exit and successful accounting collection. Missing/ambiguous evidence
+remains held; an orphan observation alone cannot authorize another paid process. This is not
+complete real-runtime orphan/subtree recovery acceptance.
+
+Suspend/Cancel can retire never-launched preparations transactionally, fenced against racing
+admission. Launched cancellation reconciles costs before archive/removal and refuses cleanup
+while any owned lease remains active. Suspended terminal agents release capacity while parked.
+`accounting.collect_invocation` permits cancellation collection without model routing or
+tracker context. No native or broker child execution has been enabled.
+
+Focused regressions cover queue/reopen/one launch, approval changes while queued, preparation
+rollback, independent brief/builder evidence, reviewer capacity, queued Suspend, cancellation
+accounting, stale input/candidate refusal and queue-excluded timeouts. Other accounting/admission
+and cancellation suites pass. These use isolated SQLite/local Git and fake sandbox adapters,
+not real model or sandbox compatibility evidence.
+
+Two-axis review found and resolved queue-timeout, stale queued-input, queued suspension and
+cancellation-accounting defects. Final spec rereview found no further hard defects. Standards
+found no hard violations; a nonblocking duplication concern remains in owned-active-launch
+selection across reconciliation and orphan signaling.
+
+Next: finish Step 3's remaining ambiguous-holder/subtree recovery with the child lifecycle,
+then implement Step 4 automatic certification (generation identity, full fingerprint, trusted
+probe contracts, paid admission, validated attestation and launch revalidation). Continue
+Steps 5–7 broker children, isolated-write integration and controls, then the real synthetic
+matrix and cross-repository rollout checks. Do not repeat standalone launch-foundation work
+or substitute ticket completion for feature acceptance. The optional timing observer now
+starts at the actual builder launch, including queued resume, with a focused regression.
+
+No DDL changed; the prior copy-only schema rehearsal still applies. Live services/settings,
+database, sandboxes, shared source and consumer pins remain unchanged. Migration 5→6, template
+deployment and activation still need separately reviewed rollout actions.
+
+Final canonical evidence: `artifacts/runtime-workflow-launches/gates-final.json` in this
+worktree. PASS: Ruff check, Ruff format --check, mypy and pytest each exited 0; all output
+tails empty, none skipped. Mypy covered 134 source/test files including the new paths.
+The first full suite had 1,038 passes and two failures expecting old approval-key text;
+those assertions now require exact invocation IDs and the final run passes. The sandbox
+fake caveat applies: this is not real-runtime acceptance or full-feature completion.

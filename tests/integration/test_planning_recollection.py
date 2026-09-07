@@ -127,7 +127,7 @@ def test_explicit_planning_restart_still_requires_approval_for_a_new_attempt(ctx
 
     parked_readiness(ctx)
     ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
-    with pytest.raises(AgentApprovalRequired, match="2:plan:1"):
+    with pytest.raises(AgentApprovalRequired, match=f"{ctx.run.id}:2:plan"):
         recovery.resume(ctx, from_state="planning")
     assert ctx.state is State.BLOCKED
     assert ctx.run.attempt == 1

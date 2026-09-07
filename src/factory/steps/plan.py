@@ -24,15 +24,13 @@ STEP = "plan"
 
 PLAN_FILES = ("plan.md", "test-plan.md")
 
-#: The plan phase's terminal file. Not `exit`: a rung-3 rewind is **one** attempt with
-#: two phases sharing one attempt directory, so the plan's exit code cannot occupy the
-#: name the implement phase is about to write. Every reader that asks "has this phase
-#: finished?" — `sbx.poll` through `RunHandle.exit_name`, and `_exit_code` below — must
-#: be told this name, or a finished plan reads as an attempt that never ended.
+#: Retain the plan terminal filename for legacy attempts that shared the builder's
+#: directory. New preparations use a separate planning directory; all readers still
+#: use the recorded handle and this filename when collecting either layout.
 PLAN_EXIT_NAME = "plan-exit"
 
-#: The plan phase's own pgid file, for the same reason it has its own exit file: a
-#: rewind's two phases share one attempt directory, and a single `pgid` there would let a
+#: The plan phase's own pgid file: legacy rewind phases shared one attempt directory,
+#: and a single `pgid` there would let a
 #: timeout in one phase signal a process group the other phase started.
 PLAN_PGID_NAME = "plan-pgid"
 
@@ -77,13 +75,16 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     `actor` threads through the `advance` into `planning`; see `implement.start`. A rewind
     from `SUSPENDED`/`BLOCKED` is human-gated, a rung-3 rewind from `RESUMABLE` is not.
     """
+    from factory import workflow_launches
+
     attempt = ctx.run.attempt + 1
-    execution.guard(ctx, attempt, STEP)
+    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     from factory.agent.selection import select
 
     select(ctx)
     worktree = ctx.worktree
-    attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
+    attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt) / "planning")
+    attempt_dir.root.mkdir(parents=True, exist_ok=True)
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     role_name = (
         "diagnoser"
@@ -137,40 +138,48 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         **reproduction,
     }
     artifacts.write_json(attempt_dir.path("plan-request.json"), request)
-    # Recorded under the same attempt number the implement phase will use, which is why
-    # both write into one attempt directory under `plan-` and bare prefixes: a rewind is
-    # one attempt with two phases, not two attempts. `steps/reap.py` needs the row to
-    # exist at all — without it a planning run that outlives its tick looks like a run
-    # with no attempt, which is the shape of an orphan.
-    ctx.store.start_attempt(
-        ctx.run.id,
-        attempt,
-        State.PLANNING,
-        sandbox=ctx.project.build_sandbox,
-        artifact_dir=str(attempt_dir.root),
-    )
-    ctx.refresh()
-    advance(ctx, State.PLANNING, actor=actor)
+    # The brief and builder retain one attempt number with separate execution directories.
+    # Publish the attempt and prepared request together so reaping can resume a queued
+    # launch without re-entering preparation or mistaking it for an orphan.
+    with workflow_launches.preparation(ctx):
+        ctx.store.start_attempt(
+            ctx.run.id,
+            attempt,
+            State.PLANNING,
+            sandbox=ctx.project.build_sandbox,
+            artifact_dir=str(attempt_dir.root),
+        )
+        ctx.refresh()
+        advance(ctx, State.PLANNING, actor=actor)
 
-    handle = RunHandle(
-        run_id=ctx.run.id,
-        attempt=attempt,
-        sandbox=ctx.project.build_sandbox,
-        workdir=str(worktree),
-        attempt_dir=attempt_dir.root,
-        exit_name=PLAN_EXIT_NAME,
-        pgid_name=PLAN_PGID_NAME,
-    )
-    accounting.begin(
-        ctx,
-        attempt,
-        role,
-        STEP,
-        invocation.events_path,
-        semantic_role=role_name,
-        extra_metadata={"handoff_contract": request},
-    )
-    ctx.sandbox.exec_detached(handle, script, ctx.env)
+        handle = RunHandle(
+            run_id=ctx.run.id,
+            attempt=attempt,
+            sandbox=ctx.project.build_sandbox,
+            workdir=str(worktree),
+            attempt_dir=attempt_dir.root,
+            exit_name=PLAN_EXIT_NAME,
+            pgid_name=PLAN_PGID_NAME,
+        )
+        identifier = accounting.begin(
+            ctx,
+            attempt,
+            role,
+            STEP,
+            invocation.events_path,
+            semantic_role=role_name,
+            extra_metadata={"handoff_contract": request},
+        )
+        inputs: tuple[Path, ...] = (
+            prompt_path,
+            attempt_dir.schema,
+            attempt_dir.path("plan-request.json"),
+        )
+        worker_request = prompt_path.with_suffix(".app-server.json")
+        if worker_request.exists():
+            inputs += (worker_request,)
+        workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
+    workflow_launches.resume(ctx)
     ctx.log("plan.started", model=role.model, effort=role.effort)
     return attempt_dir, handle, invocation.exit_path
 

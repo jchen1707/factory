@@ -17,6 +17,7 @@ from factory.pricing import PriceBook, RequestUsage
 if TYPE_CHECKING:
     from factory.routing import Role
     from factory.steps import Context
+    from factory.store import Store
 
 
 def key(ctx: Context, attempt: int, role: str) -> str:
@@ -75,7 +76,12 @@ def collect(
 ) -> None:
     """Legacy aggregate usage cannot establish request-level tier or context pricing."""
     invocation_id = invocation_id or key(ctx, attempt, step)
-    invocation = ctx.store.runtime.invocation(invocation_id)
+    collect_invocation(ctx.store, ctx.home, invocation_id, events)
+
+
+def collect_invocation(store: Store, home: Path, invocation_id: str, events: Path) -> None:
+    """Reconcile retained usage without loading workflow, routing or tracker dependencies."""
+    invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
         return
     text = events.read_text(errors="replace")
@@ -123,7 +129,7 @@ def collect(
             payload["usage"] = observed["usage"]
             payload["usage_complete"] = observed["complete"]
             payload["thread_total_wire"] = observed["thread_total"]
-            prices = PriceBook.load(ctx.home / "config/prices.toml")
+            prices = PriceBook.load(home / "config/prices.toml")
             estimates = [
                 prices.estimate(
                     RequestUsage(
@@ -170,19 +176,19 @@ def collect(
                 "usd": None,
                 "reason": reason,
             }
-    ctx.store.runtime.observe(invocation_id, len(valid), payload)
+    store.runtime.observe(invocation_id, len(valid), payload)
     # Reconcile even a duplicate observation: a process may have died after the
     # telemetry commit and before its cost update. Never regress to an older payload.
-    retained = ctx.store.runtime.invocation(invocation_id)
+    retained = store.runtime.invocation(invocation_id)
     if retained is None or retained["sequence"] > len(valid):
         return
     payload = retained["telemetry"]
     model = invocation["metadata"]["model"]
     usage = Usage(**(payload.get("usage") or {}))
-    ctx.store.reconcile_cost(
-        ctx.run.id,
-        attempt,
-        invocation["metadata"].get("cost_step", step),
+    store.reconcile_cost(
+        invocation["run_id"],
+        invocation["attempt"],
+        invocation["metadata"].get("cost_step", invocation["role"]),
         model=model,
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
