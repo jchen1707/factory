@@ -619,7 +619,6 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
     from factory.steps import effect_marker, record_effect
 
     marker = effect_marker(ctx, _SUSPEND_STEP)
-    issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
     body = (
         f"<!-- {marker} -->\n"
         f"The factory was **suspended** from `{origin}`: {reason}\n\n"
@@ -628,6 +627,7 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
         f"Run `{ctx.run.id}`, attempt {ctx.run.attempt}.\n"
     )
     try:
+        issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
         record_effect(
             ctx,
             step=_SUSPEND_STEP,
