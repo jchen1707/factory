@@ -69,20 +69,60 @@ def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) 
     narrower than it looks — the file is absent only for those attempts and for a body
     that died before publishing, and in the second case there is nothing left to signal.
     """
+    return signal_run_attempt(
+        ctx.store,
+        ctx.project,
+        ctx.run,
+        ctx.sandbox,
+        sandbox,
+        attempt_dir,
+        state,
+        allow_name_fallback=sandbox not in other_run_sandboxes(ctx.registry, ctx.store, ctx.run),
+    )
+
+
+def signal_run_attempt(
+    store: Store,
+    project: Project,
+    run: Run,
+    adapter: SandboxAdapter,
+    sandbox: str,
+    attempt_dir: Path,
+    state: State,
+    *,
+    allow_name_fallback: bool = True,
+) -> str:
+    """Signal a recorded attempt without loading model or tracker configuration."""
     pgid = read_pgid(attempt_dir / _pgid_name(state))
     if pgid is not None:
-        ctx.sandbox.kill_group(sandbox, pgid)
+        adapter.kill_group(sandbox, pgid)
         return f"group {pgid}"
-    others = [
-        row for row in ctx.store.active_runs_for_project(ctx.project.name) if row.id != ctx.run.id
-    ]
-    if others:
+    others = [row for row in store.active_runs_for_project(project.name) if row.id != run.id]
+    if others or not allow_name_fallback:
         raise Blocked(
             "targeted-signal-unavailable",
             "The process group is missing and another run shares the project",
         )
-    ctx.sandbox.kill_agent(sandbox, KILL_TARGET[state])
+    adapter.kill_agent(sandbox, KILL_TARGET[state])
     return f"name {KILL_TARGET[state]} (no pgid file; pre-upgrade attempt)"
+
+
+def other_run_sandboxes(registry: Registry, store: Store, run: Run) -> set[str]:
+    """Include both persisted roles and the actual active-attempt location."""
+    from factory.isolation import project_for_run
+    from factory.steps.reap import DETACHED_STATES
+
+    names: set[str] = set()
+    for other in store.runs_in_states(tuple(DETACHED_STATES)):
+        if other.id == run.id:
+            continue
+        if other.project in registry.projects:
+            project = project_for_run(registry.projects[other.project], other, store)
+            names.update((project.build_sandbox, project.review_sandbox))
+        attempt = store.attempt_row(other.id, other.attempt, other.state)
+        if attempt is not None and attempt["sandbox"]:
+            names.add(str(attempt["sandbox"]))
+    return names
 
 
 def _pgid_name(state: State) -> str:

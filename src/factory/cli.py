@@ -1084,6 +1084,11 @@ def _cancel_run(
     project = project_for_run(registry.projects[run.project], run, store)
     paths = _worktree_paths(project, registry, run, ticket)
     lines: list[str] = []
+    sbx = SbxAdapter()
+    from factory.steps import other_run_sandboxes
+
+    busy = other_run_sandboxes(registry, store, run)
+    active_sandbox = _cancel_attempt(store, project, run, sbx, busy)
 
     for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
@@ -1104,8 +1109,12 @@ def _cancel_run(
     # The clone's copy of the branch, for a `--clone` project. Before the sandbox is
     # stopped below, because releasing it needs the sandbox running — and the host call
     # above cannot reach it: that branch lives in the VM. See `clone.release_branch`.
-    sbx = SbxAdapter()
-    lines += clone_step.release_branch(sbx, project, run)
+    if project.requires_clone and project.build_sandbox in busy:
+        lines.append(
+            f"left clone branch {run.branch} in {project.build_sandbox}: another run uses the VM"
+        )
+    else:
+        lines += clone_step.release_branch(sbx, project, run)
 
     if machine.can(run.state, State.CANCELLED):
         store.record_transition(
@@ -1117,7 +1126,14 @@ def _cancel_run(
             detail=reason,
         )
     store.release_lease(run.id)
-    sbx.stop(project.build_sandbox)
+    for name in dict.fromkeys(
+        [project.build_sandbox, *([active_sandbox] if active_sandbox else [])]
+    ):
+        if name in busy:
+            lines.append(f"kept sandbox {name} running: another run uses it")
+        else:
+            sbx.stop(name)
+            lines.append(f"sandbox {name} stopped")
 
     # Last, and never fatal: the local cleanup above has already happened, and a Linear
     # outage must not turn a completed rollback into a failed command.
@@ -1128,8 +1144,51 @@ def _cancel_run(
             f"could not restore {ticket} in Linear ({exc}); move it back to {TODO} by hand"
         )
 
-    lines.append(f"{ticket} cancelled; sandbox {project.build_sandbox} stopped")
+    lines.append(f"{ticket} cancelled")
     return lines
+
+
+def _cancel_attempt(
+    store: Store, project: Project, run: Run, sbx: SbxAdapter, busy: set[str]
+) -> str | None:
+    """Require the writer's terminal record before touching its worktree or clone."""
+    from factory.steps import plan, reap, signal_run_attempt
+
+    if run.state not in reap.DETACHED_STATES:
+        return None
+    row = store.attempt_row(run.id, run.attempt, run.state)
+    if row is None:
+        return None
+    name = str(
+        row["sandbox"]
+        or (project.review_sandbox if run.state is State.REVIEWING else project.build_sandbox)
+    )
+    if row["ended_at"] is not None:
+        return name
+    if not row["artifact_dir"]:
+        raise Blocked(
+            "cancellation-stop-unverified", "The active attempt has no artifact directory"
+        )
+    directory = Path(str(row["artifact_dir"]))
+    filename = plan.PLAN_EXIT_NAME if run.state is State.PLANNING else "exit"
+    if not (directory / filename).exists():
+        signal_run_attempt(
+            store,
+            project,
+            run,
+            sbx,
+            name,
+            directory,
+            run.state,
+            allow_name_fallback=name not in busy,
+        )
+    exit_code = recovery._wait_for_exit_file(directory, reap.KILL_GRACE_SECONDS, filename=filename)
+    if exit_code is None:
+        raise Blocked(
+            "cancellation-stop-unverified", "No valid terminal record; work and run state preserved"
+        )
+    store.finish_attempt(run.id, run.attempt, run.state, exit_code=exit_code, outcome="cancelled")
+    return name
 
 
 # --------------------------------------------------------------------------------

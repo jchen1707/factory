@@ -572,14 +572,16 @@ def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
 _SUSPEND_STEP = "suspend"
 
 
-def _wait_for_exit_file(attempt_dir: Path, grace_seconds: int) -> int | None:
+def _wait_for_exit_file(
+    attempt_dir: Path, grace_seconds: int, *, filename: str = "exit"
+) -> int | None:
     """Poll the wrapper's atomic `exit` file, the way `reap` does after a kill.
 
     The wrapper writes `exit` last and atomically, so its appearance is the real terminal
     record; a suspend that parks without it leaves a truncated attempt. Returns the exit
     code if it landed in time, else None.
     """
-    exit_path = attempt_dir / "exit"
+    exit_path = attempt_dir / filename
     deadline = time.monotonic() + grace_seconds
     while time.monotonic() < deadline:
         if exit_path.exists():
@@ -594,18 +596,12 @@ def _wait_for_exit_file(attempt_dir: Path, grace_seconds: int) -> int | None:
 def _stop_sandbox_if_idle(ctx: Context) -> None:
     """§16.3b step 2: stop the build sandbox only when no other run is using it.
 
-    A project's build sandbox is shared across the project's runs, so stopping it under a
-    second run would kill that run's agent. `active_runs_for_project` is the set of runs
-    that exec into it.
+    Compare physical sandbox identities across projects, including persisted role names
+    and recorded active-attempt locations. A registry name change cannot hide a sibling.
     """
-    others = [r for r in ctx.store.active_runs_for_project(ctx.project.name) if r.id != ctx.run.id]
-    from factory.isolation import project_for_run
+    from factory.steps import other_run_sandboxes
 
-    if any(
-        project_for_run(ctx.registry.projects[ctx.project.name], run, ctx.store).build_sandbox
-        == ctx.project.build_sandbox
-        for run in others
-    ):
+    if ctx.project.build_sandbox in other_run_sandboxes(ctx.registry, ctx.store, ctx.run):
         return
     ctx.sandbox.stop(ctx.project.build_sandbox)
 
@@ -656,6 +652,8 @@ def suspend(ctx: Context, *, reason: str) -> State:
     origin = ctx.run.state
     if origin in reap_step.DETACHED_STATES:
         row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
+        if row and not row["artifact_dir"]:
+            raise Blocked("suspend-stop-unverified", "The active attempt has no artifact directory")
         if row and row["artifact_dir"]:
             attempt_dir = Path(str(row["artifact_dir"]))
             # Before the kill, because after it the stream stops and nothing else on this
@@ -668,14 +666,24 @@ def suspend(ctx: Context, *, reason: str) -> State:
 
                 capture_session_id(ctx, AttemptDir(attempt_dir), ctx.run.attempt, origin)
             from factory.steps import signal_attempt
+            from factory.steps.plan import PLAN_EXIT_NAME
 
-            signal_attempt(
-                ctx,
-                str(row["sandbox"] or ctx.project.build_sandbox),
-                attempt_dir,
-                origin,
+            filename = PLAN_EXIT_NAME if origin is State.PLANNING else "exit"
+            if not (attempt_dir / filename).exists():
+                signal_attempt(
+                    ctx,
+                    str(row["sandbox"] or ctx.project.build_sandbox),
+                    attempt_dir,
+                    origin,
+                )
+            exit_code = _wait_for_exit_file(
+                attempt_dir, reap_step.KILL_GRACE_SECONDS, filename=filename
             )
-            exit_code = _wait_for_exit_file(attempt_dir, reap_step.KILL_GRACE_SECONDS)
+            if exit_code is None:
+                raise Blocked(
+                    "suspend-stop-unverified",
+                    "No valid terminal record; work and run state preserved",
+                )
             ctx.store.finish_attempt(
                 ctx.run.id, ctx.run.attempt, origin, exit_code=exit_code, outcome="suspended"
             )
