@@ -124,3 +124,28 @@ def test_the_canary_target_is_a_literal_path() -> None:
 def test_the_factorys_own_vendored_tree_is_intact() -> None:
     ok, detail = vendor_check(HOME, HOME.parent / "harness" / "scripts" / "vendor_sync.py")
     assert ok, detail
+
+
+@pytest.mark.parametrize("app", ["../outside", "/outside", "."])
+def test_config_tree_refuses_escaping_or_recursive_apps(tmp_path: Path, app: str) -> None:
+    from factory.harness import config_tree
+
+    (tmp_path / "harness.config.json").write_text(json.dumps({"apps": [app]}))
+    with pytest.raises(Blocked) as caught:
+        config_tree(load_harness_config(tmp_path), tmp_path)
+    assert caught.value.reason == "invalid-app-path"
+
+
+def test_config_tree_refuses_symlink_escape_before_reading_child(tmp_path: Path) -> None:
+    from factory.harness import config_tree
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "harness.config.json").write_text("not even valid JSON")
+    (root / "child").symlink_to(outside, target_is_directory=True)
+    (root / "harness.config.json").write_text(json.dumps({"apps": ["child"]}))
+    with pytest.raises(Blocked) as caught:
+        config_tree(load_harness_config(root), root)
+    assert caught.value.reason == "invalid-app-path"

@@ -80,19 +80,27 @@ def test_non_code_diagnosis_retains_actionable_human_handoff(
     assert not ctx.store.runtime.db.execute("SELECT * FROM failure_episodes").fetchall()
 
 
-def test_builder_receives_shared_consumption_contract_and_exact_artifact_paths(
-    ctx: Context,
+@pytest.mark.parametrize(
+    "names", [(), ("execution-brief.md",), ("execution-brief.md", "test-plan.md")]
+)
+def test_builder_receives_only_collected_handoff_artifacts(
+    ctx: Context, names: tuple[str, ...]
 ) -> None:
     from factory.steps import implement, plan
+    from tests.integration.test_clone_plan_collection import prepare
 
-    ctx.run = replace(ctx.run, worktree=str(ctx.project.path))
+    attempt = prepare(ctx, True)
     handoff = ctx.factory_dir / "handoff.json"
-    handoff.parent.mkdir(parents=True, exist_ok=True)
     handoff.write_text("{}")
     contract = ctx.project.path / ".agents/vendor/harness/docs/agents/consume-execution-handoff.md"
-    contract.parent.mkdir(parents=True, exist_ok=True)
-    contract.write_text("Read the handoff and implement one failing-test slice at a time.")
+    contract.write_text("Read the supplied handoff and implement one failing-test slice at a time.")
+    plans = plan.plan_dir(ctx)
+    plans.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (plans / name).write_text("# Execution context\nApproved behavior.\n")
+    plan.collect(ctx, attempt)
     prompt, _ = implement.build_prompt(ctx)
     assert contract.read_text() in prompt
-    assert str(plan.plan_dir(ctx) / "execution-brief.md") in prompt
-    assert str(plan.plan_dir(ctx) / "test-plan.md") in prompt
+    for name in ("execution-brief.md", "test-plan.md"):
+        assert (str(attempt.path("planning-output") / name) in prompt) == (name in names)
+        assert str(plans / name) not in prompt

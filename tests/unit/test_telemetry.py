@@ -35,7 +35,7 @@ def test_intermediate_usage_never_treats_cumulative_tokens_as_occupancy() -> Non
     assert t.context.read(now=300).status == "stale"
 
 
-def test_compaction_invalidates_occupancy_until_next_usage() -> None:
+def test_compaction_invalidates_occupancy_until_next_normal_turn_usage() -> None:
     t = ThreadTelemetry("thread-a", "model-a", semantics_verified=True)
     t.observe(event(100_000, 850), sequence=1, observed_at=100)
     assert t.should_compact(safe_boundary=False) is False
@@ -45,6 +45,7 @@ def test_compaction_invalidates_occupancy_until_next_usage() -> None:
             "method": "item/completed",
             "params": {
                 "threadId": "thread-a",
+                "turnId": "compact-turn",
                 "item": {"id": "compact-1", "type": "contextCompaction"},
             },
         },

@@ -1,5 +1,94 @@
 # Runtime rollout
 
+## Current completion criteria — 2026-09-07
+
+**The objective is factory acceptance, not completion or hardening of disposable
+CRUD tickets.** Each test-workload action must serve a named factory requirement;
+stop driving that workload once its required evidence is obtained. The reproduced
+CORS finding already exercises defect detection and blocked delivery. Fixing it or
+finishing FRO-12–15 is necessary only if it enables another missing factory check.
+Use targeted isolated experiments for the remaining gaps instead of making the whole
+CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
+
+James merged harness #33 as `8bc104e33`. Factory, CRUD draft #1, Python #77 and
+frontend #55 now vendor that exact source through canonical sync. Current checks and
+exact consumer commits are recorded in the handoff and refresh evidence. Stack merges
+followed by shared submodule-pin updates remain;
+the merged harness Meta currency check must then pass. See
+[consumer refresh evidence](runtime-merged-consumer-refresh.md). Factory #83 has no
+remote workflows/checks; local gate evidence is not remote green CI.
+
+This is the execution-status update for James's approved four-repository improvement
+plan. It does not replace or reduce that plan's requirements. All major feature areas
+have implementations and the original implementation PRs are merged. **Supported rollout validation now passes at source `c7dacd3`, with the explicit
+runtime and historical-data limits below.** All four local factory gates pass in
+`artifacts/runtime-final-acceptance/factory-gates.json`. This does not activate a
+production adapter or waive shared/consumer merge checks.
+Real testing has exposed integration defects; corrective changes are published in factory #83 and harness #32/#33, with dependent
+consumer changes in Python #77, frontend #55 and draft CRUD #1.
+
+The final continuation closes the targeted runtime gaps with measured restrictions
+and corrections. [Profile reviewers](runtime-policy-model-workflow-acceptance.md)
+respect declared requirements/deferrals; Volume model tuples are supported, while
+unavailable Astra presets fail closed. [Native nesting is disabled per invocation](runtime-nested-fallback.md)
+on the opt-in app-server adapter so child launches cannot bypass factory admission.
+Legacy exec behavior and incomplete historical costs remain explicit limitations.
+[Final build/reviewer compatibility](runtime-final-app-server-compatibility.md) passes
+for worker `f2b37519…`; [worker hash binding](runtime-worker-binding-acceptance.md)
+rejects older manifests. [Resume baseline](runtime-resume-baseline-acceptance.md) and
+[collector corrections](runtime-accounting-observation-acceptance.md) preserve honest
+token/context/cost reporting across failure and compaction. The current final source,
+gates and remaining operator sequence are recorded in [the handoff](runtime-implementation-handoff.md).
+
+Required implementation gaps and failed acceptance checks must be resolved and retested
+as part of this work, before declaring completion or activating the affected features.
+Do not defer them to post-activation work. Testing and corrective implementation can
+alternate; no new planning phase is needed.
+
+| Approved area | Accepted evidence and explicit limits |
+| --- | --- |
+| Delivery policy and authority | Host conflict/deferral/immutable-snapshot/stale-evidence checks, actual CLI replacement, and three actual profile reviews pass. One standards axis per profile establishes the scoped reviewer policy behavior. |
+| Model selection and workflow | Volume tuple availability passes; Astra-dependent High-confidence roles are unavailable and refused. Actual diagnosis→repair→verification complements deterministic two-repair, unchanged-evidence, lifetime and budget guards. Approval holds and preserved-work recovery are measured. |
+| Separate test design and vertical TDD | Actual app-server test design produces scenarios/boundaries and holds the next approval. Actual base replay observes API/web assertions; classifier regressions prevent ImportError/AttributeError summaries from serving as assertion proof. Historical false-positive rows remain invalid. |
+| Runtime and context | Final build/review worker compatibility passes. Compaction, current/cumulative separation, freshness and model changes have exact-runtime evidence; final-worker recovery is measured separately. Native nested tools are disabled on start/resume; no implicit adapter switch. |
+| Accounting | Dated pricing, request context bands, duplicate reconciliation, failed-resume baselines, malformed-event lower bounds and budget checks have retained evidence. Historical/legacy usage without request or child evidence stays incomplete; API-equivalent estimates are not account charges. |
+| Parallel execution | Actual bind/clone builder/verifier/review paths, isolated resources, admission races, slot queueing, draining, base refresh and targeted control checks are measured. Final cancellation/suspension evidence is linked in the current handoff; model and deterministic-process scopes remain distinct. |
+| Composable stacks | Four default presets and selected optional combinations installed and passed 32 host gates; generation checks pass. This does not claim every platform or external-provider integration. |
+| Evaluation | Real isolated outcome metrics reconcile, including zero accepted changes and unknown cost per accepted change. Comparative delivery improvement requires longer-term cohorts and is not claimed. |
+
+Completion also requires factory's four Definition-of-Done gates, layer-A contract
+checks, consumer generation checks, and the planned real sandbox measurements against
+the final revisions. Publish corrective PRs for James to review and merge. A passing
+unit suite, scaffold or protocol probe establishes only its measured scope.
+
+Only production activation, raising live concurrency, and longer-term measurement of
+delivery improvement wait until after this validation step. Activation requires James's
+explicit decision on concrete settings and writer restart. Schema 4→5 is already
+applied with all 1,889 rows preserved; do not repeat it.
+
+The original implementation scope used completed Backend tickets only as historical
+evidence. James later authorized the separate disposable CRUD verification workload.
+That exception covers only the new test project/tickets; existing products and tickets,
+especially `nemoclaw-dev`, remain excluded. Production writers remain stopped.
+
+Resume from [the current handoff](runtime-implementation-handoff.md). FRO-12 passed
+real readiness recovery, supported suspend/resume, implementation and ten independent
+gates, and completed all eight isolated reviews. It is blocked on one high-severity
+CORS finding, reproduced and awaiting James's disposition. Corrective factory/shared/consumer PRs are
+open; source merges and explicit authority refresh remain prerequisites for changing
+FRO-12’s pinned declarations; independent scratch experiments may use exact corrective
+source revisions without changing that run. Do not start broad intake or claim full
+CRUD delivery or complete acceptance.
+
+## Historical rollout baseline
+
+2026-09-06 operator checkpoint: the approved live schema 4→5 migration preserved all
+1,889 rows. Follow-up fixes passed scoped real runtime and isolation probes; production
+activation has not occurred. The fixes remain local. See the current
+[implementation handoff](runtime-implementation-handoff.md) and
+[initial host evidence](runtime-validation-2026-09-06.md).
+The implementation-era status statements below describe the original rollout baseline.
+
 This branch changes orchestration and shared contracts. It does not apply a production
 migration, change tickets, activate app-server, or raise a live project's concurrency.
 Real sandbox compatibility and isolation measurements remain required. `sbx` is unavailable
@@ -43,14 +132,23 @@ run retains its selected adapter and compatibility-directory setting; each launc
 executing sandbox's `codex --version` and the manifest named `<sandbox>.json` in that directory.
 The invocation retains the compatibility report, selected model, effort, preset, and usage.
 
-Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`, and
-`checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
+Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`,
+`worker_sha256`, and `checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
 The required checks are `hook_enforcement`, `schema_output`, `sandbox_isolation`,
 `detached_durability`, `recovery`, and `usage_semantics`. Capture actual runtime effects:
 protected-path denial, schema-valid output, reviewer write refusal, detached process survival,
 recovery after interruption, and observed usage/compaction semantics. Keep raw events.
-Build and review sandboxes need separate manifests. A changed runtime or sandbox invalidates
-that evidence. The manifest is operator-owned, outside candidate workspaces.
+Build and review sandboxes need separate manifests. A changed runtime, sandbox or worker
+invalidates that evidence. The worker hash is checked during selection and again before
+copying the invocation worker. The manifest is operator-owned, outside candidate workspaces.
+
+The opt-in app-server worker disables native nested-agent launches on both thread start
+and resume using the measured invocation-local `agents.enabled=false` setting. Factory
+schedules each model role through its own approval, resource and budget checks; its
+independent reviews remain available. Legacy exec runs retain their adapter behavior.
+Historical nested usage remains visibly incomplete; it is not inferred or backfilled.
+This restriction is part of selecting the new adapter, not a production configuration
+change or an implementation of arbitrary nested-agent admission.
 
 ```sh
 factory configure --project PROJECT --agent-adapter app-server --app-server-compatibility /absolute/evidence/directory

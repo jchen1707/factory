@@ -159,6 +159,29 @@ def load_harness_config(root: Path) -> HarnessConfig:
     )
 
 
+def config_tree(config: HarnessConfig, root: Path) -> list[tuple[Path, HarnessConfig]]:
+    """Resolve declared app configs within this checkout without executing target code."""
+    result: list[tuple[Path, HarnessConfig]] = []
+    seen: set[Path] = set()
+
+    def visit(relative: Path, current: HarnessConfig) -> None:
+        location = (root / relative).resolve()
+        if not location.is_relative_to(root.resolve()) or location in seen:
+            raise Blocked("invalid-app-path", f"App escapes or repeats a config: {relative}")
+        seen.add(location)
+        result.append((relative, current))
+        for app in current.apps:
+            if Path(app).is_absolute() or ".." in Path(app).parts:
+                raise Blocked("invalid-app-path", f"App must be a descendant: {app}")
+            child = root / relative / app
+            if not child.resolve().is_relative_to(root.resolve()):
+                raise Blocked("invalid-app-path", f"App escapes checkout: {app}")
+            visit(relative / app, load_harness_config(child))
+
+    visit(Path("."), config)
+    return result
+
+
 def cross_check_stack(config: HarnessConfig, stack: str) -> None:
     """§10.2 step 6 — the guard that stops the factory hard-coding a gate name.
 

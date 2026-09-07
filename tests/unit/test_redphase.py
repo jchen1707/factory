@@ -27,7 +27,7 @@ def test_a_passing_gate_is_green_test_proves_nothing() -> None:
 
 
 def test_an_assertion_failure_in_a_new_test_is_a_real_red_phase() -> None:
-    out = "tests/test_foo.py::test_new FAILED ... AssertionError: assert 1 == 2"
+    out = "tests/test_foo.py::test_new FAILED\nAssertionError: assert 1 == 2"
     assert _classify(_completed(1, out), ["tests/test_foo.py"])[0] == "red"
 
 
@@ -47,7 +47,7 @@ def test_a_mixed_failure_with_an_assertion_dominates_to_red() -> None:
     # A real assertion failure in the new test plus an unrelated collection error elsewhere:
     # the assertion failure is the red phase, and the partial impl is the cause of both.
     out = (
-        "tests/test_foo.py::test_new FAILED AssertionError: assert True\n"
+        "tests/test_foo.py::test_new FAILED\nAssertionError: assert True\n"
         "tests/test_other.py::ERROR ImportError: No module named 'x'"
     )
     assert _classify(_completed(1, out), ["tests/test_foo.py"])[0] == "red"
@@ -160,3 +160,64 @@ def test_hunks_for_returns_only_hunks_touching_the_named_files() -> None:
 def test_hunks_for_returns_empty_when_the_patch_touches_no_named_file() -> None:
     patch = "diff --git a/src/app.py b/src/app.py\n@@ -1,1 +1,1 @@\n-old\n+new\n"
     assert _hunks_for(patch, {"tests/test_foo.py"}) == []
+
+
+def test_unittest_import_error_with_failed_summary_is_inconclusive() -> None:
+    out = (
+        "ERROR: test_service_0 (unittest.loader._FailedTest.test_service_0)\n"
+        "ImportError: cannot import name 'scale' from 'service_0'\n"
+        "Ran 2 tests in 0.000s\nFAILED (errors=1)"
+    )
+    assert _classify(_completed(1, out), ["tests/test_service_0.py"])[0] == "inconclusive"
+
+
+def test_missing_attribute_before_unittest_comparison_is_inconclusive() -> None:
+    out = (
+        "ERROR: test_scale (test_service_1.Baseline.test_scale)\n"
+        "    self.assertEqual(service_1.scale(value), expected)\n"
+        "AttributeError: module 'service_1' has no attribute 'scale'\n"
+        "Ran 3 tests in 0.000s\nFAILED (errors=3)"
+    )
+    assert _classify(_completed(1, out), ["tests/test_service_1.py"])[0] == "inconclusive"
+
+
+def test_failed_summary_alone_does_not_prove_an_assertion_executed() -> None:
+    for out in ("FAILED", "tests/test_service.py::FAILED", "Tests 1 failed | 2 passed"):
+        assert _classify(_completed(1, out), ["tests/test_service.py"])[0] == "inconclusive"
+
+
+def test_unittest_assertion_failure_still_proves_red_phase() -> None:
+    out = (
+        "FAIL: test_scale (test_service_1.Baseline.test_scale)\n"
+        "    self.assertEqual(service_1.scale(value), expected)\n"
+        "AssertionError: 4 != 12\nRan 3 tests in 0.000s\nFAILED (failures=1)"
+    )
+    assert _classify(_completed(1, out), ["tests/test_service_1.py"])[0] == "red"
+
+
+def test_pytest_attribute_error_before_assertion_is_inconclusive() -> None:
+    # Exact host pytest excerpt retained in source-excerpt-before.json.
+    out = (
+        "    def test_scale():\n"
+        "        service = object()\n"
+        ">       assert service.scale(2) == 6\n"
+        "               ^^^^^^^^^^^^^\n"
+        "E       AttributeError: 'object' object has no attribute 'scale'\n"
+        "FAILED test_missing.py::test_scale\n"
+    )
+    assert _classify(_completed(1, out), ["test_missing.py"])[0] == "inconclusive"
+
+
+def test_javascript_expect_source_is_not_assertion_failure_evidence() -> None:
+    out = (
+        "FAIL src/service.test.ts > scales\n"
+        "TypeError: service.scale is not a function\n"
+        "  12 | expect(service.scale(2)).toBe(6)\n"
+        "Tests 1 failed\n"
+    )
+    assert _classify(_completed(1, out), ["src/service.test.ts"])[0] == "inconclusive"
+
+
+def test_pytest_comparison_diagnostic_is_red_without_assertionerror_name() -> None:
+    out = ">       assert scale(2) == 6\nE       assert 2 == 6\nFAILED test_scale.py::test_scale"
+    assert _classify(_completed(1, out), ["test_scale.py"])[0] == "red"

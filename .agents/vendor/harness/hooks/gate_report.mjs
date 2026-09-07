@@ -62,9 +62,9 @@
  * most turns touch nothing it gates -- but it is wrong for a caller who asked. A human
  * typing `/lint` on a clean tree means "lint this repository", not "lint it if git says
  * something moved", and without this they would get a screen of `skipped_unchanged` and a
- * green verdict, which is the vacuous green this document exists to refuse. The Stop hook
- * and the cross-stack job both leave it off, because for them "nothing changed" is the
- * honest answer rather than an obstacle.
+ * green verdict, which is the vacuous green this document exists to refuse. The Stop hook leaves it off.
+ * Cross-stack CI uses it after independently detecting changed vendored content, since
+ * shared instructions and schemas may be outside a consumer's Stop-hook filters.
  *
  * `--json` emits the document below. Without it, a compact human-readable summary goes to
  * stdout and the same exit code is returned, so an interactive run is legible without a

@@ -13,6 +13,7 @@ this is the code that runs when everything else has already gone wrong.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -455,6 +456,14 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
         return target
 
     if target is State.PLANNING:
+        if (
+            state is State.BLOCKED
+            and ctx.run.blocked_reason == "plan-incomplete"
+            and not from_state
+        ):
+            _recollect_readiness(ctx)
+            advance(ctx, target, actor="human", rule=rule, detail="recollected completed readiness")
+            return target
         plan_step.start(ctx, actor="human")
         return target
 
@@ -465,6 +474,75 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
         actor="human",
     )
     return target
+
+
+def _recollect_readiness(ctx: Context) -> None:
+    """Revalidate a completed collector failure before allowing its next phase.
+
+    This is an operator resume, not an automatic repair or a retry of the model. Keep
+    the old row and invocation evidence before collection updates its outcome. A forced
+    ``--from planning`` retains the existing fresh-invocation behavior.
+    """
+    from factory import accounting, artifacts, authority
+    from factory.artifacts import AttemptDir
+    from factory.steps import plan as plan_step
+
+    row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.PLANNING)
+    if (
+        row is None
+        or row["ended_at"] is None
+        or row["exit_code"] != 0
+        or row["outcome"] not in ("plan-incomplete", "planned")
+        or not row["artifact_dir"]
+        or row["sandbox"] != ctx.project.build_sandbox
+    ):
+        raise Blocked("readiness-recollection-unavailable", "No completed readiness attempt")
+    attempt = AttemptDir(Path(str(row["artifact_dir"])))
+    try:
+        request = json.loads(attempt.path("plan-request.json").read_text())
+    except (OSError, ValueError) as exc:
+        raise Blocked("readiness-recollection-unavailable", "Missing readiness request") from exc
+    if not isinstance(request, dict) or (
+        request.get("contract") not in ("noninteractive-handoff", "ticket-readiness", "test-design")
+        or request.get("diagnosis") is not False
+    ):
+        raise Blocked(
+            "readiness-recollection-unavailable", "Only structured readiness can be reused"
+        )
+    invocation = ctx.store.runtime.invocation(accounting.key(ctx, ctx.run.attempt, "plan"))
+    snapshot = ctx.store.runtime.policy(ctx.run.id)
+    if invocation is None or invocation["metadata"].get("policy_revision") != (snapshot or {}).get(
+        "revision"
+    ):
+        raise Blocked(
+            "readiness-recollection-unavailable", "Readiness authority is missing or stale"
+        )
+    if snapshot:
+        authority.validate_integrity(snapshot)
+    original = attempt.path("recollection-original.json")
+    if not original.exists():
+        artifacts.write_json(
+            original,
+            {
+                "attempt": dict(row),
+                "invocation": invocation,
+                "schema": attempt.schema.read_bytes().decode("utf-8"),
+                "manifest": (
+                    attempt.manifest.read_bytes().decode("utf-8")
+                    if attempt.manifest.exists()
+                    else None
+                ),
+                "files": {
+                    str(path.relative_to(attempt.root)): artifacts.sha256_of(path)
+                    for path in attempt.root.rglob("*")
+                    if path.is_file()
+                },
+            },
+        )
+    # Collection validates exit, transcript, schema, ready status, and declared files.
+    # It must finish before the transition: reap treats an ended planning row as ready
+    # for implementation, including rows whose former outcome was plan-incomplete.
+    plan_step.collect(ctx, attempt)
 
 
 def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
@@ -494,14 +572,16 @@ def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
 _SUSPEND_STEP = "suspend"
 
 
-def _wait_for_exit_file(attempt_dir: Path, grace_seconds: int) -> int | None:
+def _wait_for_exit_file(
+    attempt_dir: Path, grace_seconds: int, *, filename: str = "exit"
+) -> int | None:
     """Poll the wrapper's atomic `exit` file, the way `reap` does after a kill.
 
     The wrapper writes `exit` last and atomically, so its appearance is the real terminal
     record; a suspend that parks without it leaves a truncated attempt. Returns the exit
     code if it landed in time, else None.
     """
-    exit_path = attempt_dir / "exit"
+    exit_path = attempt_dir / filename
     deadline = time.monotonic() + grace_seconds
     while time.monotonic() < deadline:
         if exit_path.exists():
@@ -516,18 +596,12 @@ def _wait_for_exit_file(attempt_dir: Path, grace_seconds: int) -> int | None:
 def _stop_sandbox_if_idle(ctx: Context) -> None:
     """§16.3b step 2: stop the build sandbox only when no other run is using it.
 
-    A project's build sandbox is shared across the project's runs, so stopping it under a
-    second run would kill that run's agent. `active_runs_for_project` is the set of runs
-    that exec into it.
+    Compare physical sandbox identities across projects, including persisted role names
+    and recorded active-attempt locations. A registry name change cannot hide a sibling.
     """
-    others = [r for r in ctx.store.active_runs_for_project(ctx.project.name) if r.id != ctx.run.id]
-    from factory.isolation import project_for_run
+    from factory.steps import other_run_sandboxes
 
-    if any(
-        project_for_run(ctx.registry.projects[ctx.project.name], run, ctx.store).build_sandbox
-        == ctx.project.build_sandbox
-        for run in others
-    ):
+    if ctx.project.build_sandbox in other_run_sandboxes(ctx.registry, ctx.store, ctx.run):
         return
     ctx.sandbox.stop(ctx.project.build_sandbox)
 
@@ -541,7 +615,6 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
     from factory.steps import effect_marker, record_effect
 
     marker = effect_marker(ctx, _SUSPEND_STEP)
-    issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
     body = (
         f"<!-- {marker} -->\n"
         f"The factory was **suspended** from `{origin}`: {reason}\n\n"
@@ -550,6 +623,7 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
         f"Run `{ctx.run.id}`, attempt {ctx.run.attempt}.\n"
     )
     try:
+        issue_uuid, _ = ctx.linear.issue_uuid(ctx.run.linear_id)
         record_effect(
             ctx,
             step=_SUSPEND_STEP,
@@ -578,6 +652,8 @@ def suspend(ctx: Context, *, reason: str) -> State:
     origin = ctx.run.state
     if origin in reap_step.DETACHED_STATES:
         row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
+        if row and not row["artifact_dir"]:
+            raise Blocked("suspend-stop-unverified", "The active attempt has no artifact directory")
         if row and row["artifact_dir"]:
             attempt_dir = Path(str(row["artifact_dir"]))
             # Before the kill, because after it the stream stops and nothing else on this
@@ -590,14 +666,24 @@ def suspend(ctx: Context, *, reason: str) -> State:
 
                 capture_session_id(ctx, AttemptDir(attempt_dir), ctx.run.attempt, origin)
             from factory.steps import signal_attempt
+            from factory.steps.plan import PLAN_EXIT_NAME
 
-            signal_attempt(
-                ctx,
-                str(row["sandbox"] or ctx.project.build_sandbox),
-                attempt_dir,
-                origin,
+            filename = PLAN_EXIT_NAME if origin is State.PLANNING else "exit"
+            if not (attempt_dir / filename).exists():
+                signal_attempt(
+                    ctx,
+                    str(row["sandbox"] or ctx.project.build_sandbox),
+                    attempt_dir,
+                    origin,
+                )
+            exit_code = _wait_for_exit_file(
+                attempt_dir, reap_step.KILL_GRACE_SECONDS, filename=filename
             )
-            exit_code = _wait_for_exit_file(attempt_dir, reap_step.KILL_GRACE_SECONDS)
+            if exit_code is None:
+                raise Blocked(
+                    "suspend-stop-unverified",
+                    "No valid terminal record; work and run state preserved",
+                )
             ctx.store.finish_attempt(
                 ctx.run.id, ctx.run.attempt, origin, exit_code=exit_code, outcome="suspended"
             )

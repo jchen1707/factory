@@ -214,6 +214,7 @@ def test_the_branch_is_cut_from_a_freshly_fetched_base(clone_ctx: Context) -> No
     git(host, "add", "moved-on.txt")
     git(host, "commit", "-m", "chore: advance the base after the clone exists")
     advanced = git(host, "rev-parse", "HEAD")
+    git(host, "push", "origin", clone_ctx.project.base_branch)
 
     clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
     assert clone is not None
@@ -223,6 +224,93 @@ def test_the_branch_is_cut_from_a_freshly_fetched_base(clone_ctx: Context) -> No
 
     assert advanced in git(clone, "log", "--format=%H", "-20", "HEAD")
     assert (Path(clone) / "moved-on.txt").exists()
+
+
+def test_private_base_refresh_needs_no_sandbox_remote_access(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+    host = clone_ctx.project.path
+    (host / "remote-change.txt").write_text("merged upstream\n")
+    git(host, "add", "remote-change.txt")
+    git(host, "commit", "-m", "advance upstream")
+    git(host, "push", "origin", clone_ctx.project.base_branch)
+    expected = git(host, "rev-parse", "HEAD")
+    (host / "host-only.txt").write_text("must not enter the sandbox base\n")
+    git(host, "add", "host-only.txt")
+    git(host, "commit", "-m", "unpublished host change")
+    fake = _fake(clone_ctx)
+    real = fake.exec_sync
+    transfers: list[Path] = []
+
+    def private_remote(name: str, argv: Any, **kwargs: Any) -> Any:
+        if "fetch" in argv:
+            source = argv[list(argv).index("fetch") + 1]
+            if source == "origin":
+                return Completed(tuple(argv), 128, "", "could not read Username")
+            bundle = Path(source)
+            assert bundle.is_relative_to(clone_ctx.clone_mount)
+            assert bundle.is_file()
+            transfers.append(bundle)
+        return real(name, argv, **kwargs)
+
+    monkeypatch.setattr(fake, "exec_sync", private_remote)
+    worktree_step.run(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    assert git(clone, "rev-parse", "HEAD") == expected
+    assert not (clone / "host-only.txt").exists()
+    assert transfers
+    assert all(not path.exists() for path in transfers)
+
+
+@pytest.mark.parametrize("failure", ["unreachable", "deleted-branch"])
+def test_host_fetch_failure_never_reuses_the_clone_base(clone_ctx: Context, failure: str) -> None:
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    before = git(clone, "rev-parse", "HEAD")
+    if failure == "unreachable":
+        git(clone_ctx.project.path, "remote", "set-url", "origin", "/nonexistent/origin.git")
+    else:
+        origin = Path(git(clone_ctx.project.path, "remote", "get-url", "origin"))
+        git(origin, "update-ref", "-d", f"refs/heads/{clone_ctx.project.base_branch}")
+    with pytest.raises(Blocked) as caught:
+        worktree_step.run(clone_ctx)
+    assert caught.value.reason == "clone-fetch-failed"
+    assert git(clone, "rev-parse", "HEAD") == before
+    assert not clone_ctx.run.branch
+
+
+def test_clone_base_must_match_the_host_fetched_commit(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    sandbox_step.run(clone_ctx)
+    fake = _fake(clone_ctx)
+    clone = fake.clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    before = git(clone, "rev-parse", "HEAD")
+    real = fake.exec_sync
+
+    def wrong_ref(name: str, argv: Any, **kwargs: Any) -> Any:
+        result = real(name, argv, **kwargs)
+        if list(argv[-2:]) == ["rev-parse", clone_ctx.project.base_ref]:
+            return Completed(tuple(argv), 0, "0" * 40 + "\n", "")
+        return result
+
+    monkeypatch.setattr(fake, "exec_sync", wrong_ref)
+    with pytest.raises(Blocked) as caught:
+        worktree_step.run(clone_ctx)
+    assert caught.value.reason == "clone-fetch-failed"
+    assert "expected fetched commit" in caught.value.detail
+    assert git(clone, "rev-parse", "HEAD") == before
+    assert not clone_ctx.run.branch
 
 
 def test_a_base_that_cannot_be_fetched_blocks_rather_than_cutting_from_a_stale_one(

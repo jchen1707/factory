@@ -27,7 +27,7 @@ def readiness(ctx: Context) -> bool:
         raise Blocked("workflow-contract-missing", str(contract_path))
     rules = json.loads(contract_path.read_text())
     facts = {
-        "ticket": asdict(ctx.issue),
+        "ticket": asdict(ctx.issue) | {"acceptance_criteria": ctx.issue.acceptance_criteria},
         "dependencies": open_blockers(ctx.issue),
         "tests": list(ctx.harness.tests) if ctx.harness else [],
     }
@@ -56,17 +56,18 @@ def write(ctx: Context, target: Path) -> None:
             )
             if result.returncode:
                 raise Blocked("handoff-inventory-failed", result.stderr)
-            return result.stdout.strip()
+            return result.stdout
     else:
 
         def git(*argv: str) -> str:
-            return repo._git(ctx.worktree, *argv)
+            return repo._git_raw(ctx.worktree, *argv)
 
     payload = {
+        **reproduction_binding(ctx),
         "contract_revision": snapshot["source_revision"] if snapshot else ctx.run.base_ref,
         "policy_revision": snapshot["revision"] if snapshot else None,
         "branch": ctx.branch,
-        "commit": git("rev-parse", "HEAD"),
+        "commit": git("rev-parse", "HEAD").strip(),
         "dirty_work": git("status", "--porcelain").splitlines(),
         "verified": [
             {"name": row["check_name"], "status": row["status"], "evidence": row["artifact"]}
@@ -84,7 +85,38 @@ def write(ctx: Context, target: Path) -> None:
     artifacts.write_json(target, payload)
 
 
-def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> None:
+def _recorded_failure(ctx: Context) -> dict[str, Any] | None:
+    records = [
+        row
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == "failure-reproduction" and row["status"] == "fail"
+    ]
+    return dict(records[-1]) if records else None
+
+
+def reproduction_binding(ctx: Context) -> dict[str, str | None]:
+    """The host verifier identity supplied to diagnosis, not an agent-written log."""
+    recorded = _recorded_failure(ctx)
+    if recorded is None:
+        return {"reproduction_evidence": "", "reproduction_sha256": None}
+    path = Path(recorded["artifact"])
+    try:
+        relative = path.resolve().relative_to(ctx.factory_dir.resolve())
+    except ValueError as exc:
+        raise Blocked("diagnosis-not-reproduced", "Verifier artifact is outside this run") from exc
+    return {
+        "reproduction_evidence": str(relative),
+        "reproduction_sha256": json.loads(recorded["detail"])["sha256"],
+    }
+
+
+def authorize_repair(
+    ctx: Context,
+    diagnosis: dict[str, Any],
+    attempt: int,
+    *,
+    expected_reproduction: dict[str, str | None] | None = None,
+) -> None:
     classification = diagnosis["classification"]
     if classification != "code" or diagnosis["status"] != "repair":
         next_action = {
@@ -133,14 +165,13 @@ def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> N
         )
     # Only a host-recorded verifier artifact can authorize repair. Its digest binds
     # the file to the evidence observed before the diagnosing agent was launched.
-    records = [
-        row
-        for row in ctx.store.checks(ctx.run.id)
-        if row["check_name"] == "failure-reproduction" and row["status"] == "fail"
-    ]
-    if not records:
+    if expected_reproduction is not None and reproduction_binding(ctx) != expected_reproduction:
+        raise Blocked(
+            "diagnosis-reproduction-stale", "Host reproduction changed after diagnosis started"
+        )
+    recorded = _recorded_failure(ctx)
+    if recorded is None:
         raise Blocked("diagnosis-not-reproduced", "No host-recorded failure")
-    recorded = records[-1]
     path = Path(recorded["artifact"])
     evidence_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     provenance = json.loads(recorded["detail"])
@@ -186,8 +217,39 @@ def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> N
         )
 
 
+def contract_name(ctx: Context) -> str:
+    if ctx.run.attempt:
+        return "diagnose-and-hand-off"
+    settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
+    return "test-design" if settings.get("test_design") else "ticket-readiness"
+
+
+def required_artifacts(ctx: Context, name: str) -> list[str]:
+    """Read the selected role's output contract from retained shared authority."""
+    root = authority.current(ctx) or ctx.project.path
+    path = root / ".agents/vendor/harness/docs/agents" / f"{name}.json"
+    try:
+        return artifact_names(json.loads(path.read_text())["required_artifacts"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Blocked("workflow-contract-invalid", f"{path}: {exc}") from exc
+
+
+def artifact_names(names: Any) -> list[str]:
+    """Artifact requests may only name files inside the supplied output directory."""
+    if (
+        not isinstance(names, list)
+        or not names
+        or any(
+            not isinstance(item, str) or not item or Path(item).name != item or item in {".", ".."}
+            for item in names
+        )
+    ):
+        raise Blocked("workflow-contract-invalid", "Expected nonempty artifact basenames")
+    return names
+
+
 def prompt(ctx: Context, plans: Path) -> str:
-    name = "diagnose-and-hand-off" if ctx.run.attempt else "ticket-readiness"
+    name = contract_name(ctx)
     return (
         authority.contract(ctx, name)
         + "\n"

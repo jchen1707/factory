@@ -199,3 +199,122 @@ def test_f30_a_config_with_no_test_gate_also_reports_unavailable(ctx: Context) -
     checks = {row["check_name"]: row for row in ctx.store.checks(ctx.run.id)}
     assert checks["redphase"]["status"] == "unavailable"
     assert "no `kind: test` gate" in str(checks["redphase"]["reason"])
+
+
+def test_declared_child_tests_are_replayed_from_the_child_directory(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    _to_verifying(ctx)
+    assert ctx.harness is not None
+    child = ctx.worktree / "components/service"
+    (child / "checks").mkdir(parents=True)
+    (child / "harness.config.json").write_text(
+        json.dumps(
+            {
+                "tests": ["checks"],
+                "gates": [{"name": "acceptance", "kind": "test", "run": ["custom-check"]}],
+            }
+        )
+    )
+    (child / "checks/test_feature.py").write_text("assert False\n")
+    git(ctx.worktree, "add", "-A")
+    git(ctx.worktree, "commit", "-m", "test: child acceptance")
+    ctx.harness = replace(ctx.harness, apps=("components/service",), tests=(), gates=())
+    _stub_scratch(ctx, monkeypatch)
+    calls = []
+    from factory.sandbox.base import Completed
+
+    def execute(sandbox: str, argv: list[str], **kwargs: object) -> Completed:
+        calls.append((argv, kwargs["workdir"]))
+        return Completed(tuple(argv), 1, "AssertionError: feature absent", "")
+
+    monkeypatch.setattr(ctx.sandbox, "exec_sync", execute)
+    assert redphase_step.replay(ctx) == "proceed"
+    assert calls == [
+        (["custom-check"], str(redphase_step._scratch_path(ctx) / "components/service"))
+    ]
+    assert ctx.store.checks(ctx.run.id)[-1]["status"] == "pass"
+
+
+def test_scratch_links_dependencies_for_declared_children(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import subprocess
+
+    from factory.sandbox.base import Completed
+    from factory.steps import clone
+
+    _to_verifying(ctx)
+    assert ctx.harness is not None
+    child = ctx.worktree / "components/client"
+    child.mkdir(parents=True)
+    (child / "harness.config.json").write_text(
+        json.dumps(
+            {
+                "gates": [{"name": "acceptance", "kind": "test", "run": ["custom-check"]}],
+            }
+        )
+    )
+    ctx.harness = replace(ctx.harness, apps=("components/client",))
+    installed = ctx.project.path / "components/client/node_modules"
+    installed.mkdir(parents=True)
+    (installed / "runner").write_text("installed runner")
+    scratch = ctx.project.path / "scratch with spaces"
+    monkeypatch.setattr(clone, "_exec", lambda *args, **kwargs: None)
+
+    def execute(sandbox: str, argv: list[str], **kwargs: object) -> Completed:
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
+        return Completed(tuple(argv), result.returncode, result.stdout, result.stderr)
+
+    monkeypatch.setattr(ctx.sandbox, "exec_sync", execute)
+    clone.scratch_add(ctx, scratch, ctx.project.base_ref)
+    linked = scratch / "components/client/node_modules"
+    assert linked.is_symlink()
+    assert (linked / "runner").read_text() == "installed runner"
+
+
+def test_child_replay_uses_frozen_config_when_candidate_removes_tests(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from factory import authority
+    from factory.sandbox.base import Completed
+
+    _to_verifying(ctx)
+    assert ctx.harness is not None
+    relative = "components/service"
+    child = ctx.worktree / relative
+    (child / "checks").mkdir(parents=True)
+    (child / "checks/test_feature.py").write_text("assert False\n")
+    candidate_config = {"gates": [{"name": "empty", "kind": "lint", "run": ["noop"]}]}
+    (child / "harness.config.json").write_text(json.dumps(candidate_config))
+    git(ctx.worktree, "add", "-A")
+    git(ctx.worktree, "commit", "-m", "test: candidate removes its review policy")
+    frozen = ctx.home / "frozen-test-authority"
+    (frozen / relative).mkdir(parents=True)
+    (frozen / relative / "harness.config.json").write_text(
+        json.dumps(
+            {
+                "tests": ["checks"],
+                "gates": [{"name": "acceptance", "kind": "test", "run": ["trusted-check"]}],
+            }
+        )
+    )
+    ctx.harness = replace(ctx.harness, apps=(relative,), tests=(), gates=())
+    monkeypatch.setattr(authority, "current", lambda context: frozen)
+    _stub_scratch(ctx, monkeypatch)
+    calls = []
+
+    def execute(sandbox: str, argv: list[str], **kwargs: object) -> Completed:
+        calls.append(argv)
+        return Completed(tuple(argv), 0, "1 passed", "")
+
+    monkeypatch.setattr(ctx.sandbox, "exec_sync", execute)
+    with pytest.raises(Blocked, match="new tests pass") as caught:
+        redphase_step.replay(ctx)
+    assert caught.value.reason == "test-proves-nothing"
+    assert calls == [["trusted-check"]]

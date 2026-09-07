@@ -65,8 +65,20 @@ class ThreadTelemetry:
     compactions: list[dict[str, Any]] = field(default_factory=list)
     model_changes: list[dict[str, Any]] = field(default_factory=list)
     sequence: int = -1
+    compaction_turn_id: str | None = None
+    awaiting_compaction_measurement: bool = False
+    invalid_events: int = 0
 
     def observe(self, event: dict[str, Any], *, sequence: int, observed_at: float) -> None:
+        try:
+            self._observe(event, sequence=sequence, observed_at=observed_at)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # Raw notifications are evidence, not trusted normalized measurements.
+            # Keep the last valid counters so one malformed event cannot erase them.
+            self.invalid_events += 1
+            self.context = CurrentContext(unavailable="invalid runtime observation")
+
+    def _observe(self, event: dict[str, Any], *, sequence: int, observed_at: float) -> None:
         params = event.get("params", {})
         if params.get("threadId") != self.thread_id or sequence <= self.sequence:
             return
@@ -82,6 +94,20 @@ class ThreadTelemetry:
                 self.context = CurrentContext(unavailable="usage counter regressed")
                 return
             self.usage = usage
+            if self.awaiting_compaction_measurement:
+                turn_id = params.get("turnId")
+                if (
+                    self.compaction_turn_id is None
+                    or not isinstance(turn_id, str)
+                    or not turn_id
+                    or turn_id == self.compaction_turn_id
+                ):
+                    self.context = CurrentContext(
+                        unavailable="awaiting measurement after compaction"
+                    )
+                    return
+                self.compaction_turn_id = None
+                self.awaiting_compaction_measurement = False
             last = usage_from_wire(raw["last"])
             window = raw.get("modelContextWindow")
             if self.semantics_verified and type(window) is int and window > 0:
@@ -99,6 +125,11 @@ class ThreadTelemetry:
             if not any(c["id"] == item_id for c in self.compactions):
                 self.compactions.append({"id": item_id, "observed_at": observed_at})
             self.context = CurrentContext(unavailable="awaiting measurement after compaction")
+            turn_id = params.get("turnId")
+            self.compaction_turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+            # Without its identity, a later usage record cannot prove it belongs
+            # to a new normal turn rather than this compaction.
+            self.awaiting_compaction_measurement = True
 
     def should_compact(self, *, safe_boundary: bool) -> bool:
         reading = self.context.read(now=self.context.observed_at or 0)

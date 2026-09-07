@@ -44,10 +44,10 @@ def migrate(args: argparse.Namespace) -> int:
 
 
 def configure(args: argparse.Namespace) -> int:
-    from factory.cli import _context_for, factory_home
-    from factory.intake.linear import LinearClient
+    from factory.cli import factory_home
+    from factory.harness import load_harness_config
+    from factory.isolation import project_for_run
     from factory.registry import load_registry
-    from factory.routing import load_routing
 
     home = factory_home()
     store = Store(home / "state" / "factory.db")
@@ -73,14 +73,10 @@ def configure(args: argparse.Namespace) -> int:
             if not store.acquire_lease(run.id, ttl_seconds=300):
                 raise Blocked("run-leased", "The run is owned by another process")
             try:
-                ctx = _context_for(
-                    home,
-                    load_registry(home / "config/projects.toml"),
-                    load_routing(home / "config/models.toml"),
-                    store,
-                    LinearClient(),
-                    run,
-                )
+                registry = load_registry(home / "config/projects.toml")
+                project = project_for_run(registry.resolve(run.linear_id), run, store)
+                load_harness_config(project.path)
+                ctx = authority.SnapshotContext(home, project, run, store)
                 print(
                     json.dumps(
                         authority.snapshot(ctx, profile=args.replace_policy, replace=True), indent=2

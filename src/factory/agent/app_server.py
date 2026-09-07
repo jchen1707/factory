@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -27,6 +26,7 @@ COMPATIBILITY_CHECKS = frozenset(
 def validate_compatibility(path: Path, *, runtime_version: str, sandbox: str) -> dict:
     try:
         report = json.loads(path.read_text())
+        _validate_worker(report, Path(__file__).with_name("app_server_worker.py").read_bytes())
         if report["runtime_version"] != runtime_version or report["sandbox"] != sandbox:
             raise ValueError("runtime or sandbox changed")
         if set(report["checks"]) != COMPATIBILITY_CHECKS:
@@ -41,6 +41,14 @@ def validate_compatibility(path: Path, *, runtime_version: str, sandbox: str) ->
         return report
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Blocked("app-server-compatibility-incomplete", str(exc)) from exc
+
+
+def _validate_worker(report: dict, worker: bytes) -> None:
+    if (
+        not isinstance(report, dict)
+        or report.get("worker_sha256") != hashlib.sha256(worker).hexdigest()
+    ):
+        raise Blocked("app-server-compatibility-incomplete", "worker changed or hash missing")
 
 
 class AppServerAdapter(CodexAdapter):
@@ -66,7 +74,10 @@ class AppServerAdapter(CodexAdapter):
 
     def prepare(self, invocation: AgentInvocation, *, readonly: bool = False) -> None:
         worker = Path(__file__).with_name("app_server_worker.py")
-        shutil.copyfile(worker, invocation.prompt_path.parent / worker.name)
+        # Recheck at launch: an adapter can outlive a source update on the host.
+        worker_bytes = worker.read_bytes()
+        _validate_worker(self.report, worker_bytes)
+        (invocation.prompt_path.parent / worker.name).write_bytes(worker_bytes)
         request = {
             "readonly": readonly,
             "model": invocation.model,

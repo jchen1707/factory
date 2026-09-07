@@ -1307,3 +1307,19 @@ def test_a_stop_the_table_forbids_leaves_the_run_where_it_is(ctx: Context) -> No
         for line in path.read_text().splitlines()
     ]
     assert [e for e in logged if e["event"] == "stop.illegal" and e["level"] == "error"]
+
+
+def test_suspend_survives_tracker_issue_lookup_outage(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_verifying(ctx)
+    before = len(ctx.linear.comments)  # type: ignore[attr-defined]
+
+    def unavailable(ticket: str) -> tuple[str, str]:
+        raise LinearError("tracker unavailable during suspend announcement")
+
+    monkeypatch.setattr(ctx.linear, "issue_uuid", unavailable)
+    assert recovery.suspend(ctx, reason="park during tracker outage") is State.VERIFYING
+    assert ctx.state is State.SUSPENDED
+    assert len(ctx.linear.comments) == before  # type: ignore[attr-defined]
+    assert any("suspend.announce_failed" in p.read_text() for p in ctx.log_dir.glob("*.jsonl"))
