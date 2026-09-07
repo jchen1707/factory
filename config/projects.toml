@@ -238,6 +238,9 @@ UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/nemoclaw-dev/{run}"
 # Temporary live FRO target approved by James on 2026-09-07.
 # Previous frontend-harness mapping is retained in Git and the private restart backup.
 [projects.factory-crud-verification]
+# Measured on both live 20260907 sandboxes: injected by sbx, GitHub API returns 401.
+# James explicitly approved this project-only acknowledgement on 2026-09-07.
+acknowledged_env_credentials = ["GH_TOKEN"]
 team = "FRO"
 path = "/Users/james/factory-crud-verification"
 remote = "https://github.com/jchen1707/factory-crud-verification.git"
