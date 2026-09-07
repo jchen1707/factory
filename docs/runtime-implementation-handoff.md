@@ -16,7 +16,43 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Latest checkpoint — merged #33 consumer refresh, 2026-09-07
+## Latest checkpoint — merged stack pins, 2026-09-07
+
+James merged Python #77 as `7534945dbdf3e8257d82eb5558103671979ef2e9`,
+frontend #55 as `071037bfd47cc7ad1176335687ac2aae28dc440c`, and factory #83
+as `4aef9aeeaac0a068439f193dc443bdc85be9250a`. All runtime corrections and
+consumer refreshes described below are now merged.
+
+[Harness #34](https://github.com/jchen1707/harness/pull/34), commit `d43927d`,
+updates only the two stack gitlinks to those exact merged commits. Both stacks
+vendor harness #33 (`8bc104e33`); no new shared content or consumer refresh is needed
+for this pin-only commit. Local `check_submodules.py --pins --current` passes.
+`check.py --since=origin/v2` passes, including 28 own tests and 149 shared hook tests.
+`cross_stack.py` confirms matching intact content and skips unchanged stack gates;
+this is not a new stack gate run. Evidence: `artifacts/runtime-stack-pin-closure/`.
+
+Harness #34 remote checks are all green: submodules (7 s), cross-stack (16 s),
+and generation (16 s), runs `34090700459` and `34090700512`. The cross-stack
+unchanged-content limitation above also applies remotely.
+
+**Next:** James merges harness #34. Verify its post-merge
+Meta (including currency) and Generate main runs succeed. That closes the remaining
+repository merge sequence. Do not refresh all consumers merely for a gitlink-only
+commit; freshness checks distinguish shared-content changes from metadata changes.
+
+Production activation, live concurrency and writer restart still require James's
+explicit decision on a named project and concrete settings. Current scratch compatibility
+manifests cover only their recorded environments; validate a different deployment
+runtime/sandbox before adapter selection. Supported feature acceptance is already
+recorded below; do not repeat experiments or finish CRUD tickets to obtain activation.
+Schema 4→5 is applied with 1,889 rows preserved and must not be repeated. FRO-12 stays
+parked. No existing-product work, tracker writes, sandbox starts or live settings changed.
+The two pre-existing untracked frontend/nemoclaw reports remain untouched.
+
+The older checkpoint below is retained evidence; its pending stack/factory merge
+statements are superseded by this checkpoint.
+
+## Previous checkpoint — merged #33 consumer refresh, 2026-09-07
 
 James merged harness #33 as `8bc104e33e89a325f3db925f215c5742d7a957bb`.
 Factory now vendors that exact merged source in commit `12f7b4e` on
