@@ -16,7 +16,45 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current resume — four concurrent runs configured, 2026-09-07
+## Current resume — per-run compatibility passed, 2026-09-07
+
+Factory #88 is merged as `f58a339`. James requested compatibility validation for
+new production sandbox identities before full workflows. Production `isolation.prepare`
+assigned fixture run `4282c8f9380c458d` the build/review names ending in that ID,
+using the live registry prefixes `factory-build-crud-live-20260907` and
+`factory-review-crud-live-20260907`. Unmodified production specifications and live
+per-run mount roots were used; no CPU/memory override was applied. The fixture is
+suspended in a separate validation store, **not a live ticket run**.
+
+Both names passed all six compatibility checks on Codex CLI 0.146.0 and worker
+`f2b3751989c9810250554ec4b35dfcb9eec07b00d11fc60b0a6f81e9168b93be`.
+Production `select` accepted both exact manifests; a mismatched name was refused.
+Evidence includes real hook refusals, schema-valid outputs, private-clone/read-only
+filesystem checks, detached holders under PID 1 for over 63 seconds, interruption
+exit 143, same-thread recovery with baseline subtraction, explicit compaction/reset,
+model change and raw thread resume. Both targets' Git state remained unchanged.
+Both new VMs are now stopped and retained. Existing project credential acknowledgement
+was used without widening it. No tracker, product, live run or live setting was changed.
+
+Evidence: `artifacts/runtime-per-run-compatibility/`, including exact manifests in
+`compatibility/`, `selection.json`, `stopped.json`, and `live-readback.json`.
+See [acceptance report](runtime-per-run-compatibility-acceptance.md).
+Canonical factory gates passed: Ruff check/format, mypy and pytest exit 0 with empty
+output tails (`factory-gates.json`). Mypy covers configured paths, not artifact scripts;
+fake-runtime tests do not establish these real compatibility observations.
+
+**Next:** observe independently approved work for delivery failures, interventions
+and accounting quality. Each future ticket-run identity still needs exact build/review
+provisioning and these compatibility checks before its first model launch. Keep that
+attempt held until validation passes; do not rename these fixture manifests or import
+its run to manufacture a live workload. The current factory does not automatically
+certify new per-run VMs. This is an ongoing operational requirement, not another blanket
+activation approval. Live concurrency remains four; full concurrent ticket workflows
+and longitudinal delivery benefit remain unobserved. FRO-12 stays parked and dependent
+CRUD tickets need not be completed merely to provide activity. Repeating synthetic
+pairs alone will not answer the delivery-benefit question.
+
+## Previous resume — four concurrent runs configured, 2026-09-07
 
 James merged #87 as `bc6773a`, authorized model/concurrency testing using existing
 FRO issues, and explicitly requested increasing directly to four. The live disposable
