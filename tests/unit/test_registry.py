@@ -48,7 +48,7 @@ build_sandbox = "factory-build-python-harness"
 
 def test_the_shipped_registry_loads() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert set(registry.projects) == {"nemoclaw-dev", "frontend-harness"}
+    assert set(registry.projects) == {"nemoclaw-dev", "factory-crud-verification"}
     assert registry.projects["nemoclaw-dev"].base_ref == "origin/james/feat/prototype"
 
 
@@ -80,7 +80,7 @@ def test_resolution_uses_the_identifier_prefix() -> None:
     # BAC was python-harness's until 2026-08-31; the retired block is commented out in
     # `projects.toml` and the team key handed over, because two projects cannot claim one.
     assert registry.resolve("BAC-4").name == "nemoclaw-dev"
-    assert registry.resolve("FRO-7").name == "frontend-harness"
+    assert registry.resolve("FRO-7").name == "factory-crud-verification"
 
 
 def test_python_project_carries_the_measured_uv_environment_fix() -> None:
@@ -179,7 +179,7 @@ def test_a_project_that_omits_the_forge_key_still_delivers_to_github() -> None:
     # have made this a migration.
     registry = load_registry(HOME / "config" / "projects.toml")
 
-    assert registry.projects["frontend-harness"].forge == "github"
+    assert registry.projects["factory-crud-verification"].forge == "github"
 
 
 def test_the_shipped_registry_routes_nemoclaw_to_gitlab() -> None:
@@ -263,7 +263,7 @@ def test_sandbox_delivery_is_absent_for_every_project_that_does_not_declare_it()
     would be a boundary change with no diff in `src/`.
     """
     registry = load_registry(HOME / "config" / "projects.toml")
-    assert registry.projects["frontend-harness"].sandbox_delivery is None
+    assert registry.projects["factory-crud-verification"].sandbox_delivery is None
     declared = registry.projects["nemoclaw-dev"].sandbox_delivery
     assert declared is not None
     assert declared.placeholder_env == "FACTORY_GITLAB_TOKEN"
@@ -387,4 +387,4 @@ def test_a_zero_writer_limit_refuses_to_load(tmp_path: Path) -> None:
 def test_the_shipped_registry_gives_nemoclaw_two_writers() -> None:
     registry = load_registry(HOME / "config" / "projects.toml")
     assert registry.concurrency_for(registry.projects["nemoclaw-dev"]) == 2
-    assert registry.concurrency_for(registry.projects["frontend-harness"]) == 1
+    assert registry.concurrency_for(registry.projects["factory-crud-verification"]) == 1

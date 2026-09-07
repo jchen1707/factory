@@ -246,14 +246,13 @@ stack = "frontend"
 template = "codex-pnpm:v1"
 kits = []
 static_mcp = []
-build_sandbox = "factory-build-crud-20260907"
-review_sandbox = "factory-review-crud-20260907"
+build_sandbox = "factory-build-crud-live-20260907"
+review_sandbox = "factory-review-crud-live-20260907"
 vault_mount = "rw"
 requires_clone = true
 concurrency_per_project = 1
-# Measured on this exact new sandbox: gh auth status reports the inherited value invalid.
-# Names remain visible as warnings; no usable credential or new proxy scope is admitted.
-acknowledged_env_credentials = ["GH_TOKEN"]
+# Fresh live sandbox identities have no inherited credential acknowledgement.
+# Preflight must measure their own environment; isolated-VM evidence does not transfer.
 
 [projects.factory-crud-verification.env]
 UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/factory-crud/{run}"

@@ -1,5 +1,25 @@
 # Runtime rollout
 
+## Current deployment checkpoint — after #84 merge
+
+Factory #84 merged as `f17ba61`. The timer and console are running and FRO routes to
+the disposable `factory-crud-verification` repository. Its live store has no project
+overrides or runs: legacy exec, existing model routing, repository-default Prototype,
+and concurrency 1 remain effective. The isolated FRO-12 run stays parked.
+
+Deployment inspection found the reused test reviewer mounted on the isolated factory
+home. Live routing now uses fresh `factory-build-crud-live-20260907` and
+`factory-review-crud-live-20260907` identities so creation uses live mounts. The old
+VMs and their work remain untouched. The new names were absent when checked; no VM
+was started and no compatibility measurement is claimed for them. Credential
+acknowledgements do not transfer from the isolated VMs; normal preflight applies.
+
+Supported feature acceptance is complete within the recorded limits. App-server
+selection remains a separate rollout action: measure these exact live environments
+before presenting concrete settings for James's decision. Restarting writers and
+choosing the FRO target are already done. This checkpoint supersedes conflicting
+stopped-writer, open-#84 and unselected-project statements below.
+
 ## Writer restart — 2026-09-07
 
 James explicitly authorized restarting the existing timer and console. Both launchd
