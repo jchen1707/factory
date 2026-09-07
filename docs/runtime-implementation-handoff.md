@@ -35,10 +35,19 @@ Harness #34 remote checks are all green: submodules (7 s), cross-stack (16 s),
 and generation (16 s), runs `34090700459` and `34090700512`. The cross-stack
 unchanged-content limitation above also applies remotely.
 
-**Next:** James merges harness #34. Verify its post-merge
-Meta (including currency) and Generate main runs succeed. That closes the remaining
-repository merge sequence. Do not refresh all consumers merely for a gitlink-only
-commit; freshness checks distinguish shared-content changes from metadata changes.
+James merged harness #34 as `cc7bf33474e41b202906525f12fc7b7de7ce68ea`.
+Post-merge Meta run `34090825991` and Generate main run `34090825987` both
+succeeded. The retained Meta log confirms `--pins --current` ran and passed;
+its prior stale-pin failure is resolved. This closes the implementation/consumer
+repository merge sequence. Factory #84 remains the open documentation-only handoff PR.
+
+**Next:** choose the named deployment project and concrete settings with James before
+production activation. No feature implementation or disposable-ticket completion is
+required merely to close this validated scope. For an activation request, inspect the
+selected deployment environment, validate its exact runtime/worker/isolation identities,
+and prepare the configuration diff and writer restart procedure for James's approval.
+Do not refresh consumers merely for this gitlink-only merge; their shared content is
+unchanged. Longer-term delivery metrics remain observation work after activation.
 
 Production activation, live concurrency and writer restart still require James's
 explicit decision on a named project and concrete settings. Current scratch compatibility

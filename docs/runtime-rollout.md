@@ -12,9 +12,9 @@ CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
 
 James merged harness #33, Python #77, frontend #55 and factory #83. All consumers
 vendor merged shared source `8bc104e33`. [Harness #34](https://github.com/jchen1707/harness/pull/34)
-now updates the stack gitlinks to the exact merged commits; local pin/current and
-shared contract checks pass. After James merges it, require post-merge Meta currency
-and Generate main success. No further consumer refresh is needed for a pin-only change.
+merged as `cc7bf334`, updating the stack gitlinks to the exact merged commits.
+Post-merge Meta (including pin/current checks) and Generate main both pass, runs
+`34090825991` and `34090825987`. The implementation/consumer merge sequence is closed. No further consumer refresh is needed for a pin-only change.
 Factory #83 has no remote workflows/checks; its retained four-gate result is local
 evidence. Exact commits and next steps are in [the handoff](runtime-implementation-handoff.md).
 
