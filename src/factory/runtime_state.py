@@ -89,7 +89,12 @@ class RuntimeState:
     ) -> None:
         old = self.invocation(invocation_id)
         if old:
-            if old["metadata"] != metadata:
+            if (old["run_id"], old["attempt"], old["role"], old["metadata"]) != (
+                run_id,
+                attempt,
+                role,
+                metadata,
+            ):
                 raise ValueError("an invocation's execution snapshot is immutable")
             return
         now = time.time()

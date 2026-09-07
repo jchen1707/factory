@@ -2,8 +2,178 @@
 
 from pathlib import Path
 
+import pytest
+
 from factory.runtime_jobs import RuntimeJobs
 from factory.store import Store
+
+
+@pytest.mark.parametrize("changed", ["run", "attempt", "role"])
+def test_invocation_replay_cannot_change_ownership(tmp_path: Path, changed: str) -> None:
+    store = Store(tmp_path / "factory.db")
+    first = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    second = store.insert_run(linear_id="SYN-2", project="synthetic", team="SYN")
+    store.runtime.start_invocation("parent", first.id, 1, "builder", {})
+    with pytest.raises(ValueError, match="immutable"):
+        store.runtime.start_invocation(
+            "parent",
+            second.id if changed == "run" else first.id,
+            2 if changed == "attempt" else 1,
+            "reviewer" if changed == "role" else "builder",
+            {},
+        )
+    retained = store.runtime.invocation("parent")
+    assert retained is not None
+    assert (retained["run_id"], retained["attempt"], retained["role"]) == (first.id, 1, "builder")
+    store.close()
+
+
+def test_each_child_needs_its_own_approval_before_reserving_capacity(tmp_path: Path) -> None:
+    from factory.execution import AgentApprovalRequired
+
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    for name in ["parent", "child"]:
+        store.runtime.start_invocation(name, run.id, 1, "builder", {})
+    store.runtime.configure(
+        "project", "synthetic", {"mode": "approval", "delegation_mode": "read-only"}
+    )
+    jobs = RuntimeJobs(store)
+    store.runtime.approve(run.id, "parent")
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    with pytest.raises(AgentApprovalRequired):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert len(jobs.active_agents("synthetic")) == 1
+    store.runtime.approve(run.id, "child")
+    assert jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert store.runtime.settings("run", run.id)["approved_invocation"] is None
+    assert jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    store.close()
+
+
+def test_project_ceiling_and_child_limits_cannot_be_bypassed(tmp_path: Path) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    for name in ["parent", "child", "extra", "grandchild"]:
+        store.runtime.start_invocation(name, run.id, 1, "builder", {})
+    jobs = RuntimeJobs(store)
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    with pytest.raises(ValueError, match="disabled"):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    store.runtime.configure(
+        "project",
+        "synthetic",
+        {
+            "delegation_mode": "read-only",
+            "max_active_agents": 2,
+            "max_children_per_parent": 1,
+        },
+    )
+    store.runtime.configure("run", run.id, {"max_active_agents": 3})
+    with pytest.raises(ValueError, match="project"):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    store.runtime.configure("run", run.id, {"max_active_agents": 2})
+    assert jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert not jobs.schedule_agent("extra", parent_id="parent", usd_limit=10, max_attempts=2)
+    with pytest.raises(ValueError, match="depth"):
+        jobs.schedule_agent("grandchild", parent_id="child", usd_limit=10, max_attempts=2)
+    jobs.finish_agent("child", status="completed")
+    assert jobs.schedule_agent("extra", parent_id="parent", usd_limit=10, max_attempts=2)
+    store.close()
+
+
+@pytest.mark.parametrize(
+    "field", ["max_active_agents", "max_children_per_parent", "max_delegation_depth"]
+)
+@pytest.mark.parametrize("value", [None, "", "2", 0, -1, True, 1.5])
+def test_malformed_agent_limits_refuse_admission(tmp_path: Path, field: str, value: object) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("parent", run.id, 1, "builder", {})
+    store.runtime.configure("project", "synthetic", {field: value})
+    jobs = RuntimeJobs(store)
+    with pytest.raises(ValueError, match="positive integer"):
+        jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert jobs.active_agents("synthetic") == []
+    store.close()
+
+
+@pytest.mark.parametrize("reason", ["budget", "attempt"])
+def test_exhausted_run_cannot_reserve_child_or_consume_approval(
+    tmp_path: Path, reason: str
+) -> None:
+    from factory.machine import Blocked
+
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("parent", run.id, 1, "builder", {})
+    store.runtime.start_invocation("child", run.id, 3 if reason == "attempt" else 1, "builder", {})
+    jobs = RuntimeJobs(store)
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    store.runtime.configure(
+        "project", "synthetic", {"mode": "approval", "delegation_mode": "read-only"}
+    )
+    store.runtime.approve(run.id, "child")
+    if reason == "budget":
+        store.reconcile_cost(
+            run.id,
+            1,
+            "parent",
+            model="synthetic",
+            input_tokens=1,
+            output_tokens=1,
+            cached_tokens=0,
+            usd=10,
+        )
+    with pytest.raises(Blocked):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert len(jobs.active_agents("synthetic")) == 1
+    assert store.runtime.settings("run", run.id)["approved_invocation"] == "child"
+    store.close()
+
+
+def test_child_cannot_attach_to_another_runs_parent(tmp_path: Path) -> None:
+    store = Store(tmp_path / "factory.db")
+    first = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    second = store.insert_run(linear_id="SYN-2", project="synthetic", team="SYN")
+    store.runtime.configure("project", "synthetic", {"delegation_mode": "read-only"})
+    store.runtime.start_invocation("parent", first.id, 1, "builder", {})
+    store.runtime.start_invocation("child", second.id, 1, "builder", {})
+    jobs = RuntimeJobs(store)
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    with pytest.raises(ValueError, match="same run"):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert len(jobs.active_agents("synthetic")) == 1
+    store.close()
+
+
+def test_child_cannot_reset_the_parents_attempt_number(tmp_path: Path) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.configure("project", "synthetic", {"delegation_mode": "read-only"})
+    store.runtime.start_invocation("parent", run.id, 2, "builder", {})
+    store.runtime.start_invocation("child", run.id, 1, "builder", {})
+    jobs = RuntimeJobs(store)
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    with pytest.raises(ValueError, match="attempt"):
+        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    assert len(jobs.active_agents("synthetic")) == 1
+    store.close()
+
+
+@pytest.mark.parametrize("mode", [None, "", "Approval", False])
+def test_malformed_approval_mode_does_not_enable_automatic_admission(
+    tmp_path: Path, mode: object
+) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("parent", run.id, 1, "builder", {})
+    store.runtime.configure("project", "synthetic", {"mode": mode})
+    jobs = RuntimeJobs(store)
+    with pytest.raises(ValueError, match="approval mode"):
+        jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert jobs.active_agents("synthetic") == []
+    store.close()
 
 
 def test_certification_request_is_idempotent_and_survives_reopen(tmp_path: Path) -> None:
@@ -33,15 +203,24 @@ def test_agent_capacity_counts_invocations_in_one_run_and_drains(tmp_path: Path)
     for name in ["parent", "child", "reviewer"]:
         store.runtime.start_invocation(name, run.id, 1, name, {})
     jobs = RuntimeJobs(store)
-    assert jobs.admit_agent("parent", limit=2)
-    assert jobs.admit_agent("child", limit=2, parent_id="parent")
-    assert not jobs.admit_agent("reviewer", limit=2)
-    assert jobs.admit_agent("parent", limit=1)
+    store.runtime.configure(
+        "project",
+        "synthetic",
+        {
+            "max_active_agents": 2,
+            "delegation_mode": "read-only",
+        },
+    )
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert jobs.schedule_agent("child", usd_limit=10, max_attempts=2, parent_id="parent")
+    assert not jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
+    store.runtime.configure("project", "synthetic", {"max_active_agents": 1})
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
     assert len(jobs.active_agents("synthetic")) == 2
     jobs.finish_agent("child", status="cancelled")
-    assert not jobs.admit_agent("reviewer", limit=1)
+    assert not jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
     jobs.finish_agent("parent", status="completed")
-    assert jobs.admit_agent("reviewer", limit=1)
+    assert jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
     store.close()
 
 

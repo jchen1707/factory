@@ -71,38 +71,6 @@ class RuntimeJobs:
             )
         ]
 
-    def admit_agent(self, invocation_id: str, *, limit: int, parent_id: str | None = None) -> bool:
-        if type(limit) is not int or limit < 1:
-            raise ValueError("agent limit must be a positive integer")
-        with self.runtime.transaction():
-            invocation = self.runtime.invocation(invocation_id)
-            if invocation is None:
-                raise ValueError("unknown invocation")
-            run = self.store.run_by_id(invocation["run_id"])
-            if run is None:
-                raise ValueError("unknown run")
-            old = self.runtime.db.execute(
-                "SELECT * FROM agent_leases WHERE invocation_id=?", (invocation_id,)
-            ).fetchone()
-            if old:
-                if old["parent_id"] != parent_id:
-                    raise ValueError("agent ownership is immutable")
-                return old["status"] == "active"
-            if parent_id:
-                parent = self.runtime.db.execute(
-                    "SELECT * FROM agent_leases WHERE invocation_id=?", (parent_id,)
-                ).fetchone()
-                if parent is None or parent["run_id"] != run.id or parent["status"] != "active":
-                    raise ValueError("child requires an active parent in the same run")
-            if len(self.active_agents(run.project)) >= limit:
-                return False
-            self.runtime.db.execute(
-                "INSERT INTO agent_leases VALUES (?,?,?,'active',?)",
-                (invocation_id, run.id, run.project, parent_id),
-            )
-            self.runtime.audit("run", run.id, "agent-admitted", {"invocation": invocation_id})
-            return True
-
     def finish_agent(self, invocation_id: str, *, status: str) -> None:
         if status not in {"completed", "failed", "cancelled", "suspended"}:
             raise ValueError("invalid terminal agent status")
@@ -129,6 +97,127 @@ class RuntimeJobs:
                 "agent-finished",
                 {"invocation": invocation_id, "status": status},
             )
+
+    def schedule_agent(
+        self,
+        invocation_id: str,
+        *,
+        usd_limit: float,
+        max_attempts: int,
+        parent_id: str | None = None,
+    ) -> bool:
+        """Reserve one invocation atomically; an existing reservation is not a new launch.
+
+        The controller must reconcile a reserved invocation after a crash, never spawn it
+        again merely because this operation returns True. External launch stays outside
+        the transaction. Limits are supplied by trusted controller configuration.
+        """
+        from factory.execution import AgentApprovalRequired
+        from factory.machine import Blocked
+
+        with self.runtime.transaction():
+            invocation = self.runtime.invocation(invocation_id)
+            if invocation is None:
+                raise ValueError("unknown invocation")
+            run = self.store.run_by_id(invocation["run_id"])
+            if run is None:
+                raise ValueError("unknown run")
+            existing = self.runtime.db.execute(
+                "SELECT parent_id,status FROM agent_leases WHERE invocation_id=?", (invocation_id,)
+            ).fetchone()
+            if existing:
+                if existing["parent_id"] != parent_id:
+                    raise ValueError("agent ownership is immutable")
+                return existing["status"] == "active"
+            project_settings = self.runtime.settings("project", run.project)
+            settings = project_settings | self.runtime.settings("run", run.id)
+            limits = {}
+            for field, default in (
+                ("max_active_agents", 8),
+                ("max_children_per_parent", 2),
+                ("max_delegation_depth", 1),
+            ):
+                ceiling = project_settings.get(field, default)
+                value = settings.get(field, ceiling)
+                if type(ceiling) is not int or ceiling < 1 or type(value) is not int or value < 1:
+                    raise ValueError(f"{field} must be a positive integer")
+                if value > ceiling:
+                    raise ValueError(f"{field} exceeds the project ceiling")
+                limits[field] = value
+            if (
+                limits["max_delegation_depth"] != 1
+                or project_settings.get("max_delegation_depth", 1) != 1
+            ):
+                raise ValueError("only delegation depth one is supported")
+            modes = {"disabled": 0, "read-only": 1, "isolated-write": 2}
+            project_mode = project_settings.get("delegation_mode", "disabled")
+            mode = settings.get("delegation_mode", project_mode)
+            if (
+                not isinstance(project_mode, str)
+                or not isinstance(mode, str)
+                or project_mode not in modes
+                or mode not in modes
+            ):
+                raise ValueError("invalid delegation mode")
+            if modes[mode] > modes[project_mode]:
+                raise ValueError("delegation mode exceeds the project capability")
+            if parent_id is not None:
+                if mode == "disabled":
+                    raise ValueError("delegation is disabled")
+                parent = self.runtime.db.execute(
+                    "SELECT * FROM agent_leases WHERE invocation_id=?", (parent_id,)
+                ).fetchone()
+                if parent is None or parent["run_id"] != run.id or parent["status"] != "active":
+                    raise ValueError("child requires an active parent in the same run")
+                if parent["parent_id"] is not None:
+                    raise ValueError("delegation depth exceeded")
+                if (
+                    self.runtime.db.execute(
+                        "SELECT count(*) FROM agent_leases WHERE parent_id=? AND status='active'",
+                        (parent_id,),
+                    ).fetchone()[0]
+                    >= limits["max_children_per_parent"]
+                ):
+                    return False
+            approval_mode = settings.get("mode", "automatic")
+            if approval_mode not in ("automatic", "approval"):
+                raise ValueError("invalid approval mode")
+            approval = approval_mode == "approval"
+            if (
+                approval
+                and self.runtime.settings("run", run.id).get("approved_invocation") != invocation_id
+            ):
+                raise AgentApprovalRequired(invocation_id)
+            if self.store.known_spend(run.id) >= usd_limit:
+                raise Blocked(
+                    "budget-exceeded", "API-equivalent estimate reached the configured ceiling"
+                )
+            if invocation["attempt"] > max_attempts:
+                raise Blocked("attempts-exhausted", "The lifetime attempt limit is exhausted")
+            if parent_id is not None:
+                parent_invocation = self.runtime.invocation(parent_id)
+                if (
+                    parent_invocation is None
+                    or invocation["attempt"] != parent_invocation["attempt"]
+                ):
+                    raise ValueError("child must retain its parent's attempt")
+            if len(self.active_agents(run.project)) >= limits["max_active_agents"]:
+                return False
+            self.runtime.db.execute(
+                "INSERT INTO agent_leases VALUES (?,?,?,'active',?)",
+                (invocation_id, run.id, run.project, parent_id),
+            )
+            self.runtime.audit("run", run.id, "agent-admitted", {"invocation": invocation_id})
+            if approval:
+                self.runtime.db.execute(
+                    "UPDATE operator_settings SET settings=json_set(settings,'$.approved_invocation',NULL), "
+                    "revision=revision+1 WHERE scope='run' AND owner=?",
+                    (run.id,),
+                )
+                self.runtime.audit(
+                    "run", run.id, "approval-consumed", {"invocation": invocation_id}
+                )
+            return True
 
     def claim_certification(self, job_id: str, *, now: float, duration: float) -> str | None:
         import math

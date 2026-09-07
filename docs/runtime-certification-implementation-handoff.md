@@ -114,8 +114,8 @@ and malformed-account handling concern; both were corrected before the final run
 2. Complete and merge shared contracts on harness@v2, then sync exact merged content through
    the normal consumer process. James owns merges. No PR is opened by this implementation
    command unless requested; do not claim consumer freshness before it has been measured.
-3. Complete Step 3: agent approval/budget admission integration, real transaction races,
-   schema constraints/ownership, cross-run misuse tests and durable reconciliation.
+3. Complete Step 3 launch integration and durable reconciliation. The follow-up below adds
+   guarded reservations and real transaction races; these are not yet connected to launch sites.
 4. Implement automatic certification service: generation marker, full fingerprint, source-owned
    probe contracts, bounded/paid job scheduling, evidence validation, CLI/daemon resume,
    launch-time revalidation and status. No name-based or unchecked-scope bypass.
@@ -136,3 +136,39 @@ all exited 0 with empty output tails; none skipped. Two independent review axes 
 this bounded foundation, found the two diagnostic issues above, and confirmed their fixes.
 This is not a full-feature review or acceptance claim. Shared-source final checking is
 recorded separately in harness-check-final.txt after the committed source snapshot.
+
+## Admission follow-up checkpoint
+
+The implementation worktree now has one `RuntimeJobs.schedule_agent` reservation entry point.
+The earlier unchecked `admit_agent` primitive was removed. Within one SQLite transaction it
+checks project/run capacity ceilings, delegation enablement, same-run/attempt parent ownership,
+depth one and child limits, per-invocation Approval, known run spend and lifetime attempt limits.
+Successful admission consumes the exact invocation's approval atomically. A queued/refused
+reservation does not consume approval. Existing active reservations drain when limits decrease;
+re-reading a reservation is NOT permission to spawn a second process.
+
+`RuntimeState.start_invocation` now rejects replay with a different run, attempt or role even
+when metadata is identical. This closed a reproduced ownership weakness. Review also found
+child attempt reset and malformed approval-mode fallthrough; both have red-before-green
+regressions and were corrected. Both review axes confirmed their findings addressed.
+
+`tests/integration/test_runtime_job_races.py` starts independent Python controllers with
+separate SQLite connections. One wins the last agent slot; simultaneous requests join one
+certification job and only one claims its lease. These are actual database contention tests,
+not real sandbox/model acceptance. The focused admission/race suite passed 39 tests.
+
+No new schema DDL, shared source, live database, sandbox, routing or service changes occurred
+in this follow-up. The previous schema-copy rehearsal remains applicable to unchanged DDL.
+The new reservation method is NOT called by existing application launch sites yet. Next:
+wire invocation-specific admission into accounting/execution and reviewer fan-out, with durable
+launch ownership and terminal reconciliation before releasing capacity. Do not attach a simple
+`schedule_agent` check to launch without that reconciliation: duplicate reservation success
+must never become duplicate paid execution. Then continue the certification service and broker
+steps above. Approval keys for new invocations are exact invocation IDs; adapt operator-facing
+approval display together with launch wiring, preserving legacy attempt approval behavior.
+
+Factory final gate evidence is `artifacts/runtime-admission/gates-final.json` in the
+implementation worktree: PASS, all four gates exit 0, empty output tails, none skipped.
+Mypy includes the new production/test paths. The first run failed three test-style lint
+checks; those were corrected. Overall plan status remains implementing; this checkpoint
+does not complete Step 3 or the full feature.
