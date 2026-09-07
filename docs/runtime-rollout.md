@@ -1,5 +1,13 @@
 # Runtime rollout
 
+## Writer restart — 2026-09-07
+
+James explicitly authorized restarting the existing timer and console. Both launchd
+services are loaded; the first timer invocation exited 0 and the console returned
+HTTP 200. Schema 5 passed SQLite quick_check and a private pre-restart backup was
+retained. No project adapter, model, profile or concurrency setting changed.
+This supersedes the stopped-writer status below; see the handoff for exact evidence.
+
 ## Current completion criteria — 2026-09-07
 
 **The objective is factory acceptance, not completion or hardening of disposable

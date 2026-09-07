@@ -16,6 +16,23 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
+## Writer restart — 2026-09-07 06:29 UTC
+
+James explicitly instructed “just restart them.” Both launchd services are now loaded:
+`gui/501/com.jchen.factory` and `gui/501/com.jchen.factory.console`.
+The timer's first tick exited 0; it remains scheduled every 60 seconds.
+The console returned HTTP 200 at `http://127.0.0.1:7717/`.
+Before restart, the live store reported schema 5 and `quick_check=ok`; a SQLite
+backup was retained with mode 0600 at
+`artifacts/runtime-writer-restart/factory-before-restart-20260907T062909Z.db`.
+Old schema-approval errors remain in the append-only daemon log; the new launchd
+invocation exited successfully. No migration was repeated.
+
+This supersedes earlier statements that production writers remain stopped or their
+restart still needs approval. Project adapters, models, profiles and concurrency were
+not changed. App-server selection for a different deployment environment still requires
+its exact compatibility evidence. FRO-12 remains outside the live registry.
+
 ## Latest checkpoint — merged stack pins, 2026-09-07
 
 James merged Python #77 as `7534945dbdf3e8257d82eb5558103671979ef2e9`,
