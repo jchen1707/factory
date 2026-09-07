@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,10 +14,22 @@ from factory.harness import delivery_policies
 from factory.machine import Blocked
 
 if TYPE_CHECKING:
+    from factory.registry import Project
     from factory.steps import Context
+    from factory.store import Run, Store
 
 
-def mount(ctx: Context) -> Path:
+@dataclass(frozen=True)
+class SnapshotContext:
+    """Local inputs for policy publication; no ticket or executing adapters needed."""
+
+    home: Path
+    project: Project
+    run: Run
+    store: Store
+
+
+def mount(ctx: Context | SnapshotContext) -> Path:
     return ctx.home / "state" / "authority" / ctx.project.name
 
 
@@ -29,7 +42,7 @@ def current(ctx: Context) -> Path | None:
 
 
 def snapshot(
-    ctx: Context, *, profile: str | None = None, replace: bool = False
+    ctx: Context | SnapshotContext, *, profile: str | None = None, replace: bool = False
 ) -> dict[str, Any] | None:
     existing = ctx.store.runtime.policy(ctx.run.id)
     if existing and not replace:

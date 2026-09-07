@@ -550,7 +550,7 @@ def create_app(
     async def settings_write(scope: str, owner: str, request: Request) -> HTMLResponse:
         from factory import operator_controls
 
-        reg, rt, st, ln = _cfg()
+        reg, _, st, _ = _cfg()
         form = _parse_form(await request.body())
         run = (
             st.run_by_ticket(owner.upper())
@@ -560,7 +560,8 @@ def create_app(
         try:
             if scope == "replace-policy":
                 from factory import authority
-                from factory.cli import _context_for
+                from factory.harness import load_harness_config
+                from factory.isolation import project_for_run
 
                 if run is None or run.state not in {
                     State.SUSPENDED,
@@ -574,8 +575,10 @@ def create_app(
                 if not st.acquire_lease(run.id, ttl_seconds=300):
                     raise Blocked("run-leased", "The run is owned by another process")
                 try:
-                    ctx = _context_for(home, reg, rt, st, ln, run)
-                    authority.snapshot(ctx, profile=form["profile"], replace=True)
+                    project = project_for_run(reg.resolve(run.linear_id), run, st)
+                    load_harness_config(project.path)
+                    snapshot_ctx = authority.SnapshotContext(home, project, run, st)
+                    authority.snapshot(snapshot_ctx, profile=form["profile"], replace=True)
                 finally:
                     st.release_lease(run.id)
             elif scope == "approve" and run:
