@@ -1,5 +1,30 @@
 # Runtime rollout
 
+## App-server selected — 2026-09-07
+
+James approved and applied app-server selection for new `factory-crud-verification`
+runs. Live store read-back confirms the exact validated compatibility directory;
+other operator settings, model routing and concurrency 1 are unchanged. Console
+HTTP 200. There were zero live disposable runs at confirmation, so this is selection
+verification rather than a completed live workload. Evidence and rollback are in the
+[current handoff](runtime-implementation-handoff.md) and
+`artifacts/runtime-live-app-server-selection/`. No further activation approval is
+pending. Observe actual approved use; do not complete CRUD tickets merely for rollout.
+
+
+## Live compatibility passed — 2026-09-07
+
+James approved the disposable project's credential acknowledgement; it is applied.
+All six compatibility checks pass on both live sandbox identities with the current
+worker and Codex CLI 0.146.0. Exact manifests and raw evidence are retained in
+`artifacts/runtime-live-sandbox-validation/`. Production adapter selection was
+rehearsed successfully in the separate validation store, not the live store.
+See [live acceptance](runtime-live-sandbox-acceptance.md) and the
+[current handoff](runtime-implementation-handoff.md) for the proposed selection command.
+App-server selection is the next operator decision; current models and concurrency 1
+remain unchanged. Earlier credential-blocked checkpoints below are superseded.
+
+
 ## Live sandbox checkpoint — 2026-09-07
 
 Factory #85 is merged. Both new live sandboxes were created with production

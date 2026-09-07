@@ -16,7 +16,117 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current resume — live credential preflight, 2026-09-07
+## Current resume — app-server selected, 2026-09-07
+
+James explicitly approved app-server selection for new `factory-crud-verification`
+runs. Applied the exact configure command below to `/Users/james/factory/state/factory.db`.
+Read-back confirms project setting revision 1, adapter `app-server`, and compatibility
+directory `/Users/james/factory/artifacts/runtime-live-sandbox-validation/compatibility`.
+Both exact runtime/worker manifests were revalidated immediately before selection.
+Other project/run settings are unchanged; existing model routing and concurrency 1
+are preserved. No migration or service restart was needed. Console HTTP 200.
+
+Evidence: `artifacts/runtime-live-app-server-selection/verified-selection.json` and
+`operator-settings-before.json`. A consistent SQLite online backup, integrity-checked
+and mode 0600, is retained there as `factory-before-selection.db`. Live writers were
+not stopped for this ordinary supported configuration update; no schema was changed.
+
+There were zero live disposable-project runs at read-back. This checkpoint proves
+activation configuration, not a completed live workload. Real sandbox compatibility
+is separately proven below. Existing attempts remain on their original adapter.
+FRO-12 remains parked in its isolated store; no ticket or readiness label changed.
+
+**Next:** James merges factory #87, which carries the approved credential registry
+change and these deployment records. The adapter selection is already applied; do
+not ask for it again or repeat activation. Observe actual approved use for failures,
+interventions and accounting metrics. Start or advance a disposable workload only
+for a specifically missing factory check; CRUD completion is not the objective.
+No additional implementation or compatibility experiment is currently required.
+
+Operator rollback, if requested: `uv run factory configure --project
+factory-crud-verification --agent-adapter codex-exec` from this repository. It affects
+new runs; existing run snapshots retain their selected adapter. Do not restore the
+whole database backup to undo this setting, since that would discard subsequent work.
+
+## Previous resume — live compatibility passed, 2026-09-07
+
+James explicitly approved the project-only credential acknowledgement. Applied to
+`factory-crud-verification` in `config/projects.toml`; other projects are unchanged.
+Production credential admission now passes on both live sandboxes, and full build
+preflight passes with the acknowledgement recorded as a warning. Earlier failures
+remain in the separate validation store as historical evidence. No validation run
+was inserted into the live store. Console reload picks up the approved registry edit.
+
+**All six compatibility checks now pass** for `factory-build-crud-live-20260907`
+and `factory-review-crud-live-20260907`, Codex CLI 0.146.0, worker SHA256
+`f2b3751989c9810250554ec4b35dfcb9eec07b00d11fc60b0a6f81e9168b93be`.
+Fresh evidence covers real hook refusal, schema-valid output, private clone/read-only
+mount isolation, detached holders under PID 1 for over 60 seconds, exit 143 on
+intentional interruption, same-thread recovery and invocation baseline subtraction,
+and raw usage/explicit compaction reset/Sol-to-Terra model change/thread resume.
+Git HEAD, status and diff remained unchanged in both targets. The reviewer filesystem
+refusal is independently observed through a deterministic sandbox write; model output
+alone is not credited. Natural 80% compaction and full ticket completion were not forced.
+
+Manifests: `artifacts/runtime-live-sandbox-validation/compatibility/`, one JSON named
+for each sandbox. Production `validate_compatibility` accepts both; production
+`configure` and `select` were rehearsed on the separate validation store for build
+and review and selected `AppServerAdapter`. Raw events, digest indexes, reports and
+probes remain under `artifacts/runtime-live-sandbox-validation/`; see
+[runtime-live-sandbox-acceptance.md](runtime-live-sandbox-acceptance.md).
+
+**Next:** present James this concrete adapter-selection command (not yet applied):
+
+```sh
+uv run factory configure --project factory-crud-verification --agent-adapter app-server --app-server-compatibility /Users/james/factory/artifacts/runtime-live-sandbox-validation/compatibility
+```
+
+It selects app-server for new disposable-project runs. Existing attempts retain
+legacy exec. Keep current model routing, explicit concurrency 1 and other controls.
+`proposed-live-settings.json` retains the exact two setting values. Credential
+acknowledgement approval is complete; do not ask for it again. Adapter selection
+remains a distinct operator decision. Do not repeat migration, finish CRUD tickets,
+resume FRO-12 or change other products. Longitudinal delivery metrics follow actual use.
+
+## Previous resume — credential source resolved, 2026-09-07
+
+James merged #86 as `31a087a9a01d1a9f68ef739244c4fe1436ab5f05` and asked to
+continue. The minimized `credential-loop.py` reproduces admission failure on both
+live identities, exit 1. Direct execution also sees the variable, while inspected
+shell startup files contain no reference. Read-only inspection through sandboxd's
+own Docker socket proves template `codex-pnpm:v1` has no declared credential env
+entries, but each live container configuration contains nonempty `GH_TOKEN`.
+The injection is at sandbox creation, not baked into the template. No supported
+`sbx create codex` flag omits it. The exact injection implementation is not audited.
+
+Both sandboxes' real `gh api user` calls fail with HTTP 401 and exit 1. This is
+stronger than the previous `gh auth status` message, but remains a point-in-time
+observation, not a guarantee that future proxy configuration cannot grant access.
+Only names, booleans and outcome classifications were retained, never values.
+
+Full deterministic build preflight passes toolchain, unset skip flag, proxy-secret
+policy, private clone isolation, vendor integrity and direct protection hook denial;
+only `no-capability-env` fails. Reviewer direct hook denial also passes. Vendor
+integrity does not check upstream freshness, and direct hook invocation does not
+prove model integration. No model or six-check compatibility sequence was started.
+
+Evidence remains `artifacts/runtime-live-sandbox-validation/`: `image-source.py`,
+`env-source.py`, `credential-loop.py`, `deterministic-checks.py`, sanitized source
+JSON and per-role `api-auth-classification.json`. Build `full-preflight.json`
+records the exact results. Existing code/configuration and live settings are unchanged.
+
+**Next decision:** review `proposed-acknowledgement.patch` in that directory. It
+adds only `acknowledged_env_credentials = ["GH_TOKEN"]` to the disposable project.
+It is **not applied** and requires James's explicit credential acknowledgement,
+as the preceding handoff stipulated. The setting permits this name on both project
+sandboxes and is not bound to their current token or HTTP 401 evidence; report that
+limit when requesting approval. If approved, apply it, rerun admission and finish
+the exact six compatibility checks before presenting app-server selection. If not,
+resolution requires a supported sbx change that omits creation-time injection.
+Do not infer exception approval from a documentation merge. The main objective
+remains factory validation; leave FRO-12 and the other products untouched.
+
+## Previous resume — live credential preflight, 2026-09-07
 
 James merged #85 as `335d3e2a47ef6c72ac5cbc8c074f3285da165ce9` and requested
 validation of the new live sandbox identities before app-server selection.
