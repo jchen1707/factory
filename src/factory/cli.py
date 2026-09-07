@@ -1078,8 +1078,10 @@ def _cancel_run(
     `-> cancelled` under `actor="human"` (the §18.5 control contract), stops the build
     sandbox, and restores the Linear tracker. Returns the lines it would print. A pushed
     branch is never deleted; a Linear outage does not fail the rollback."""
+    from factory.isolation import project_for_run
+
     ticket = run.linear_id
-    project = registry.projects[run.project]
+    project = project_for_run(registry.projects[run.project], run, store)
     paths = _worktree_paths(project, registry, run, ticket)
     lines: list[str] = []
 
