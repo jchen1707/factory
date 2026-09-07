@@ -1,5 +1,19 @@
 # Runtime rollout
 
+## Live sandbox checkpoint — 2026-09-07
+
+Factory #85 is merged. Both new live sandboxes were created with production
+specifications and live mount paths, using a separate validation store. Both fail
+credential admission: target-declared `GH_TOKEN` is nonempty and unacknowledged.
+Both report it invalid via `gh auth status`, despite exit 0; no value was retained.
+No disallowed proxy secret was reported. Codex CLI is 0.146.0 in both environments.
+
+Testing stopped before model execution; no compatibility manifest or app-server
+selection occurred. Resolve credential admission before full preflight and the six
+compatibility checks. See the current [handoff](runtime-implementation-handoff.md)
+and `artifacts/runtime-live-sandbox-validation/`. Existing models and concurrency 1
+remain unchanged. CRUD completion is not the objective.
+
 ## Current deployment checkpoint — after #84 merge
 
 Factory #84 merged as `f17ba61`. The timer and console are running and FRO routes to
