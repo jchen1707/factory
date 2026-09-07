@@ -21,6 +21,18 @@ print('ready', flush=True)
 sys.stdin.readline()
 if sys.argv[2] == 'agent':
     result = jobs.schedule_agent(sys.argv[3], usd_limit=10, max_attempts=2)
+elif sys.argv[2] == 'launch':
+    from factory.agent_launches import AgentLaunches
+    from factory.sandbox.base import RunHandle, RunStatus
+    class Sandbox:
+        def exec_detached(self, handle, script, env):
+            with (Path(sys.argv[1]).parent / 'spawns').open('a') as stream:
+                stream.write('spawn\\n')
+        def poll(self, handle):
+            return RunStatus.RUNNING
+    invocation = store.runtime.invocation(sys.argv[3])
+    handle = RunHandle(invocation['run_id'], 1, 'factory-build-race', '/work', Path(sys.argv[1]).parent / 'attempt')
+    result = AgentLaunches(store, Sandbox()).start(sys.argv[3], handle, 'script', {}, usd_limit=10, max_attempts=2)
 else:
     job = jobs.request_certification(sys.argv[3], {'sandbox': 'factory-build-race', 'generation': 'one'})
     result = [job['id'], jobs.claim_certification(job['id'], now=10, duration=30)]
@@ -84,4 +96,17 @@ def test_two_controllers_join_and_claim_one_certification(tmp_path: Path) -> Non
     assert isinstance(second, list)
     assert first[0] == second[0]
     assert sum(result[1] is not None for result in (first, second)) == 1
+    store.close()
+
+
+def test_two_controllers_launch_the_same_invocation_only_once(tmp_path: Path) -> None:
+    path = tmp_path / "factory.db"
+    store = Store(path)
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("builder", run.id, 1, "builder", {})
+    results = race(path, "launch", ["builder", "builder"])
+    assert results.count(True) == 1
+    assert results.count(False) == 1
+    assert (tmp_path / "spawns").read_text().splitlines() == ["spawn"]
+    assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
     store.close()

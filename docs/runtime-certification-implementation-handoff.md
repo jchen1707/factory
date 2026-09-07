@@ -172,3 +172,59 @@ implementation worktree: PASS, all four gates exit 0, empty output tails, none s
 Mypy includes the new production/test paths. The first run failed three test-style lint
 checks; those were corrected. Overall plan status remains implementing; this checkpoint
 does not complete Step 3 or the full feature.
+
+## Durable launch follow-up checkpoint
+
+`AgentLaunches` now owns a bounded paid-launch operation over `RuntimeJobs` and the existing
+sandbox adapter. It atomically reserves capacity, consumes exact invocation approval and writes
+an effects-ledger intent before calling the adapter. An immutable contract records the handle,
+parent identity, script digest and environment digest (not environment values). Only the winning
+controller calls `exec_detached`; an existing intent returns False and must be observed, never
+interpreted as permission for a retry. An adapter exception retains intent and capacity because
+spawn may already have succeeded. An older bare reservation without an intent is refused as
+ambiguous, not adopted as fresh launch permission.
+
+`RuntimeState.transaction` supports nested savepoints so reservation and intent commit together.
+`AgentLaunches.start` refuses an enclosing transaction: no adapter call can precede the outer
+commit. A storage-failure regression proves approval/capacity/effect rollback together. Existing
+launch directories cannot be assigned to another invocation; unrecorded exit/heartbeat/holder/
+process-group evidence refuses a new launch without deleting anything.
+
+`observe` recovers the stored handle. `reconcile` collects terminal usage through an idempotent
+control-plane callback before freeing a slot; collection failure retains capacity. Running and
+orphaned/ambiguous observations do not release it. Active descendants still prevent parent
+finalization. This is intentionally not a complete orphan recovery policy: an intent with no
+conclusive terminal evidence remains held, and targeted recovery must be implemented before
+claiming automatic recovery parity.
+
+Focused tests: 49 pass across agent launches, runtime jobs and real SQLite controller races.
+The new process race invokes the launch service from two independent controllers and records
+one sandbox-boundary spawn. Lost acknowledgement, store reopen, stale evidence, immutable
+contract, reservation replay and atomic rollback have regressions. These use a fake sandbox
+boundary, not a real model/VM compatibility measurement.
+
+Two-axis review found a stale-evidence gap and a bare-reservation admission bypass; both were
+reproduced and fixed before final verification. Standards review found no hard violations. Its
+nonblocking concern remains: directory ownership scans historical launch effects under the
+write transaction. Add an indexed canonical ownership representation before broad rollout;
+any DDL change requires a fresh copy-only migration rehearsal.
+
+Next work remains application integration, not a repeat of these tests: wire this operation
+into builder, execution-brief/diagnosis and reviewer launch sites together with durable queued
+requests and exact invocation approval display. Existing `execution.guard` uses legacy
+attempt/group keys and advances launch counters before preparation; simply replacing
+`exec_detached` would mishandle approval/capacity waits and controller restarts. Preserve those
+legacy approvals while making new pending invocations recoverable without incrementing again.
+Connect terminal collectors and targeted orphan/subtree recovery before releasing capacity.
+Then implement the certification service and child broker/integration from Steps 4–8.
+
+No workflow launch site calls `AgentLaunches` yet. Overall Step 3 and the full feature remain
+unfinished. No live service/settings/database, schema DDL, sandbox, shared source or consumer
+pins changed in this checkpoint. This turn adds source and isolated test evidence only.
+
+Final canonical gate evidence: `artifacts/runtime-launches/gates-final.json` in this worktree.
+PASS: Ruff check, Ruff format --check, mypy and pytest all exit 0, empty output tails, none
+skipped. New source/tests are within configured mypy coverage. The pytest caveat applies:
+fake sandbox tests establish controller behavior, not real runtime compatibility. Spec reviewer
+re-ran the bare-reservation reproduction after the fix and confirmed no launch; both findings
+are resolved. No full-feature acceptance claim is made.

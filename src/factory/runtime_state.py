@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -32,13 +33,18 @@ class RuntimeState:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        self.db.execute("BEGIN IMMEDIATE")
+        # Nested reservations belong to the outer launch-intent transaction. A
+        # savepoint may roll back its work, but must never commit the outer intent.
+        savepoint = f"runtime_{uuid.uuid4().hex}" if self.db.in_transaction else None
+        self.db.execute(f"SAVEPOINT {savepoint}" if savepoint else "BEGIN IMMEDIATE")
         try:
             yield
         except BaseException:
-            self.db.execute("ROLLBACK")
+            self.db.execute(f"ROLLBACK TO {savepoint}" if savepoint else "ROLLBACK")
+            if savepoint:
+                self.db.execute(f"RELEASE {savepoint}")
             raise
-        self.db.execute("COMMIT")
+        self.db.execute(f"RELEASE {savepoint}" if savepoint else "COMMIT")
 
     def settings(self, scope: str, owner: str) -> dict[str, Any]:
         row = self.db.execute(
