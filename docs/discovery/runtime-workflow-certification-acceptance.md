@@ -95,3 +95,66 @@ and zero leases, asserts a clean target, and stops only the two owned workflow V
 The independent reviewer **workflow** matrix remains unfinished even though the prior
 adapter/service reviewer six-check fixture passed. Child execution/integration also remains
 unfinished. The result is a builder/recovery checkpoint, not full feature completion.
+
+## Independent reviewer and pricing replay continuation
+
+Continued from factory 1363fc9. `workflow-drive.py review` used twelve independent
+controller ticks and one stable job, `128af452f95745dfbe4273503e7f7782`. All nine phases
+and six checks passed on the existing workflow reviewer generation. No sibling certificate
+was reused. Evidence remains under the isolated home's `state/certifications/JOB`.
+
+`workflow-review.py queue` explicitly seeded verifying/reviewing boundaries after the
+no-change builder recovery, reserved one synthetic capacity slot, then invoked actual
+`review.start`. The prepared standards invocation queued with no paid spawn. The first
+fixture attempted an illegal implementing→reviewing transition; Store correctly refused it.
+The fixture uses the two legal edges, explicitly labelled synthetic, instead. This does
+not establish that the verify step ran during this continuation.
+
+`workflow-review.py resume` ran in another controller, released only that fixture slot,
+and exercised actual `workflow_launches.resume`. Changed host certificate evidence and
+changed immutable authority bytes each refused before a launch intent. Exact restoration
+launched the original invocation once. Subsequent `collect` calls used production collection
+and next-axis admission. Standards and Spec each exited zero; the standard review returned
+a high finding for the fixture's missing checklist. The final collector raised review-finding,
+as designed. `workflow-review-result.py` retains both invocation records and the hold in
+`review-result.json`. No finding was dismissed or repaired to manufacture a green ticket.
+The direct collector raised the hold; no driver tracker/block write or PR delivery ran.
+
+Accounting diagnosis found two distinct gaps. Four early estimates lacked a price table at
+first collection; the collector's equal-sequence deduplication prevented later repricing.
+The usage measurement worker also deliberately emits requests=[] and pricing_complete=false
+for all six usage stages. Interrupted canaries lack terminal completeness. These are not
+reasons to invent request attribution or account charges.
+
+The pricing fix retains a SHA256 of valid event lines alongside telemetry. Equal-sequence
+replay may refresh only derived estimates when that digest and all other observation fields
+match. The persistence transaction prevents observation races; shorter or altered streams
+cannot replace retained data. Old telemetry without a digest is deliberately ineligible for
+this automatic refresh. An explicit trusted-evidence rebuild is a separate operation.
+
+Regression tests reproduced missing-price replay before the fix. Spec review additionally
+found that aggregate-usage equality did not establish identical request evidence: changing
+only long_context changed USD 0.0032 to 0.0058. That second regression failed before the digest
+and passes afterward. Both accounting test files pass (12 tests), including nested-accounting
+incompleteness and stale/duplicate replay. Standards and final spec reviews clear.
+
+`accounting-retained-replay.py` created a fresh isolated store and replayed the original 21
+invocation logs without prices, then with the existing dated price file, then again. Final
+`accounting-replay-final/result.json` proves unchanged raw evidence/usage, idempotent totals,
+7 complete and 14 incomplete estimates, known API-equivalent USD 0.2268688. This is a controlled
+rebuild, not an automatic migration of old undigested rows. An earlier development replay
+updated four estimates in the disposable workflow store before the digest guard was added;
+raw logs were unchanged. That intermediate result is not evidence that final code refreshes
+legacy rows automatically. Both replay stores are retained, and setup refuses their reuse.
+
+`workflow-stop.py` checked clean candidate bytes, reconciled all 32 workflow invocations,
+asserted zero active leases, and stopped only the owned build/review VMs. Current known
+API-equivalent lower bound USD 0.5031968; 21 estimates remain incomplete. This includes failed
+fixtures/probes and both reviewers. Live services, schema, settings and consumer pins remain
+unchanged. The synthetic review finding needs no resolution to finish this acceptance slice.
+
+Final canonical report: `artifacts/runtime-workflow-real/gates-review-pricing-final.json`,
+PASS, no skips: Ruff check exit0/39ms, format exit0/42ms, mypy exit0/432ms, pytest
+exit0/132645ms. Every output tail empty. Changed paths are covered by mypy. The fake-sandbox
+caveat applies to the suite; real measurements are separately retained above. No production
+source changed after the final report.

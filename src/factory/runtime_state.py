@@ -120,6 +120,24 @@ class RuntimeState:
             == 1
         )
 
+    def refresh_pricing(self, invocation_id: str, sequence: int, telemetry: dict[str, Any]) -> None:
+        """Reprice identical retained observations without advancing their event sequence."""
+        pricing_keys = {"estimate", "parent_estimate"}
+        with self.transaction():
+            current = self.invocation(invocation_id)
+            if current is None or current["sequence"] != sequence or not current["telemetry"]:
+                return
+            retained = current["telemetry"]
+            if {k: v for k, v in retained.items() if k not in pricing_keys} != {
+                k: v for k, v in telemetry.items() if k not in pricing_keys
+            }:
+                return
+            if retained != telemetry:
+                self.db.execute(
+                    "UPDATE invocations SET telemetry=?,updated_at=? WHERE id=? AND sequence=?",
+                    (json.dumps(telemetry), time.time(), invocation_id, sequence),
+                )
+
     def policy(self, run_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
             "SELECT revision,payload FROM policy_snapshots WHERE run_id=? "

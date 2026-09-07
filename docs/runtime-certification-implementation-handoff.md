@@ -5,7 +5,7 @@ Status: implementation in progress; feature is not complete.
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
 launch enforcement are implemented in the isolated worktree. Final disposable build/reviewer six-check
 acceptance now PASSES; full workflow/child acceptance and rollout remain incomplete. See
-**Workflow authority and admission checkpoint** at the end; earlier sections are historical.
+**Independent reviewer and pricing checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -884,3 +884,66 @@ Exact next steps:
 
 See `docs/discovery/runtime-workflow-certification-acceptance.md` for reproducible commands,
 red/green evidence and limitations. This checkpoint is the commit containing this section.
+
+## Independent reviewer and pricing checkpoint
+
+Continued from 1363fc9. Main objective remains factory feature validation with synthetic
+workloads, not ticket hardening/completion. No customer, Backend/nemoclaw, tracker/forge,
+live service/configuration, migration or consumer-sync work occurred. Shared e3fc8ad unchanged.
+
+Completed:
+- Fresh production Context reviewer certification: job 128af452f95745dfbe4273503e7f7782,
+  twelve independent controller ticks, all nine phases/six checks, same exact generation.
+- Actual review.start queued on a synthetic occupied slot without paid spawn. A new controller
+  resumed the same prepared invocation. Tampered certificate and authority bytes refused
+  before intent; exact restoration launched once. Standards and Spec each exited0; final
+  collector raised review-finding for a missing synthetic checklist. Preserve that finding;
+  do NOT harden the fixture or drive it to delivery. No real verify transition or tracker block
+  is claimed: boundaries were explicitly synthetic; direct collector returned the human hold.
+- Fixed equal-sequence accounting replay ignoring newly available dated prices. Stored valid-event
+  digest plus unchanged observations now permit pricing-only refresh in a transaction. Unknown
+  legacy digest, altered request evidence and shorter streams refuse refresh. Two observed RED
+  regressions (missing price; same-length changed request context band) now pass; 12 focused tests.
+- Controlled fresh-store replay of original 21 real logs:7 complete / 14 incomplete, known
+  API-equivalent USD 0.2268688, unchanged usage/raw files and idempotent replay. Final evidence:
+  artifacts/runtime-workflow-real/accounting-replay-final/result.json. Original undigested rows
+  are not automatically rebuilt by final code. During development four disposable estimates
+  were refreshed before the digest guard; retained raw files prove their inputs, but do not
+  mistake that for supported automatic legacy backfill.
+- Both workflow VMs STOPPED, original generations unchanged, target clean, zero active leases.
+  stopped-checkpoint.json:32 invocations, known lower bound USD 0.5031968,21 incomplete estimates.
+  No account-charge or whole-run completeness claim. Older service VMs remain stopped.
+
+Evidence/commands: artifacts/runtime-certification-service/workflow-review.py queue|resume|collect,
+workflow-review-result.py, accounting-retained-replay.py, workflow-stop.py. Existing fixtures
+are already terminal: do not rerun queue/resume/setup, and collect has no incomplete axis now.
+review-queued.json, review-launch.json and review-result.json retain exact assertions. The
+isolated run remains reviewing after direct collector refusal, with a complete review plan;
+no agent is running. See discovery/runtime-workflow-certification-acceptance.md for limitations.
+
+Exact next work:
+1. Complete request-level pricing in agent/certification_usage_worker.py. Its six usage stages
+   currently emit requests=[]/pricing_complete=false even when usage deltas are known. Reuse
+   measured app_server_worker request attribution where valid; retain explicit incompleteness
+   for compaction/unknown scope/interruption. Add RED tests at the approved accounting seam,
+   then recertify changed probe implementation in disposable identities. Never turn latest or
+   cumulative totals into invented request prices. Legacy undigested records need a separately
+   explicit trusted-evidence rebuild; final equal-sequence refresh intentionally does not guess.
+2. Remaining prepared-launch environment/generation refusal matrix and the old transient spec
+   digest change remain open. New reviewer job was stable, but that does not explain the old
+   build transient. Existing builder/recovery/reviewer launch, evidence/authority refusals and
+   first-paid-admission race now have actual coverage; don't repeat full tickets for these.
+3. Complete child broker/execution/accounting, targeted cancellation/subtree recovery, isolated
+   writable children/safe serialized integration, remaining controls and real acceptance matrix.
+4. Prepare matching full runtime package/template, shared merge/exact consumer sync and rollout.
+   Binary-only Astra measurements don't authorize the bundled launcher in production. James
+   owns merge, live schema5→6 approval, deployment and activation. No activation this turn.
+
+Plans remain untracked/implementing. This checkpoint is the commit containing this section.
+
+Final verification: artifacts/runtime-workflow-real/gates-review-pricing-final.json PASS.
+Ruff check exit0 (39ms), format exit0 (42ms), mypy exit0 (432ms), pytest exit0 (132645ms),
+all output tails empty, no skips. Changed paths are in mypy coverage; fake-sandbox suite
+limitations apply, with separate real reviewer evidence above. No production source changed
+after this report. Standards review clear; spec review's evidence-identity finding fixed and
+re-review clear. No push or PR opened.

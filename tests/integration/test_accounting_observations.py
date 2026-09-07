@@ -135,3 +135,69 @@ def test_compaction_without_valid_turn_identity_cannot_restore_context(
     assert telemetry["context"]["tokens"] is None
     assert "compaction" in telemetry["context"]["unavailable"]
     assert telemetry["thread_total"]["input_tokens"] == 910
+
+
+def test_retained_requests_can_be_priced_when_price_book_arrives(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    price_path = ctx.home / "config/prices.toml"
+    price_path.write_text("")
+    rows = [
+        {
+            "type": "factory.usage",
+            "usage": {"input_tokens": 1000, "output_tokens": 100},
+            "complete": True,
+            "thread_total": {"inputTokens": 1000},
+            "pricing_complete": True,
+            "requests": [
+                {
+                    "model": "gpt-5.6-terra",
+                    "usage": {"input_tokens": 1000, "output_tokens": 100},
+                    "observed_at": 1788756749,
+                    "service_tier": "standard",
+                    "long_context": False,
+                }
+            ],
+        }
+    ]
+    initial = collect(ctx, monkeypatch, rows)
+    assert initial["estimate"]["complete"] is False
+    price_path.write_text((Path(__file__).parents[2] / "config/prices.toml").read_text())
+    priced = collect(ctx, monkeypatch, rows)
+    assert priced["estimate"]["complete"] is True
+    assert ctx.store.known_spend(ctx.run.id) == pytest.approx(0.0032)
+    assert {k: v for k, v in priced.items() if k != "estimate"} == {
+        k: v for k, v in initial.items() if k != "estimate"
+    }
+    assert collect(ctx, monkeypatch, rows) == priced
+    assert collect(ctx, monkeypatch, []) == priced
+    assert ctx.store.known_spend(ctx.run.id) == pytest.approx(0.0032)
+
+
+def test_repricing_refuses_changed_request_evidence_at_same_sequence(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (ctx.home / "config/prices.toml").write_text(
+        (Path(__file__).parents[2] / "config/prices.toml").read_text()
+    )
+    request = {
+        "model": "gpt-5.6-terra",
+        "usage": {"input_tokens": 1000, "output_tokens": 100},
+        "observed_at": 1788756749,
+        "service_tier": "standard",
+        "long_context": False,
+    }
+    rows = [
+        {
+            "type": "factory.usage",
+            "usage": request["usage"],
+            "complete": True,
+            "thread_total": {"inputTokens": 1000},
+            "pricing_complete": True,
+            "requests": [request],
+        }
+    ]
+    priced = collect(ctx, monkeypatch, rows)
+    request["long_context"] = True
+    assert collect(ctx, monkeypatch, rows) == priced
+    assert ctx.store.known_spend(ctx.run.id) == pytest.approx(0.0032)

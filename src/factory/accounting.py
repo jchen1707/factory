@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -95,6 +96,7 @@ def collect_invocation(store: Store, home: Path, invocation_id: str, events: Pat
         valid.append(line)
     transcript = parse_events("\n".join(valid))
     payload: dict[str, Any] = {
+        "evidence_sha256": hashlib.sha256("\n".join(valid).encode()).hexdigest(),
         "thread_id": transcript.session_id,
         "usage": asdict(transcript.usage),
         "context": {"unavailable": "legacy exec has no current-window measurement"},
@@ -176,7 +178,8 @@ def collect_invocation(store: Store, home: Path, invocation_id: str, events: Pat
                 "usd": None,
                 "reason": reason,
             }
-    store.runtime.observe(invocation_id, len(valid), payload)
+    if not store.runtime.observe(invocation_id, len(valid), payload):
+        store.runtime.refresh_pricing(invocation_id, len(valid), payload)
     # Reconcile even a duplicate observation: a process may have died after the
     # telemetry commit and before its cost update. Never regress to an older payload.
     retained = store.runtime.invocation(invocation_id)
