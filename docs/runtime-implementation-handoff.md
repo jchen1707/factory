@@ -16,6 +16,42 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
+## Latest checkpoint — merged #33 consumer refresh, 2026-09-07
+
+James merged harness #33 as `8bc104e33e89a325f3db925f215c5742d7a957bb`.
+Factory now vendors that exact merged source in commit `12f7b4e` on
+`ops/runtime-validation`, through factory PR #83. Canonical sync changed only the
+manifest and approved diagnosis evidence-identity wording; no vendor file was hand-edited.
+All four factory gates pass after refresh (exit 0, empty output tails), and canonical
+integrity/freshness pass. Evidence: `artifacts/runtime-consumer-refresh-33/`.
+Mypy covers configured paths; fixture tests establish control-plane logic. The real
+runtime evidence below remains separately scoped; worker bytes are unchanged.
+
+Python #77 (`d105212ec814b1ab927897fa0a19a0650c660be1`), frontend #55
+(`17b6629b7b0ad6eaae00af0b320d9b757657d64c`) and draft CRUD #1
+(`9a6ef079`) are refreshed to the same exact merged source. Both stack source/generated
+default gates and all remote checks pass; CRUD passes all ten gates, schema checks and
+remote freshness. See
+[consumer refresh evidence](runtime-merged-consumer-refresh.md) for checks and limits.
+
+**Next:** James merges the refreshed stack PRs after their green checks. Then update
+harness gitlinks to the exact merged stack commits and require
+`check_submodules.py --pins --current`; publish that pin update for James. Harness
+post-merge Meta run `34089401107` currently fails on the two stale stack gitlinks,
+confirmed by its retained log. Do not waive the check or pin unmerged stack branches.
+Factory #83 still requires James's merge; it has no reported remote checks.
+
+Production activation, live concurrency changes and writer restart remain James's
+separate decision on concrete settings after the merge sequence. Validate any different
+deployment sandbox/runtime before selecting the app-server adapter: scratch manifests
+are limited to their recorded identities. No activation or production configuration
+change occurred. Schema 4→5 is already applied; do not repeat it.
+
+FRO-12 remains parked; CRUD completion and CORS hardening are not next steps. No
+tracker write, sandbox start or existing-product work occurred. The two pre-existing
+untracked frontend/nemoclaw reports remain untouched. Resume the merge/pin sequence,
+not test-ticket completion or repeated acceptance experiments.
+
 ## Current continuation — supported rollout validation, 2026-09-07
 
 **The supported rollout scope is validated, with the runtime and historical-data
@@ -91,9 +127,8 @@ platform combination or an adequate delivery-improvement cohort merely to repeat
 already established contracts. Longer-term comparative delivery metrics remain future
 observation; current zero-accepted-change metrics must stay honest.
 
-Harness #33 remains open at `36bb716…` with all reported checks passing. James owns
-that merge. After it merges, sync consumers from the exact merged SHA, update existing
-open consumer PRs, and require their checks. After James merges the stack PRs, update
+James merged harness #33 as `8bc104e33e89a325f3db925f215c5742d7a957bb`.
+The consumer refresh status is recorded in the newer checkpoint above. After James merges the stack PRs, update
 shared gitlinks to the exact merged stack commits and require pin/current checks.
 Production activation, live concurrency changes and writer restart remain James's
 explicit decision after reviewing concrete settings. None occurred in this continuation.

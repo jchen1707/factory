@@ -1,5 +1,46 @@
 # Merged shared-source consumer refresh
 
+## Harness #33 follow-up — 2026-09-07
+
+James merged #33 as `8bc104e33e89a325f3db925f215c5742d7a957bb`. The current
+refresh uses that exact merged source through `scripts/vendor_sync.py`. The generated
+change is the manifest plus the approved diagnosis evidence-identity contract.
+No worker code, production setting or existing run authority changes.
+
+Evidence is retained under `artifacts/runtime-consumer-refresh-33/`. Harness merged-v2
+generation passes. Meta run `34089401107` fails because both existing stack gitlinks
+still point to consumers with stale layer-A pins; the retained failure log names
+exactly those two currency errors. After James merges the refreshed stack PRs, update
+the gitlinks to the exact merged stack commits and require
+`check_submodules.py --pins --current`. Do not pin unmerged branches or waive currency.
+
+Factory PR #83 now includes sync commit `12f7b4e`. All four declared gates ran and
+passed, exit 0 with empty output tails (`factory-gates.json`); integrity and freshness
+pass. Mypy retains its configured-path limit and pytest establishes fixture-backed
+control-plane behavior, not new runtime measurements. The worker hash is unchanged.
+
+Python [#77](https://github.com/jchen1707/python-harness/pull/77) is at
+`d105212ec814b1ab927897fa0a19a0650c660be1`; frontend
+[#55](https://github.com/jchen1707/frontend-harness/pull/55) is at
+`17b6629b7b0ad6eaae00af0b320d9b757657d64c`. Both source and generated-main default
+gates and post-commit freshness pass, with clean worktrees. All remote checks pass:
+Python Linux/Windows, generation, freshness and integration; frontend Linux/Windows,
+generation, freshness, PR body, e2e and Lighthouse. Conditional integration/browser
+gates were not asserted locally for this instruction-only diff; remote job results
+are recorded separately. Evidence: `source-stacks/python/summary.json` and
+`source-stacks/frontend/report.md` under the new artifact directory.
+
+Disposable draft [#1](https://github.com/jchen1707/factory-crud-verification/pull/1)
+is at `9a6ef079`. All ten declared API/web gates, three config schema checks, local
+freshness and remote freshness CI pass. Evidence: `crud/`. Only the isolated draft
+consumer's generated content changed; its product main and FRO-12's candidate,
+worktree, frozen authority and blocked state were untouched.
+
+All refresh PRs remain for James to merge. No tracker write, sandbox start, migration,
+production setting change or activation occurred in this continuation.
+
+## Previous harness #32 refresh (historical)
+
 James merged harness PR #32 as `f7917ce3a66f916109c5c2d621d4b621bc6fca87`.
 All refreshes in this continuation use that exact committed source through
 `scripts/vendor_sync.py`; no generated vendor file was edited manually.

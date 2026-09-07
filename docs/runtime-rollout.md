@@ -10,9 +10,10 @@ finishing FRO-12–15 is necessary only if it enables another missing factory ch
 Use targeted isolated experiments for the remaining gaps instead of making the whole
 CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
 
-James merged harness #32 as `f7917ce`. Factory, CRUD draft #1, Python #77 and
-frontend #55 now vendor that exact source; local required gates and available remote
-consumer checks pass. Stack merges followed by shared submodule-pin updates remain;
+James merged harness #33 as `8bc104e33`. Factory, CRUD draft #1, Python #77 and
+frontend #55 now vendor that exact source through canonical sync. Current checks and
+exact consumer commits are recorded in the handoff and refresh evidence. Stack merges
+followed by shared submodule-pin updates remain;
 the merged harness Meta currency check must then pass. See
 [consumer refresh evidence](runtime-merged-consumer-refresh.md). Factory #83 has no
 remote workflows/checks; local gate evidence is not remote green CI.
