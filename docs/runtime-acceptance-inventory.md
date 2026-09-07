@@ -1,5 +1,14 @@
 # Runtime acceptance inventory
 
+Final continuation checkpoint: FRO-12 completed implementation and all ten independent
+gates, followed by all eight review axes. It is blocked on one reproduced high CORS
+finding; seven axes returned no findings. See
+[the final review evidence](runtime-crud-review-findings.md) and the current handoff.
+One runtime-capacity failure was retried through supported recovery without rerunning
+completed axes, with failed and retry invocations retained separately. Both CRUD
+sandboxes are stopped and run mode is Approval. This adds real review/recovery evidence
+but does not establish an accepted change, complete accounting, or full workflow acceptance.
+
 Read-only evidence audit, 2026-09-07 UTC, against the current completion matrix in
 [runtime-rollout.md](runtime-rollout.md). This is an inventory, not an activation
 approval or a fresh test report. It covers existing retained artifacts and test
@@ -12,7 +21,90 @@ measurements exist. Their scope does not establish the complete ticket lifecycle
 Existing products and tickets remain excluded; only the disposable CRUD workload may
 receive new live verification actions. Production writers stay stopped.
 
-## Evidence map
+## Subsequent measured progress — 2026-09-07 UTC
+
+This section supersedes corresponding open items in the audit-start table below.
+
+- **Readiness and supported recovery now have real workflow evidence.**
+  [The recovery report](runtime-crud-recovery-acceptance.md) records recollection of
+  completed readiness without another planner, the implementation approval hold,
+  and explicit launch. Actual `factory suspend` and `factory resume` preserved HEAD,
+  branch, tracked diff and every untracked file digest, then resumed the original
+  Codex session in attempt 2. This proves preserved committed base and dirty work;
+  no new builder commit existed at the suspension boundary. Unapproved resume
+  prevented launch but exposed a presentation exception; its correction has six
+  regressions and full gates, and was not induced a second time live.
+- **Exact build compatibility now passes.**
+  [The build report](runtime-crud-build-acceptance.md) records all six checks for
+  `factory-build-crud-20260907`, independently of the reviewer manifest. Both
+  operator-owned manifests are in `artifacts/crud-runtime-test/compatibility/`.
+  FRO-12 remains a legacy exec run; this does not claim app-server factory delivery.
+- **Installed dependencies are measured in both simultaneous layouts.**
+  [The follow-up](runtime-isolation-installed-dependencies-2026-09-07.md) installed
+  actual `idna` versions 3.10 and 3.11 in independent real virtualenvs, exercised
+  their encoder, and retained distinct versions through targeted cancellation and
+  restart. This closes the earlier injected-module limitation. These remain
+  adapter-level workers, not two complete factory workflows or the entire CRUD
+  dependency graph.
+- **Composition acceptance covers all default presets and every declared optional
+  component in selected combinations.** [The composition report](runtime-composition-acceptance-2026-09-07.md)
+  records seven successful installs and 32 actually passing gates plus two refused
+  browser/provider conflicts. It binds exact source/catalog inputs. This is host
+  installation and scaffold behavior, not service/provider integration, Linux-native
+  compatibility or every possible combination.
+- **Actual accounting replay is idempotent within the measured scope.**
+  `artifacts/crud-runtime-test/captured-accounting.json` records production
+  `accounting.collect` replaying real planner events three times into a SQLite backup:
+  one cost row, unchanged 1,415,348 input / 21,012 output / 1,306,496 cached tokens.
+  USD correctly remains unknown because request-level tier/context pricing is absent.
+  Row timestamps refresh; amounts do not. This is legacy aggregate evidence, not
+  app-server pricing or proof of child-agent attribution.
+- **Metrics now have retained real-outcome evidence.** The same backup report yields
+  three runs, zero accepted changes, three interventions and three runs with incomplete
+  cost. Estimated USD per accepted change is null. No delivery-improvement claim is
+  supported by this cohort.
+- **Read-only console rendering succeeds on real isolated data.** Production
+  `create_app` ASGI TestClient returned 200 for `/`, `/projects`, and
+  `/settings/runs/FRO-12`; `console-captured-state.json` and `console-*.html` retain
+  results. Settings render model and incomplete cost. No fake adapters were injected,
+  but this is not browser interaction or live control acceptance.
+- **Corrections are published for James.** [Factory PR #83](https://github.com/jchen1707/factory/pull/83)
+  contains recovery, test-design, accounting-role and monorepo red-phase fixes;
+  `factory-gates-resume-holds.json` records all four gates after the approval-hold
+  correction. [Harness PR #32](https://github.com/jchen1707/harness/pull/32) and
+  draft [CRUD contract PR #1](https://github.com/jchen1707/factory-crud-verification/pull/1)
+  await James; consumer remote freshness depends on shared-source merge. Thus the
+  audit-start monorepo limitations below are now corrected in source, with final
+  real replay and source/consumer rollout still distinct acceptance obligations.
+
+## Nested builder collaboration: remaining accounting evidence
+
+A read-only inspection of FRO-12 attempt 2 `events.jsonl` observed builder messages
+claiming delegation to two reviewers through the code-review skill, followed by
+`collab_tool_call` wait events (items 46 and 48). Those retained events have an empty
+`receiver_thread_ids` list, empty `agents_states`, and no model, effort or usage fields.
+They establish a collaboration-tool interaction and the builder's claim of delegation;
+they do not independently establish child launches, child count or completed reviews.
+The run was still active when inspected, so this is a partial transcript observation.
+
+`agent/codex.py::parse_events` sums usage from top-level `turn.completed` events and
+retains the parent `thread.started` identity. It does not normalize collaboration
+items. `accounting.begin` creates a record for each factory-scheduled invocation,
+using the scheduled role's model/effort/preset; `accounting.collect` reconciles that
+invocation from its transcript. Neither path creates child invocation records from
+`collab_tool_call` events. The original wire events remain retained on disk.
+
+Consequently the current evidence does **not** establish whether the parent's usage
+includes, excludes or partially includes nested agents. It also cannot attribute
+nested usage to actual child model/effort/preset or show a separate approval/budget
+check before a nested launch. Do not count the claimed self-review as the factory's
+independent reviewer stage or fabricate child usage. Resolve this acceptance gap with
+actual supported child-lifecycle/usage evidence and explicit aggregation semantics;
+if the executing runtime cannot provide that evidence, record the limitation visibly
+and decide the supported orchestration behavior before claiming accounting for every
+model invocation. No source fix or live action was made by this audit.
+
+## Audit-start evidence map (superseded above where stated)
 
 | Requirement | Concrete evidence already retained | Precise remaining acceptance |
 | --- | --- | --- |
@@ -36,7 +128,7 @@ Test filenames above are under `tests/unit/` or `tests/integration/` as appropri
 Artifact paths are local retained operational evidence, not automatically suitable for
 publication; do not publish raw private transcripts.
 
-## Highest-priority concrete gaps beyond recovery and test design
+## Audit-start priorities (source fixes and new evidence noted above)
 
 1. **The disposable monorepo cannot currently obtain factory red-phase replay evidence.**
    `steps/redphase.py:124` returns `unavailable` and proceeds if root configuration

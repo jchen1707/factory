@@ -2,9 +2,55 @@
 
 ## Continued validation — 2026-09-07 UTC
 
-Latest operational state: FRO-12 run `47515078d97246e9` is **implementing,
-attempt 2**, after a real supported suspend/resume acceptance check. Original
-session `01a079c0-a16b-7ff3-b80a-82cb727dd3ba` was resumed; exact branch, HEAD,
+Latest operational state: FRO-12 run `47515078d97246e9` is **blocked /
+review-finding, attempt 2**, with all eight review axes complete. Seven returned no
+findings; standards returned the single high-severity CORS finding documented below.
+Run mode has been restored to **Approval**. Both CRUD sandboxes are stopped and their
+final inspections are retained. No model or targeted driver remains running.
+`artifacts/crud-runtime-test/handoff-state.json` records the final state, every review
+result and invocation, and evaluation output (zero accepted changes; costs incomplete).
+The candidate is additionally preserved in verified complete-history Git bundle
+`fro12-candidate-b635ade.bundle`; do not cancel or delete its branch/worktree.
+
+Next decisions/actions:
+
+1. James must disposition the reproduced CORS finding. Proposed fix: allow the
+   documented localhost frontend origin and test that exact preflight. The factory
+   must not dismiss the finding or implement a review-driven fix before that decision.
+2. Merge corrective [factory #83](https://github.com/jchen1707/factory/pull/83) and
+   [harness #32](https://github.com/jchen1707/harness/pull/32). The generated
+   [CRUD #1](https://github.com/jchen1707/factory-crud-verification/pull/1) is a draft
+   dependency PR: after the shared merge, check the exact merged SHA, regenerate if
+   necessary, confirm freshness, and prepare it for James to merge.
+3. After consumer merge, explicitly refresh the run's authority through the supported
+   operator control and renew affected verification/review evidence. Preserve the
+   implementation branch and account for the updated integration base. If James
+   approves the CORS repair, resume through the supported fresh implementation path
+   and approve its reported next-attempt key; do not fake a verifier failure or edit DB.
+4. Complete FRO-12 delivery/review and James's merge before starting dependent CRUD
+   tickets. Continue the acceptance inventory, including actual test-design execution,
+   monorepo replay, app-server workflow, diagnosis limits, and full concurrent runs.
+   Nested collaboration usage attribution remains unknown; never claim it complete.
+   Production activation remains a later explicit decision, not the next automatic step.
+
+Implementation commit `b635ade17a03b7adf3999b676244be8719bf7d89`
+was collected and all ten independent API/web gates ran and passed. Review approval
+`2:review:1` was exercised; the run alone was then explicitly switched to Automatic
+mode (`run-automatic.json`) to continue its remaining reviews. Project defaults and
+production settings are unchanged. Standards reported a high CORS finding, reproduced
+by the operator; spec returned no findings. See
+[the finding and reproduction](runtime-crud-review-findings.md). James must decide
+the finding; the candidate has not been changed to dismiss or fix it.
+
+Security review launch 3 failed with the runtime message "Selected model is at
+capacity." Supported `factory resume FRO-12 --from reviewing` launched only the
+incomplete security axis as launch 4, preserving standards/spec and the failed
+invocation. The retry passed and the remaining axes completed. Retained `review-capacity-resume.txt` and
+`review-capacity-accounting.json` show the retry and distinct invocation records.
+The run is now parked for James; do not start broad intake or a new run.
+
+Earlier, a real supported suspend/resume acceptance check resumed original
+session `01a079c0-a16b-7ff3-b80a-82cb727dd3ba`; exact branch, HEAD,
 tracked diff and untracked implementation/test/plan files were preserved.
 See [the recovery evidence](runtime-crud-recovery-acceptance.md). The unapproved
 resume exposed a CLI reporting exception while correctly preventing launch;
@@ -21,9 +67,9 @@ Retained files: `readiness-resume.txt`, `implementation-approval-held.json`,
 `approve-implement.json`, and `implementation-launch.json` in the isolated home.
 Use the targeted driver to observe this run; do not start another run or broad intake.
 
-Factory source is committed at `a8e1dce` and published in
+Factory source is committed at `0a54196` (following `a8e1dce`) and published in
 [factory PR #83](https://github.com/jchen1707/factory/pull/83). All four gates pass
-in `artifacts/crud-runtime-test/factory-gates-release.json` against the final source.
+in `artifacts/crud-runtime-test/factory-gates-resume-holds.json` against the final source.
 Shared source is in [harness PR #32](https://github.com/jchen1707/harness/pull/32).
 The generated CRUD contract/test-path refresh is draft
 [CRUD PR #1](https://github.com/jchen1707/factory-crud-verification/pull/1), commit
@@ -36,8 +82,8 @@ and host-snapshotted artifact requirements; builder consumption of only collecte
 artifacts; semantic role accounting; and monorepo red-phase replay using child
 configuration from immutable authority, with nested sandbox dependency links.
 Independent review caught and corrected candidate-controlled child policy and mutable
-test-design request weaknesses. These changes require final integrated gates and
-corrective PR review; implementation is not yet fully accepted.
+test-design request weaknesses. The final integrated gates pass; corrective PR review
+and the remaining runtime acceptance are still required.
 
 New retained acceptance:
 
@@ -70,10 +116,11 @@ by the final reviewed-tree report when present; do not cite a partial/in-flight 
 as final verification. The source and retained historical reports below remain valid
 only within their named revisions and scope.
 
-## Compaction checkpoint and completion rule — 2026-09-07
+## Historical compaction checkpoint and completion rule — 2026-09-07
 
-James requested this documentation checkpoint before compaction. **Resume using this
-section and the active checkpoint below; older status sections are historical.**
+James requested this earlier documentation checkpoint before compaction. **It is now
+superseded by Continued validation above. The following sections are historical;
+do not repeat their old next steps or treat them as the current run state.**
 The [rollout plan's current completion criteria](runtime-rollout.md#current-completion-criteria--2026-09-07)
 now distinguish implemented features from unfinished acceptance, covering all areas of
 the approved four-repository plan. Original PRs being merged does not mean every

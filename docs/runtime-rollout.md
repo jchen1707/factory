@@ -39,10 +39,13 @@ evidence. James later authorized the separate disposable CRUD verification workl
 That exception covers only the new test project/tickets; existing products and tickets,
 especially `nemoclaw-dev`, remain excluded. Production writers remain stopped.
 
-Resume from [the current handoff](runtime-implementation-handoff.md). The retained
-FRO-12 run is blocked after readiness; its collection defect is fixed locally but has
-not been retried. Review the latest correction, rerun full gates, then continue isolated
-testing with retained evidence. Do not start broad intake or claim full CRUD delivery.
+Resume from [the current handoff](runtime-implementation-handoff.md). FRO-12 passed
+real readiness recovery, supported suspend/resume, implementation and ten independent
+gates, and completed all eight isolated reviews. It is blocked on one high-severity
+CORS finding, reproduced and awaiting James's disposition. Corrective factory/shared/consumer PRs are
+open; source merges and explicit authority refresh remain prerequisites for the new
+test-design and monorepo replay declarations. Do not start broad intake or claim full
+CRUD delivery or complete acceptance.
 
 ## Historical rollout baseline
 
