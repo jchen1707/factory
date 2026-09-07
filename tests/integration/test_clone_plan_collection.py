@@ -162,7 +162,7 @@ def test_diagnosis_still_requires_test_plan(
             }
         )
     )
-    monkeypatch.setattr(handoffs, "authorize_repair", lambda *args: None)
+    monkeypatch.setattr(handoffs, "authorize_repair", lambda *args, **kwargs: None)
     fake = _fake(clone_ctx)
     real = fake.exec_sync
 

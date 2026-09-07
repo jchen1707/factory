@@ -63,6 +63,7 @@ def write(ctx: Context, target: Path) -> None:
             return repo._git_raw(ctx.worktree, *argv)
 
     payload = {
+        **reproduction_binding(ctx),
         "contract_revision": snapshot["source_revision"] if snapshot else ctx.run.base_ref,
         "policy_revision": snapshot["revision"] if snapshot else None,
         "branch": ctx.branch,
@@ -84,7 +85,38 @@ def write(ctx: Context, target: Path) -> None:
     artifacts.write_json(target, payload)
 
 
-def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> None:
+def _recorded_failure(ctx: Context) -> dict[str, Any] | None:
+    records = [
+        row
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == "failure-reproduction" and row["status"] == "fail"
+    ]
+    return dict(records[-1]) if records else None
+
+
+def reproduction_binding(ctx: Context) -> dict[str, str | None]:
+    """The host verifier identity supplied to diagnosis, not an agent-written log."""
+    recorded = _recorded_failure(ctx)
+    if recorded is None:
+        return {"reproduction_evidence": "", "reproduction_sha256": None}
+    path = Path(recorded["artifact"])
+    try:
+        relative = path.resolve().relative_to(ctx.factory_dir.resolve())
+    except ValueError as exc:
+        raise Blocked("diagnosis-not-reproduced", "Verifier artifact is outside this run") from exc
+    return {
+        "reproduction_evidence": str(relative),
+        "reproduction_sha256": json.loads(recorded["detail"])["sha256"],
+    }
+
+
+def authorize_repair(
+    ctx: Context,
+    diagnosis: dict[str, Any],
+    attempt: int,
+    *,
+    expected_reproduction: dict[str, str | None] | None = None,
+) -> None:
     classification = diagnosis["classification"]
     if classification != "code" or diagnosis["status"] != "repair":
         next_action = {
@@ -133,14 +165,13 @@ def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> N
         )
     # Only a host-recorded verifier artifact can authorize repair. Its digest binds
     # the file to the evidence observed before the diagnosing agent was launched.
-    records = [
-        row
-        for row in ctx.store.checks(ctx.run.id)
-        if row["check_name"] == "failure-reproduction" and row["status"] == "fail"
-    ]
-    if not records:
+    if expected_reproduction is not None and reproduction_binding(ctx) != expected_reproduction:
+        raise Blocked(
+            "diagnosis-reproduction-stale", "Host reproduction changed after diagnosis started"
+        )
+    recorded = _recorded_failure(ctx)
+    if recorded is None:
         raise Blocked("diagnosis-not-reproduced", "No host-recorded failure")
-    recorded = records[-1]
     path = Path(recorded["artifact"])
     evidence_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     provenance = json.loads(recorded["detail"])

@@ -123,11 +123,18 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     prompt_path.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
+    reproduction = handoffs.reproduction_binding(ctx) if ctx.run.attempt else {}
+    if reproduction:
+        schema = json.loads(attempt_dir.schema.read_text())
+        identity = reproduction["reproduction_evidence"]
+        schema["properties"]["reproduction_evidence"]["enum"] = [identity, ""] if identity else [""]
+        artifacts.write_json(attempt_dir.schema, schema)
     request = {
         "contract": contract,
         "role": role_name,
         "diagnosis": ctx.run.attempt > 0,
         "required_artifacts": required_artifacts,
+        **reproduction,
     }
     artifacts.write_json(attempt_dir.path("plan-request.json"), request)
     # Recorded under the same attempt number the implement phase will use, which is why
@@ -198,7 +205,17 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
         if request.get("role") == "test_designer":
             required_outputs = tuple(handoffs.artifact_names(request.get("required_artifacts")))
         if diagnosis:
-            handoffs.authorize_repair(ctx, result, ctx.run.attempt)
+            expected_reproduction = (
+                {
+                    "reproduction_evidence": request.get("reproduction_evidence"),
+                    "reproduction_sha256": request.get("reproduction_sha256"),
+                }
+                if "reproduction_evidence" in request
+                else None
+            )
+            handoffs.authorize_repair(
+                ctx, result, ctx.run.attempt, expected_reproduction=expected_reproduction
+            )
         elif result["status"] != "ready":
             raise Blocked("readiness-needs-human", result["summary"])
     plans = plan_dir(ctx)
