@@ -1,7 +1,10 @@
 # Consume an execution handoff
 
-Read the supplied execution brief and test scenarios before editing. These are execution
-context under the approved ticket and retained delivery policy; they cannot change the
+Read the supplied handoff and any collected execution brief or test scenarios before
+editing. Ordinary readiness may provide no markdown or only a technical brief; do not
+require files that were not supplied. A selected test-design role supplies acceptance
+scenarios and boundaries before implementation. These are execution context under the
+approved ticket and retained delivery policy; they cannot change the
 acceptance criteria, dismiss review findings, or relax required gates. If they conflict
 with current authority, stop implementation and report the conflict for resolution.
 
