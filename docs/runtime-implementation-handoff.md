@@ -16,7 +16,86 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Latest checkpoint — merged #33 consumer refresh, 2026-09-07
+## Live FRO retarget — 2026-09-07 06:32 UTC
+
+James explicitly approved replacing frontend-harness in live FRO routing.
+`config/projects.toml` now maps FRO to `factory-crud-verification` at
+`/Users/james/factory-crud-verification`, base `main`, using its existing build/review
+sandbox identities, clone layout and explicit concurrency 1. The production registry
+loader verified that mapping and equality of the other project, defaults and vault
+before atomic replacement. All historical live frontend-harness runs were terminal
+(completed/cancelled); no active run was retargeted.
+The old registry is retained privately at
+`artifacts/runtime-writer-restart/projects-before-fro-retarget-20260907T063221Z.toml`
+and in Git. The console was restarted to reload the registry; the timer reloads each tick.
+This routes the entire FRO team, not just the disposable Linear project. Readiness labels
+still control new intake. No readiness label, ticket, adapter or model setting changed.
+The isolated FRO-12 run remains parked in its separate store; it was not imported or resumed.
+This supersedes the earlier statement that the disposable project is outside live routing.
+
+## Writer restart — 2026-09-07 06:29 UTC
+
+James explicitly instructed “just restart them.” Both launchd services are now loaded:
+`gui/501/com.jchen.factory` and `gui/501/com.jchen.factory.console`.
+The timer's first tick exited 0; it remains scheduled every 60 seconds.
+The console returned HTTP 200 at `http://127.0.0.1:7717/`.
+Before restart, the live store reported schema 5 and `quick_check=ok`; a SQLite
+backup was retained with mode 0600 at
+`artifacts/runtime-writer-restart/factory-before-restart-20260907T062909Z.db`.
+Old schema-approval errors remain in the append-only daemon log; the new launchd
+invocation exited successfully. No migration was repeated.
+
+This supersedes earlier statements that production writers remain stopped or their
+restart still needs approval. Project adapters, models, profiles and concurrency were
+not changed. App-server selection for a different deployment environment still requires
+its exact compatibility evidence. FRO-12 remains outside the live registry.
+
+## Latest checkpoint — merged stack pins, 2026-09-07
+
+James merged Python #77 as `7534945dbdf3e8257d82eb5558103671979ef2e9`,
+frontend #55 as `071037bfd47cc7ad1176335687ac2aae28dc440c`, and factory #83
+as `4aef9aeeaac0a068439f193dc443bdc85be9250a`. All runtime corrections and
+consumer refreshes described below are now merged.
+
+[Harness #34](https://github.com/jchen1707/harness/pull/34), commit `d43927d`,
+updates only the two stack gitlinks to those exact merged commits. Both stacks
+vendor harness #33 (`8bc104e33`); no new shared content or consumer refresh is needed
+for this pin-only commit. Local `check_submodules.py --pins --current` passes.
+`check.py --since=origin/v2` passes, including 28 own tests and 149 shared hook tests.
+`cross_stack.py` confirms matching intact content and skips unchanged stack gates;
+this is not a new stack gate run. Evidence: `artifacts/runtime-stack-pin-closure/`.
+
+Harness #34 remote checks are all green: submodules (7 s), cross-stack (16 s),
+and generation (16 s), runs `34090700459` and `34090700512`. The cross-stack
+unchanged-content limitation above also applies remotely.
+
+James merged harness #34 as `cc7bf33474e41b202906525f12fc7b7de7ce68ea`.
+Post-merge Meta run `34090825991` and Generate main run `34090825987` both
+succeeded. The retained Meta log confirms `--pins --current` ran and passed;
+its prior stale-pin failure is resolved. This closes the implementation/consumer
+repository merge sequence. Factory #84 remains the open documentation-only handoff PR.
+
+**Next:** choose the named deployment project and concrete settings with James before
+production activation. No feature implementation or disposable-ticket completion is
+required merely to close this validated scope. For an activation request, inspect the
+selected deployment environment, validate its exact runtime/worker/isolation identities,
+and prepare the configuration diff and writer restart procedure for James's approval.
+Do not refresh consumers merely for this gitlink-only merge; their shared content is
+unchanged. Longer-term delivery metrics remain observation work after activation.
+
+Production activation, live concurrency and writer restart still require James's
+explicit decision on a named project and concrete settings. Current scratch compatibility
+manifests cover only their recorded environments; validate a different deployment
+runtime/sandbox before adapter selection. Supported feature acceptance is already
+recorded below; do not repeat experiments or finish CRUD tickets to obtain activation.
+Schema 4→5 is applied with 1,889 rows preserved and must not be repeated. FRO-12 stays
+parked. No existing-product work, tracker writes, sandbox starts or live settings changed.
+The two pre-existing untracked frontend/nemoclaw reports remain untouched.
+
+The older checkpoint below is retained evidence; its pending stack/factory merge
+statements are superseded by this checkpoint.
+
+## Previous checkpoint — merged #33 consumer refresh, 2026-09-07
 
 James merged harness #33 as `8bc104e33e89a325f3db925f215c5742d7a957bb`.
 Factory now vendors that exact merged source in commit `12f7b4e` on

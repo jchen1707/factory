@@ -1,5 +1,13 @@
 # Runtime rollout
 
+## Writer restart — 2026-09-07
+
+James explicitly authorized restarting the existing timer and console. Both launchd
+services are loaded; the first timer invocation exited 0 and the console returned
+HTTP 200. Schema 5 passed SQLite quick_check and a private pre-restart backup was
+retained. No project adapter, model, profile or concurrency setting changed.
+This supersedes the stopped-writer status below; see the handoff for exact evidence.
+
 ## Current completion criteria — 2026-09-07
 
 **The objective is factory acceptance, not completion or hardening of disposable
@@ -10,13 +18,13 @@ finishing FRO-12–15 is necessary only if it enables another missing factory ch
 Use targeted isolated experiments for the remaining gaps instead of making the whole
 CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
 
-James merged harness #33 as `8bc104e33`. Factory, CRUD draft #1, Python #77 and
-frontend #55 now vendor that exact source through canonical sync. Current checks and
-exact consumer commits are recorded in the handoff and refresh evidence. Stack merges
-followed by shared submodule-pin updates remain;
-the merged harness Meta currency check must then pass. See
-[consumer refresh evidence](runtime-merged-consumer-refresh.md). Factory #83 has no
-remote workflows/checks; local gate evidence is not remote green CI.
+James merged harness #33, Python #77, frontend #55 and factory #83. All consumers
+vendor merged shared source `8bc104e33`. [Harness #34](https://github.com/jchen1707/harness/pull/34)
+merged as `cc7bf334`, updating the stack gitlinks to the exact merged commits.
+Post-merge Meta (including pin/current checks) and Generate main both pass, runs
+`34090825991` and `34090825987`. The implementation/consumer merge sequence is closed. No further consumer refresh is needed for a pin-only change.
+Factory #83 has no remote workflows/checks; its retained four-gate result is local
+evidence. Exact commits and next steps are in [the handoff](runtime-implementation-handoff.md).
 
 This is the execution-status update for James's approved four-repository improvement
 plan. It does not replace or reduce that plan's requirements. All major feature areas
@@ -74,9 +82,8 @@ especially `nemoclaw-dev`, remain excluded. Production writers remain stopped.
 Resume from [the current handoff](runtime-implementation-handoff.md). FRO-12 passed
 real readiness recovery, supported suspend/resume, implementation and ten independent
 gates, and completed all eight isolated reviews. It is blocked on one high-severity
-CORS finding, reproduced and awaiting James's disposition. Corrective factory/shared/consumer PRs are
-open; source merges and explicit authority refresh remain prerequisites for changing
-FRO-12’s pinned declarations; independent scratch experiments may use exact corrective
+CORS finding, reproduced and awaiting James's disposition. Corrective source and consumer PRs are merged; explicit authority refresh remains
+a prerequisite for changing FRO-12’s pinned declarations; independent scratch experiments may use exact corrective
 source revisions without changing that run. Do not start broad intake or claim full
 CRUD delivery or complete acceptance.
 
