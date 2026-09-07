@@ -16,7 +16,44 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current resume — app-server selected, 2026-09-07
+## Current resume — four concurrent runs configured, 2026-09-07
+
+James merged #87 as `bc6773a`, authorized model/concurrency testing using existing
+FRO issues, and explicitly requested increasing directly to four. The live disposable
+project now has setting revision 2: `concurrency=4`, `isolation=per-run`, and
+`isolation_measurement=/Users/james/factory/artifacts/runtime-four-concurrency/isolation-manifest.json`.
+App-server selection, compatibility directory and existing model routing are preserved.
+This is already applied; do not request the same approval again.
+
+Four fresh private-clone build sandboxes passed production preflight and simultaneous
+dependency, temporary-file, SQLite and same-port isolation checks. Targeted process-group
+cancellation produced exit 143 while three siblings progressed. Four supported model
+combinations then ran the shipped app-server worker concurrently against frozen FRO-13,
+FRO-14 and FRO-15 requirements: Sol/high, Terra/medium, Luna/medium and Sol/xhigh.
+Astra/high and Astra/xhigh remain unavailable in all four measured catalogues.
+These are bounded model/collector/admission probes in a separate validation store,
+not tracker intake or complete implementation/review workflows. No Linear writes,
+readiness-label changes, FRO-12 resume or product implementation occurred.
+
+**Next operational dependency:** per-run isolation creates new sandbox identities.
+The compatibility directory currently authorizes the earlier shared build/review
+identities only. Each actual new run's build/review sandboxes need their own six-check
+compatibility manifests before production app-server selection can launch them.
+Do not copy, rename or relax the old manifests to authorize unmeasured identities.
+The four-worker experiment does not issue those compatibility approvals. Thus four
+is configured and capacity-tested, but four full live workflows are not yet demonstrated.
+Continue with exact-run provisioning/compatibility when an approved workload is ready;
+FRO-13/14 depend on parked FRO-12 and FRO-15 depends on both. Do not erase dependencies,
+invent completed work or harden CRUD merely to fill four slots.
+
+See [four-run measurements](runtime-four-concurrency-acceptance.md) and
+`artifacts/runtime-four-concurrency/` for frozen issues, preflight, isolation manifest,
+model requests/events, accounting replay, admission evidence and live setting read-back.
+The earlier empty live observation baseline remains valid historical evidence.
+Longitudinal delivery benefit remains unmeasured. Operator rollback, if requested:
+lower concurrency to one using `factory configure`; existing work drains without killing.
+
+## Previous resume — app-server selected, 2026-09-07
 
 James explicitly approved app-server selection for new `factory-crud-verification`
 runs. Applied the exact configure command below to `/Users/james/factory/state/factory.db`.

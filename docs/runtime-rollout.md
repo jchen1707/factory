@@ -1,5 +1,19 @@
 # Runtime rollout
 
+## Four-run capacity selected — 2026-09-07
+
+James explicitly requested four. Live `factory-crud-verification` settings now select
+concurrency 4 and per-run isolation, retaining app-server and existing model routing.
+Four private clones passed simultaneous resource isolation and targeted cancellation;
+four supported model/effort combinations completed bounded concurrent worker probes.
+Astra remains unavailable. See [four-run acceptance](runtime-four-concurrency-acceptance.md).
+
+This does not authorize new identities using the old shared-sandbox compatibility
+manifests. Each real per-run build/review identity still needs exact compatibility
+validation before app-server launch. No live tickets were advanced or completed.
+The current [handoff](runtime-implementation-handoff.md) records this remaining
+operational dependency and supersedes the concurrency-1 checkpoints below.
+
 ## App-server selected — 2026-09-07
 
 James approved and applied app-server selection for new `factory-crud-verification`
