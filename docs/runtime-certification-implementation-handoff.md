@@ -5,7 +5,7 @@ Status: implementation in progress; feature is not complete.
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
 launch enforcement are implemented in the isolated worktree. Final disposable build/reviewer six-check
 acceptance now PASSES; full workflow/child acceptance and rollout remain incomplete. See
-**Native helper mount checkpoint** at the end; earlier sections are historical.
+**Workflow authority and admission checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -791,3 +791,96 @@ Exact next work:
 
 Factory checkpoint is the commit containing this section (`git log -1 --oneline`). No push or PR.
 Plans remain intentionally untracked, overall status implementing. Shared remains e3fc8ad.
+
+## Workflow authority and admission checkpoint
+
+Continued from 0fa1109 in `/Users/james/factory-runtime-certification`. The main objective
+remains factory feature/workflow validation with synthetic workloads. No ticket hardening,
+customer workflows, tracker/forge writes, shared sync, migration or live activation occurred.
+Shared harness remains e3fc8ad; plans remain intentionally untracked and implementing.
+
+Completed this continuation:
+- Real first paid-admission race: two independent controllers ensure the same job and race
+  its first canary. One exits 73 after real detached spawn before host acknowledgement;
+  the other exits 0. A new controller does not relaunch the intended effect. One invocation,
+  one independent actual-launch marker, actual exit 0, idempotent terminal collection and
+  zero remaining leases. Known API-equivalent USD0.0108136. Race-only job is intentionally
+  failed with a named synthetic-stop reason; never presented as a six-check certificate.
+  `artifacts/runtime-certification-service/initial-admission-race/result.json` and
+  `admission-race.py` retain exact seed, commands and evidence. Original owned build VM stopped.
+- The full Context/production-spec fixture exposed a real preflight bug: snapshotting
+  `harness.config.json` reformatted JSON, invalidating its digest against unchanged candidate
+  bytes. `authority.snapshot` now copies original bytes for root and app configurations.
+  A strengthened integration observer reproduces the raw-digest mismatch before the fix
+  and passes afterward. Existing snapshots stay immutable; only synthetic revisions were
+  explicitly replaced. Older reformatted snapshots may require explicit operator replacement.
+- Fourteen focused tests pass. Canonical `artifacts/runtime-workflow-real/gates.json` PASS:
+  Ruff check82ms, format41ms, mypy442ms, pytest135430ms; all exits0, no skips, empty tails.
+  Both changed files are covered. Standards and spec reviews clear. Fake suite limitations
+  still apply; real evidence is separate. No production source changed after the gate run.
+- Real production Context → automatic selection passed all nine phases/six checks for build
+  job `66103cc8e21547c0aa15e9b6ec643b04`, authority revision3, synthetic run
+  `ad5647f4dfbd45ae`, VM `factory-build-cert-workflow-20260907`.
+  Evidence under `artifacts/runtime-workflow-real/home/state/certifications/JOB`.
+- Actual `implement.start` refused tampered host summary evidence with attempt0 and no
+  application invocation; exact restoration allowed launch. Real builder returned
+  `no_change_needed`, exit0, no changed files. A new controller reconciled usage, retained
+  the session and released all slots. `builder-refusal.json`, `builder-launch.json` and
+  `builder-result.json` retain this evidence in `artifacts/runtime-workflow-real/`.
+
+Fixture/diagnosis corrections (do not repeat or misreport):
+- Do not rerun older `setup.py`; its minimal gate declaration does not satisfy HarnessConfig.
+  New `workflow-acceptance.py setup` creates actual Context inputs with a declared gate,
+  copied pinned layer-A tree, original config/hook bytes and an isolated pricing table.
+  Its setup refuses an existing directory; two abandoned pre-VM setup directories remain
+  as ignored diagnosis history. No real tracker/delivery client is constructed.
+- Initial snapshot revision1 failed deterministically before paid work. Revision2 used the
+  source fix. Job028c7ffaed35499bb35e9e66186fb1d5 changed specification digest once after
+  its canary; exact changing input was not captured, so do not claim a cause. It is failed.
+- Job9602588764ed48528980db6422dfdc86 ran all phases but correctly refused final isolation:
+  fixture lacked `.factory/` ignore, so its protocol files appeared as application additions.
+  `isolation-failure-diff.json` proves additions only under protocol, no existing file edits,
+  unchanged HEAD/tracked diff. Added the target's ignore, committed it locally and explicitly
+  refreshed synthetic authority to3. Production isolation was not weakened.
+- The first actual builder preparation refused `lease-lost` because the fixture omitted the
+  controller run lease. Transaction rollback kept attempt0/no spawn. The fixture now acquires
+  and releases the same production lease around step execution; subsequent launch succeeded.
+
+Recovery result and stopped state:
+- `workflow-recovery.py start` injected a named synthetic `resumable` boundary after the
+  successful builder result, then called production `recovery.resume_run`. This is a routing
+  test, not a claim of another actual crash. Tampered evidence refused before attempt2;
+  exact restoration selected `session-intact`, launched attempt2 and exited0 on the same
+  retained session. `recovery-launch.json` / `recovery-result.json` retain assertions.
+- `workflow-stop.py` reconciled every isolated certificate and both application invocations,
+  repeated accounting without changing the known total, checked a clean target and zero leases,
+  then stopped both workflow VMs. `stopped-checkpoint.json`: 21 invocations, known
+  API-equivalent USD0.1269232, 17 estimates incomplete. These include failed fixtures and
+  are a lower bound, not account charges or complete whole-run spend. Preserve incompleteness.
+- Build generation c51effe9-c5ff-44dd-b5c6-29f56513457b; reviewer generation
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73. Both STOPPED. The older service VMs remain stopped.
+  No live services/settings/template/schema changed. No publication or push.
+
+Exact next steps:
+1. Continue the independent reviewer workflow matrix in this synthetic Context. Start with
+   `uv run python artifacts/runtime-certification-service/workflow-drive.py review` (bounded
+   independent controller ticks through production selection). The reviewer VM exists but has
+   not been certified through this new Context. Its prior service-only sibling certificate does
+   not authorize it. Do not rerun setup or reuse stale/failed job evidence.
+2. After fresh reviewer certification, exercise actual review entry/launch, queued restart and
+   stale-identity/authority refusal before paid admission. Preserve the no-change synthetic
+   candidate and stop once those factory assertions hold; no PR/ticket delivery is needed.
+   Actual builder and builder recovery launch/refusal now have real coverage. Additional
+   environment/generation changes at prepared launch remain part of the acceptance matrix.
+3. Inspect the 17 incomplete estimates and the initial transient spec-digest change before
+   claiming accounting completeness or effortless certification. All paid records are retained;
+   missing pricing/usage is not permission to fabricate an estimate.
+4. Complete child broker/execution/accounting, targeted cancellation/subtree recovery,
+   isolated writable children/safe serialized integration, remaining controls and real matrix.
+5. Prepare matching full runtime package/template, shared source merge and exact consumer sync,
+   plus rollout evidence. Binary-only Astra experiments remain insufficient for the current
+   launcher package contract. Production needs its own fresh certification. James still owns
+   merge, live schema5→6 approval, deployment and activation.
+
+See `docs/discovery/runtime-workflow-certification-acceptance.md` for reproducible commands,
+red/green evidence and limitations. This checkpoint is the commit containing this section.

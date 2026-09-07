@@ -1,5 +1,6 @@
 """Automatic selection consumes a published fresh certificate, never a manual file."""
 
+import hashlib
 import json
 import shutil
 from dataclasses import asdict
@@ -39,6 +40,9 @@ def test_automatic_selection_requires_published_host_evidence_and_rechecks_it(
     context.run(ctx)
     sandbox.run(ctx)
     worktree.run(ctx)
+    for relative in (".codex", ".agents/vendor/harness"):
+        shutil.copytree(ctx.project.path / relative, ctx.worktree / relative, dirs_exist_ok=True)
+    shutil.copyfile(config_path, ctx.worktree / "harness.config.json")
     authority.snapshot(ctx)
     probe_root = ctx.home / "probes"
     probe_root.mkdir()
@@ -70,6 +74,12 @@ def test_automatic_selection_requires_published_host_evidence_and_rechecks_it(
     )
 
     def observe_runtime(*args: object, **kwargs: object) -> dict:
+        # The real standalone observer compares the candidate's exact bytes with
+        # these approved digests. Snapshot serialization must not change them.
+        hooks = kwargs["hook_files"]
+        assert isinstance(hooks, dict)
+        for path, expected in hooks.items():
+            assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected
         return {
             "generation": "fresh-generation",
             "image_digest": "sha256:" + "a" * 64,
