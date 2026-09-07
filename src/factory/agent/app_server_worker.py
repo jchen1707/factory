@@ -10,6 +10,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -313,6 +314,87 @@ def sealed_binary(path: str, expected: str) -> Iterator[int]:
             yield descriptor
 
 
+MAILBOX_LIMIT = 80 * 1024
+MAILBOX_RESPONSE_LIMIT = 256 * 1024
+
+
+def read_mailbox(directory: Path, name: str, *, limit: int = MAILBOX_LIMIT) -> bytes:
+    """Fixed mailbox filenames under host-selected mounts; never follow candidate links."""
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("mailbox requires a regular file")
+            raw = stream.read(limit + 1)
+            if len(raw) > limit:
+                raise ValueError("mailbox message exceeds size limit")
+            return raw
+    finally:
+        os.close(root)
+
+
+def write_mailbox(directory: Path, name: str, raw: bytes, *, limit: int = MAILBOX_LIMIT) -> None:
+    if len(raw) > limit:
+        raise ValueError("mailbox message exceeds size limit")
+    descriptor, temporary = tempfile.mkstemp(prefix=".mailbox-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, directory / name)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def delegation_call(config: dict[str, Any], params: dict[str, Any], thread: str) -> dict[str, Any]:
+    """Transport only. Host response is not approval to spawn from this worker."""
+    if (
+        not isinstance(params, dict)
+        or not thread
+        or params.get("threadId") != thread
+        or params.get("namespace") is not None
+        or params.get("tool") not in {tool["name"] for tool in config["tools"]}
+        or not isinstance(params.get("callId"), str)
+        or not params["callId"].strip()
+        or len(params["callId"]) > 128
+    ):
+        raise RuntimeError("unregistered or foreign delegation call")
+    raw = json.dumps(
+        {"call_id": params["callId"], "tool": params["tool"], "arguments": params["arguments"]},
+        allow_nan=False,
+    ).encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    write_mailbox(Path(config["inbox"]), "request.json", raw)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            response = json.loads(
+                read_mailbox(Path(config["outbox"]), "response.json", limit=MAILBOX_RESPONSE_LIMIT)
+            )
+        except FileNotFoundError:
+            response = {}
+        if response.get("request_sha256") == digest:
+            result = response["result"]
+            if (
+                type(result.get("success")) is not bool
+                or not isinstance(result.get("contentItems"), list)
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) != {"type", "text"}
+                    or item["type"] != "inputText"
+                    or not isinstance(item["text"], str)
+                    for item in result["contentItems"]
+                )
+            ):
+                raise RuntimeError("invalid delegation response")
+            return result
+        time.sleep(0.1)
+    # The durable request remains available to the controller after disconnection.
+    raise RuntimeError("delegation controller response unavailable; request retained")
+
+
 def run(request: dict[str, Any]) -> int:
     probe_models = request.get("probe_models") is True
     argv = ["codex", "app-server", "--stdio"]
@@ -374,6 +456,15 @@ def run(request: dict[str, Any]) -> int:
             raise RuntimeError("app-server disconnected")
         event: dict[str, Any] = json.loads(line)
         emit({"type": "factory.runtime", "observed_at": time.time(), "event": event})
+        if (
+            event.get("method") == "item/tool/call"
+            and "id" in event
+            and request.get("delegation") is not None
+        ):
+            result = delegation_call(request["delegation"], event["params"], thread)
+            stdin.write(json.dumps({"id": event["id"], "result": result}) + "\n")
+            stdin.flush()
+            return {"method": "factory/tool/handled"}
         # An unattended adapter cannot answer an approval or product decision.
         if "method" in event and "id" in event:
             raise RuntimeError(f"app-server requires operator input: {event['method']}")
@@ -492,6 +583,8 @@ def run(request: dict[str, Any]) -> int:
             params["threadId"] = request["resume_session"]
             started = rpc("thread/resume", params)
         else:
+            if request.get("delegation") is not None:
+                params["dynamicTools"] = request["delegation"]["tools"]
             started = rpc("thread/start", params)
         thread = started["thread"]["id"]
         emit({"type": "thread.started", "thread_id": thread})

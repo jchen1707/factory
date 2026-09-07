@@ -2,12 +2,12 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: the durable host child broker is implemented and connected to child launch
-admission/cancellation fences and parent finalization. Actual app-server child transport,
-read-only sandbox preparation/certification, controller signaling and full child execution are
-still unfinished. See **Durable child broker checkpoint** at the end. Earlier sections are
-historical; neither prior workflow VM is assumed available. No live changes or child model
-calls were made in this checkpoint.
+Latest checkpoint: host-bound child mailbox transport and app-server dynamic-tool handling are
+implemented, with durable success/refusal replay. This is not yet wired through AppServerAdapter
+or a workflow controller. Read-only child preparation/certification, signaling and actual child
+execution remain unfinished. See **Child transport checkpoint** at the end. No live settings,
+services, sandbox or model calls changed in this checkpoint. New worker bytes invalidate old
+compatibility evidence for this implementation worktree.
 
 ## Objective and approved scope
 
@@ -1260,3 +1260,91 @@ Fake sandbox caveat applies: there is no real child execution claim. Separate sp
 SQLite races are covered in the broker tests. No production source changed after the final
 report. Standards review clear; Spec replay finding fixed and re-review clear. Earlier passing
 pre-fix gate report retained as gates-before-replay-fix.json, not the final evidence.
+
+
+## Child transport checkpoint
+
+Continued from e8d10ef. Objective remains factory feature/workflow acceptance with synthetic
+workloads, not ticket completion/hardening. Factory branch feat/runtime-certification-and-delegation;
+shared harness stays e3fc8ad, unmerged/unsynced. No live, schema, concurrency, template, consumer,
+tracker/forge or customer changes. No VM or model call was made. This checkpoint is the commit
+containing this section; approved plan files remain intentionally untracked and implementing.
+
+Implemented:
+- src/factory/delegation_transport.py adds DelegationMailbox, bound by the host to a broker and
+  two directories. configuration() derives the request tool schema from immutable layer-A
+  authority; service() handles one bounded mailbox request per controller tick. No database,
+  approval, child binding, launch or result-publication capability enters the tool interface.
+- Three tools only: factory_request_child, factory_child_status, factory_cancel_child. Responses
+  expose only handle/status/result, not host paths, run metadata or authority records. All actual
+  request/inspection/cancellation operations use the existing owned broker.
+- Successful AND refused valid calls retain immutable receipts in the existing effects ledger,
+  in the same transaction as the broker operation. Parent/call identity and source root bind the
+  receipt. Replay returns the same result across restart; changed payloads cannot reuse a call.
+  A new call ID is required for an intentional retry after capacity/policy changes.
+- app_server_worker.py registers dynamicTools only on thread/start and services item/tool/call
+  on start/resume. Wire shape comes from captured 0.153.4 schemas and the earlier real dynamic
+  probe under /Users/james/factory/artifacts/runtime-certification-implementation/. Resume relies
+  on retained thread registration, as measured there. Native agents.enabled remains false;
+  unknown tools, namespaces, foreign threads and other operator requests still fail closed.
+- The worker writes one atomic request.json in its private inbox and waits at most60seconds for
+  a digest-matched host response.json from a separate read-only outbox. This waits for controller
+  acknowledgement, never for child approval/completion. Timeout retains the request and marks
+  parent usage incomplete; host recovery can subsequently persist the pending handle.
+- Fixed filenames, no-follow regular-file reads, nonblocking opens and bounded reads refuse
+  symlinks/FIFOs/oversized messages. Atomic replacement prevents partial responses. Request cap
+  is80KiB; response cap256KiB accommodates the broker's64KiB result after JSON escaping.
+  Safety REQUIRES trusted directory ancestors and a separately mounted read-only outbox; these
+  helpers do not create/enforce sandbox mounts or certify a configuration by themselves.
+
+Evidence and review:
+-17 transport tests pass using real temporary files/SQLite plus the existing fake app-server
+  protocol boundary. Combined worker/broker/transport suite passed107 tests before the final
+  refusal-replay regression; final transport17 and mypy156files pass. No real transport/child
+  execution/isolation claim follows from these tests.
+- RED/GREEN cases reproduced replay cancellation targeting a different child and escaped valid
+  results exceeding the original response cap. Spec review separately reproduced a capacity
+  refusal becoming success on replay; a RED test captured it, durable refusal receipts fix it,
+  and re-review is clear.
+- Standards review found no documented-rule violations or actionable heuristic smells. The
+  optional architecture/stack reviewer checklist files are absent, so this is an AGENTS/CONTEXT
+  and available-guidance review, not a claim that the absent checklist was executed.
+- Final canonical gate result is recorded below after completion. No push/PR opened.
+
+Exact next work:
+1. Finish host parent preparation and controller transport wiring. AppServerAdapter.prepare
+   currently does NOT emit delegation configuration; no production workflow calls mailbox.service.
+   Allocate invocation-owned mailbox directories outside every candidate-writable host ancestor;
+   mount inbox privately rw and outbox separately ro, include both in fresh fingerprint/spec
+   validation, freeze configuration/worker inputs, and bind broker identity from retained host
+   invocation records. Observe mailbox requests during normal polling and restart. Do not enable
+   a worker config by itself without the mount/controller service. configuration() currently reads
+   through request_schema(), which requires an active parent: preparation-before-admission needs
+   a trusted schema read path without relaxing actual request admission. Do not launch the parent
+   early merely to obtain its schema.
+2. Host read-only child preparation/advancement: fresh thread and explicit trusted task/base/
+   authority handoff; normal model/effort/preset routing; private scratch and read-only source/
+   authority; unique accounting.begin child step with parent_id; bind_child; frozen launch inputs;
+   fresh full fingerprint/certification before AgentLaunches.start(parent_id=...). No duplicate
+   spawn on an existing launch intent. Keep approval, budget, attempts and common agent caps.
+3. Owned subtree lifecycle: reconcile/account terminal children before releasing slots; host
+   collector validates bounded results against the approved output contract and publishes them;
+   signal only recorded child process groups for cancel/suspend; retain ambiguous holders and
+   partial usage. Drain/cancel queued requests and collect results before finalizing a parent.
+   A mailbox cancellation receipt records intent and is not proof a process was stopped.
+4. Real synthetic acceptance on a fresh supported FULL runtime package, including final-worker
+   certification: actual parent requests two read-only children, pending/approval/capacity,
+   overlap, write refusal, result transport, restart, targeted cancellation and accounting replay.
+   Old certificates are stale after these worker changes; prior absent VMs cannot authorize runs.
+   No ticket delivery/hardening is needed once the assertions are met.
+5. Isolated writable children/integration, controls, shared merge/exact sync and reviewed rollout
+   remain later work. James owns merges, schema5→6 approval, deployment and activation. Live
+   concurrency4 and disabled delegation remain unchanged.
+
+Final canonical verification: artifacts/runtime-child-transport/gates-final.json PASS.
+Ruff check exit0/80ms, Ruff format exit0/39ms, mypy exit0/198ms, pytest exit0/128040ms;
+all output tails empty, no skips. Mypy covers156 source/test files including the new transport.
+Fake-runtime caveat applies: local files/SQLite and protocol fixtures do not establish real
+sandbox transport, mount isolation or child execution. No production source changed after this
+report. Both bounded reviews have no outstanding findings against available guidance; the
+missing optional stack checklist remains the review coverage caveat stated above.

@@ -52,6 +52,7 @@ def run_client(
     launches: list[list[str]] | None = None,
     runtime: dict[str, str] | None = None,
     replace_before_exec: bool = False,
+    delegation: dict[str, Any] | None = None,
 ) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]]]:
     native_root = tmp_path.parent / "native-mounts"
     native_root.mkdir(exist_ok=True)
@@ -213,6 +214,7 @@ def run_client(
             "usage_scope": usage_scope,
             "readonly": readonly,
             **({"runtime_identity": runtime} if runtime is not None else {}),
+            **({"delegation": delegation} if delegation is not None else {}),
         }
     )
     return result, emitted, [json.loads(line) for line in sent.getvalue().splitlines()]

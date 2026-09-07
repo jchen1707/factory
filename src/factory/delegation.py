@@ -64,12 +64,7 @@ class DelegationBroker:
                     raise ValueError("delegation request is immutable")
                 return self.inspect(old["id"])
             parent, snapshot = self._admissible_parent()
-            schema = json.loads(
-                (
-                    Path(snapshot["root"])
-                    / ".agents/vendor/harness/schema/delegation-request.schema.json"
-                ).read_text()
-            )
+            schema = self.request_schema()
             validate_against_schema(arguments, schema)
             if not isinstance(arguments, dict):
                 raise ValueError("delegation task must be an object")
@@ -116,6 +111,16 @@ class DelegationBroker:
                 {"request": request_id, "parent": self.parent_id},
             )
         return self.inspect(request_id)
+
+    def request_schema(self) -> dict[str, Any]:
+        """Controller registration uses the same immutable contract as request admission."""
+        _, snapshot = self._admissible_parent()
+        return json.loads(
+            (
+                Path(snapshot["root"])
+                / ".agents/vendor/harness/schema/delegation-request.schema.json"
+            ).read_text()
+        )
 
     def bind_child(self, request_id: str, child_id: str) -> dict[str, Any]:
         """Attach a host-prepared accounted invocation, never a worker-selected ID."""
