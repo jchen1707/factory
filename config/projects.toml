@@ -235,34 +235,25 @@ placeholder_env  = "FACTORY_GITLAB_TOKEN"
 # the ticket per exec. It costs one `uv sync` per run.
 UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/nemoclaw-dev/{run}"
 
-[projects.frontend-harness]
-team           = "FRO"
-path           = "/Users/james/frontend-harness"
-remote         = "https://github.com/jchen1707/frontend-harness.git"
-base_branch    = "v2"
-stack          = "frontend"
-# Confirmed present in the registry by P0-3; the stock image has no pnpm.
-template       = "codex-pnpm:v1"
-kits           = []
-static_mcp     = []
-build_sandbox  = "factory-build-frontend-harness"
-review_sandbox = "factory-review-frontend-harness"
-vault_mount    = "rw"
-network_allow  = ["registry.npmjs.org", "*.npmjs.org", "github.com"]
-# node_modules must sit beside package.json, so there is no UV_PROJECT_ENVIRONMENT
-# equivalent: the host's macOS tree is simply not loadable in the Linux VM and a
-# sandbox `pnpm install` would overwrite it (p0-10-gate-timing.md). `--clone` is
-# the only shape that keeps node_modules VM-local, and Phase 2 builds it. Until
-# then this project refuses to claim rather than corrupting the host checkout.
+# Temporary live FRO target approved by James on 2026-09-07.
+# Previous frontend-harness mapping is retained in Git and the private restart backup.
+[projects.factory-crud-verification]
+team = "FRO"
+path = "/Users/james/factory-crud-verification"
+remote = "https://github.com/jchen1707/factory-crud-verification.git"
+base_branch = "main"
+stack = "frontend"
+template = "codex-pnpm:v1"
+kits = []
+static_mcp = []
+build_sandbox = "factory-build-crud-20260907"
+review_sandbox = "factory-review-crud-20260907"
+vault_mount = "rw"
 requires_clone = true
-# The same measurement as python-harness above — the clone sandbox that proved it was
-# this project's.
+concurrency_per_project = 1
+# Measured on this exact new sandbox: gh auth status reports the inherited value invalid.
+# Names remain visible as warnings; no usable credential or new proxy scope is admitted.
 acknowledged_env_credentials = ["GH_TOKEN"]
-# The table this replaces held `src/**/routes/**` for this stack, and there has never been
-# a `routes` directory in this repository — the trigger was inert from the day it was
-# written and read identically to one that simply never fired. These are the directories
-# that actually declare their own standards, measured 2026-08-23 with
-# `git ls-files '*AGENTS.md'`. `src/test/**` is deliberately absent: a change confined to
-# test infrastructure is what the red-phase replay and the weakening guard already cover.
-sensitive_paths = ["e2e/**", "src/components/**", "src/core/**", "src/features/**"]
-[projects.frontend-harness.env]
+
+[projects.factory-crud-verification.env]
+UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/factory-crud/{run}"

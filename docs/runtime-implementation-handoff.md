@@ -16,6 +16,23 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
+## Live FRO retarget — 2026-09-07 06:32 UTC
+
+James explicitly approved replacing frontend-harness in live FRO routing.
+`config/projects.toml` now maps FRO to `factory-crud-verification` at
+`/Users/james/factory-crud-verification`, base `main`, using its existing build/review
+sandbox identities, clone layout and explicit concurrency 1. The production registry
+loader verified that mapping and equality of the other project, defaults and vault
+before atomic replacement. All historical live frontend-harness runs were terminal
+(completed/cancelled); no active run was retargeted.
+The old registry is retained privately at
+`artifacts/runtime-writer-restart/projects-before-fro-retarget-20260907T063221Z.toml`
+and in Git. The console was restarted to reload the registry; the timer reloads each tick.
+This routes the entire FRO team, not just the disposable Linear project. Readiness labels
+still control new intake. No readiness label, ticket, adapter or model setting changed.
+The isolated FRO-12 run remains parked in its separate store; it was not imported or resumed.
+This supersedes the earlier statement that the disposable project is outside live routing.
+
 ## Writer restart — 2026-09-07 06:29 UTC
 
 James explicitly instructed “just restart them.” Both launchd services are now loaded:
