@@ -277,6 +277,7 @@ function readConfig(path) {
       ? parsed.apps.filter((app) => typeof app === 'string' && app)
       : [],
     gates: Array.isArray(parsed.gates) ? parsed.gates : [],
+    delivery: parsed.delivery || null,
     hooks,
   };
 }

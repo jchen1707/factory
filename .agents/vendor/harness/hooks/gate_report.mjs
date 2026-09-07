@@ -99,8 +99,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
-import { loadConfig, repoRelative, runArgv, tail } from './lib.mjs';
-import { dispatch, gatedChange, STOP_KINDS } from './verify.mjs';
+import { repoRelative, runArgv, tail } from './lib.mjs';
+import { deliveryDispatch, gatedChange, STOP_KINDS } from './verify.mjs';
 
 const MAX_LINES = 40;
 const GATE_TIMEOUT = 540_000;
@@ -312,6 +312,12 @@ export function buildReport({
     // not a gate to attempt. Reporting it would mean executing `undefined`.
     const declared = target.gates.filter((gate) => gate && Array.isArray(gate.run));
     for (const gate of declared) {
+      if (gate.policyDeferral) {
+        const entry = gateEntry(gate, 'deferred', null, target.name);
+        entry.outputTail = JSON.stringify(gate.policyDeferral);
+        gates.push(entry);
+        continue;
+      }
       // Switched off in config, and that outranks every other reason a gate might or
       // might not run: an operator who set `enabled: false` gets the same answer whether
       // or not the turn touched the app, and whether or not the caller asserted it.
@@ -346,7 +352,12 @@ export function buildReport({
       // Asserted per gate first, then the blanket `--all`. That order is the whole fix:
       // a caller naming `playwright` gets `playwright`, and does not silently also assert
       // `lighthouse`'s unrelated `when` clause.
-      if (!STOP_KINDS.has(gate.kind) && !all && !assertedNames.has(gate.name)) {
+      if (
+        !STOP_KINDS.has(gate.kind) &&
+        !all &&
+        !assertedNames.has(gate.name) &&
+        !gate.policyRequired
+      ) {
         gates.push(gateEntry(gate, 'not_applicable', null, target.name));
         continue;
       }
@@ -435,6 +446,8 @@ export function parseArgs(argv) {
     else if (flag.startsWith('--base=')) args.base = flag.slice('--base='.length);
     else if (flag === '--cwd') args.cwd = argv[++i] ?? '';
     else if (flag.startsWith('--cwd=')) args.cwd = flag.slice('--cwd='.length);
+    else if (flag === '--authority') args.authority = argv[++i] ?? '';
+    else if (flag === '--profile') args.profile = argv[++i] ?? '';
   }
   return args;
 }
@@ -478,8 +491,11 @@ function humanReport(report) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cwd = args.cwd || process.cwd();
-  const root = loadConfig(cwd);
-  const { targets, missing } = dispatch(root);
+  const { root, targets, missing } = deliveryDispatch(
+    cwd,
+    args.authority || process.env.HARNESS_AUTHORITY_ROOT || '',
+    args.profile || process.env.HARNESS_DELIVERY_PROFILE || '',
+  );
 
   const report = buildReport({
     root,

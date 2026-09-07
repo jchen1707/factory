@@ -521,7 +521,13 @@ def _stop_sandbox_if_idle(ctx: Context) -> None:
     that exec into it.
     """
     others = [r for r in ctx.store.active_runs_for_project(ctx.project.name) if r.id != ctx.run.id]
-    if others:
+    from factory.isolation import project_for_run
+
+    if any(
+        project_for_run(ctx.registry.projects[ctx.project.name], run, ctx.store).build_sandbox
+        == ctx.project.build_sandbox
+        for run in others
+    ):
         return
     ctx.sandbox.stop(ctx.project.build_sandbox)
 
@@ -680,7 +686,7 @@ def _refuse_over_budget(ctx: Context) -> None:
     begin, and a run cut off part-way through a write is a worse outcome than one that
     stopped one attempt early and said so.
     """
-    _, _, usd = ctx.store.spend(ctx.run.id)
+    usd = ctx.store.known_spend(ctx.run.id)
     if usd is None:
         return
     ceiling = ctx.routing.usd_per_run

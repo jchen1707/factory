@@ -335,6 +335,11 @@ def fetch_back(ctx: Context) -> Path:
     needing either of the two verbs this repository forbids on a tree the host does not
     author.
     """
+    with repo.serialized_git(ctx.project.path):
+        return _fetch_back_locked(ctx)
+
+
+def _fetch_back_locked(ctx: Context) -> Path:
     branch = ctx.branch
     if branch is None:
         raise Blocked("no-branch", f"run {ctx.run.id} has no branch to fetch back")

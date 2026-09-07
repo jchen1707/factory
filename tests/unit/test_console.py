@@ -89,29 +89,12 @@ def test_the_latest_turn_supplies_the_numerator(tmp_path: Path) -> None:
     assert view.cached_input_tokens == 11008
 
 
-def test_the_percentage_is_the_turn_over_the_usable_window(tmp_path: Path) -> None:
-    # 136000 / (272000 * 95 / 100) = 136000 / 258400 ≈ 0.526.
+def test_legacy_usage_is_not_a_current_context_measurement(tmp_path: Path) -> None:
     view = read_turn_view(_events(tmp_path, THREAD_STARTED, TURN_COMPLETED))
-
-    pct, reason = context_percentage(view, State.IMPLEMENTING, _routing())
-
-    assert reason is None
-    assert pct is not None
-    assert round(pct, 3) == 0.526
-
-
-def test_no_window_on_file_hides_the_percentage_and_says_so(tmp_path: Path) -> None:
-    # The acceptance row: shown from the confirmed field, or hidden with the reason
-    # stated. Never estimated — a console that guessed a window would report context
-    # pressure it cannot defend, on the one number an operator uses to decide whether to
-    # rewind to planning (§16.3a).
-    view = read_turn_view(_events(tmp_path, THREAD_STARTED, TURN_COMPLETED))
-
-    pct, reason = context_percentage(view, State.IMPLEMENTING, _routing(known=False))
-
-    assert pct is None
-    assert reason is not None
-    assert "gpt-5.6-sol" in reason
+    for routing in (_routing(), _routing(known=False)):
+        pct, reason = context_percentage(view, State.IMPLEMENTING, routing)
+        assert pct is None
+        assert reason == "legacy exec has no current-window measurement"
 
 
 def test_a_turn_still_running_hides_the_percentage(tmp_path: Path) -> None:

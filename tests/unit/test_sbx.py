@@ -415,7 +415,9 @@ def test_poll_does_not_reap_a_paused_run_on_a_stale_heartbeat(
     assert adapter.poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
 
 
-def test_poll_reads_the_exit_file_the_phase_actually_writes(tmp_path: Path) -> None:
+def test_poll_reads_the_exit_file_the_phase_actually_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A plan attempt's wrapper writes `plan-exit`, not `exit`.
 
     Measured on FRO-11 attempt 3, 2026-08-23: the rung-3 rewind's `codex exec` failed in
@@ -427,6 +429,7 @@ def test_poll_reads_the_exit_file_the_phase_actually_writes(tmp_path: Path) -> N
     (tmp_path / "plan-exit").write_text("1\n")
     handle = replace(_handle(tmp_path), exit_name="plan-exit")
 
+    monkeypatch.setattr(SbxAdapter, "exists", lambda self, name: False)
     assert SbxAdapter().poll(handle) is sbx_module.RunStatus.EXITED
     # The default is unchanged for every phase that writes `exit`.
     assert SbxAdapter().poll(_handle(tmp_path)) is not sbx_module.RunStatus.EXITED

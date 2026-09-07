@@ -930,17 +930,19 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     # The fan-out ran detached; the per-axis `-o` paths are baked into the script. Every
     # one must sit inside the sandbox's writable scratch mount, the way the real codex
     # `-o` enforces it — a `-o` outside the mounts writes nothing (BAC-4 2efa19065ce6476e).
-    scripts = [s for _name, s in _fake(ctx).detached if "review-standards" in s]
-    assert len(scripts) == 1
-    outputs = [Path(m.group(1)) for m in re.finditer(r"(?:^|\s)-o (\S+)", scripts[0])]
-    assert len(outputs) == 3  # standards, spec, full
+    scripts = [s for name, s in _fake(ctx).detached if name == ctx.project.review_sandbox]
+    assert len(scripts) == 3  # standards, spec, full, admitted individually
+    outputs = [
+        Path(m.group(1)) for script in scripts for m in re.finditer(r"(?:^|\s)-o (\S+)", script)
+    ]
+    assert len(outputs) == 3
     # Inside the mount, not necessarily at its root: the *mount* is what §9.1 fixes per
     # project, and a run-id subdirectory under it is free — the same shape the clone mount
     # takes, and what keeps two runs of one ticket from colliding.
     assert all(out.is_relative_to(scratch) for out in outputs), outputs
     # And each landed in the run's own directory afterwards.
-    for name in ("review-standards.json", "review-spec.json", "review-full.json"):
-        assert (ctx.state_dir / "review" / name).exists(), name
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    assert all(Path(axis["out"]).exists() for axis in plan["axes"])
     assert not list(scratch.rglob("review-*.json"))  # moved, not copied
 
 
@@ -980,8 +982,12 @@ def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
     mounts = [Path(w.path) for w in spec.workspaces]
     writable = [Path(w.path) for w in spec.workspaces if not w.readonly]
 
-    script = next(s for _name, s in _fake(ctx).detached if "review-standards" in s)
-    named = {Path(tok.strip("'\"")) for tok in re.findall(r"'?/[^\s'\"<>]+", script)}
+    scripts = [s for name, s in _fake(ctx).detached if name == ctx.project.review_sandbox]
+    named = {
+        Path(tok.strip("'\""))
+        for script in scripts
+        for tok in re.findall(r"'?/[^\s'\"<>]+", script)
+    }
     # Only paths the factory owns; the script also names binaries like /bin/sh.
     owned = [p for p in named if p.is_relative_to(ctx.home) or p.is_relative_to(ctx.project.path)]
     assert owned, "the script named no factory-owned path; the regex stopped matching"
@@ -1018,7 +1024,9 @@ def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
 
     summary = json.loads((ctx.state_dir / "review" / "review-summary.json").read_text())
     assert summary["tier2"] == review_step.FORCED
-    assert (ctx.state_dir / "review" / "review-full.json").exists()
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    full = next(axis for axis in plan["axes"] if axis["label"] == "full")
+    assert Path(full["out"]).exists()
 
 
 def test_the_override_survives_the_process_that_asked_for_it(
@@ -1156,3 +1164,197 @@ def test_delivery_blocks_by_name_when_the_placeholder_was_never_provisioned(
     assert caught.value.reason == "sandbox-delivery-unprovisioned"
     assert PLACEHOLDER_ENV in str(caught.value)
     assert ctx.state is State.PR_READY
+
+
+def test_approval_change_between_review_axes_preserves_completed_observation(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import execution
+
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    first = review_step.start(ctx)
+    assert first is not None
+    first_dir, _ = first
+    invocations = ctx.store.runtime.invocations(ctx.run.id)
+    review_invocations = [i for i in invocations if i["role"].startswith("review:")]
+    assert len(review_invocations) == 1
+    assert review_invocations[0]["role"] == "review:standards"
+    ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
+    with pytest.raises(execution.AgentApprovalRequired, match=f"{ctx.run.attempt}:review:2"):
+        review_step.collect(ctx, first_dir, ctx.run.attempt)
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    assert plan["axes"][0]["complete"]
+    assert "invocation_id" not in plan["axes"][1]
+    assert Path(plan["axes"][0]["out"]).exists()
+    ctx.store.runtime.approve(ctx.run.id, f"{ctx.run.attempt}:review:2")
+    review_step.collect(ctx, first_dir, ctx.run.attempt)
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    second_dir = review_step.AttemptDir(Path(plan["axes"][1]["artifact_dir"]))
+    review_step.collect(ctx, second_dir, ctx.run.attempt)
+    assert ctx.state is State.PR_READY
+    assert (
+        len(
+            [
+                i
+                for i in ctx.store.runtime.invocations(ctx.run.id)
+                if i["role"].startswith("review:")
+            ]
+        )
+        == 2
+    )
+
+
+def test_first_axis_spend_blocks_the_next_actual_model_launch(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    ctx.routing = replace(ctx.routing, usd_per_run=1)
+    # Preserve the fake process runner, while supplying a normalized app-server usage record.
+    monkeypatch.setattr(ctx.agent, "report", {}, raising=False)
+    (ctx.home / "config/prices.toml").write_text((HOME / "config/prices.toml").read_text())
+    first = review_step.start(ctx)
+    assert first is not None
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    usage = {
+        "input_tokens": 1_000_000,
+        "output_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "reasoning_output_tokens": 0,
+    }
+    Path(plan["axes"][0]["scratch_events"]).write_text(
+        json.dumps(
+            {
+                "type": "factory.usage",
+                "usage": usage,
+                "complete": True,
+                "thread_total": {},
+                "pricing_complete": True,
+                "requests": [
+                    {
+                        "model": "gpt-5.6-sol",
+                        "usage": usage,
+                        "observed_at": 1788652800,
+                        "service_tier": "standard",
+                        "long_context": False,
+                    }
+                ],
+            }
+        )
+        + "\n"
+    )
+    with pytest.raises(Blocked, match="budget-exceeded"):
+        review_step.collect(ctx, first[0], ctx.run.attempt)
+    assert ctx.store.known_spend(ctx.run.id) == 4
+    assert (
+        len(
+            [
+                i
+                for i in ctx.store.runtime.invocations(ctx.run.id)
+                if i["role"].startswith("review:")
+            ]
+        )
+        == 1
+    )
+    assert len([1 for name, _ in _fake(ctx).detached if name == ctx.project.review_sandbox]) == 1
+
+
+def test_review_retry_preserves_completed_axes_and_separate_invocation_evidence(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    first = review_step.start(ctx)
+    assert first is not None
+    review_step.collect(ctx, first[0], ctx.run.attempt)
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    completed_path = Path(plan["axes"][0]["out"])
+    second = plan["axes"][1]
+    second_invocation = second["invocation_id"]
+    Path(second["scratch_out"]).unlink()
+    with pytest.raises(Blocked, match="review-schema-invalid"):
+        review_step.collect(
+            ctx, review_step.AttemptDir(Path(second["artifact_dir"])), ctx.run.attempt
+        )
+    advance(ctx, State.RESUMABLE, rule="review-process-interrupted")
+    retry = review_step.start(ctx)
+    assert retry is not None
+    assert completed_path.exists()
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    assert plan["axes"][0]["complete"]
+    assert plan["axes"][1]["invocation_id"] != second_invocation
+    assert plan["axes"][1]["history"][0]["invocation_id"] == second_invocation
+    review_step.collect(ctx, retry[0], ctx.run.attempt)
+    assert ctx.state is State.PR_READY
+    roles = [
+        i["role"]
+        for i in ctx.store.runtime.invocations(ctx.run.id)
+        if i["role"].startswith("review:")
+    ]
+    assert roles == ["review:standards", "review:spec", "review:spec"]
+
+
+def test_legacy_whole_suite_plan_remains_collectible(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    first = review_step.start(ctx)
+    assert first is not None
+    review_step.collect(ctx, first[0], ctx.run.attempt)
+    plan = review_step._read_plan(ctx.state_dir / "review")
+    plan.pop("schemaVersion")
+    review_step._save_plan(ctx, plan)
+    second = review_step.AttemptDir(Path(plan["axes"][1]["artifact_dir"]))
+    review_step.collect(ctx, second, ctx.run.attempt)
+    assert ctx.state is State.PR_READY
+
+
+def test_approval_wait_does_not_spend_the_next_reviewers_execution_timeout(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import execution
+    from factory.steps import reap
+
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    first = review_step.start(ctx)
+    assert first is not None
+    ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
+    with pytest.raises(execution.AgentApprovalRequired):
+        review_step.collect(ctx, first[0], ctx.run.attempt)
+    first_row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.REVIEWING)
+    assert first_row is not None
+    old_start = first_row["started_at"]
+    later = old_start + ctx.timeout_for(State.REVIEWING) + 60
+    monkeypatch.setattr(reap.time, "time", lambda: later)
+    ctx.store.runtime.approve(ctx.run.id, f"{ctx.run.attempt}:review:2")
+    review_step.collect(ctx, first[0], ctx.run.attempt)
+    assert reap._overrun_seconds(ctx, State.REVIEWING) is None
+    monkeypatch.setattr(reap.time, "time", lambda: later + ctx.timeout_for(State.REVIEWING) + 1)
+    assert reap._overrun_seconds(ctx, State.REVIEWING) == 1
+
+
+def test_nonzero_reviewer_exit_cannot_authorize_another_axis(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _fake(ctx).exit_code = 1
+    first = review_step.start(ctx)
+    assert first is not None
+    # A valid-looking output file cannot erase the process failure.
+    with pytest.raises(Blocked, match="review-agent-failed"):
+        review_step.collect(ctx, first[0], ctx.run.attempt)
+    assert (
+        len(
+            [
+                i
+                for i in ctx.store.runtime.invocations(ctx.run.id)
+                if i["role"].startswith("review:")
+            ]
+        )
+        == 1
+    )

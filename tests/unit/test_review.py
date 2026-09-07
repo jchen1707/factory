@@ -248,9 +248,14 @@ def test_axis_prompt_throws_when_both_halves_are_absent(tmp_path: Path) -> None:
 
 
 def _ctx_for_argv() -> Any:
-    """`_review_argv` reads exactly one thing off the context: the reviewer role."""
+    """Existing routing with no operator preset override."""
     role = SimpleNamespace(model="gpt-5.6-sol", effort="high")
-    return SimpleNamespace(routing=SimpleNamespace(role=lambda _name: role))
+    return SimpleNamespace(
+        routing=SimpleNamespace(role=lambda _name: role),
+        project=SimpleNamespace(name="p"),
+        run=SimpleNamespace(id="r"),
+        store=SimpleNamespace(runtime=SimpleNamespace(effective=lambda *_: {})),
+    )
 
 
 def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
@@ -267,6 +272,9 @@ def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
         run=SimpleNamespace(id=run_id, linear_id=ticket),
         worktree=project.path / ".factory/worktrees" / ticket,
         registry=SimpleNamespace(defaults=SimpleNamespace(deny_network=("mcp.linear.app",))),
+        store=SimpleNamespace(
+            runtime=SimpleNamespace(policy=lambda _: None, settings=lambda *args: {})
+        ),
     )
 
 

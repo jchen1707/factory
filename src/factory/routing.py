@@ -68,6 +68,7 @@ class Role:
     name: str
     model: str
     effort: str
+    preset: str = "existing"
 
 
 @dataclass(frozen=True)

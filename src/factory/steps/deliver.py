@@ -50,6 +50,13 @@ STEP = "deliver"
 
 
 def run(ctx: Context) -> None:
+    from factory import authority
+
+    authority.require_current_evidence(ctx, "verify")
+    authority.require_current_evidence(ctx, "review")
+    from factory.integration_base import before_delivery
+
+    before_delivery(ctx)
     worktree = ctx.worktree
     branch = ctx.branch
     if branch is None:

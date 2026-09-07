@@ -50,16 +50,7 @@ const CHECKLIST_DIR = join(ROOT, REVIEW.checklistDir ?? 'docs/agents/subagents')
 // in the repo rather than a shared frame plus a checklist. It sits after `tests`
 // because that is where both stacks had it, and axis order is the order findings are
 // read in.
-const SHARED_AXES = [
-  { label: 'standards', agent: 'standards-reviewer' },
-  { label: 'spec', agent: 'spec-checker' },
-  { label: 'security', agent: 'security-reviewer' },
-  { label: 'tests', agent: 'test-reviewer' },
-  { label: 'simplicity', agent: 'simplicity-reviewer' },
-  { label: 'design', agent: 'design-reviewer' },
-  { label: 'speed', agent: 'perf-reviewer' },
-  { label: 'cost', agent: 'cost-reviewer' },
-];
+const SHARED_AXES = JSON.parse(readFileSync(join(HERE, 'review-axes.json'), 'utf8'));
 
 const AXES = REVIEW.ninthAxis
   ? [...SHARED_AXES.slice(0, 4), REVIEW.ninthAxis, ...SHARED_AXES.slice(4)]

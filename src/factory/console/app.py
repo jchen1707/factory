@@ -34,6 +34,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from factory import routing as routing_module
 from factory.console import views as console_views
 from factory.intake.linear import LinearClient
+from factory.machine import Blocked, State
 from factory.registry import Registry, load_registry
 from factory.routing import Routing, RoutingError, load_routing
 from factory.store import Store
@@ -94,24 +95,89 @@ def _pct_cell(pct: float | None, reason: str | None) -> str:
     hidden percentage says why, so the operator can tell 'no window on file' from 'the
     agent has not finished a turn'."""
     if pct is None:
-        return f'<span class="muted" title="{_e(reason or "")}">—</span>'
+        return f'<span class="muted" title="{_e(reason or "current context unavailable")}">{_e(reason or "current context unavailable")}</span>'
     width = max(0, min(100, int(pct * 100)))
     cls = "fail" if width >= 85 else ("warn" if width >= 70 else "")
     return (
-        f'<span class="{cls}">{width}%</span> '
+        f'<span class="{cls}">{pct * 100:.0f}%</span> '
         f'<span class="bar"><i style="width:{width}%"></i></span>'
     )
 
 
 def _spend_cell(usd: float | None, ceiling: float) -> str:
     if usd is None:
-        return f'<span class="muted">— / ${ceiling:.0f}</span>'
+        return f'<span class="muted">incomplete / ${ceiling:.0f}</span>'
     width = max(0, min(100, int((usd / ceiling) * 100))) if ceiling else 0
     cls = "fail" if usd >= ceiling else ("warn" if width >= 60 else "")
     return (
         f'<span class="{cls}">${usd:.2f}</span> <span class="muted">/ ${ceiling:.0f}</span> '
         f'<span class="bar"><i style="width:{width}%"></i></span>'
     )
+
+
+def _settings_form(action: str, settings: dict[str, Any], *, concurrency: int | None = None) -> str:
+    fields = []
+    for key, choices, default in (
+        ("mode", ("automatic", "approval"), "automatic"),
+        ("model_preset", ("existing", "volume", "high-confidence"), "existing"),
+        ("delivery_profile", ("", "prototype", "core", "hardening"), ""),
+        ("workflow", ("existing", "diagnosis"), "existing"),
+        ("test_design", ("false", "true"), "false"),
+    ):
+        options = "".join(
+            f'<option value="{choice}"{" selected" if str(settings.get(key) if settings.get(key) is not None else default).lower() == choice else ""}>{choice or "repository default"}</option>'
+            for choice in choices
+        )
+        fields.append(
+            f'<label>{_e(key.replace("_", " "))} <select name="{key}">{options}</select></label> '
+        )
+    if "/projects/" in action:
+        fields.append(
+            f'<label>Concurrency <input name="concurrency" type="number" min="1" value="{concurrency or ""}" placeholder="inherited"></label> '
+        )
+        options = "".join(
+            f'<option value="{mode}"{" selected" if settings.get("isolation", "shared") == mode else ""}>{mode}</option>'
+            for mode in ("shared", "per-run")
+        )
+        fields.append(
+            f'<label>Sandbox isolation <select name="isolation">{options}</select></label> '
+        )
+        fields.append(
+            f'<label>Isolation evidence <input name="isolation_measurement" value="{_e(settings.get("isolation_measurement", ""))}" placeholder="manifest path"></label> '
+        )
+    return (
+        f'<form method="post" action="{_e(action)}">'
+        + "".join(fields)
+        + "<button>Save settings</button></form>"
+    )
+
+
+def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
+    from factory.agent.telemetry import CurrentContext
+
+    cards = []
+    for invocation in invocations:
+        metadata = invocation["metadata"]
+        telemetry = invocation.get("telemetry") or {}
+        reading = CurrentContext(**telemetry.get("context", {})).read(now=time.time())
+        context = f"{reading.fraction:.0%}" if reading.fraction is not None else "unavailable"
+        age = (
+            f" · measured {reading.age_seconds:.0f}s ago" if reading.age_seconds is not None else ""
+        )
+        estimate = telemetry.get("estimate", {})
+        usd = estimate.get("usd")
+        spend = f"${usd:.4f}" if usd is not None else "unknown"
+        if not estimate.get("complete"):
+            spend += " · incomplete"
+        model = telemetry.get("current_model", metadata.get("model", "unknown"))
+        cards.append(
+            f"<article><h3>{_e(invocation['role'])} · attempt {invocation['attempt']}</h3>"
+            f"<p>{_e(model)} · {_e(metadata.get('effort', 'unknown'))} · {_e(metadata.get('preset', 'existing'))}</p>"
+            f"<p>Context: {context} · {_e(reading.status)}{age}</p>"
+            f"<p>API-equivalent estimate: {spend}</p>"
+            f"<details><summary>Usage and evidence</summary><pre>{_e(json.dumps(invocation, indent=2))}</pre></details></article>"
+        )
+    return "".join(cards) or "<p>No model invocations recorded.</p>"
 
 
 def _duration(seconds: float | None) -> str:
@@ -148,7 +214,7 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
         )
         cells.append(
             "<tr>"
-            f'<td><a href="/runs/{_e(r.ticket)}">{_e(r.ticket)}</a></td>'
+            f'<td><a href="/runs/{_e(r.ticket)}">{_e(r.ticket)}</a> <a href="/settings/runs/{_e(r.ticket)}">controls</a></td>'
             f"<td>{_e(r.project)}</td>"
             f'<td class="wrap">{_e(r.state)}{badge}{blocked}</td>'
             f"<td>{r.attempt} <span class='muted'>· {_e(r.rung)}</span></td>"
@@ -164,7 +230,7 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
     return (
         '<div class="scroll"><table><thead><tr>'
         "<th>ticket</th><th>project</th><th>state</th><th>attempt</th><th>in state</th>"
-        "<th>context</th><th>tokens in / out</th><th>spend</th><th>activity</th><th>live</th>"
+        "<th>context</th><th>tokens in / out</th><th>spend · API-equivalent estimated USD</th><th>activity</th><th>live</th>"
         "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
     )
 
@@ -419,6 +485,131 @@ def create_app(
         rows = console_views.runs_board(home, reg, rt, st)
         body = _render("board.html", table=_board_table(rows))
         return HTMLResponse(_page("runs", body))
+
+    @app.get("/projects", response_class=HTMLResponse)
+    def projects() -> HTMLResponse:
+        reg, _, st, _ = _cfg()
+        body = "<h1>Projects</h1>"
+        for name, project in reg.projects.items():
+            settings = st.runtime.settings("project", name)
+            explicit = settings.get("concurrency", project.concurrency_per_project)
+            limit = explicit or reg.concurrency_for(project)
+            runs = [r for r in st.all_runs() if r.project == name]
+            occupied = st.runtime.db.execute(
+                "SELECT COUNT(*) FROM project_slots WHERE project=?", (name,)
+            ).fetchone()[0]
+            queued = sum(r.state is State.APPROVED for r in runs)
+            body += f"<h2>{_e(name)}</h2><p>{occupied} / {limit} slots · {queued} queued · "
+            body += f"{'inherited' if explicit is None else 'explicit'} concurrency</p>"
+            try:
+                config = json.loads((project.path / "harness.config.json").read_text())
+                delivery = config.get("delivery", {})
+                profile = settings.get("delivery_profile") or delivery.get("default")
+                declared = delivery.get("profiles", {}).get(profile, {})
+                body += f"<p>Effective delivery profile: {_e(profile or 'not declared')}</p>"
+                deferrals = declared.get("deferrals", [])
+                if deferrals:
+                    body += (
+                        "<ul>"
+                        + "".join(
+                            f"<li>{_e(item.get('requirement', ''))}: {_e(item.get('rationale', ''))} "
+                            f"— revisit: {_e(item.get('revisit', ''))}</li>"
+                            for item in deferrals
+                        )
+                        + "</ul>"
+                    )
+                else:
+                    body += "<p>No project deferrals declared.</p>"
+            except (OSError, ValueError):
+                body += "<p>Delivery policy unavailable.</p>"
+            body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
+        return HTMLResponse(_page("projects", body))
+
+    @app.get("/settings/runs/{ticket}", response_class=HTMLResponse)
+    def run_settings(ticket: str) -> HTMLResponse:
+        _, _, st, _ = _cfg()
+        run = st.run_by_ticket(ticket.upper())
+        if run is None:
+            return HTMLResponse("Run not found", status_code=404)
+        settings = st.runtime.effective(run.project, run.id)
+        policy = st.runtime.policy(run.id)
+        if policy:
+            settings["delivery_profile"] = policy["profile"]
+        body = f"<h1>{_e(run.linear_id)} controls</h1>"
+        body += _settings_form(f"/settings/runs/{run.linear_id}", settings)
+        body += f"<h2>Effective delivery policy</h2><pre>{_e(json.dumps(policy, indent=2))}</pre>"
+        body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
+        body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
+        body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><label>Next invocation <input name="invocation" placeholder="2:implement:1" required></label><button>Approve next attempt</button></form>'
+        body += f'<p><a href="/runs/{_e(run.linear_id)}">Run and Suspend controls</a></p>'
+        body += "<h2>Invocations</h2><p>API-equivalent estimated USD. These are not Codex account charges.</p>"
+        body += _invocation_cards(st.runtime.invocations(run.id))
+        return HTMLResponse(_page("run controls", body))
+
+    @app.post("/settings/{scope}/{owner}")
+    async def settings_write(scope: str, owner: str, request: Request) -> HTMLResponse:
+        from factory import operator_controls
+
+        reg, rt, st, ln = _cfg()
+        form = _parse_form(await request.body())
+        run = (
+            st.run_by_ticket(owner.upper())
+            if scope in {"runs", "approve", "replace-policy"}
+            else None
+        )
+        try:
+            if scope == "replace-policy":
+                from factory import authority
+                from factory.cli import _context_for
+
+                if run is None or run.state not in {
+                    State.SUSPENDED,
+                    State.BLOCKED,
+                    State.AWAITING_HUMAN,
+                }:
+                    raise Blocked(
+                        "policy-replacement-needs-paused-run",
+                        "Suspend the run before replacing its policy",
+                    )
+                if not st.acquire_lease(run.id, ttl_seconds=300):
+                    raise Blocked("run-leased", "The run is owned by another process")
+                try:
+                    ctx = _context_for(home, reg, rt, st, ln, run)
+                    authority.snapshot(ctx, profile=form["profile"], replace=True)
+                finally:
+                    st.release_lease(run.id)
+            elif scope == "approve" and run:
+                st.runtime.approve(run.id, str(form["invocation"]))
+            else:
+                target = run.id if run else owner
+                if (
+                    scope not in {"runs", "projects"}
+                    or (scope == "runs" and not run)
+                    or (scope == "projects" and owner not in reg.projects)
+                ):
+                    raise ValueError("Unknown run or project")
+                changes = {key: value for key, value in form.items() if value != ""}
+                if "delivery_profile" in form:
+                    changes["delivery_profile"] = form["delivery_profile"] or None
+                if "concurrency" in form:
+                    changes["concurrency"] = (
+                        int(form["concurrency"]) if form["concurrency"] else None
+                    )
+                if "test_design" in changes:
+                    changes["test_design"] = changes["test_design"] == "true"
+                operator_controls.configure(
+                    st, "run" if run else "project", target, changes, registry=reg
+                )
+        except (ValueError, KeyError, Blocked) as exc:
+            return HTMLResponse(
+                _page("settings refused", f"<p>{_e(str(exc))}</p>"), status_code=409
+            )
+        return HTMLResponse(
+            _page(
+                "settings saved",
+                '<p>Settings saved. Current work continues. <a href="/projects">Projects</a></p>',
+            )
+        )
 
     @app.get("/sse/board")
     async def board_stream() -> StreamingResponse:

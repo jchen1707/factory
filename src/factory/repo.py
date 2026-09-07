@@ -8,9 +8,12 @@ repository content runs inside the sandbox.
 
 from __future__ import annotations
 
+import fcntl
 import re
 import subprocess
-from collections.abc import Sequence
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,13 +57,63 @@ class GitError(Exception):
     """A git command that failed, with its stderr attached."""
 
 
+_git_locks = threading.local()
+
+
+@contextmanager
+def serialized_git(repository: Path) -> Iterator[None]:
+    """Serialize factory Git mutations across worktrees, threads, and host processes."""
+    common = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if common.returncode:
+        raise GitError(common.stderr.strip())
+    directory = (repository / common.stdout.strip()).resolve()
+    held: set[Path] = getattr(_git_locks, "held", set())
+    if directory in held:
+        yield
+        return
+    with (directory / "factory-maintenance.lock").open("a") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        _git_locks.held = held | {directory}
+        try:
+            yield
+        finally:
+            _git_locks.held = held
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def _git_process(repository: Path, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    def run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repository), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    if args and args[0] in {
+        "fetch",
+        "worktree",
+        "branch",
+        "update-ref",
+        "gc",
+        "maintenance",
+        "remote",
+    }:
+        with serialized_git(repository):
+            return run()
+    return run()
+
+
 def _git_raw(repo: Path, *args: str) -> str:
     """git's stdout, byte for byte. The right helper whenever the output is a *document*
     rather than a value: a patch's trailing newline is part of the patch, and `git apply`
     rejects one that lost it as `corrupt patch at line <last>`."""
-    proc = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
-    )
+    proc = _git_process(repo, args)
     if proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed in {repo}:\n{proc.stderr.strip()}")
     return proc.stdout
@@ -73,9 +126,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _git_ok(repo: Path, *args: str) -> bool:
-    proc = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
-    )
+    proc = _git_process(repo, args)
     return proc.returncode == 0
 
 

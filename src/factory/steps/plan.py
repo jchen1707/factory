@@ -1,26 +1,18 @@
-"""`worktree_ready -> planning -> implementing` — the repositories' own second path.
+"""Noninteractive execution briefs, test design, and fresh diagnosis.
 
-This is not a recovery mode the factory invented. Both consumers' `AGENTS.md` describe
-`/plan` in one context, then `/implement-from-plan` in a fresh one, as the handoff for
-work that is large or ambiguous — and `models.toml` makes that handoff a real model
-switch, because the planner role and the builder role are different models.
-
-It is reached two ways: deliberately (`factory run --plan`, or a registry threshold),
-and automatically as rung 3 of the §16.3a ladder, when two attempts have failed and
-running the same prompt a third time would produce the same failure.
-
-The worktree is **never reset** on a rewind. Attempt 3's plan is written with the
-current diff in hand, so it can decide to keep, amend or revert what is there — which
-is a judgement the plan step is for and the retry loop is not.
+The historical planning state and artifact names remain readable on recovery. New
+invocations consume the shared handoff contract and produce a schema-validated result.
+The preserved worktree includes both prior commits and uncommitted work.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
-from factory import artifacts
-from factory.agent.base import AgentInvocation
+from factory import accounting, artifacts, execution, handoffs
+from factory.agent.base import AgentInvocation, validate_against_schema
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle
@@ -76,21 +68,34 @@ def plan_dir(ctx: Context) -> Path:
 
 def _schema_source(ctx: Context) -> Path:
     """The control-plane original, which is copied into the attempt directory."""
-    return ctx.home / "schemas" / "implement_result.schema.json"
+    return ctx.home / "schemas" / "handoff_result.schema.json"
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle, Path] | None:
-    """Write the plan prompt and spawn the detached agent. `None` for a dry run.
+    """Write the handoff prompt and spawn the detached agent. `None` for a dry run.
 
     `actor` threads through the `advance` into `planning`; see `implement.start`. A rewind
     from `SUSPENDED`/`BLOCKED` is human-gated, a rung-3 rewind from `RESUMABLE` is not.
     """
     attempt = ctx.run.attempt + 1
+    execution.guard(ctx, attempt, STEP)
+    from factory.agent.selection import select
+
+    select(ctx)
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
-    role = ctx.routing.role("planner")
+    settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
+    role = execution.role_for(
+        ctx,
+        "diagnoser"
+        if ctx.run.attempt
+        else "test_designer"
+        if settings.get("test_design")
+        else "planner",
+    )
     plans = plan_dir(ctx)
 
+    handoffs.write(ctx, ctx.factory_dir / "handoff.json")
     prompt = _prompt(ctx, plans)
     prompt_path = attempt_dir.path("plan-prompt.md")
 
@@ -99,17 +104,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         effort=role.effort,
         workdir=str(worktree),
         prompt_path=prompt_path,
-        # `/plan` writes files; its final message is prose, so there is no result
-        # schema to hand it. The schema file still has to exist for `--output-schema`,
-        # so the step points at the implement one and ignores the answer: the evidence
-        # that planning happened is `plan.md` and `test-plan.md`, not a JSON blob.
-        #
-        # The *staged copy*, not `ctx.home`'s original. The agent runs inside the build
-        # sandbox and the control plane's home is not mounted there, so a home path is a
-        # path codex cannot open: measured on FRO-11 attempt 3, `codex exec` died in
-        # under a second with "Failed to read output schema file". The attempt directory
-        # resolves to the identical string on both sides -- §14.1's protocol -- which is
-        # why `implement.start` has always pointed at its own copy.
+        # Stage the schema at the path shared by host and build sandbox.
         schema_path=attempt_dir.schema,
         output_path=attempt_dir.path("plan-last-message.json"),
         events_path=attempt_dir.path("plan-events.jsonl"),
@@ -124,6 +119,10 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     prompt_path.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
+    artifacts.write_json(
+        attempt_dir.path("plan-request.json"),
+        {"contract": "noninteractive-handoff", "diagnosis": ctx.run.attempt > 0},
+    )
     # Recorded under the same attempt number the implement phase will use, which is why
     # both write into one attempt directory under `plan-` and bare prefixes: a rewind is
     # one attempt with two phases, not two attempts. `steps/reap.py` needs the row to
@@ -148,20 +147,32 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         exit_name=PLAN_EXIT_NAME,
         pgid_name=PLAN_PGID_NAME,
     )
+    accounting.begin(ctx, attempt, role, STEP, invocation.events_path)
     ctx.sandbox.exec_detached(handle, script, ctx.env)
     ctx.log("plan.started", model=role.model, effort=role.effort)
     return attempt_dir, handle, invocation.exit_path
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
-    """Both files, or the run blocks. The evidence that planning happened is the files.
-
-    `/plan`'s final message is prose, so there is no schema to validate; what is
-    checkable is whether `plan.md` and `test-plan.md` exist, and a `/plan` that finished
-    without writing them has not planned.
-    """
+    """Validate new structured handoffs; retain file-based collection for legacy attempts."""
+    accounting.collect(ctx, ctx.run.attempt, STEP, attempt_dir.path("plan-events.jsonl"))
+    request_path = attempt_dir.path("plan-request.json")
+    if request_path.exists():
+        transcript = ctx.agent.read_transcript(
+            attempt_dir.path("plan-events.jsonl"), attempt_dir.path("plan-stderr.log")
+        )
+        if _exit_code(attempt_dir) != 0 or transcript.failed:
+            raise Blocked("handoff-agent-failed", transcript.failure or "nonzero exit")
+        result = json.loads(attempt_dir.path("plan-last-message.json").read_text())
+        validate_against_schema(result, json.loads(attempt_dir.schema.read_text()))
+        request = json.loads(request_path.read_text())
+        if request["diagnosis"]:
+            handoffs.authorize_repair(ctx, result, ctx.run.attempt)
+        elif result["status"] != "ready":
+            raise Blocked("readiness-needs-human", result["summary"])
     plans = plan_dir(ctx)
-    missing = [name for name in PLAN_FILES if not (plans / name).exists()]
+    expected = ("execution-brief.md", "test-plan.md") if request_path.exists() else PLAN_FILES
+    missing = [name for name in expected if not (plans / name).exists()]
     if missing:
         ctx.store.finish_attempt(
             ctx.run.id,
@@ -172,7 +183,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
         )
         raise Blocked(
             "plan-incomplete",
-            f"`/plan` finished but did not write {missing} under {plans}",
+            f"Handoff finished but did not write {missing} under {plans}",
         )
     ctx.store.record_check(ctx.run.id, ctx.run.attempt, "plan_written", "pass", artifact=str(plans))
     artifacts.write_manifest(attempt_dir.root, produced_by=str(State.PLANNING))
@@ -194,35 +205,4 @@ def _exit_code(attempt_dir: AttemptDir) -> int | None:
 
 
 def _prompt(ctx: Context, plans: Path) -> str:
-    if ctx.issue is None:
-        raise Blocked("no-issue-loaded", ctx.run.linear_id)
-    lines = [
-        f"# Plan {ctx.issue.identifier} — {ctx.issue.title}",
-        "",
-        "Use the `plan` command from this repository's harness. Write two files under",
-        f"`{plans}`: `plan.md` and `test-plan.md`. Write no implementation code in",
-        "this turn.",
-        "",
-        "## Context, already written for you",
-        "",
-        "- `.factory/context/ticket.md`, `spec.md`, `breakdown.md`, `comments.md`",
-        "",
-    ]
-    if ctx.run.attempt > 0:
-        lines += [
-            "## What earlier attempts already did",
-            "",
-            "This is a rewind, not a first pass. The worktree has **not** been reset, so",
-            "the current diff is in front of you: decide whether to keep, amend or revert",
-            "it, and say which in the plan. The failure evidence is in",
-            f"`.factory/run/{ctx.run.attempt}/`.",
-            "",
-        ]
-    lines += [
-        "## The test plan is the half that matters",
-        "",
-        "Every case must be able to fail. A test that passes before the implementation",
-        "exists proves nothing about the new behaviour, and this run will replay exactly",
-        "that: the test half of the diff, applied at the base ref, must fail.",
-    ]
-    return "\n".join(lines) + "\n"
+    return handoffs.prompt(ctx, plans)

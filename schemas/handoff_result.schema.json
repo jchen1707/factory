@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "classification", "summary", "acceptance_behavior", "reproduction_evidence"],
+  "properties": {
+    "status": {"enum": ["ready", "repair", "needs-human"]},
+    "classification": {"enum": ["ready", "code", "environment", "stale-authority", "requirements", "review-dispute"]},
+    "summary": {"type": "string"},
+    "acceptance_behavior": {"type": "string"},
+    "reproduction_evidence": {"type": "string"}
+  }
+}

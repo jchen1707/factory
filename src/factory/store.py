@@ -23,10 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory.machine import TERMINAL, Blocked, State, can
+from factory.runtime_state import SCHEMA as RUNTIME_SCHEMA
+from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -99,6 +101,7 @@ _LIVE_RUN_INDEX = (
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     3: ("ALTER TABLE runs ADD COLUMN full_review INTEGER NOT NULL DEFAULT 0",),
     4: ("ALTER TABLE runs ADD COLUMN force_plan INTEGER NOT NULL DEFAULT 0",),
+    5: RUNTIME_SCHEMA,
 }
 
 _SCHEMA = (
@@ -226,15 +229,26 @@ class Effect:
 class Store:
     """The database. One process, one connection, WAL."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, migrate: bool = False) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        current = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if current > SCHEMA_VERSION:
+            self._conn.close()
+            raise Blocked("schema-newer-than-code", f"database version {current}")
+        if 0 < current < SCHEMA_VERSION and not migrate:
+            self._conn.close()
+            raise Blocked(
+                "schema-approval-required",
+                "Review docs/runtime-rollout.md before applying schema version 5",
+            )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._migrate()
+        self.runtime = RuntimeState(self._conn)
 
     def close(self) -> None:
         self._conn.close()
@@ -267,8 +281,10 @@ class Store:
             if target == 2:
                 self._upgrade_1_to_2()
             else:
-                for statement in _MIGRATIONS[target]:
-                    self._conn.execute(statement)
+                with self.transaction():
+                    for statement in _MIGRATIONS[target]:
+                        self._conn.execute(statement)
+                    self._conn.execute(f"PRAGMA user_version={target}")
             current = target
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
@@ -820,4 +836,41 @@ class Store:
         tokens_in = sum(r["input_tokens"] or 0 for r in rows)
         tokens_out = sum(r["output_tokens"] or 0 for r in rows)
         priced = [r["usd"] for r in rows if r["usd"] is not None]
-        return tokens_in, tokens_out, (sum(priced) if priced else None)
+        return tokens_in, tokens_out, (sum(priced) if priced and len(priced) == len(rows) else None)
+
+    def known_spend(self, run_id: str) -> float:
+        """The priced lower bound, including runs with incomplete accounting."""
+        known = sum(row["usd"] for row in self.costs(run_id) if row["usd"] is not None)
+        for invocation in self.runtime.invocations(run_id):
+            estimate = (invocation["telemetry"] or {}).get("estimate", {})
+            if not estimate.get("complete"):
+                known += estimate.get("known_usd", 0)
+        return known
+
+    def reconcile_cost(
+        self,
+        run_id: str,
+        attempt: int,
+        step: str,
+        *,
+        model: str | None,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        usd: float | None,
+    ) -> None:
+        """Replace one invocation's cumulative observation atomically."""
+        with self.transaction():
+            self._conn.execute(
+                "DELETE FROM costs WHERE run_id=? AND attempt=? AND step=?", (run_id, attempt, step)
+            )
+            self.record_cost(
+                run_id,
+                attempt,
+                step,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                usd=usd,
+            )

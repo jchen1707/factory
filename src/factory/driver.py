@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from factory import machine, recovery
+from factory.execution import AgentApprovalRequired, ProjectQueued
 from factory.machine import Action, Blocked, Resumable, State
 from factory.steps import Context, record_stop, start_agent
 from factory.steps import block as block_step
@@ -110,7 +111,12 @@ def step(ctx: Context) -> Result:
         # that a state with no entry action is one `is_human_held` derives as James's.
         return Result(Outcome.NEEDS_HUMAN, f"{before} is held for a human")
 
-    result = _perform(ctx, action, before)
+    try:
+        result = _perform(ctx, action, before)
+    except AgentApprovalRequired as exc:
+        return Result(Outcome.NEEDS_HUMAN, f"agent attempt waiting: {exc}", "approval-required")
+    except ProjectQueued as exc:
+        result = Result(Outcome.WAITING, str(exc), "project-busy")
     if result.outcome is Outcome.WAITING:
         ctx.store.renew_lease(ctx.run.id, ttl_seconds=LEASE_TTL_SECONDS)
     return result

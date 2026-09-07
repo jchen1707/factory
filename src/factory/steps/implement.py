@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from factory import artifacts, policy
+from factory import accounting, artifacts, authority, execution, policy
 from factory.agent import timings
 from factory.agent.base import (
     AgentInvocation,
@@ -74,9 +74,13 @@ def start(
     # already planned reuses that attempt's number and its directory. Anywhere else this
     # is a new attempt.
     attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
+    execution.guard(ctx, attempt, STEP)
+    from factory.agent.selection import select
+
+    select(ctx)
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
-    role = ctx.routing.role("builder")
+    role = execution.role_for(ctx, "builder")
 
     prompt, skill_sha = build_prompt(ctx, continuation=continuation)
     schema_source = _schema_path(ctx)
@@ -145,6 +149,7 @@ def start(
         workdir=str(worktree),
         attempt_dir=attempt_dir.root,
     )
+    accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
     ctx.sandbox.exec_detached(handle, script, ctx.env)
     # Phase 2 (opt-in): a host-side tailer that stamps each `events.jsonl` line with an
     # `observed_at`, so the run-timeline can defend a per-call `duration_s`. Gated by
@@ -221,7 +226,11 @@ def capture_session_id(
         return
     if not attempt_dir.events.exists():
         return
-    first = attempt_dir.events.read_text(errors="replace").splitlines()[:1]
+    first = [
+        line
+        for line in attempt_dir.events.read_text(errors="replace").splitlines()
+        if '"thread.started"' in line
+    ][:1]
     if not first:
         return
     try:
@@ -242,6 +251,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     disk, in the attempt directory, under the same absolute path on both sides.
     """
     exit_code = attempt_dir.exit_code()
+    accounting.collect(ctx, attempt, STEP, attempt_dir.events)
     vault_before = _read_vault_snapshot(ctx, attempt_dir)
     # A crash between `finish_attempt` and `advance` leaves the run at `implementing`
     # with the attempt already recorded, and the next tick re-enters here. The verdict
@@ -309,18 +319,19 @@ def _already_recorded(ctx: Context, attempt: int) -> bool:
 def _record_evidence(
     ctx: Context, attempt_dir: AttemptDir, attempt: int, transcript: Transcript
 ) -> None:
-    ctx.store.record_cost(
-        ctx.run.id,
-        attempt,
-        STEP,
-        model=ctx.routing.role("builder").model,
-        input_tokens=transcript.usage.input_tokens,
-        output_tokens=transcript.usage.output_tokens,
-        cached_tokens=transcript.usage.cached_input_tokens,
-        # No price row covers an OpenAI model yet, and a missing price is recorded as
-        # unknown rather than as free (§18.3).
-        usd=None,
-    )
+    if ctx.store.runtime.invocation(accounting.key(ctx, attempt, STEP)) is None:
+        # Pre-upgrade attempts have no invocation record. Preserve only their retained
+        # aggregate evidence; new invocations are reconciled by accounting.collect.
+        ctx.store.reconcile_cost(
+            ctx.run.id,
+            attempt,
+            STEP,
+            model=None,
+            input_tokens=transcript.usage.input_tokens,
+            output_tokens=transcript.usage.output_tokens,
+            cached_tokens=transcript.usage.cached_input_tokens,
+            usd=None,
+        )
 
     if transcript.hook_denials:
         # Not a failure on its own — a refused write is enforcement working — but it
@@ -528,6 +539,20 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
         "decides pass or fail. An honest `gates_run` with a failure in it is a better",
         "outcome than an optimistic one.",
     ]
+    handoff = ctx.factory_dir / "handoff.json"
+    if handoff.exists():
+        from factory.steps.plan import plan_dir
+
+        plans = plan_dir(ctx)
+        sections.extend(
+            [
+                "",
+                authority.contract(ctx, "consume-execution-handoff"),
+                f"Execution handoff: {handoff}",
+                f"Execution brief: {plans / 'execution-brief.md'}",
+                f"Acceptance scenarios: {plans / 'test-plan.md'}",
+            ]
+        )
     if continuation:
         sections += [
             "",

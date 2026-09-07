@@ -226,6 +226,9 @@ def reap(ctx: Context) -> Verdict:
     if state in AGENT_SESSION_STATES:
         implement_step.capture_session_id(ctx, attempt_dir, ctx.run.attempt, state)
 
+    from factory import accounting
+
+    accounting.collect_active(ctx)
     status = ctx.sandbox.poll(handle)
     if status is RunStatus.EXITED:
         # Read before `_collect`, which may raise: the exit code is the one thing this
@@ -309,6 +312,16 @@ def _overrun_seconds(ctx: Context, state: State) -> float | None:
     budget being spent is the state's, not the attempt's.
     """
     entered = _entered_state_at(ctx)
+    if state is State.REVIEWING:
+        plan_path = ctx.state_dir / "review" / "review-plan.json"
+        if plan_path.exists():
+            plan = review_step._read_plan(plan_path.parent)
+            if plan.get("schemaVersion") == 2:
+                # Approval can park between axes for hours. Each admitted process
+                # receives its own execution timeout; legacy suites retain their timer.
+                row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, state)
+                if row is not None:
+                    entered = int(row["started_at"])
     if entered is None:
         return None
     elapsed = time.time() - entered

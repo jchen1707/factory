@@ -311,7 +311,7 @@ def test_migration_1_to_2_keeps_the_history_it_migrates(tmp_path: Path) -> None:
     path = tmp_path / "factory.db"
     old_id = _v1_database(path)
 
-    store = Store(path)
+    store = Store(path, migrate=True)
 
     assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert store.run_by_id(old_id) is not None
@@ -331,7 +331,7 @@ def test_a_database_two_versions_behind_takes_every_step_not_just_the_first(
     path = tmp_path / "factory.db"
     _v1_database(path)
 
-    store = Store(path)
+    store = Store(path, migrate=True)
 
     columns = {row["name"] for row in store._conn.execute("PRAGMA table_info(runs)")}
     assert "full_review" in columns
@@ -347,7 +347,7 @@ def test_migration_1_to_2_unblocks_the_rerun_that_v1_refused(tmp_path: Path) -> 
     path = tmp_path / "factory.db"
     old_id = _v1_database(path)
 
-    store = Store(path)
+    store = Store(path, migrate=True)
     fresh = store.insert_run(linear_id="BAC-4", project="python-harness", team="BAC")
 
     assert fresh.id != old_id
@@ -358,8 +358,8 @@ def test_migration_1_to_2_unblocks_the_rerun_that_v1_refused(tmp_path: Path) -> 
 def test_migration_is_not_rerun_on_an_already_current_database(tmp_path: Path) -> None:
     path = tmp_path / "factory.db"
     _v1_database(path)
-    Store(path).close()
-    store = Store(path)  # second open must be a no-op, not a second rebuild
+    Store(path, migrate=True).close()
+    store = Store(path, migrate=True)  # second open must be a no-op, not a second rebuild
     assert len(store.all_runs()) == 1
 
 
@@ -506,11 +506,11 @@ def test_migration_3_to_4_adds_force_plan_without_touching_the_rows_it_finds(
     path = tmp_path / "factory.db"
     old_id = _v1_database(path)
 
-    store = Store(path)
+    store = Store(path, migrate=True)
 
     columns = {row["name"] for row in store._conn.execute("PRAGMA table_info(runs)")}
     assert "force_plan" in columns
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     # The pre-existing run is untouched and defaults to off, not to on.
     old = store.run_by_id(old_id)
     assert old is not None

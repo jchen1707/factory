@@ -20,6 +20,8 @@ __all__ = ["run"]
 
 
 def run(ctx: Context) -> None:
+    from factory import authority
+
     if ctx.issue is None:
         raise Blocked("no-issue-loaded", ctx.run.linear_id)
 
@@ -34,6 +36,7 @@ def run(ctx: Context) -> None:
         )
     cross_check_stack(harness, ctx.project.stack)
     ctx.harness = harness
+    authority.snapshot(ctx)
 
     # §9.2 — the vault must resolve before anything runs, or the second brain is
     # silently unmounted and the session-learnings hooks write nowhere.

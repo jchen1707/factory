@@ -373,14 +373,17 @@ def test_the_sandbox_is_created_with_the_measured_settings(ctx: Context) -> None
     assert not any(w.readonly for w in spec.workspaces)
 
 
-def test_a_second_writer_on_the_same_project_is_refused(ctx: Context) -> None:
+def test_a_second_writer_on_the_same_project_waits_without_claiming(ctx: Context) -> None:
     other = ctx.store.insert_run(linear_id="BAC-9", project="python-harness", team="BAC")
     ctx.store.record_transition(
         other.id, from_state=None, to_state=State.IMPLEMENTING, actor="auto"
     )
-    with pytest.raises(Blocked) as caught:
+    from factory.execution import ProjectQueued
+
+    with pytest.raises(ProjectQueued, match="slots are occupied"):
         claim_step.run(ctx)
-    assert caught.value.reason == "project-busy"
+    assert ctx.run.state is State.APPROVED
+    assert not ctx.store.effects(ctx.run.id)
 
 
 def test_a_project_that_raised_its_own_limit_admits_the_second_writer(ctx: Context) -> None:

@@ -515,7 +515,9 @@ def _context_for(
     linear: LinearClient,
     run: Run,
 ) -> Context:
-    project = registry.resolve(run.linear_id)
+    from factory.isolation import project_for_run
+
+    project = project_for_run(registry.resolve(run.linear_id), run, store)
     return Context(
         home=home,
         registry=registry,
@@ -884,7 +886,8 @@ def _sbx_ls_json() -> list[dict[str, object]]:
     Returns `[]` when `sbx` is missing or refuses (it needs a Docker login), so the console
     degrades to an empty view instead of failing the page.
     """
-    if not sbx_available():
+    available, _ = sbx_available()
+    if not available:
         return []
     proc = subprocess.run(
         ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
@@ -1803,6 +1806,9 @@ def _assert_codex_config_untouched(before: int) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="factory", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    from factory.configuration_cli import register
+
+    register(sub)
 
     run = sub.add_parser("run", help="drive one approved ticket")
     run.add_argument("ticket")

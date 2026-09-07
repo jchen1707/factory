@@ -58,11 +58,13 @@
  * worth stating because the failure is the quiet kind: everything runs, nothing enforces.
  */
 
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, readPayload, repoRelative, run, runArgv, tail } from './lib.mjs';
+import { applyDelivery, resolveDelivery } from './delivery_policy.mjs';
 
 const MAX_LINES = 40;
 const GATE_TIMEOUT = 540_000;
@@ -206,6 +208,54 @@ export function dispatch(root) {
   return { targets, missing };
 }
 
+/** Resolve policy once for both interactive Stop enforcement and retained gate reports. */
+export function deliveryDispatch(cwd, authority = '', profile = '') {
+  const source = loadConfig(authority || cwd);
+  if (authority && (!source.found || resolve(source.root) !== resolve(authority))) {
+    throw new Error('Delivery authority config is missing');
+  }
+  const root = { ...source, root: authority ? resolve(cwd) : source.root };
+  const targets = [];
+  const missing = [];
+  const visited = new Set();
+  const visit = (config, parent = null) => {
+    const key = realpathSync(config.root);
+    if (visited.has(key)) throw new Error('Cyclic or duplicate app authority');
+    visited.add(key);
+    const policy = resolveDelivery(config, parent, profile);
+    if (config.gates.length || !config.apps.length) {
+      targets.push(
+        applyDelivery(
+          {
+            ...config,
+            root: resolve(root.root, repoRelative(config.root, source.root)),
+          },
+          policy,
+        ),
+      );
+    }
+    for (const app of config.apps) {
+      const dir = resolve(config.root, app);
+      const rel = relative(source.root, dir);
+      if (isAbsolute(app) || rel === '..' || rel.startsWith('../')) {
+        throw new Error('App escapes authority root');
+      }
+      const child = loadConfig(dir);
+      if (!child.found || resolve(child.root) !== dir) {
+        missing.push(repoRelative(dir, source.root));
+        continue;
+      }
+      const realRel = relative(realpathSync(source.root), realpathSync(dir));
+      if (isAbsolute(realRel) || realRel === '..' || realRel.startsWith('../')) {
+        throw new Error('App escapes authority root');
+      }
+      visit(child, policy);
+    }
+  };
+  if (source.found) visit(source);
+  return { root, targets, missing };
+}
+
 /** One line naming the apps whose gates could not be found, or `''`. */
 export function missingNote(missing) {
   if (missing.length === 0) return '';
@@ -222,10 +272,13 @@ async function main() {
   if (!payload) return 0;
 
   const cwd = payload.cwd ?? '';
-  const root = loadConfig(cwd);
+  const { root, targets, missing } = deliveryDispatch(
+    cwd,
+    process.env.HARNESS_AUTHORITY_ROOT || '',
+    process.env.HARNESS_DELIVERY_PROFILE || '',
+  );
   if (!root.found) return 0; // Nothing declares this repo's Definition of Done.
 
-  const { targets, missing } = dispatch(root);
   // Every gate the turn's changed paths put in scope, accumulated as the targets are
   // walked so that a failure can name what it did not get to.
   const considered = [];
@@ -238,7 +291,7 @@ async function main() {
     const gates = target.gates.filter((gate) => gate && Array.isArray(gate.run));
     considered.push(...gates);
     for (const gate of gates) {
-      if (!STOP_KINDS.has(gate.kind)) continue;
+      if (!STOP_KINDS.has(gate.kind) || gate.enabled === false || gate.policyDeferral) continue;
 
       // In the app's own directory, which is where its commands are written to run.
       const result = runArgv(gate.run, { cwd: target.root, timeout: GATE_TIMEOUT });

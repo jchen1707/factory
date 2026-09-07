@@ -27,7 +27,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from factory import artifacts
+from factory import artifacts, authority
 from factory.agent.base import SchemaInvalid, validate_against_schema
 from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
@@ -67,7 +67,7 @@ _RAN = frozenset({"pass", "fail"})
 #: The gate still did not run *as a gate*: nothing here promotes it to evidence. The
 #: report says `disabled`, the verdict ignores it, and this set only stops the claim from
 #: being read as a lie.
-_CLAIM_SATISFIED = _RAN | {"disabled"}
+_CLAIM_SATISFIED = _RAN | {"disabled", "deferred"}
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
@@ -86,6 +86,9 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     `unblock-is-a-judgement`, so a human `factory resume --from verifying` passes
     `"human"` or the advance refuses.
     """
+    from factory.integration_base import before_verification
+
+    before_verification(ctx)
     worktree = ctx.worktree
     base_ref = ctx.run.base_ref or ctx.project.base_ref
 
@@ -110,7 +113,17 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         clone_step.ensure_on_branch(ctx)
 
     gates_run = _gates_run(attempt_dir)
+    authority.record_request(ctx, STEP)
+    snapshot_root = authority.current(ctx)
+    if snapshot_root:
+        from factory.harness import load_harness_config
+
+        ctx.harness = load_harness_config(snapshot_root)
     argv = _gate_argv(ctx.harness, gates_run, base_ref)
+    if snapshot_root:
+        argv[1] = str(snapshot_root / _REPORT_HOOK)
+        snapshot = ctx.store.runtime.policy(ctx.run.id) or {}
+        argv += ["--authority", str(snapshot_root), "--profile", str(snapshot["profile"])]
     body = (
         " ".join(shlex.quote(part) for part in argv)
         + f" > {shlex.quote(str(attempt_dir.path('gates.stdout.txt')))}"
@@ -221,8 +234,13 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         ctx.run.id, attempt, State.VERIFYING, exit_code=attempt_dir.exit_code(), outcome=verdict
     )
     if verdict == "pass":
+        ctx.store.runtime.configure("run", ctx.run.id, {"failure_episode": None})
+        authority.record_evidence(ctx, STEP)
         advance(ctx, State.REVIEWING)
     elif verdict == "fail":
+        from factory import handoffs
+
+        handoffs.record_failure(ctx, attempt_dir.path("gates.json"), report)
         failing = [g for g in report["gates"] if g.get("status") == "fail"]
         if failing and all(g.get("caveat") for g in failing):
             # An environment gate the agent cannot fix by writing code — lighthouse
@@ -247,7 +265,9 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
                 "to bypass and report the failure honestly in the PR: "
                 + ", ".join(f"{g['name']} ({g.get('caveat')})" for g in failing),
             )
-        if _next_is_rewind(ctx):
+        if ctx.store.runtime.effective(ctx.project.name, ctx.run.id).get(
+            "workflow"
+        ) == "diagnosis" or _next_is_rewind(ctx):
             from factory.steps import plan as plan_step
 
             plan_step.start(ctx)
