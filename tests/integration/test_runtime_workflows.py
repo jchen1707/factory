@@ -15,7 +15,7 @@ from factory.steps import Context
 def shared_delivery_contract(ctx: Context) -> None:
     import shutil
 
-    source = Path(__file__).parents[3] / "harness/plugins/harness"
+    source = Path(__file__).parents[2] / ".agents/vendor/harness"
     for name in ("hooks/delivery_policy.mjs", "docs/agents/delivery-review.md"):
         target = ctx.project.path / ".agents/vendor/harness" / name
         target.parent.mkdir(parents=True, exist_ok=True)

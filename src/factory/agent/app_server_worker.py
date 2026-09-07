@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import time
@@ -31,6 +32,137 @@ def usage_delta(total: dict[str, int], baseline: dict[str, int]) -> dict[str, in
             return None
         result[key] = count - before
     return result
+
+
+def discovered_hooks(report: dict[str, Any], workdir: str) -> list[dict[str, Any]]:
+    entries = report.get("data", [])
+    if len(entries) != 1 or Path(entries[0].get("cwd", "")).resolve() != Path(workdir).resolve():
+        raise RuntimeError("hook discovery did not return the requested working directory")
+    entry = entries[0]
+    if entry.get("errors") or entry.get("warnings"):
+        raise RuntimeError("hook discovery reported errors or warnings")
+    return entry.get("hooks", [])
+
+
+def project_hook_coverage(
+    discovered: list[dict[str, Any]],
+    definitions: dict[str, Any],
+    workdir: str,
+    *,
+    inline: bool = False,
+) -> bool:
+    """Require every repository handler, not merely any hook from its source."""
+    source = Path(workdir).resolve() / ".codex/hooks.json"
+    candidates = [
+        hook
+        for hook in discovered
+        if (
+            hook.get("source") == "sessionFlags"
+            if inline
+            else hook.get("source") == "project"
+            and Path(hook.get("sourcePath") or "").resolve() == source
+        )
+    ]
+    if not candidates and not inline:
+        return False
+    expected_count = 0
+    for event, groups in definitions.items():
+        for group in groups:
+            for handler in group["hooks"]:
+                expected_count += 1
+                expected = {
+                    "eventName": event[0].lower() + event[1:],
+                    "handlerType": handler["type"],
+                    "command": handler["command"],
+                    "matcher": group.get("matcher"),
+                    "async": handler.get("async", False),
+                }
+                for name, wire in (
+                    ("timeout", "timeoutSec"),
+                    ("statusMessage", "statusMessage"),
+                    ("additionalContextLimit", "additionalContextLimit"),
+                ):
+                    if name in handler:
+                        expected[wire] = handler[name]
+                match = next(
+                    (
+                        i
+                        for i, hook in enumerate(candidates)
+                        if hook.get("enabled") is True
+                        and all(hook.get(k) == v for k, v in expected.items())
+                    ),
+                    None,
+                )
+                if match is None:
+                    raise RuntimeError("project hook discovery is incomplete or disabled")
+                candidates.pop(match)
+    if not expected_count:
+        raise RuntimeError("project hook definitions contain no handlers")
+    return True
+
+
+def hook_overrides(report: dict[str, Any], workdir: str) -> dict[str, Any]:
+    """Trust discovered enabled hooks only for this thread, never in the user store.
+
+    App-server 0.146/0.149 accepts the CLI hook-trust flag but does not forward it
+    to thread configuration. Exact runtime hashes restore that invocation-local
+    behavior. Host preflight still owns vetting the project's hook sources.
+    """
+    states = {}
+    for hook in discovered_hooks(report, workdir):
+        if hook.get("enabled") is not True:
+            continue
+        key, digest = hook.get("key"), hook.get("currentHash")
+        if (
+            not isinstance(key, str)
+            or not key
+            or key in states
+            or not isinstance(digest, str)
+            or not digest.startswith("sha256:")
+            or len(digest) != 71
+            or any(c not in "0123456789abcdef" for c in digest[7:])
+        ):
+            raise RuntimeError("hook discovery returned an invalid key or hash")
+        states[key] = {"trusted_hash": digest}
+    if not states:
+        raise RuntimeError("hook discovery found no enabled hooks")
+    return {"hooks.state": states}
+
+
+def toml_literal(value: Any) -> str:
+    """Encode JSON hook definitions for one CLI config override."""
+    if isinstance(value, dict):
+        return "{" + ",".join(json.dumps(k) + "=" + toml_literal(v) for k, v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(toml_literal(v) for v in value) + "]"
+    if isinstance(value, (str, bool, int)) or (isinstance(value, float) and math.isfinite(value)):
+        return json.dumps(value)
+    raise RuntimeError("unsupported value in project hook definitions")
+
+
+def project_hooks(workdir: str) -> dict[str, Any]:
+    root = Path(workdir).resolve()
+    source = root / ".codex/hooks.json"
+    if source.is_symlink() or not source.resolve().is_relative_to(root):
+        raise RuntimeError("project hook definitions escape the working directory")
+    hooks = json.loads(source.read_text())["hooks"]
+    if not isinstance(hooks, dict) or not hooks:
+        raise RuntimeError("project hook definitions are empty")
+    return hooks
+
+
+def close_server(process: subprocess.Popen[str]) -> None:
+    if process.stdin is not None:
+        process.stdin.close()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
 
 def run(request: dict[str, Any]) -> int:
@@ -122,15 +254,18 @@ def run(request: dict[str, Any]) -> int:
         )
         return delta
 
-    try:
+    def initialize() -> None:
         rpc(
             "initialize",
             {
                 "clientInfo": {"name": "factory", "version": "1"},
-                "capabilities": {"experimentalApi": False},
+                "capabilities": {"experimentalApi": not probe_models},
             },
         )
         send("initialized", {}, notify=True)
+
+    try:
+        initialize()
         cursor = None
         models = []
         cursors: set[str] = set()
@@ -153,11 +288,37 @@ def run(request: dict[str, Any]) -> int:
             r["reasoningEffort"] for r in facts["supportedReasoningEfforts"]
         ]:
             raise RuntimeError("model or reasoning effort unavailable in executing runtime")
+        hooks = rpc("hooks/list", {"cwds": [request["workdir"]]})
+        definitions = project_hooks(request["workdir"])
+        if not project_hook_coverage(
+            discovered_hooks(hooks, request["workdir"]), definitions, request["workdir"]
+        ):
+            # A secondary workspace may omit its project layer even while user
+            # hooks are present. Load the repository definitions for this process.
+            override = "hooks=" + toml_literal(definitions)
+            close_server(process)
+            argv += ["-c", override]
+            process = subprocess.Popen(  # noqa: S603 - vetted hook definitions, argv only
+                argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+            )
+            if process.stdin is None or process.stdout is None:
+                raise RuntimeError("app-server pipes unavailable")
+            stdin, stdout = process.stdin, process.stdout
+            pending.clear()
+            initialize()
+            hooks = rpc("hooks/list", {"cwds": [request["workdir"]]})
+            project_hook_coverage(
+                discovered_hooks(hooks, request["workdir"]),
+                definitions,
+                request["workdir"],
+                inline=True,
+            )
         params = {
             "model": model,
             "cwd": request["workdir"],
             "approvalPolicy": "never",
-            "sandbox": "readOnly" if request.get("readonly") else "dangerFullAccess",
+            "sandbox": "read-only" if request.get("readonly") else "danger-full-access",
+            "config": hook_overrides(hooks, request["workdir"]),
         }
         if request.get("resume_session"):
             params["threadId"] = request["resume_session"]
@@ -196,13 +357,16 @@ def run(request: dict[str, Any]) -> int:
         )
         turn_id = started_turn["turn"]["id"]
         compacting = False
+        compact_turn_id: str | None = None
         while True:
             event = pending.pop(0) if pending else receive()
             params = event.get("params", {})
             method = event.get("method")
             if params.get("threadId") != thread:
                 continue
-            if method == "thread/tokenUsage/updated":
+            if method == "turn/started" and compacting:
+                compact_turn_id = params["turn"]["id"]
+            elif method == "thread/tokenUsage/updated":
                 usage = params["tokenUsage"]
                 if params.get("turnId") != turn_id and not compacting:
                     continue
@@ -246,6 +410,10 @@ def run(request: dict[str, Any]) -> int:
                 # killed worker cannot run finally, but its retained lower bound
                 # and resume baseline must still survive in the event stream.
                 publish_usage()
+                if compacting:
+                    # Compaction reports both billed requests and a context reset.
+                    # Neither is a fresh normal-turn context measurement.
+                    continue
                 window = usage.get("modelContextWindow")
                 context_fraction = (
                     usage["last"]["totalTokens"] / window
@@ -273,8 +441,8 @@ def run(request: dict[str, Any]) -> int:
                 if item["type"] == "contextCompaction":
                     emit({"type": "factory.context.invalidated", "reason": "compaction completed"})
                     context_fraction = None
-                    if compacting:
-                        break
+                    if compacting and compact_turn_id is None:
+                        compact_turn_id = params.get("turnId")
                 elif item["type"] == "agentMessage":
                     if item.get("phase") in (None, "final_answer"):
                         final = item["text"]
@@ -285,17 +453,27 @@ def run(request: dict[str, Any]) -> int:
                         }
                     )
             elif method == "turn/completed":
-                if params["turn"]["id"] != turn_id:
+                expected_turn = compact_turn_id if compacting else turn_id
+                if params["turn"]["id"] != expected_turn:
                     continue
                 turn_finished = True
                 if params["turn"]["status"] != "completed":
                     raise RuntimeError(f"turn ended: {params['turn']['status']}")
+                if compacting:
+                    # The item completes before the turn becomes available again.
+                    # Keep the server alive through the matching terminal event.
+                    outcome = "completed"
+                    break
                 Path(request["output"]).write_text(final)
                 outcome = "completed"
                 if context_fraction is not None and context_fraction >= 0.8 and not compacting:
                     # A completed turn is the safe boundary. Earlier runtime automatic
                     # compaction invalidates the reading and suppresses this request.
                     compacting = True
+                    turn_finished = False
+                    outcome = "failed"
+                    context_fraction = None
+                    emit({"type": "factory.context.invalidated", "reason": "compaction requested"})
                     # Compaction can consume usage not attributed to this turn. Until
                     # runtime evidence covers that attribution, its cost is incomplete.
                     pricing_complete = False
@@ -320,16 +498,7 @@ def run(request: dict[str, Any]) -> int:
                     "usage": delta or {},
                 }
             )
-        process.stdin.close()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+        close_server(process)
 
 
 if __name__ == "__main__":

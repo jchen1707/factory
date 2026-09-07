@@ -1,5 +1,12 @@
 # Runtime rollout
 
+2026-09-06 operator checkpoint: the approved live schema 4→5 migration preserved all
+1,889 rows. Follow-up fixes passed scoped real runtime and isolation probes; production
+activation has not occurred. The fixes remain local. See the current
+[implementation handoff](runtime-implementation-handoff.md) and
+[initial host evidence](runtime-validation-2026-09-06.md).
+The implementation-era status statements below describe the original rollout baseline.
+
 This branch changes orchestration and shared contracts. It does not apply a production
 migration, change tickets, activate app-server, or raise a live project's concurrency.
 Real sandbox compatibility and isolation measurements remain required. `sbx` is unavailable
