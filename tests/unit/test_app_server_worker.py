@@ -41,6 +41,7 @@ def run_client(
     *,
     model: str = "gpt-5.6-sol",
     baseline: dict[str, int] | None = None,
+    usage_scope: str = "thread",
     resume: bool = False,
     readonly: bool = False,
     hook_report: dict[str, Any] | None = None,
@@ -152,6 +153,7 @@ def run_client(
             "context_semantics_verified": True,
             "resume_session": "thread" if resume else None,
             "usage_baseline": baseline,
+            "usage_scope": usage_scope,
             "readonly": readonly,
         }
     )
@@ -559,3 +561,20 @@ def test_request_context_band_uses_per_request_input_for_supported_models(
     assert len(observed["requests"]) == 2
     expected = None if model == "unknown-model" else input_tokens > 272000
     assert [r["long_context"] for r in observed["requests"]] == [expected, expected]
+
+
+def test_certified_connection_counters_do_not_subtract_prior_process_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, emitted, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), usage_event(counts(100), counts(100)), turn_end()],
+        baseline=counts(1000),
+        resume=True,
+        usage_scope="connection",
+    )
+    assert code == 0
+    usage = [event for event in emitted if event["type"] == "factory.usage"][-1]
+    assert usage["complete"] is True
+    assert usage["usage"]["input_tokens"] == 100

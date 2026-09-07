@@ -188,7 +188,13 @@ def run(request: dict[str, Any]) -> int:
     model = request.get("model", "")
     total: dict[str, int] = {}
     baseline: dict[str, int] | None = request.get("usage_baseline")
-    if not request.get("resume_session"):
+    usage_scope = request.get("usage_scope", "thread")
+    if usage_scope not in {"thread", "connection"}:
+        close_server(process)
+        raise RuntimeError("unverified usage counter scope")
+    if not request.get("resume_session") or usage_scope == "connection":
+        # Only a compatibility-verified connection-local runtime may start at zero
+        # on resume. Never infer a reset merely because a counter regressed.
         baseline = {}
     pending: list[dict[str, Any]] = []
     requests: list[dict[str, Any]] = []
@@ -250,6 +256,7 @@ def run(request: dict[str, Any]) -> int:
                 "model": model,
                 "observed_at": time.time(),
                 "thread_total": total,
+                "usage_scope": usage_scope,
                 "usage": delta,
                 "complete": complete,
                 "requests": requests,

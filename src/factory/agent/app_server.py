@@ -27,6 +27,8 @@ def validate_compatibility(path: Path, *, runtime_version: str, sandbox: str) ->
     try:
         report = json.loads(path.read_text())
         _validate_worker(report, Path(__file__).with_name("app_server_worker.py").read_bytes())
+        if report.get("usage_scope", "thread") not in {"thread", "connection"}:
+            raise ValueError("unknown usage counter scope")
         if report["runtime_version"] != runtime_version or report["sandbox"] != sandbox:
             raise ValueError("runtime or sandbox changed")
         if set(report["checks"]) != COMPATIBILITY_CHECKS:
@@ -88,6 +90,7 @@ class AppServerAdapter(CodexAdapter):
             "output": str(invocation.output_path),
             "resume_session": invocation.resume_session,
             "usage_baseline": self.baselines.get(invocation.resume_session or ""),
+            "usage_scope": self.report.get("usage_scope", "thread"),
             "vault": invocation.vault_directory,
             "context_semantics_verified": True,
         }
