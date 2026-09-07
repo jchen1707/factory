@@ -28,8 +28,15 @@ The [real diagnosis/repair experiment](runtime-diagnosis-workflow-acceptance.md)
 now reaches reviewing after one approved repair and actually running independent gates,
 with commits and dirty work preserved. Shared #33 corrects the evidence contract and
 needs merge plus consumer refresh. Actual integration-base refresh/merge/reverification
-also passes. Builder request pricing metadata and nested-agent accounting/control remain
-open; two full concurrent workflows and remaining policy/model coverage are still required.
+also passes. The [builder pricing correction and replay](runtime-builder-pricing-acceptance.md)
+address the missing Terra/Luna context-band classification. Nested-agent accounting/control,
+active-reviewer/shared-VM cancellation and remaining policy/model coverage are still required.
+[Concurrent bind/clone measurements](runtime-concurrent-workflows-acceptance.md) now
+cover actual builder/verify/review paths, draining and targeted recovery/cancellation.
+Their audit exposed false-positive red-phase records; the
+[classifier correction](runtime-redphase-classifier-correction.md) replays those
+outputs as inconclusive, preserving the original records and measurement limits.
+Final-revision sandbox compatibility must cover the corrected worker before activation.
 The current ordered continuation is in [the handoff](runtime-implementation-handoff.md).
 
 Required implementation gaps and failed acceptance checks must be resolved and retested
@@ -39,12 +46,12 @@ alternate; no new planning phase is needed.
 
 | Approved area | Implementation status | Evidence still required before completion |
 | --- | --- | --- |
-| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Fourteen host acceptance checks now cover conflict, deferral, immutable snapshot and stale-evidence refusal. Actual reviewer adherence and successful operator CLI replacement remain. |
+| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Fourteen host acceptance checks now cover conflict, deferral, immutable snapshot and stale-evidence refusal. Successful operator CLI replacement now passes without tracker access and invalidates old evidence; actual reviewer adherence remains. |
 | Model selection and workflow | Presets, readiness, optional planning, diagnosis, repair limits and approval/suspend controls implemented. | Executing-runtime model/effort validation across selected roles; end-to-end diagnosis/repair limits, approval retries, suspend/resume and preservation of committed and dirty work. Approval preventing the first planner launch has been measured. |
 | Separate test design and vertical TDD | Test-design setting and role routing exist; builders receive shared workflow guidance. | Confirm the separate role actually produces acceptance scenarios and test boundaries and the builder proves vertical red-green slices. The explicit shared contract now passed a real app-server test-design invocation, collection and next-approval hold. Builder vertical slices and replay remain separately evidenced. Readiness does not require a particular test-plan filename. |
-| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Exact build and reviewer compatibility manifests now pass. Complete factory workflow integration, console intermediate/freshness observation and reviewer invocation attribution; no implicit adapter switch. |
+| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Earlier build/reviewer manifests passed for the prior worker. Revalidate the corrected worker and retain remaining context/reviewer attribution evidence; no implicit adapter switch. |
 | Accounting | Dated pricing, invocation accounting, incomplete-data labels, reconciliation and budget admission implemented. | Reconcile acceptance coverage for cached/uncached and long-context pricing, failures, duplicate events, incomplete history and all invocation roles. Retain real event evidence where runtime semantics matter; never equate estimates with account charges. |
-| Parallel execution | Atomic admission, configurable limits, per-run isolation and integration-base checks implemented. | Two simultaneous runs in both bind and clone layouts, admission races, dependency/temp/database/port isolation, reviewer resource limits, targeted cancellation/recovery, draining and renewed verification after base changes. |
+| Parallel execution | Atomic admission, configurable limits, per-run isolation and integration-base checks implemented. | Actual bind/clone builder/verifier overlap, reviewer slot limits, verifier draining, targeted suspend and per-run clone cancellation now have evidence. Active-reviewer cancellation and legacy shared-VM sibling safety remain open. Prior admission/dependency/base-refresh measurements remain separately scoped. |
 | Composable stacks | Language/framework presets and optional component generation implemented. | All four default presets and selected optional combinations installed and passed 32 host gates; consumer generation checks pass. Retain declared platform limits and validate any remaining service/runtime-specific behavior. |
 | Evaluation | Intervention, failure-episode, completion-rate and estimated-cost metrics implemented. | Real isolated outcomes reconcile, including incomplete costs and zero accepted changes. Claims of improved delivery require sufficient completed outcomes and comparable cohorts over time. |
 

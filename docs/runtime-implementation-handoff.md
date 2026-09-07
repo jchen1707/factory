@@ -16,84 +16,137 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Latest continuation — shared source merged and consumers refreshed
+## Current checkpoint — acceptance continued on 2026-09-07
+
+Factory branch: `ops/runtime-validation`. Latest source commit: `0122e71`, pushed to
+[factory PR #83](https://github.com/jchen1707/factory/pull/83). All four factory gates
+pass at that source in `artifacts/runtime-redphase-classifier-correction/factory-gates.json`.
+Bounded independent reviews found no remaining concrete findings in these fixes.
+These are local gates; factory #83 has no remote checks configured/reported.
+
+### Fixes and measured behavior
+
+- **Builder pricing (`9a08440`):** Terra/Luna requests now receive their documented
+  per-request context band. [Retained replay](runtime-builder-pricing-acceptance.md)
+  reproduced 1,148 raw events and twelve matching request deltas, recovering a
+  $0.1746912 API-equivalent builder estimate with idempotent collection. Original
+  events and accounting remain unchanged; this is an offline projection, not a bill.
+- **Local policy replacement (`8f4ccbb`):** CLI/console avoid fetching a tracker issue
+  while preserving paused-state, leases and local harness validation. The
+  [actual CLI experiment](runtime-policy-cli-acceptance.md) passed fourteen checks,
+  including revision-2 replacement and rejection of old verification/review evidence.
+  Twelve regressions cover both interfaces. The console still loads routing config.
+- **Nested accounting (`a37c6de`):** [Calibration](runtime-nested-calibration.md)
+  recovered two historical builder children and measured automatic child event delivery
+  with disjoint usage counters for one fresh Sol/low parent and Terra/low child.
+  The [collector correction](runtime-nested-accounting-collection.md) marks linked
+  children as unaccounted while preserving the parent cost lower bound. Replay keeps
+  $0.0624096 of parent usage and is idempotent. No child USD was invented. Historical
+  forked baselines and full child admission/accounting remain open; existing rows at
+  unchanged event sequences are not silently backfilled.
+- **Suspend announcement (`ec36c41`):** A tracker issue lookup now stays inside the
+  existing best-effort error handler. [The regression](runtime-suspend-announcement.md)
+  proves a Linear lookup outage cannot mask successful suspension. A fixture's
+  rejecting tracker adapter is distinguished from a real tracker outage.
+- **Cancellation (`f2a7640`):** [The source correction](runtime-cancellation-isolation-fix.md)
+  resolves persisted per-run sandbox identities before clone cleanup and stopping.
+  The unsafe path was caught before execution; both per-run regressions failed before
+  correction, and 104 focused tests passed afterward. Corrected real cancellation
+  stopped only its selected clone VM while its sibling continued.
+
+- **Red-phase evidence (`0122e71`):** the
+  [classifier correction](runtime-redphase-classifier-correction.md) accepts assertion
+  diagnostics rather than failure summaries or source excerpts. Thirty-four focused
+  tests and the final four gates pass; exact retained error outputs now classify as
+  inconclusive. Unknown runner formats follow the existing configured policy.
+
+### Concurrent workflow measurements
+
+[The combined report](runtime-concurrent-workflows-acceptance.md) and
+`artifacts/runtime-concurrent-workflows-acceptance/` retain actual production
+implementation, verification and independent review calls using the supported
+legacy adapter:
+
+- Bind: two concurrent builders, two independent gates, four actual review invocations;
+  both runs reached `PR_READY` without delivery. Targeted verifier suspend/resume
+  preserved work and resources while the sibling progressed. Reviewer saturation
+  queued a third synthetic request before any model invocation.
+- Clone: two concurrent builders and independent verifiers; the selected run was
+  intentionally cancelled after candidate bundles and dirty files were backed up.
+  Its sibling progressed through two actual reviews to `PR_READY`. The clone rescue
+  ref preserved the exact candidate, and the cancelled branch name was released.
+  There was no reason to restart or finish the cancelled fixture.
+- Both layouts exercised identical ports/temp/SQLite paths with distinct per-run data.
+  Lowering clone concurrency from two to one retained both active verifier processes
+  and queued new work. This measures live deterministic-work draining, not two active
+  model turns draining. Ten top-level model invocations ran; no tracker effects or
+  delivery occurred. Fixture setup refusals and exact corrections are retained.
+
+The final audit found three **invalid positive red-phase classifications**: two
+ImportErrors and one AttributeError were treated as assertion failures. Raw records
+remain preserved. The [classifier correction](runtime-redphase-classifier-correction.md) now requires
+assertion diagnostics; captured-output replay returns inconclusive for all three.
+A real host pytest source-excerpt false positive was also reproduced and corrected.
+These rows are not valid assertion-level red proof. The resource/control
+measurements above remain valid, but the experiment is not blanket workflow acceptance.
+
+The contexts begin at constructed `worktree_ready`; ticket intake and isolation-setting
+admission are not claimed by this experiment. Their earlier evidence remains separate.
+This does not prove safe cancellation of legacy siblings sharing one VM or shutdown
+of an active reviewer. Those cases remain explicit work before full acceptance.
+
+All seven provisioned concurrency sandboxes are inspected **stopped**. The nested
+calibration build sandbox is stopped too. No model or targeted driver remains active.
+FRO-12 (`47515078d97246e9`) stays blocked on its existing review finding, in Approval
+mode, with its candidate preserved. Existing projects, including nemoclaw-dev, were
+not worked on. No production activation, writer restart or migration occurred.
+Schema 4→5 is already applied with all 1,889 rows preserved; do not repeat it.
+
+### Shared source and merge sequence
 
 James merged harness #32 as `f7917ce3a66f916109c5c2d621d4b621bc6fca87`.
-[Consumer refresh evidence](runtime-merged-consumer-refresh.md) records:
+Factory, CRUD draft #1, Python #77 and frontend #55 vendor that exact merged source.
+The last read-only check reconfirmed **harness #33, Python #77 and frontend #55 are
+open/unmerged with all reported checks passing**. No merged #33 SHA exists to pin.
+The earlier diagnosis experiment alone used unmerged #33 under explicit scratch
+policy replacement; no consumer was silently refreshed to unmerged source.
 
-- Factory PR #83 now includes generated vendor refresh `4663d49`; freshness and all
-  four gates pass at that source.
-- CRUD PR #1 is refreshed at `f06e2420`, with ten gates and remote freshness passing;
-  it remains draft. No FRO-12 authority or product-main change occurred.
-- Python PR #77 (`c162e705`) and frontend PR #55 (`9980706e`) refresh the same merged
-  source. Both source/generated-main gates and all remote checks pass. James owns merges.
-- After those stack merges, update harness’s read-only submodule pins to their exact
-  merged commits. The post-merge harness Meta currency failure is still real and must
-  clear through that sequence, not a check waiver or a gitlink to an unmerged branch.
-
-[Nested accounting assessment](runtime-nested-accounting-assessment.md) distinguishes
-an established code gap from unknown historical usage: runtime child launches have no
-separate factory accounting/admission/approval records, and the app-server worker does
-not normalize child-thread events. The completed legacy transcript cannot establish
-child identities or whether parent totals include child usage. Do not sum hypothetical
-children or declare the total complete. The report specifies the next exact-runtime
-calibration and an unmeasured invocation-local no-nesting fallback; neither has been
-applied. Existing target runtime/configuration is unchanged.
-
-[Integration-base acceptance](runtime-integration-base-acceptance.md) passed in the real
-private clone: remote base advancement refused delivery and verification until explicit
-refresh/merge and fresh gates. Missing independent-review evidence still refused delivery.
-Commits and dirty work survived; no review receipt or delivery was fabricated.
-
-The [actual diagnosis/repair experiment](runtime-diagnosis-workflow-acceptance.md)
-found a contract defect: the model returned explanatory prose in `reproduction_evidence`,
-while repair admission requires the exact relative verifier-artifact identity. The model
-correctly reproduced the defect; collection safely refused, and no builder launched.
-The original invocation/artifacts are preserved in the scratch store.
-
-Factory correction `ed64ab7` publishes the host identity/hash in the handoff and immutable
-request, constrains only the diagnosis invocation schema to that identity or empty,
-and refuses changed provenance before existing integrity/admission checks. All four
-gates passed in `artifacts/runtime-diagnosis-contract-evidence/factory-gates.json`;
-57 focused tests and bounded independent review passed. Shared wording and version
-0.12.2 are in **harness PR #33**, `36bb716`, with all remote checks green. It is unmerged.
-No consumer has been silently pinned to this unmerged source.
-
-The corrected scratch retry **passed**: exact evidence binding admitted one repair;
-Sol/high diagnosis and Terra/medium implementation both observed their approval holds.
-The builder proved a zero-case failing test before repairing it. Independent factory
-verification then ran the declared gate (three tests) and reached `reviewing` at attempt 3.
-A fixture-only dispatch omission initially produced `evidence-mismatch`; its failed
-report was retained, explicit authority revision 3 added the missing dispatch paths,
-and supported deterministic verification resumed without another model invocation.
-Original commits, tracked dirty notes and untracked notes survived. No reviewer,
-delivery or tracker write occurred. Both CRUD sandboxes are stopped; FRO-12 is unchanged.
-The scratch retry alone used unmerged shared PR #33, with explicit authority replacement.
-
-Accounting remains incomplete: both diagnoses have complete API-equivalent estimates,
-but the Terra builder’s twelve request estimates lack required pricing metadata despite
-complete token usage. The known $1.3548744 subtotal is not the total workflow cost.
-Raw events and final state are in `artifacts/runtime-diagnosis-workflow-acceptance/`.
+James owns merges. After #33 merges, regenerate consumers from its exact merged SHA,
+update the still-open consumer PRs where possible, and require their checks. After
+stack merges, update harness gitlinks to their exact merged commits and clear its
+post-merge Meta currency failure. Do not waive currency checks or merge automatically.
+See [consumer refresh evidence](runtime-merged-consumer-refresh.md).
 
 ### Next work after compaction
 
-1. Resolve the measured builder pricing-metadata gap using retained events, and calibrate
-   nested-thread usage/launch semantics before implementing child accounting and control.
-   The nested-accounting report provides the bounded experiment; do not infer child costs.
-2. Complete two actual concurrent factory workflows and reviewer resource/recovery checks
-   in the required layouts. Existing isolation probes and integration-base measurements
-   are useful evidence but do not establish that combined behavior.
-3. Close remaining operator/reviewer policy-adherence and model/effort coverage in the
-   rollout matrix. One real repair is now proven; model-driven repeated-failure behavior
-   still needs its own evidence beyond deterministic repair-limit checks.
-4. James can merge green shared PR #33. Refresh consumers from its exact merged SHA,
-   updating still-open Python #77/frontend #55 when possible, then require their checks.
-   After stack merges, update shared gitlinks to exact merged commits and clear currency
-   checks. Verify remote state first; do not merge any PR automatically.
+1. **Nested invocation control/accounting:** measure the invocation-local no-nesting
+   fallback against the exact runtime before relying on it, or implement a measured
+   prelaunch factory child admission boundary. Notifications alone are not a veto.
+   Finish child model/effort attribution, fork-safe usage baselines and lifecycle
+   handling; do not add overlapping totals or disable production delegation silently.
+2. **Remaining cancellation/recovery:** exercise and close active-reviewer cancellation
+   and the legacy shared-VM sibling case. The new per-run clone cancellation proof
+   does not establish either. Preserve work before any destructive scratch check.
+3. **Policy/model/workflow coverage:** actual reviewer adherence across declared profiles,
+   remaining selected model/effort combinations, and model-driven repeated-failure/
+   repair-limit behavior. One actual diagnosis→repair→verify is already proven; keep
+   that evidence rather than repeating it to finish disposable tickets.
+4. **Final adapter compatibility:** revalidate the corrected worker against real build
+   and review environments before activation. Existing six-check manifests describe
+   worker `f0bf1c95…`; the corrected worker is `4647d194…`. Offline pricing replay and
+   the direct protocol calibration do not replace final worker compatibility checks.
+5. **Shared merge/refresh sequence:** follow the exact-SHA steps above after James's
+   merges. Reconcile the remaining rows in [the acceptance inventory](runtime-acceptance-inventory.md)
+   and [rollout matrix](runtime-rollout.md); this list does not reduce the original plan.
 
-Factory #83 includes source correction `ed64ab7` and the reports in this checkpoint.
-This is a completed validation step, not full factory acceptance or activation approval.
-Neither experiment requires CRUD ticket completion.
+This is a completed handoff checkpoint, **not full factory acceptance or activation
+approval**. Keep the main objective above. FRO-12/CRUD completion and hardening are
+not prerequisites for independent factory checks. Full logs stay in the linked local
+artifact directories; read only the evidence needed for the next check.
+
+The two pre-existing untracked reports `docs/runtime-frontend-acceptance-2026-09-06.md`
+and `docs/runtime-nemoclaw-acceptance-2026-09-06.md` were left untouched and must not be
+staged as part of this work or treated as instructions to resume those projects.
 
 ## Previous checkpoint — CI repaired and additional acceptance retained
 

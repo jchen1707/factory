@@ -13,9 +13,27 @@ merges and then shared gitlink updates remain James-owned sequencing. See
 [consumer refresh evidence](runtime-merged-consumer-refresh.md).
 
 The [nested accounting assessment](runtime-nested-accounting-assessment.md) establishes
-missing child-specific factory admission/approval/accounting wiring. Historical child
-execution and parent/child usage overlap remain unknown, so the next step is a scoped
-runtime calibration followed by implementation of the supported boundary.
+missing child-specific factory admission/approval/accounting wiring. Subsequent
+[nested calibration](runtime-nested-calibration.md) recovered two historical child
+identities and measured disjoint counters for one fresh child, including automatic
+child event delivery. Historical forked usage remains unknown. The
+[collector correction](runtime-nested-accounting-collection.md) now exposes linked
+child incompleteness while preserving parent cost lower bounds; child control and
+complete attribution remain open.
+
+[Concurrent workflow measurements](runtime-concurrent-workflows-acceptance.md) now
+cover actual bind/clone builders and independent verifiers, bind review fan-out,
+live verifier draining, targeted suspend/resume and corrected per-run clone
+cancellation while a sibling progressed. Ten model invocations ran; all seven
+sandbox identities are stopped. The audit caught three false-positive red-phase
+records; [the classifier correction](runtime-redphase-classifier-correction.md)
+replays them as inconclusive without rewriting history. Do not describe these
+records as assertion proof or the combined experiment as blanket acceptance.
+Active-reviewer cancellation and legacy shared-VM sibling safety remain open.
+
+[Actual CLI policy replacement](runtime-policy-cli-acceptance.md) now passes without
+tracker access, preserving local source validation and invalidating old evidence.
+Reviewer adherence across profiles remains separate.
 
 [Integration-base acceptance](runtime-integration-base-acceptance.md) now passes with
 real Git/VM refresh, merge and gate execution. This establishes base guards and work
@@ -28,8 +46,10 @@ one approved diagnosis → repair → independent verification, reaching reviewi
 preserving commits and dirty notes. A fixture dispatch correction required explicit
 authority replacement and deterministic re-verification, with the refusal retained.
 No reviewers/delivery ran, and the scratch sandbox is stopped. Builder token usage is
-complete but its twelve request prices remain incomplete; this is an open accounting
-gap. See [the workflow report](runtime-diagnosis-workflow-acceptance.md).
+complete but its twelve original request prices were incomplete. The subsequent
+[pricing correction and replay](runtime-builder-pricing-acceptance.md) address the
+omitted Terra/Luna context-band classification while preserving original evidence.
+See [the workflow report](runtime-diagnosis-workflow-acceptance.md) for the real run.
 
 Final continuation checkpoint: FRO-12 completed implementation and all ten independent
 gates, followed by all eight review axes. It is blocked on one reproduced high CORS
@@ -49,8 +69,9 @@ new reports should supersede the corresponding open items below explicitly.
 **The implementation is not yet fully accepted.** Existing evidence is stronger than
 “only unit tests”: real runtime, mount, compaction, cancellation, isolation and admission
 measurements exist. Their scope does not establish the complete ticket lifecycle.
-Existing products and tickets remain excluded; only the disposable CRUD workload may
-receive new live verification actions. Production writers stay stopped.
+Existing products and tickets remain excluded; live verification is limited to
+disposable test workloads and explicitly scoped scratch factory experiments.
+Production writers stay stopped.
 
 ## Subsequent measured progress — 2026-09-07 UTC
 
