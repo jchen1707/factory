@@ -16,7 +16,48 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current resume — after #84 merge, 2026-09-07
+## Current resume — live credential preflight, 2026-09-07
+
+James merged #85 as `335d3e2a47ef6c72ac5cbc8c074f3285da165ce9` and requested
+validation of the new live sandbox identities before app-server selection.
+Both were provisioned using production `build_spec` / `_review_spec`, the live
+registry and live mount paths. Validation records use a separate artifact SQLite
+store; no validation run was inserted into the live store. A dedicated validation
+authority snapshot was published under the live project authority mount so the
+creation specification includes that read-only mount. FRO-12 remains untouched.
+
+**Blocked before model execution:** both `factory-build-crud-live-20260907` and
+`factory-review-crud-live-20260907` contain nonempty `GH_TOKEN`, declared by the
+target repository and rejected by production capability classification because
+the project's acknowledgement list is empty. Neither sandbox reports a disallowed
+proxy secret. Both report Codex CLI 0.146.0. Read-only `gh auth status` reports the
+credential invalid in each environment, despite command exit 0. Only classification
+flags were retained; no credential value or raw auth output was printed or stored.
+
+Evidence: `artifacts/runtime-live-sandbox-validation/{build,review}/` retains exact
+creation argv/specifications, filtered inspect records, credential preflight and
+auth classifications. `preflight.py` and `classify-auth.py` retain the probes.
+This was credential admission, **not a full preflight or compatibility pass**.
+No model invocation or six-check compatibility sequence ran; no manifest was issued.
+App-server remains unselected; existing models and concurrency 1 are unchanged.
+
+Repository verification: canonical `gate_report.mjs --force --json` reports PASS;
+Ruff check, Ruff format, mypy and pytest each exit 0 with empty output tails.
+Report: `artifacts/runtime-live-sandbox-validation/factory-gates.json`. No new source
+directory was added; mypy retains its configured-path limitation. Fixture tests
+do not establish live compatibility. Local Docker template image inspection was
+unavailable, so the inherited variable's injection source remains unproven.
+
+**Next:** resolve inherited credential admission, then run full preflight and all
+six compatibility checks for these exact environments and current worker. Prefer
+an environment without the inherited variable. Alternatively James may explicitly
+authorize the existing registry acknowledgement mechanism for the measured invalid
+credential on this disposable project. That is a visible exception, not removal of
+the variable or proof of absent capability; no exception was applied. After checks
+pass, present concrete adapter settings for James's selection. Do not complete CRUD
+tickets, resume FRO-12, repeat migration or change another project's environment.
+
+## Previous resume — after #84 merge, 2026-09-07
 
 James merged #84 as `f17ba61db887f13ecaad3759c64138f1d7dd62d0`.
 The implementation/consumer merge sequence and authorized writer restart are complete.
