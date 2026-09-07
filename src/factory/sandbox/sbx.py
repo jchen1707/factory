@@ -490,11 +490,17 @@ class SbxAdapter:
 
     def stop(self, name: str) -> None:
         assert_factory_sandbox(name)
-        self._run(["sbx", "stop", name], timeout=120)
+        result = self._run(["sbx", "stop", name], timeout=120)
+        if not result.ok:
+            raise SbxError(f"sbx stop {name} failed (exit {result.returncode})")
 
     def remove(self, name: str) -> None:
         assert_factory_sandbox(name)
-        self._run(["sbx", "rm", name], timeout=120)
+        if self.inspect(name).get("state") != "stopped":
+            raise SbxError(f"sbx remove {name} refused: sandbox must be stopped")
+        result = self._run(["sbx", "rm", "--force", name], timeout=120)
+        if not result.ok:
+            raise SbxError(f"sbx remove {name} failed (exit {result.returncode})")
 
     # -- execution ----------------------------------------------------------------
 

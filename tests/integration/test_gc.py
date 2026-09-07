@@ -10,8 +10,11 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
+
 from factory import gc, repo
 from factory.machine import State
+from factory.sandbox.sbx import SbxError
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
@@ -295,3 +298,19 @@ def test_artifacts_are_kept_while_the_disk_is_above_the_floor(ctx: Context) -> N
 
     assert _kinds(actions, "artifact-delete") == []
     assert old.is_dir()
+
+
+def test_sandbox_cleanup_failure_is_reported_without_claiming_removal(
+    ctx: Context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _finished_run(ctx)
+
+    def refuse(self: FakeSandbox, name: str) -> None:
+        raise SbxError(f"sbx remove {name} failed (exit 1)")
+
+    monkeypatch.setattr(FakeSandbox, "remove", refuse)
+    removals = _kinds(_sweep(ctx, dry_run=False), "sandbox-remove")
+    assert removals
+    assert any("failed (exit 1)" in action.why for action in removals)
+    assert all(not action.done for action in removals)

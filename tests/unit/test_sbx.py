@@ -797,3 +797,62 @@ def test_full_observation_includes_environment_capability_names(
         hook_files={},
     )
     assert result["actual"]["credential_names"] == ["FIXTURE_CAPABILITY"]
+
+
+@pytest.mark.parametrize("operation", ["stop", "remove"])
+def test_cleanup_reports_command_failure(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+        return subprocess.CompletedProcess(argv, 1, "", "cleanup refused")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="failed"):
+        getattr(SbxAdapter(), operation)("factory-review-cleanup-test")
+
+
+def test_remove_is_noninteractive_and_only_removes_stopped_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[str] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+        if argv == ["sbx", "rm", "--force", "factory-review-cleanup-test"]:
+            removed.append(argv[-1])
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 1, "", "interactive confirmation required")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    SbxAdapter().remove("factory-review-cleanup-test")
+    assert removed == ["factory-review-cleanup-test"]
+
+
+@pytest.mark.parametrize("state", ["running", "starting", "", None])
+def test_remove_refuses_an_unstopped_or_unknown_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    state: str | None,
+) -> None:
+    import json
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert argv[1] == "inspect", "refusal must not issue any destructive command"
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"state": state}), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="must be stopped"):
+        SbxAdapter().remove("factory-review-cleanup-test")
+
+
+@pytest.mark.parametrize("operation", ["stop", "remove"])
+def test_cleanup_never_contacts_a_human_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    def run(*args: object, **kwargs: object) -> None:
+        pytest.fail("must refuse before contacting sbx")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(PermissionError):
+        getattr(SbxAdapter(), operation)("codex-human-session")

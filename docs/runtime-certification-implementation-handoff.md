@@ -2,11 +2,12 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
-launch enforcement are implemented in the isolated worktree. Both prior disposable identities passed six checks. Prepared-launch environment/generation
-refusals now pass; the deliberately recreated reviewer requires fresh certification before reuse.
-Child execution/integration and rollout remain incomplete. See **Prepared launch identity checkpoint**
-at the end; earlier sections are historical.
+Latest checkpoint: checked sandbox cleanup is implemented and validated in a fresh disposable
+VM. Automatic certification and prepared-launch identity validation retain their previous
+acceptance. Child broker/execution, isolated integration, controls and rollout remain unfinished.
+See **Checked sandbox cleanup checkpoint** at the end; earlier sections are historical.
+Neither prior workflow VM is assumed available. Fresh observations/certification are required
+before future paid execution.
 
 ## Objective and approved scope
 
@@ -1116,3 +1117,60 @@ final_readback. Do not treat either prior disposable identity as currently avail
 it blindly. Fresh setup/observation/certification is required for future execution. No codex-*
 sandbox was attached/stopped/removed and no live services/settings were changed by this work.
 This checkpoint is the commit containing this section.
+
+
+## Checked sandbox cleanup checkpoint
+
+Continued from593ca70 in the isolated implementation worktree. Objective remains factory
+feature/workflow validation with synthetic workloads, not ticket hardening or completion.
+No live services/settings, schema, consumer pins, shared source, tracker/forge writes or
+customer work changed. This commit completes the cleanup prerequisite only; child execution
+is not implemented by this slice.
+
+Implemented and measured:
+- SbxAdapter.stop/remove now raise on unsuccessful command exits, naming the action, exact
+  sandbox and exit code. They do not copy raw command output into cleanup errors.
+- Removal requires an observed stopped sandbox, then uses checked noninteractive rm --force
+  for that exact name. Human sandbox names refuse before any adapter command. Running or
+  unknown state refuses; removal never implicitly stops a running VM.
+- GC retains registry/run-derived names and active-run exclusions, and records an unsuccessful
+  action when the adapter refuses/fails instead of claiming success or aborting the sweep.
+  An eligible but still-running VM is retained with a stopped-state refusal; its owner must
+  safely stop it before removal. No broader targeting or implicit forced stop was introduced.
+- RED regressions reproduced swallowed stop/remove failures, interactive removal doing nothing,
+  and GC aborting on the new exception. Focused sandbox/GC suites pass (69 tests); mypy covers
+  all152 source/test files. Unknown-state and human-name guards also pass.
+- Real single-use script artifacts/runtime-cleanup-validation/check.py created only
+  factory-review-cleanup-593ca70, generation385b393b-cdf0-4155-bfe5-a99e129e48a7. It executed
+  /bin/true (no model), observed running-state removal refusal and preserved generation,
+  stopped/inspected the VM, removed it through the production adapter and verified absence.
+  A host artifact survived unchanged. Result: artifacts/runtime-cleanup-validation/result.json.
+  Final sbx ls --json lists no sandboxes. No historical workflow VM was recreated.
+- Both bounded Standards and Spec reviews clear. This establishes adapter behavior, not an
+  atomic child-cleanup admission boundary: future child callers must reconcile owned leases
+  and exclude concurrent starts before removal. The sbx CLI observation/removal pair is not
+  a compare-and-swap operation. Child lifecycle safety remains unclaimed.
+
+Exact next work:
+1. Durable host child broker and read-only execution/result transport on the measured supported
+   runtime. runtime_jobs still has tables/admission only; app_server_worker still has no factory
+   child transport. Validate schema/size/paths, bind requests to the executing parent/run,
+   persist idempotent requests/results, and enforce authority, separate child approval,
+   accounting, targeted cancellation and subtree restart recovery. Keep native spawn disabled.
+2. Isolated writable children and serialized safe integration preserving dirty parent work;
+   remaining CLI/console controls and real synthetic acceptance. Use the checked adapter only
+   after owned children are terminal/reconciled and concurrent starts are excluded.
+3. Matching full runtime package/template, shared merge/exact consumer sync and reviewed
+   rollout. Harness remains e3fc8ad, unchanged/unmerged. Binary-only runtime experiments do
+   not authorize a new bundled launcher. James owns merge, live schema5→6 approval, deployment
+   and activation. Live concurrency4 and disabled delegation remain unchanged.
+
+Overall plans remain implementing and untracked. No push/PR opened. This checkpoint is the
+commit containing this section. Prior certification/accounting history is unchanged; no new
+paid calls or accounting backfill. See final gate evidence below.
+
+Final canonical verification: artifacts/runtime-cleanup-validation/gates-final.json PASS.
+Ruff check exit0/80ms, Ruff format exit0/48ms, mypy exit0/202ms, pytest exit0/137584ms;
+all output tails empty, no skips. Configured mypy paths cover all changed source/tests.
+Fake-sandbox test caveat applies; the real cleanup observation above supplies separate sbx
+behavior evidence. No production source changed after this report. Both review axes clear.

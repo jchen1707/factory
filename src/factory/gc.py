@@ -29,6 +29,7 @@ from factory.delivery import forge as forge_dispatch
 from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
 from factory.sandbox.base import SandboxAdapter
+from factory.sandbox.sbx import SbxError
 from factory.store import Run, Store
 
 __all__ = ["Action", "sweep"]
@@ -292,7 +293,7 @@ def _act_on_sandbox(
             sandbox.remove(name)
         else:
             sandbox.stop(name)
-    except (PermissionError, OSError) as exc:
+    except (PermissionError, OSError, SbxError) as exc:
         return [Action(kind, name, f"refused: {exc}", False)]
     return [Action(kind, name, why, True)]
 
