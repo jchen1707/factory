@@ -16,7 +16,100 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current checkpoint — acceptance continued on 2026-09-07
+## Current continuation — supported rollout validation, 2026-09-07
+
+**The supported rollout scope is validated, with the runtime and historical-data
+limitations below.** Source corrections are committed on `ops/runtime-validation`:
+`8b3d1d1` (runtime/accounting) and `c7dacd3` (targeted cancellation/suspension),
+published through [factory PR #83](https://github.com/jchen1707/factory/pull/83).
+All four final factory gates pass, exit 0, at source `c7dacd3` in
+`artifacts/runtime-final-acceptance/factory-gates.json`; source hashes match the
+entire gate run. Mypy covers declared paths; fixture tests establish control-plane
+logic, while the linked real measurements establish their separately stated effects.
+Bounded independent reviews found and closed the described gaps. Factory #83 has no
+reported remote checks; local green gates are not remote CI.
+
+FRO-12 remains parked. Existing products and production writers are unchanged,
+and schema 4→5 must not be repeated. No test ticket needs to be completed to continue
+the remaining rollout sequence.
+
+### New corrections and evidence
+
+- [Worker compatibility binding](runtime-worker-binding-acceptance.md) now checks
+  `worker_sha256` during adapter selection and immediately before preparing a launch.
+  Missing/older hashes are refused; retained historical manifests are unchanged.
+- [Nested-agent restriction](runtime-nested-fallback.md) measures and enforces
+  invocation-local `agents.enabled=false` on app-server thread start and resume.
+  The weaker CLI feature flag was tested and did not prevent spawning. Factory's
+  independent scheduled roles remain available. Legacy exec behavior is preserved.
+  Full-history child calibration also proved why inherited counters cannot be added
+  to parent totals without a verified baseline; historical costs remain incomplete.
+- [Resume baseline correction](runtime-resume-baseline-acceptance.md) prevents empty
+  or malformed failed-resume observations from replacing valid retained counters.
+  The reproduced 600-token overcount becomes the actual 100-token invocation delta.
+  Missing valid baselines remain unknown, rather than being treated as zero.
+- [Accounting observation correction](runtime-accounting-observation-acceptance.md)
+  keeps late compaction usage from becoming fresh context, honors worker invalidation,
+  and retains known priced lower bounds when malformed raw events make totals incomplete.
+- [Policy/model acceptance](runtime-policy-model-workflow-acceptance.md) ran three
+  actual independent standards reviews. Prototype honored its explicit test deferral;
+  Core required tests; Hardening also required the production audit behavior. All
+  identified the mandatory correctness defect. All distinct Volume model/effort
+  pairs are supported by the executing catalogue. Astra/high and Astra/xhigh are
+  unavailable there and correctly fail closed, with no silent substitution.
+
+The final worker hash is
+`f2b3751989c9810250554ec4b35dfcb9eec07b00d11fc60b0a6f81e9168b93be`.
+[Final build/reviewer compatibility](runtime-final-app-server-compatibility.md) passes
+for this exact worker, including fresh hooks, schema, isolation, detached interruption
+and same-thread recovery. Exact-runtime raw compaction/model-change measurements are
+reused explicitly, not presented as repeated final-worker turns. Both VMs are stopped.
+
+[Active cancellation and suspension](runtime-active-cancellation-recovery.md) now
+require the correct terminal file before destructive cleanup or a suspension claim,
+protect physical shared-VM siblings across projects, and stop idle active reviewer VMs.
+Actual production cancellation stopped targeted deterministic workers with exit 143
+while shared build/reviewer siblings progressed and retained files/SQLite. Actual
+planning suspension used `plan-exit=143` despite stale `exit=0`, preserving another
+project's same-VM worker. All scratch VMs are stopped. These are real process-control
+measurements; final compatibility separately interrupted actual model workers.
+
+### Next steps — merges and explicit activation
+
+Native nested orchestration is unavailable in the opt-in app-server adapter until
+factory can enforce child admission and account for each child's verified usage.
+This is a measured restriction enforcing the approved control boundary, not a claim
+that arbitrary nesting works. Legacy exec and missing historical evidence retain
+explicit limitations. Unavailable Astra presets cannot be activated in the measured
+runtime. Availability elsewhere requires a fresh executing-runtime check.
+
+The original plan's acceptance is supported by complementary evidence: actual model
+workflow seams, real deterministic gate/resource/control checks, focused regressions,
+and exact-runtime protocol measurements. Do not require new CRUD completion, two
+intentionally failed model repairs, every role×effort invocation, every optional
+platform combination or an adequate delivery-improvement cohort merely to repeat
+already established contracts. Longer-term comparative delivery metrics remain future
+observation; current zero-accepted-change metrics must stay honest.
+
+Harness #33 remains open at `36bb716…` with all reported checks passing. James owns
+that merge. After it merges, sync consumers from the exact merged SHA, update existing
+open consumer PRs, and require their checks. After James merges the stack PRs, update
+shared gitlinks to the exact merged stack commits and require pin/current checks.
+Production activation, live concurrency changes and writer restart remain James's
+explicit decision after reviewing concrete settings. None occurred in this continuation.
+The final compatibility manifests authorize only their named scratch environments;
+validate any different deployment sandbox/runtime before selecting the new adapter.
+
+The working tree retains only the pre-existing unrelated untracked frontend and
+nemoclaw reports outside this change. Do not stage them or treat them as instructions
+to resume product work. All experiment processes/VMs are stopped; reports retain exact
+identities, failure attempts and evidence paths. This is a ready compaction checkpoint;
+resume with the merge/refresh sequence, not another disposable-ticket completion loop.
+
+The sections below are retained history. Their old next-step lists and source hashes
+are superseded by this current continuation.
+
+## Previous checkpoint — acceptance continued on 2026-09-07
 
 Factory branch: `ops/runtime-validation`. Latest source commit: `0122e71`, pushed to
 [factory PR #83](https://github.com/jchen1707/factory/pull/83). All four factory gates

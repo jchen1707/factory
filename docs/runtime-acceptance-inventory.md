@@ -7,6 +7,54 @@ parked. Shared source is now merged and consumer freshness is green; the remaini
 stack-merge and gitlink sequence is documented below. Continue the
 remaining factory checks. Passing local gates does not establish remote merge readiness.
 
+## Final validation follow-up — 2026-09-07
+
+Supported rollout validation passes at factory source `c7dacd3`, with the limitations
+below. All four gates pass in `artifacts/runtime-final-acceptance/factory-gates.json`.
+Bounded source reviews are clear; all experiment VMs are stopped. This is not an
+activation approval, complete historical-accounting claim, or support for native
+nested orchestration in the new adapter.
+
+The following evidence supersedes corresponding open items in the historical audit
+below; it preserves each experiment's scope rather than claiming universal coverage.
+
+- [Policy/model checks](runtime-policy-model-workflow-acceptance.md): three real
+  reviews distinguish Prototype deferrals, Core engineering requirements and Hardening
+  production requirements. All Volume model/effort tuples are supported by the measured
+  runtime; Astra/high and Astra/xhigh are absent and correctly refused. Actual execution
+  of unavailable presets is not claimed and no substitution was made.
+- [Native nesting restriction](runtime-nested-fallback.md): invocation-local
+  `agents.enabled=false` prevents new native children on start and resume, while the
+  primary task completes. The opt-in worker now enforces it. Factory's independent
+  scheduled roles remain available; legacy execution and incomplete historical child
+  accounting retain their limitations. Fork calibration proves inherited counters
+  require a known baseline and cannot be naively added to parent totals.
+- [Final worker compatibility](runtime-final-app-server-compatibility.md): separate
+  real build/review environments passed the six declared checks with explicit reuse
+  of exact-runtime raw compaction/model-change measurements. Fresh final-worker
+  hooks, isolation, schema, detached interruption and same-thread recovery passed.
+  Both sandboxes are stopped. Natural 80% occupancy was not forced by this refresh.
+- [Compatibility binding](runtime-worker-binding-acceptance.md),
+  [resume baselines](runtime-resume-baseline-acceptance.md), and
+  [collector observations](runtime-accounting-observation-acceptance.md) close concrete
+  gaps with red-before-green regressions: stale-worker authorization, failed-resume
+  token overcount, false fresh context after compaction and loss of known cost on
+  malformed raw notifications. Original historical evidence remains unchanged.
+- [Active cancellation/suspension](runtime-active-cancellation-recovery.md) now verifies
+  terminal records before cleanup/parking, protects physical shared-VM siblings across
+  projects, and handles planner/reviewer identities. Real targeted deterministic
+  processes stopped with exit 143 while siblings progressed with files/databases intact;
+  actual planner suspension used the correct terminal file. All scratch VMs stopped.
+- Repair acceptance combines actual failing-gate provenance and deterministic limits
+  with the already measured model diagnosis→repair→verification seam. It does not
+  claim two deliberately failed model repairs or require disposable-ticket completion.
+
+Remaining publication and activation steps belong to James: merge shared #33, refresh
+consumers from its exact merged SHA, require consumer checks, merge stacks, refresh
+shared gitlinks and require currency checks, then decide concrete activation settings.
+No production writer restart, activation or repeated schema migration occurred.
+Longer-term delivery-improvement claims still require comparable outcome cohorts.
+
 Latest source rollout: James merged harness #32 as `f7917ce`; factory `4663d49`,
 CRUD draft #1, Python #77 and frontend #55 now vendor it. Their checks pass; stack
 merges and then shared gitlink updates remain James-owned sequencing. See

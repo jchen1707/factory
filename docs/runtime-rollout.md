@@ -19,41 +19,41 @@ remote workflows/checks; local gate evidence is not remote green CI.
 
 This is the execution-status update for James's approved four-repository improvement
 plan. It does not replace or reduce that plan's requirements. All major feature areas
-have implementations and the original implementation PRs are merged. **This is not
-a claim that every requirement is implemented correctly or that acceptance is complete.**
+have implementations and the original implementation PRs are merged. **Supported rollout validation now passes at source `c7dacd3`, with the explicit
+runtime and historical-data limits below.** All four local factory gates pass in
+`artifacts/runtime-final-acceptance/factory-gates.json`. This does not activate a
+production adapter or waive shared/consumer merge checks.
 Real testing has exposed integration defects; corrective changes are published in factory #83 and harness #32/#33, with dependent
 consumer changes in Python #77, frontend #55 and draft CRUD #1.
 
-The [real diagnosis/repair experiment](runtime-diagnosis-workflow-acceptance.md)
-now reaches reviewing after one approved repair and actually running independent gates,
-with commits and dirty work preserved. Shared #33 corrects the evidence contract and
-needs merge plus consumer refresh. Actual integration-base refresh/merge/reverification
-also passes. The [builder pricing correction and replay](runtime-builder-pricing-acceptance.md)
-address the missing Terra/Luna context-band classification. Nested-agent accounting/control,
-active-reviewer/shared-VM cancellation and remaining policy/model coverage are still required.
-[Concurrent bind/clone measurements](runtime-concurrent-workflows-acceptance.md) now
-cover actual builder/verify/review paths, draining and targeted recovery/cancellation.
-Their audit exposed false-positive red-phase records; the
-[classifier correction](runtime-redphase-classifier-correction.md) replays those
-outputs as inconclusive, preserving the original records and measurement limits.
-Final-revision sandbox compatibility must cover the corrected worker before activation.
-The current ordered continuation is in [the handoff](runtime-implementation-handoff.md).
+The final continuation closes the targeted runtime gaps with measured restrictions
+and corrections. [Profile reviewers](runtime-policy-model-workflow-acceptance.md)
+respect declared requirements/deferrals; Volume model tuples are supported, while
+unavailable Astra presets fail closed. [Native nesting is disabled per invocation](runtime-nested-fallback.md)
+on the opt-in app-server adapter so child launches cannot bypass factory admission.
+Legacy exec behavior and incomplete historical costs remain explicit limitations.
+[Final build/reviewer compatibility](runtime-final-app-server-compatibility.md) passes
+for worker `f2b37519…`; [worker hash binding](runtime-worker-binding-acceptance.md)
+rejects older manifests. [Resume baseline](runtime-resume-baseline-acceptance.md) and
+[collector corrections](runtime-accounting-observation-acceptance.md) preserve honest
+token/context/cost reporting across failure and compaction. The current final source,
+gates and remaining operator sequence are recorded in [the handoff](runtime-implementation-handoff.md).
 
 Required implementation gaps and failed acceptance checks must be resolved and retested
 as part of this work, before declaring completion or activating the affected features.
 Do not defer them to post-activation work. Testing and corrective implementation can
 alternate; no new planning phase is needed.
 
-| Approved area | Implementation status | Evidence still required before completion |
-| --- | --- | --- |
-| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Fourteen host acceptance checks now cover conflict, deferral, immutable snapshot and stale-evidence refusal. Successful operator CLI replacement now passes without tracker access and invalidates old evidence; actual reviewer adherence remains. |
-| Model selection and workflow | Presets, readiness, optional planning, diagnosis, repair limits and approval/suspend controls implemented. | Executing-runtime model/effort validation across selected roles; end-to-end diagnosis/repair limits, approval retries, suspend/resume and preservation of committed and dirty work. Approval preventing the first planner launch has been measured. |
-| Separate test design and vertical TDD | Test-design setting and role routing exist; builders receive shared workflow guidance. | Confirm the separate role actually produces acceptance scenarios and test boundaries and the builder proves vertical red-green slices. The explicit shared contract now passed a real app-server test-design invocation, collection and next-approval hold. Builder vertical slices and replay remain separately evidenced. Readiness does not require a particular test-plan filename. |
-| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Earlier build/reviewer manifests passed for the prior worker. Revalidate the corrected worker and retain remaining context/reviewer attribution evidence; no implicit adapter switch. |
-| Accounting | Dated pricing, invocation accounting, incomplete-data labels, reconciliation and budget admission implemented. | Reconcile acceptance coverage for cached/uncached and long-context pricing, failures, duplicate events, incomplete history and all invocation roles. Retain real event evidence where runtime semantics matter; never equate estimates with account charges. |
-| Parallel execution | Atomic admission, configurable limits, per-run isolation and integration-base checks implemented. | Actual bind/clone builder/verifier overlap, reviewer slot limits, verifier draining, targeted suspend and per-run clone cancellation now have evidence. Active-reviewer cancellation and legacy shared-VM sibling safety remain open. Prior admission/dependency/base-refresh measurements remain separately scoped. |
-| Composable stacks | Language/framework presets and optional component generation implemented. | All four default presets and selected optional combinations installed and passed 32 host gates; consumer generation checks pass. Retain declared platform limits and validate any remaining service/runtime-specific behavior. |
-| Evaluation | Intervention, failure-episode, completion-rate and estimated-cost metrics implemented. | Real isolated outcomes reconcile, including incomplete costs and zero accepted changes. Claims of improved delivery require sufficient completed outcomes and comparable cohorts over time. |
+| Approved area | Accepted evidence and explicit limits |
+| --- | --- |
+| Delivery policy and authority | Host conflict/deferral/immutable-snapshot/stale-evidence checks, actual CLI replacement, and three actual profile reviews pass. One standards axis per profile establishes the scoped reviewer policy behavior. |
+| Model selection and workflow | Volume tuple availability passes; Astra-dependent High-confidence roles are unavailable and refused. Actual diagnosis→repair→verification complements deterministic two-repair, unchanged-evidence, lifetime and budget guards. Approval holds and preserved-work recovery are measured. |
+| Separate test design and vertical TDD | Actual app-server test design produces scenarios/boundaries and holds the next approval. Actual base replay observes API/web assertions; classifier regressions prevent ImportError/AttributeError summaries from serving as assertion proof. Historical false-positive rows remain invalid. |
+| Runtime and context | Final build/review worker compatibility passes. Compaction, current/cumulative separation, freshness and model changes have exact-runtime evidence; final-worker recovery is measured separately. Native nested tools are disabled on start/resume; no implicit adapter switch. |
+| Accounting | Dated pricing, request context bands, duplicate reconciliation, failed-resume baselines, malformed-event lower bounds and budget checks have retained evidence. Historical/legacy usage without request or child evidence stays incomplete; API-equivalent estimates are not account charges. |
+| Parallel execution | Actual bind/clone builder/verifier/review paths, isolated resources, admission races, slot queueing, draining, base refresh and targeted control checks are measured. Final cancellation/suspension evidence is linked in the current handoff; model and deterministic-process scopes remain distinct. |
+| Composable stacks | Four default presets and selected optional combinations installed and passed 32 host gates; generation checks pass. This does not claim every platform or external-provider integration. |
+| Evaluation | Real isolated outcome metrics reconcile, including zero accepted changes and unknown cost per accepted change. Comparative delivery improvement requires longer-term cohorts and is not claimed. |
 
 Completion also requires factory's four Definition-of-Done gates, layer-A contract
 checks, consumer generation checks, and the planned real sandbox measurements against
@@ -131,14 +131,23 @@ run retains its selected adapter and compatibility-directory setting; each launc
 executing sandbox's `codex --version` and the manifest named `<sandbox>.json` in that directory.
 The invocation retains the compatibility report, selected model, effort, preset, and usage.
 
-Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`, and
-`checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
+Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`,
+`worker_sha256`, and `checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
 The required checks are `hook_enforcement`, `schema_output`, `sandbox_isolation`,
 `detached_durability`, `recovery`, and `usage_semantics`. Capture actual runtime effects:
 protected-path denial, schema-valid output, reviewer write refusal, detached process survival,
 recovery after interruption, and observed usage/compaction semantics. Keep raw events.
-Build and review sandboxes need separate manifests. A changed runtime or sandbox invalidates
-that evidence. The manifest is operator-owned, outside candidate workspaces.
+Build and review sandboxes need separate manifests. A changed runtime, sandbox or worker
+invalidates that evidence. The worker hash is checked during selection and again before
+copying the invocation worker. The manifest is operator-owned, outside candidate workspaces.
+
+The opt-in app-server worker disables native nested-agent launches on both thread start
+and resume using the measured invocation-local `agents.enabled=false` setting. Factory
+schedules each model role through its own approval, resource and budget checks; its
+independent reviews remain available. Legacy exec runs retain their adapter behavior.
+Historical nested usage remains visibly incomplete; it is not inferred or backfilled.
+This restriction is part of selecting the new adapter, not a production configuration
+change or an implementation of arbitrary nested-agent admission.
 
 ```sh
 factory configure --project PROJECT --agent-adapter app-server --app-server-compatibility /absolute/evidence/directory
