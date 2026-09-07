@@ -73,6 +73,14 @@ def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) 
     if pgid is not None:
         ctx.sandbox.kill_group(sandbox, pgid)
         return f"group {pgid}"
+    others = [
+        row for row in ctx.store.active_runs_for_project(ctx.project.name) if row.id != ctx.run.id
+    ]
+    if others:
+        raise Blocked(
+            "targeted-signal-unavailable",
+            "The process group is missing and another run shares the project",
+        )
     ctx.sandbox.kill_agent(sandbox, KILL_TARGET[state])
     return f"name {KILL_TARGET[state]} (no pgid file; pre-upgrade attempt)"
 
@@ -170,7 +178,10 @@ class Context:
         of a project fail `_assert_spec_matches` — the mistake `_review_scratch` already
         records. Per-ticket subdirectories inside it are free; the *mount* is what is fixed.
         """
-        return self.home / "state" / "clone" / self.project.name
+        root = self.home / "state" / "clone" / self.project.name
+        if self.store.runtime.settings("run", self.run.id).get("isolation") == "per-run":
+            return root / self.run.linear_id / self.run.id
+        return root
 
     @property
     def env(self) -> dict[str, str]:
@@ -192,10 +203,15 @@ class Context:
         business knowing what `uv` is (§3.2). The registry says which variable is per-run;
         layer D only knows how to spell a run.
         """
-        return {
+        environment = {
             key: value.replace("{run}", self.run.linear_id)
             for key, value in self.project.env.items()
         }
+        snapshot = self.store.runtime.policy(self.run.id)
+        if snapshot:
+            environment["HARNESS_AUTHORITY_ROOT"] = snapshot["root"]
+            environment["HARNESS_DELIVERY_PROFILE"] = snapshot["profile"]
+        return environment
 
     @property
     def factory_dir(self) -> Path:
@@ -373,10 +389,17 @@ def start_agent(ctx: Context) -> None:
 
     The imports are function-local because `plan` and `implement` import this module.
     """
+    from factory import handoffs
     from factory.steps import implement as implement_step
     from factory.steps import plan as plan_step
 
-    if plan_step.should_plan(ctx, forced=ctx.run.force_plan):
+    settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
+    brief_needed = settings.get("workflow") == "diagnosis" and handoffs.readiness(ctx)
+    if (
+        brief_needed
+        or settings.get("test_design")
+        or plan_step.should_plan(ctx, forced=ctx.run.force_plan)
+    ):
         plan_step.start(ctx)
     else:
         implement_step.start(ctx)

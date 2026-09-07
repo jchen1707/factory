@@ -22,6 +22,9 @@ IN_PROGRESS = "In Progress"
 
 def run(ctx: Context) -> None:
     _refuse_second_writer(ctx)
+    from factory.isolation import prepare
+
+    ctx.project = prepare(ctx.project, ctx.run, ctx.store)
 
     issue_uuid, current_state = ctx.linear.issue_uuid(ctx.run.linear_id)
     marker = effect_marker(ctx, STEP)
@@ -74,13 +77,10 @@ def _refuse_second_writer(ctx: Context) -> None:
     index. Raising the limit is a registry edit — `[projects.<name>]` for one project,
     `[defaults]` for the rest — and each ticket still gets its own worktree and branch.
     """
-    limit = ctx.registry.concurrency_for(ctx.project)
-    active = [
-        run for run in ctx.store.active_runs_for_project(ctx.project.name) if run.id != ctx.run.id
-    ]
-    if len(active) >= limit:
-        raise Blocked(
-            "project-busy",
-            f"{ctx.project.name} already has {len(active)} run(s) in a writing state "
-            f"({[r.linear_id for r in active]}) and concurrency_per_project is {limit}",
-        )
+    from factory.execution import ProjectQueued
+
+    limit = ctx.store.runtime.settings("project", ctx.project.name).get(
+        "concurrency"
+    ) or ctx.registry.concurrency_for(ctx.project)
+    if not ctx.store.runtime.admit(ctx.run.id, ctx.project.name, limit):
+        raise ProjectQueued(f"{ctx.project.name}: all {limit} slots are occupied")

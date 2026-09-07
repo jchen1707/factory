@@ -49,6 +49,10 @@ def build_spec(ctx: Context) -> SandboxSpec:
     later, because `sbx` fixes it at creation.
     """
     workspaces = [Workspace(ctx.project.path)]
+    from factory import authority
+
+    if authority.current(ctx):
+        workspaces.append(Workspace(authority.mount(ctx), readonly=True))
     if ctx.project.requires_clone:
         # `--clone` gives the VM a private in-container clone at the project's own path,
         # so nothing the agent writes under it reaches the host — including `.factory/`,

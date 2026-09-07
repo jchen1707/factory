@@ -192,3 +192,39 @@ def test_an_ordinary_run_has_no_cleared_escalations_section() -> None:
         usd=None,
     )
     assert "Cleared escalations" not in body
+
+
+def test_an_accepted_review_finding_records_both_positions() -> None:
+    body = render_pr_body(
+        ticket="BAC-49",
+        title="t",
+        restatement="r",
+        gates=[],
+        gate_verdict="pass",
+        review_summary={
+            "tier2": "ran",
+            "findings": [
+                {
+                    "severity": "high",
+                    "file": "src/app.py",
+                    "line": 9,
+                    "summary": "requires production hardening",
+                }
+            ],
+        },
+        redphase=REDPHASE,
+        disputed_findings=[
+            {
+                "note": "James accepts this as post-POC hardening.",
+            }
+        ],
+        out_of_scope=[],
+        artifact_path="/a",
+        tokens_in=0,
+        tokens_out=0,
+        usd=None,
+    )
+    assert "[high] src/app.py:9: requires production hardening" in body
+    assert "Disputed review findings" in body
+    assert "remain unresolved" in body
+    assert "James accepts this as post-POC hardening." in body

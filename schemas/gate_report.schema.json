@@ -4,25 +4,50 @@
   "title": "gate_report",
   "description": "A validation copy of layer A's machine-readable gate report (`plugins/harness/hooks/gate_report.mjs --json`), sourced from `harness@v2`. The factory validates the report against this copy before trusting its `verdict`, because the exit code only mirrors the verdict and a malformed document must block rather than round to green. Unlike `implement_result.schema.json`, this document is never handed to a model, so the OpenAI structured-outputs rule that every property also be in `required` does not apply: `required` names only the fields the step reads. The schema uses only keywords `validate_against_schema` implements (`agent/base.py`): no `oneOf`, `anyOf`, `pattern` or `$ref`, and every subschema is inlined.",
   "type": "object",
-  "required": ["schemaVersion", "gates", "verdict"],
+  "required": [
+    "schemaVersion",
+    "gates",
+    "verdict"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "root": { "type": "string" },
-    "requestedKinds": { "type": "array", "items": { "type": "string" } },
+    "schemaVersion": {
+      "const": 1
+    },
+    "root": {
+      "type": "string"
+    },
+    "requestedKinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "targets": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "dir"],
+        "required": [
+          "name",
+          "dir"
+        ],
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string" },
-          "dir": { "type": "string" }
+          "name": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          }
         }
       }
     },
-    "missingApps": { "type": "array", "items": { "type": "string" } },
+    "missingApps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "gates": {
       "type": "array",
       "items": {
@@ -39,9 +64,15 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string" },
-          "app": { "type": "string" },
-          "kind": { "type": "string" },
+          "name": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
           "status": {
             "enum": [
               "pass",
@@ -49,17 +80,46 @@
               "unavailable",
               "not_applicable",
               "skipped_unchanged",
-              "disabled"
+              "disabled",
+              "deferred"
             ]
           },
-          "exit": { "type": ["integer", "null"] },
-          "durationMs": { "type": ["integer", "null"] },
-          "caveat": { "type": ["string", "null"] },
-          "when": { "type": ["string", "null"] },
-          "outputTail": { "type": "string" }
+          "exit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "caveat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "when": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputTail": {
+            "type": "string"
+          }
         }
       }
     },
-    "verdict": { "enum": ["pass", "fail", "incomplete"] }
+    "verdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "incomplete"
+      ]
+    }
   }
 }

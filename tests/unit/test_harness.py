@@ -122,5 +122,5 @@ def test_the_canary_target_is_a_literal_path() -> None:
 
 
 def test_the_factorys_own_vendored_tree_is_intact() -> None:
-    ok, detail = vendor_check(HOME, Path.home() / "harness" / "scripts" / "vendor_sync.py")
+    ok, detail = vendor_check(HOME, HOME.parent / "harness" / "scripts" / "vendor_sync.py")
     assert ok, detail

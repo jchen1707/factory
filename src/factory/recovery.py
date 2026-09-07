@@ -357,8 +357,12 @@ def _rerun_detached(ctx: Context, died_in: State) -> Verdict:
 def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = False) -> State:
     """§16.3b — James resumes a parked run. Re-enters the state it left, or a forced one.
 
-    Handles `suspended`, `blocked` and (after `--authorise`) `failed`/`resumable`. The
-    attempt counter increments only when the resume starts an agent (§16.3b, and the
+    Handles `suspended`, `blocked`, a rejected `awaiting_human` escalation, and (after
+    `--authorise`) `failed`/`resumable`. An escalation can only resume with an explicit
+    `--from implementing`: accepting it has a separate audited command, while silently
+    re-running review would inspect the same rejected diff.
+
+    The attempt counter increments only when the resume starts an agent (§16.3b, and the
     handoff's note 2): `verify` and `deliver` address `factory_dir / "run" / str(attempt)`,
     so an increment on a non-agent resume would point at a directory that does not exist
     and spend budget for a model call that never happens. The tick's forward dispatch
@@ -393,11 +397,25 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
         resume_run(ctx, skip_backoff=True)
         return state_before(ctx, State.RESUMABLE)
 
-    if state not in (State.RESUMABLE, State.SUSPENDED, State.BLOCKED):
+    if state is State.AWAITING_HUMAN and from_state != str(State.IMPLEMENTING):
+        raise Blocked(
+            "awaiting-human-decision",
+            f"{ctx.run.linear_id} is awaiting a decision; use `factory accept "
+            f"{ctx.run.linear_id}` if the escalation is accepted, or `factory resume "
+            f"{ctx.run.linear_id} --from implementing` if it is rejected.",
+        )
+
+    if state not in (
+        State.RESUMABLE,
+        State.SUSPENDED,
+        State.BLOCKED,
+        State.AWAITING_HUMAN,
+    ):
         raise Blocked(
             "not-resumable",
-            f"{ctx.run.linear_id} is at {state}; resume works on suspended, blocked or "
-            "resumable runs. Use `factory tick` to advance a run that is already going.",
+            f"{ctx.run.linear_id} is at {state}; resume works on suspended, blocked, "
+            "resumable, or rejected awaiting-human runs. Use `factory tick` to advance "
+            "a run that is already going.",
         )
 
     target = State(from_state) if from_state else state_before(ctx, state)
@@ -503,7 +521,13 @@ def _stop_sandbox_if_idle(ctx: Context) -> None:
     that exec into it.
     """
     others = [r for r in ctx.store.active_runs_for_project(ctx.project.name) if r.id != ctx.run.id]
-    if others:
+    from factory.isolation import project_for_run
+
+    if any(
+        project_for_run(ctx.registry.projects[ctx.project.name], run, ctx.store).build_sandbox
+        == ctx.project.build_sandbox
+        for run in others
+    ):
         return
     ctx.sandbox.stop(ctx.project.build_sandbox)
 
@@ -614,9 +638,16 @@ def continuation_prompt(ctx: Context) -> str:
     # carries both `high` findings verbatim. Without this the next attempt is started
     # with a diff stat and no reason, and nothing else in `implement.start` reads the
     # review output.
-    stopped = (str(State.RESUMABLE), str(State.BLOCKED))
+    stopped = (str(State.RESUMABLE), str(State.BLOCKED), str(State.AWAITING_HUMAN))
     for row in reversed(ctx.store.transitions(ctx.run.id)):
         if str(row["to_state"]) in stopped:
+            if str(row["to_state"]) == str(State.AWAITING_HUMAN):
+                lines += [
+                    "The human rejected this escalation and requested a fresh implementation "
+                    "attempt. Preserve or strengthen the existing test guarantees rather than "
+                    "clearing the escalation by weakening tests.",
+                    "",
+                ]
             lines += [f"- reason: `{row['rule'] or 'unknown'}`", ""]
             if row["detail"]:
                 lines += ["```", str(row["detail"])[:2000], "```", ""]
@@ -655,7 +686,7 @@ def _refuse_over_budget(ctx: Context) -> None:
     begin, and a run cut off part-way through a write is a worse outcome than one that
     stopped one attempt early and said so.
     """
-    _, _, usd = ctx.store.spend(ctx.run.id)
+    usd = ctx.store.known_spend(ctx.run.id)
     if usd is None:
         return
     ceiling = ctx.routing.usd_per_run

@@ -149,13 +149,17 @@ def test_the_status_word_is_on_every_line(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_load_context_reports_its_own_checks_and_hands_back_what_it_loaded() -> None:
-    ctx, results = doctor.load_context(HOME)
+def test_load_context_reports_its_own_checks_and_hands_back_what_it_loaded(tmp_path: Path) -> None:
+    (tmp_path / "config").mkdir()
+    for filename in ("projects.toml", "models.toml"):
+        (tmp_path / "config" / filename).write_bytes((HOME / "config" / filename).read_bytes())
+    ctx, results = doctor.load_context(tmp_path)
 
     assert [r.name for r in results] == ["registry", "routing", "state table", "database"]
     assert ctx.registry is not None
     assert ctx.store is not None
-    assert ctx.home == HOME
+    assert ctx.home == tmp_path
+    ctx.store.close()
 
 
 def test_the_deep_canary_is_opt_in(tmp_path: Path) -> None:

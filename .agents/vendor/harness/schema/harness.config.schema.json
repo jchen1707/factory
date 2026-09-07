@@ -254,6 +254,180 @@
           "minLength": 1
         }
       }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "requirements", "profiles"],
+      "properties": {
+        "default": {
+          "enum": ["prototype", "core", "hardening"]
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "description"],
+            "properties": {
+              "kind": {
+                "enum": ["product", "correctness", "safety", "engineering", "production"]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "gate": {
+                "type": "string",
+                "minLength": 1
+              },
+              "deferrableIn": {
+                "type": "array",
+                "items": {
+                  "enum": ["prototype", "core", "hardening"]
+                }
+              }
+            }
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prototype", "core", "hardening"],
+          "properties": {
+            "prototype": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["required", "deferrals"],
+              "properties": {
+                "required": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "deferrals": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["requirement", "rationale", "revisit"],
+                    "properties": {
+                      "requirement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "revisit": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "core": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["required", "deferrals"],
+              "properties": {
+                "required": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "deferrals": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["requirement", "rationale", "revisit"],
+                    "properties": {
+                      "requirement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "revisit": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "hardening": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["required", "deferrals"],
+              "properties": {
+                "required": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "deferrals": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["requirement", "rationale", "revisit"],
+                    "properties": {
+                      "requirement": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "revisit": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stackSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset", "components"],
+      "properties": {
+        "preset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
     }
   },
   "$defs": {

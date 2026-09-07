@@ -1,0 +1,34 @@
+[
+  {
+    "label": "standards",
+    "agent": "standards-reviewer"
+  },
+  {
+    "label": "spec",
+    "agent": "spec-checker"
+  },
+  {
+    "label": "security",
+    "agent": "security-reviewer"
+  },
+  {
+    "label": "tests",
+    "agent": "test-reviewer"
+  },
+  {
+    "label": "simplicity",
+    "agent": "simplicity-reviewer"
+  },
+  {
+    "label": "design",
+    "agent": "design-reviewer"
+  },
+  {
+    "label": "speed",
+    "agent": "perf-reviewer"
+  },
+  {
+    "label": "cost",
+    "agent": "cost-reviewer"
+  }
+]

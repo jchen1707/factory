@@ -12,6 +12,7 @@ leaking into layer D as a command.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from collections.abc import Sequence
@@ -205,3 +206,38 @@ def gates_summary(gates: Sequence[Gate]) -> str:
         + (f"\n{'':<40}when: {g.when}" if g.when else "")
         for g in gates
     )
+
+
+def delivery_policies(root: Path, profiles: Sequence[str]) -> dict:
+    """Use factory-installed layer A on snapshotted JSON; never execute target code on host."""
+    relative = Path(".agents/vendor/harness/hooks/delivery_policy.mjs")
+    declared_interpreter = root / relative
+    interpreter = Path(__file__).resolve().parents[2] / relative
+    contract = root / ".agents/vendor/harness/docs/agents/delivery-review.md"
+    if not interpreter.is_file() or not contract.is_file():
+        raise Blocked(
+            "workflow-contract-missing",
+            "Delivery authority needs its shared interpreter and review contract",
+        )
+    if (
+        not declared_interpreter.is_file()
+        or hashlib.sha256(declared_interpreter.read_bytes()).digest()
+        != hashlib.sha256(interpreter.read_bytes()).digest()
+    ):
+        raise Blocked(
+            "delivery-interpreter-mismatch",
+            "Target policy interpreter must match the trusted factory installation",
+        )
+    policies = {}
+    for profile in profiles:
+        result = subprocess.run(
+            ["node", str(interpreter), str(root / "harness.config.json"), profile, "--tree"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode:
+            raise Blocked("delivery-policy-invalid", result.stderr[-2000:])
+        policies[profile] = json.loads(result.stdout)
+    return policies

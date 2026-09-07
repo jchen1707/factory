@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "field": "ticket.acceptance_criteria",
+      "present": true,
+      "action": "human",
+      "reason": "readiness-missing-acceptance",
+      "message": "The ticket needs observable acceptance criteria"
+    },
+    {
+      "field": "ticket.parent_description",
+      "present": true,
+      "action": "human",
+      "reason": "readiness-missing-authority",
+      "message": "The ticket needs its approved contract"
+    },
+    {
+      "field": "dependencies",
+      "present": false,
+      "action": "human",
+      "reason": "readiness-dependencies",
+      "message": "Resolve the ticket's open dependencies"
+    },
+    { "field": "tests", "present": true, "action": "brief" }
+  ]
+}

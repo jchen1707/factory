@@ -50,6 +50,13 @@ STEP = "deliver"
 
 
 def run(ctx: Context) -> None:
+    from factory import authority
+
+    authority.require_current_evidence(ctx, "verify")
+    authority.require_current_evidence(ctx, "review")
+    from factory.integration_base import before_delivery
+
+    before_delivery(ctx)
     worktree = ctx.worktree
     branch = ctx.branch
     if branch is None:
@@ -234,6 +241,7 @@ def _render_body(ctx: Context) -> str:
         review_summary=review_summary,
         redphase=_redphase_row(ctx),
         escalations=_cleared_escalations(ctx),
+        disputed_findings=_accepted_review_findings(ctx),
         out_of_scope=result.get("out_of_scope", []) or [],
         artifact_path=str(ctx.artifact_root / str(ctx.run.attempt)),
         tokens_in=tokens_in,
@@ -253,6 +261,22 @@ def _cleared_escalations(ctx: Context) -> list[dict[str, str]]:
         {"rule": str(row["reason"] or "?"), "note": str(row["detail"] or "")}
         for row in ctx.store.checks(ctx.run.id)
         if row["check_name"] == redphase.ESCALATION_ACCEPTED
+    ]
+
+
+def _accepted_review_findings(ctx: Context) -> list[dict[str, str]]:
+    """James's explicit acceptance of unresolved critical/high review findings.
+
+    The review summary remains untouched and is rendered immediately above this note in the
+    PR body. Reading the separate check row makes the two positions independently auditable.
+    """
+    return [
+        {"note": str(row["detail"] or "")}
+        for row in ctx.store.checks(ctx.run.id)
+        if row["check_name"] == review_step.REVIEW_FINDING_ACCEPTED
+        and int(row["attempt"]) == ctx.run.attempt
+        and row["status"] == "accepted"
+        and row["reason"] == review_step.REVIEW_FINDING
     ]
 
 

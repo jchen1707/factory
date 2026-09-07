@@ -68,6 +68,11 @@ def test_merge_is_never_automatic() -> None:
     assert requires_human_rule(State.AWAITING_HUMAN, State.COMPLETED) == "merge-is-james"
 
 
+def test_only_james_can_accept_a_blocking_review_finding_for_delivery() -> None:
+    assert can(State.BLOCKED, State.PR_READY)
+    assert requires_human_rule(State.BLOCKED, State.PR_READY) == "accept-review-finding-is-james"
+
+
 def test_cancel_and_suspend_are_human_from_anywhere() -> None:
     assert requires_human_rule(State.IMPLEMENTING, State.CANCELLED) == "abandon-is-james"
     assert requires_human_rule(State.IMPLEMENTING, State.SUSPENDED) == "suspend-is-james"
@@ -161,9 +166,14 @@ def test_blocked_is_reachable_from_every_non_terminal_state() -> None:
 
 def test_leaving_blocked_is_still_a_human_decision() -> None:
     # Widening the way *in* must not widen the way out: an automatic unblock would turn
-    # every stop into a retry loop.
+    # every stop into a retry loop. Direct delivery has its narrower James-only rule.
     for target in TRANSITIONS[State.BLOCKED] - {State.CANCELLED}:
-        assert requires_human_rule(State.BLOCKED, target) == "unblock-is-a-judgement"
+        expected = (
+            "accept-review-finding-is-james"
+            if target is State.PR_READY
+            else "unblock-is-a-judgement"
+        )
+        assert requires_human_rule(State.BLOCKED, target) == expected
 
 
 def test_a_blocked_run_can_resume_into_the_state_that_blocked_it() -> None:

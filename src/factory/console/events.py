@@ -1,13 +1,8 @@
 """The console's read-only view of a run's `events.jsonl` — §18.5.
 
-P0-7 (`docs/discovery/codex-events.md`) settled the shape: the stream carries per-turn
-`usage` (`input_tokens` / `cached_input_tokens` / `cache_write_input_tokens` /
-`output_tokens` / `reasoning_output_tokens`) and `item.completed` activity, but **no**
-`model_context_window`, `context_window`, `tokens_used` or `percent` — those are TUI-only.
-So the console's context percentage is `latest_turn.input_tokens /
-routing.ModelFacts.usable_context`, with the denominator from the model cache via
-`routing`, and it is *hidden with a reason* when the numerator or denominator is missing
-rather than estimated. The plan is explicit (§18.5): never show a number it cannot defend.
+Legacy exec streams carry billed usage without current-window occupancy. Only validated
+normalized context observations produce a percentage; unavailable and stale measurements
+remain explicit. Compaction and model changes invalidate the previous measurement.
 
 This is a display parser, not the state machine's. `agent.codex.parse_events` advances on
 evidence and raises on a truncated line; this one only displays, so a half-flushed trailing
@@ -17,10 +12,12 @@ line (the normal case for a file a live process is writing) is skipped, not fata
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from factory.agent.telemetry import CurrentContext
 from factory.machine import State
 from factory.routing import Routing
 
@@ -85,6 +82,7 @@ class TurnView:
     reasoning_output_tokens: int
     activity: str | None
     has_turn: bool
+    context: CurrentContext = field(default_factory=CurrentContext)
 
 
 def read_turn_view(events_path: Path) -> TurnView | None:
@@ -104,6 +102,7 @@ def read_turn_view(events_path: Path) -> TurnView | None:
     output = 0
     reasoning = 0
     activity: str | None = None
+    context = CurrentContext()
     for line in events_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -114,7 +113,26 @@ def read_turn_view(events_path: Path) -> TurnView | None:
         if not isinstance(event, dict):
             continue
         kind = event.get("type")
-        if kind == "turn.completed":
+        if kind == "factory.context":
+            tokens, window, observed = (
+                event.get("tokens"),
+                event.get("window"),
+                event.get("observed_at"),
+            )
+            if (
+                event.get("semantics_verified") is True
+                and type(tokens) is int
+                and tokens >= 0
+                and type(window) is int
+                and window > 0
+                and isinstance(observed, (int, float))
+            ):
+                context = CurrentContext(tokens, window, observed)
+        elif kind == "factory.context.invalidated":
+            context = CurrentContext(
+                unavailable=str(event.get("reason", "awaiting context measurement"))
+            )
+        elif kind == "turn.completed":
             raw = event.get("usage")
             if isinstance(raw, dict):
                 input_tokens = int(raw.get("input_tokens", 0) or 0)
@@ -124,7 +142,7 @@ def read_turn_view(events_path: Path) -> TurnView | None:
             saw_turn = True
         elif kind == "item.completed":
             activity = _activity_from(event.get("item"))
-    return TurnView(input_tokens, cached, output, reasoning, activity, saw_turn)
+    return TurnView(input_tokens, cached, output, reasoning, activity, saw_turn, context)
 
 
 @dataclass(frozen=True)
@@ -274,16 +292,14 @@ def context_percentage(
         return None, f"no agent running in {state.value}"
     if view is None:
         return None, "no event stream for this attempt yet"
+    if view.context.observed_at is not None:
+        reading = view.context.read(now=time.time())
+        return reading.fraction, f"{reading.status}; measured {reading.age_seconds:.0f}s ago"
+    if view.context.unavailable != CurrentContext().unavailable:
+        return None, view.context.unavailable
     if not view.has_turn:
         return None, "the agent has not completed a turn yet"
-    model = routing.role(role).model
-    facts = routing.models.get(model)
-    if facts is None:
-        return None, f"no context window on file for {model!r}"
-    denominator = facts.usable_context
-    if denominator <= 0:
-        return None, f"context window for {model!r} is {denominator}"
-    return view.input_tokens / denominator, None
+    return None, "legacy exec has no current-window measurement"
 
 
 def _activity_from(item: Any) -> str | None:

@@ -1,34 +1,34 @@
 {
   "$schema": "./.agents/vendor/harness/schema/harness.config.schema.json",
   "name": "factory",
-  "install": ["uv", "sync"],
+  "install": ["node", "scripts/python_env.mjs", "uv", "sync"],
   "gates": [
     {
       "name": "ruff check",
       "kind": "lint",
-      "run": ["uv", "run", "ruff", "check", "."]
+      "run": ["node", "scripts/python_env.mjs", "uv", "run", "ruff", "check", "."]
     },
     {
       "name": "ruff format --check",
       "kind": "format",
-      "run": ["uv", "run", "ruff", "format", "--check", "."]
+      "run": ["node", "scripts/python_env.mjs", "uv", "run", "ruff", "format", "--check", "."]
     },
     {
       "name": "mypy",
       "kind": "types",
-      "run": ["uv", "run", "mypy"],
+      "run": ["node", "scripts/python_env.mjs", "uv", "run", "mypy"],
       "caveat": "mypy reads only the paths in pyproject.toml's `files` and skips dot-directories during discovery. A new top-level directory is silently unchecked while this stays green — add it to `files` in the same change that creates it."
     },
     {
       "name": "pytest",
       "kind": "test",
-      "run": ["uv", "run", "pytest"],
+      "run": ["node", "scripts/python_env.mjs", "uv", "run", "pytest"],
       "caveat": "Every test here runs against a fake sandbox and fixture transcripts. A green suite proves the control plane's logic, never that `sbx`, `codex`, `gh` or Linear behave the way the fakes say they do — that is what `factory doctor` and a real run are for."
     }
   ],
   "hooks": {
     "gatedPaths": ["src", "tests", "schemas", "config"],
-    "gatedFiles": ["pyproject.toml", "harness.config.json", ".codex/config.toml", ".codex/hooks.json", ".claude/settings.json"],
+    "gatedFiles": ["pyproject.toml", "harness.config.json", ".codex/config.toml", ".codex/hooks.json", "scripts/python_env.mjs", ".claude/settings.json"],
     "gatedExtensions": [".py", ".mjs", ".json", ".toml"],
     "protected": [
       {
@@ -57,8 +57,8 @@
       {
         "match": [".py"],
         "run": [
-          ["uv", "run", "ruff", "format"],
-          ["uv", "run", "ruff", "check", "--fix", "--unfixable", "F401"]
+          ["node", "scripts/python_env.mjs", "uv", "run", "ruff", "format"],
+          ["node", "scripts/python_env.mjs", "uv", "run", "ruff", "check", "--fix", "--unfixable", "F401"]
         ]
       }
     ]

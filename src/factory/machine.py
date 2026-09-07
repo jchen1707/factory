@@ -124,7 +124,14 @@ _WORKFLOW: dict[State, frozenset[State]] = {
     #: implement. Both exits are human-gated below under the existing `unblock-is-a-judgement`
     #: rule, so widening the way *out* of `blocked` does not widen it to automatic.
     State.BLOCKED: frozenset(
-        {State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING, State.CANCELLED}
+        {
+            State.IMPLEMENTING,
+            State.PLANNING,
+            State.VERIFYING,
+            State.REVIEWING,
+            State.PR_READY,
+            State.CANCELLED,
+        }
     ),
     State.RESUMABLE: frozenset(
         {State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING, State.FAILED}
@@ -181,6 +188,7 @@ HUMAN_ONLY: dict[tuple[State, State], str] = {
     (State.BLOCKED, State.PLANNING): "unblock-is-a-judgement",
     (State.BLOCKED, State.VERIFYING): "unblock-is-a-judgement",
     (State.BLOCKED, State.REVIEWING): "unblock-is-a-judgement",
+    (State.BLOCKED, State.PR_READY): "accept-review-finding-is-james",
     (State.AWAITING_HUMAN, State.IMPLEMENTING): "reopen-after-review-is-james",
     (State.AWAITING_HUMAN, State.REVIEWING): "escalation-cleared-is-james",
     (State.FAILED, State.RESUMABLE): "reauthorise-spend",

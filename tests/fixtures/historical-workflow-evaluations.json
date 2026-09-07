@@ -1,0 +1,9 @@
+{
+  "provenance": "Curated scenarios derived from the approved audit; these are not captured runtime events or full ticket transcripts.",
+  "cases": [
+    {"ticket": "BAC-53", "source": "https://linear.app/development-jchen/issue/BAC-53", "scenario": "Conflicting review authority requires an explicit precedence decision", "classification": "review-dispute", "status": "needs-human"},
+    {"ticket": "BAC-54", "source": "https://linear.app/development-jchen/issue/BAC-54", "scenario": "Execution context still reflects superseded authority", "classification": "stale-authority", "status": "needs-human"},
+    {"ticket": "BAC-49", "source": "https://linear.app/development-jchen/issue/BAC-49", "scenario": "A disputed review finding must not be silently dismissed", "classification": "review-dispute", "status": "needs-human"},
+    {"ticket": "BAC-22", "source": "https://linear.app/development-jchen/issue/BAC-22", "scenario": "Assertion removal requires a human disposition", "classification": "review-dispute", "status": "needs-human"}
+  ]
+}

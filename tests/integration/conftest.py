@@ -462,7 +462,7 @@ class FakeSandbox:
             return
         clone = self.clone_dir(handle.sandbox)
         is_verify = "gate_report.mjs" in script
-        is_review = "review-standards" in script
+        is_review = handle.sandbox.startswith("factory-review-")
         if clone is not None and not is_verify and not is_review:
             # The agent's commits land in the clone and nowhere else, which is what makes
             # `clone.fetch_back` a real fetch rather than a formality. Only the implement
@@ -692,6 +692,10 @@ def _seed_vendored_review_tree(worktree: Path) -> None:
     per test.
     """
     vendor = worktree / ".agents/vendor/harness"
+    for name in ("ticket-readiness", "diagnose-and-hand-off", "refresh-execution-authority"):
+        target = vendor / "docs/agents" / f"{name}.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"# {name}\nNoninteractive workflow contract.\n")
     for agent in ("standards-reviewer", "spec-checker"):
         path = vendor / "agents" / f"{agent}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -748,6 +752,9 @@ def project_repo(tmp_path: Path) -> Path:
         )
     )
     (work / "README.md").write_text("# python-harness\n")
+    # Real consumers exclude run artifacts. Staging a source change must not also
+    # commit the fake sandbox's prompts and evidence and trip review's size trigger.
+    (work / ".gitignore").write_text(".factory/\n")
     _seed_vendored_review_tree(work)
     git(work, "add", "-A")
     git(work, "commit", "-m", "initial")
@@ -848,6 +855,9 @@ def _make_ctx(
 ) -> Context:
     home = tmp_path / "factory-home"
     (home / "schemas").mkdir(parents=True)
+    (home / "schemas/handoff_result.schema.json").write_text(
+        (HOME / "schemas/handoff_result.schema.json").read_text()
+    )
     (home / "schemas" / "implement_result.schema.json").write_text(
         (HOME / "schemas" / "implement_result.schema.json").read_text()
     )

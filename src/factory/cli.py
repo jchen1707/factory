@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, doctor, driver, gc, machine, policy, recovery, repo
+from factory.agent.base import SchemaInvalid, SchemaUnsupported, validate_against_schema
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
 from factory.delivery import forge as forge_dispatch
@@ -50,6 +51,7 @@ from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
 from factory.steps import complete as complete_step
 from factory.steps import reap as reap_step
+from factory.steps import review as review_step
 from factory.store import Run, Store
 
 __all__ = ["main"]
@@ -513,7 +515,9 @@ def _context_for(
     linear: LinearClient,
     run: Run,
 ) -> Context:
-    project = registry.resolve(run.linear_id)
+    from factory.isolation import project_for_run
+
+    project = project_for_run(registry.resolve(run.linear_id), run, store)
     return Context(
         home=home,
         registry=registry,
@@ -882,7 +886,8 @@ def _sbx_ls_json() -> list[dict[str, object]]:
     Returns `[]` when `sbx` is missing or refuses (it needs a Docker login), so the console
     degrades to an empty view instead of failing the page.
     """
-    if not sbx_available():
+    available, _ = sbx_available()
+    if not available:
         return []
     proc = subprocess.run(
         ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
@@ -1220,7 +1225,7 @@ _CLEARABLE: dict[str, str] = {
 
 
 def cmd_accept(args: argparse.Namespace) -> int:
-    """Clear a §15.3 escalation and let the review the guard interrupted actually run.
+    """Clear a §15.3 escalation or explicitly accept a disputed blocking review.
 
     The guards in `review.start` stop the run *before* Tier 1 and Tier 2, quote the hunks,
     and park at `awaiting_human`. Until this command existed the judgement they asked for
@@ -1232,6 +1237,11 @@ def cmd_accept(args: argparse.Namespace) -> int:
     It re-enters `reviewing`, not `pr_ready`. The escalation is spent, the review is not:
     a PR opened by skipping ahead would carry an empty Review section and claim by omission
     that the fan-out had found nothing.
+
+    `--review-finding` is the distinct post-review judgement. It applies only to an exact
+    `blocked: review-finding` with passing current-attempt gates and a completed review that
+    recorded a critical/high finding. The required note and unchanged findings both go into
+    the PR body before the ordinary delivery step runs.
     """
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
@@ -1242,6 +1252,8 @@ def cmd_accept(args: argparse.Namespace) -> int:
     if run is None:
         print(f"no run for {ticket}")
         return 1
+    if getattr(args, "review_finding", False):
+        return _accept_review_finding(home, registry, routing, store, run, ticket, args.note)
     if run.state is not State.AWAITING_HUMAN:
         print(
             f"{ticket} is at {run.state}, not {State.AWAITING_HUMAN}; `accept` clears an "
@@ -1302,6 +1314,160 @@ def cmd_accept(args: argparse.Namespace) -> int:
         f"The run is at `{ctx.state}`; `factory tick` carries it to a PR."
     )
     return 0
+
+
+def _accept_review_finding(
+    home: Path,
+    registry: Registry,
+    routing: Routing,
+    store: Store,
+    run: Run,
+    ticket: str,
+    note: str | None,
+) -> int:
+    """Record James's dispute and enter delivery without erasing review evidence."""
+    if run.state is not State.BLOCKED or run.blocked_reason != review_step.REVIEW_FINDING:
+        print(
+            f"{ticket} is at {run.state} with blocker "
+            f"`{run.blocked_reason or 'none'}`, not `blocked: {review_step.REVIEW_FINDING}`; "
+            "nothing was changed."
+        )
+        return 1
+    if run.pr_url:
+        print(f"{ticket} already delivered {run.pr_url}; nothing was changed.")
+        return 1
+    accepted_note = (note or "").strip()
+    if not accepted_note:
+        print(
+            "--review-finding requires --note so the eventual PR records why James "
+            "accepted unresolved critical/high findings."
+        )
+        return 1
+    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+        print(f"\n{ticket} is leased by another process ({run.lease_owner}); wait for it.")
+        return 1
+
+    try:
+        current = store.run_by_id(run.id)
+        if (
+            current is None
+            or current.state is not State.BLOCKED
+            or current.blocked_reason != review_step.REVIEW_FINDING
+            or current.pr_url
+        ):
+            print(f"{ticket} changed while its lease was acquired; nothing was changed.")
+            return 1
+        run = current
+        ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+        summary_path = ctx.state_dir / "review" / "review-summary.json"
+        gates_path = ctx.factory_dir / "run" / str(ctx.run.attempt) / "gates.json"
+        transitions = store.transitions(run.id)
+        latest = transitions[-1] if transitions else None
+        if (
+            latest is None
+            or State(latest["from_state"]) is not State.REVIEWING
+            or State(latest["to_state"]) is not State.BLOCKED
+            or latest["rule"] != review_step.REVIEW_FINDING
+        ):
+            print(
+                f"{ticket} was not parked by the current review-finding transition; "
+                "refusing to skip into delivery. Nothing was changed."
+            )
+            return 1
+        review_attempt = store.attempt_row(run.id, run.attempt, State.REVIEWING)
+        if review_attempt is None or review_attempt["ended_at"] is None:
+            print(
+                f"{ticket} has no completed review attempt for attempt {run.attempt}; "
+                "refusing to skip into delivery. Nothing was changed."
+            )
+            return 1
+        summary = _read_evidence_object(summary_path)
+        if not review_step.has_blocking_findings(summary):
+            print(
+                f"{ticket} has no recorded critical/high finding at {summary_path}; "
+                "refusing to skip into delivery. Nothing was changed."
+            )
+            return 1
+
+        gates = _read_evidence_object(gates_path)
+        gate_schema = _read_evidence_object(ctx.home / "schemas" / "gate_report.schema.json")
+        gate_document_valid = False
+        if gates is not None and gate_schema is not None:
+            try:
+                validate_against_schema(gates, gate_schema)
+            except (SchemaInvalid, SchemaUnsupported):
+                pass
+            else:
+                gate_document_valid = True
+        gate_check_passed = any(
+            row["check_name"] == "gate_report"
+            and row["status"] == "pass"
+            and int(row["attempt"]) == run.attempt
+            for row in store.checks(run.id)
+        )
+        if (
+            not gate_document_valid
+            or gates is None
+            or gates.get("verdict") != "pass"
+            or not gate_check_passed
+        ):
+            print(
+                f"{ticket} has no passing gate verdict at {gates_path}; refusing to skip "
+                "into delivery. Nothing was changed."
+            )
+            return 1
+
+        accepted_rows = [
+            row
+            for row in store.checks(run.id)
+            if row["check_name"] == review_step.REVIEW_FINDING_ACCEPTED
+            and int(row["attempt"]) == run.attempt
+            and row["status"] == "accepted"
+            and row["reason"] == review_step.REVIEW_FINDING
+        ]
+        if accepted_rows and any(
+            str(row["detail"] or "") != accepted_note for row in accepted_rows
+        ):
+            print(
+                f"{ticket} already records a different acceptance note for attempt "
+                f"{run.attempt}; nothing was changed."
+            )
+            return 1
+        already_recorded = bool(accepted_rows)
+        if not already_recorded:
+            store.record_check(
+                run.id,
+                run.attempt,
+                review_step.REVIEW_FINDING_ACCEPTED,
+                "accepted",
+                reason=review_step.REVIEW_FINDING,
+                detail=accepted_note,
+                artifact=str(summary_path),
+            )
+        advance(ctx, State.PR_READY, actor="human", detail=accepted_note)
+        result = driver.drive(ctx)
+        ctx.refresh()
+        if ctx.run.pr_url:
+            print(
+                f"\n{ticket}: disputed review findings accepted and recorded; "
+                f"pull request open for review: {ctx.run.pr_url}"
+            )
+        else:
+            print(
+                f"\n{ticket}: disputed review findings accepted and recorded; "
+                f"the run is at `{ctx.state}` ({result.detail})."
+            )
+        return 2 if result.reason else 0
+    finally:
+        store.release_lease(run.id)
+
+
+def _read_evidence_object(path: Path) -> dict[str, object] | None:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def _parked_on(store: Store, run: Run) -> str:
@@ -1640,6 +1806,9 @@ def _assert_codex_config_untouched(before: int) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="factory", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    from factory.configuration_cli import register
+
+    register(sub)
 
     run = sub.add_parser("run", help="drive one approved ticket")
     run.add_argument("ticket")
@@ -1747,13 +1916,18 @@ def build_parser() -> argparse.ArgumentParser:
     complete.set_defaults(func=cmd_complete)
 
     accept = sub.add_parser(
-        "accept", help="clear a §15.3 escalation and let the interrupted review run"
+        "accept", help="clear a review escalation or accept disputed blocking findings"
     )
     accept.add_argument("ticket")
     accept.add_argument(
         "--note",
         default=None,
-        help="why it is accepted; carried into the PR body's cleared-escalations section",
+        help="why it is accepted; carried into the PR body",
+    )
+    accept.add_argument(
+        "--review-finding",
+        action="store_true",
+        help="accept unresolved critical/high review findings and enter delivery; requires --note",
     )
     accept.set_defaults(func=cmd_accept)
 
@@ -1762,7 +1936,10 @@ def build_parser() -> argparse.ArgumentParser:
     suspend.add_argument("--reason", default="suspended by hand")
     suspend.set_defaults(func=cmd_suspend)
 
-    resume = sub.add_parser("resume", help="resume a parked (suspended/blocked/resumable) run")
+    resume = sub.add_parser(
+        "resume",
+        help="resume a parked run or reopen a rejected review escalation",
+    )
     resume.add_argument("ticket")
     resume.add_argument(
         "--from",

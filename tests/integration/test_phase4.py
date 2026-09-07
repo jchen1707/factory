@@ -856,6 +856,39 @@ def test_resume_from_implementing_forces_a_fresh_attempt_not_a_session_resume(ct
     assert "01a0-fake-thread" not in script  # fresh attempt, no session resume
 
 
+def test_rejected_test_weakening_reopens_a_fresh_implementation_attempt(ctx: Context) -> None:
+    _to_verifying(ctx)
+    advance(ctx, State.REVIEWING)
+    advance(
+        ctx,
+        State.AWAITING_HUMAN,
+        rule="test-weakening",
+        detail="tests/test_run_controller.py removed existing durability assertions",
+    )
+    attempt_before = ctx.run.attempt
+
+    recovery.resume(ctx, from_state="implementing")
+
+    assert ctx.state is State.IMPLEMENTING
+    assert ctx.run.attempt == attempt_before + 1
+    transition = ctx.store.transitions(ctx.run.id)[-1]
+    assert (
+        transition["from_state"],
+        transition["to_state"],
+        transition["actor"],
+        transition["rule"],
+    ) == (
+        str(State.AWAITING_HUMAN),
+        str(State.IMPLEMENTING),
+        "human",
+        "reopen-after-review-is-james",
+    )
+    prompt = (ctx.factory_dir / "run" / str(ctx.run.attempt) / "prompt.md").read_text()
+    assert "The human rejected this escalation" in prompt
+    assert "test-weakening" in prompt
+    assert "tests/test_run_controller.py" in prompt
+
+
 def test_resume_from_planning_rewinds(ctx: Context) -> None:
     _start_an_attempt(ctx, finish=False)
     recovery.suspend(ctx, reason="park mid-implement")

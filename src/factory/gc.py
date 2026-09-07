@@ -234,17 +234,37 @@ def _sweep_sandboxes(
     idle_floor = registry.defaults.gc.sandbox_idle_hours * 3600
     rm_floor = registry.defaults.gc.sandbox_rm_days * DAY_SECONDS
 
+    from factory.isolation import project_for_run
+
     for project in registry.projects.values():
-        busy = store.active_runs_for_project(project.name)
-        for name in (project.build_sandbox, project.review_sandbox):
+        active = store.active_runs_for_project(project.name)
+        names = {project.build_sandbox, project.review_sandbox}
+        retained = [run for run in store.all_runs() if run.project == project.name]
+        for run in retained:
+            resolved = project_for_run(project, run, store)
+            names.update((resolved.build_sandbox, resolved.review_sandbox))
+        for name in sorted(names):
             if not name or not policy.sandbox_is_factory_owned(name):
                 continue
+            users = [
+                run
+                for run in retained
+                if name
+                in (
+                    project_for_run(project, run, store).build_sandbox,
+                    project_for_run(project, run, store).review_sandbox,
+                )
+            ]
+            busy = [run for run in users if run in active]
             if busy:
                 actions.append(
                     Action("sandbox-stop", name, f"{len(busy)} run(s) still using it", False)
                 )
                 continue
-            idle = now - _last_activity(store, project.name)
+            last_activity = max(
+                (run.updated_at for run in users), default=_last_activity(store, project.name)
+            )
+            idle = now - last_activity
             if idle >= rm_floor:
                 actions += _act_on_sandbox(
                     sandbox,

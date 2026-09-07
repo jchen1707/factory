@@ -57,20 +57,23 @@ class LinearError(Exception):
 
 def keychain_secret(service: str = KEYCHAIN_SERVICE) -> str:
     """Read a secret from the macOS keychain. The value is returned, never printed."""
-    proc = subprocess.run(
-        [
-            "security",
-            "find-generic-password",
-            "-a",
-            os.environ.get("USER", ""),
-            "-s",
-            service,
-            "-w",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-a",
+                os.environ.get("USER", ""),
+                "-s",
+                service,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise LinearError(f"keychain unavailable: {exc}") from exc
     if proc.returncode != 0:
         raise LinearError(
             f"no keychain item for service {service!r}. Store one with: "

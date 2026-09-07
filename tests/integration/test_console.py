@@ -14,6 +14,7 @@ test that called the view functions directly would prove the data and skip the a
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
@@ -163,7 +164,7 @@ def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Con
     assert "%" not in context_cell
 
 
-def test_the_context_percentage_is_shown_once_a_turn_lands(ctx: Context) -> None:
+def test_intermediate_context_is_shown_without_waiting_for_a_completed_turn(ctx: Context) -> None:
     _to_implementing(ctx)
     attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -173,14 +174,11 @@ def test_the_context_percentage_is_shown_once_a_turn_lands(ctx: Context) -> None
         + "\n"
         + json.dumps(
             {
-                "type": "turn.completed",
-                "usage": {
-                    "input_tokens": usable // 2,
-                    "cached_input_tokens": 0,
-                    "cache_write_input_tokens": 0,
-                    "output_tokens": 10,
-                    "reasoning_output_tokens": 0,
-                },
+                "type": "factory.context",
+                "tokens": usable // 2,
+                "window": usable,
+                "observed_at": time.time(),
+                "semantics_verified": True,
             }
         )
         + "\n",
@@ -190,10 +188,20 @@ def test_the_context_percentage_is_shown_once_a_turn_lands(ctx: Context) -> None
     rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
 
     row = next(r for r in rows if r.ticket == "BAC-4")
-    assert row.context_reason is None
+    assert row.context_reason is not None
+    assert row.context_reason.startswith("fresh; measured")
     assert row.context_pct is not None
     assert round(row.context_pct, 2) == 0.50
     assert "50%" in _client(ctx).get("/").text
+
+    with (attempt_dir / "events.jsonl").open("a") as events:
+        events.write(
+            json.dumps({"type": "factory.context.invalidated", "reason": "compaction completed"})
+            + "\n"
+        )
+    rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
+    assert rows[0].context_pct is None
+    assert rows[0].context_reason == "compaction completed"
 
 
 # --------------------------------------------------------------------------------
@@ -661,3 +669,68 @@ def test_the_timeline_shows_call_durations_when_a_sidecar_exists(ctx: Context) -
     # the dur column appears, with the defended duration (42s) rendered
     assert "<th>dur</th>" in page
     assert "42s" in page
+
+
+def test_invocation_controls_show_context_freshness_and_incomplete_cost(ctx: Context) -> None:
+    ctx.store.runtime.start_invocation(
+        "observed",
+        ctx.run.id,
+        1,
+        "review:spec",
+        {
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+            "preset": "volume",
+        },
+    )
+    ctx.store.runtime.observe(
+        "observed",
+        1,
+        {
+            "context": {"tokens": 750, "effective_window": 1000, "observed_at": time.time()},
+            "estimate": {"usd": 0.25, "complete": False},
+        },
+    )
+    page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
+    assert page.status_code == 200
+    assert "Context: 75%" in page.text
+    assert "warn" in page.text
+    assert "$0.2500 · incomplete" in page.text
+    assert "gpt-5.6-sol" in page.text
+    ctx.store.runtime.observe(
+        "observed",
+        2,
+        {
+            "context": {"tokens": 750, "effective_window": 1000, "observed_at": time.time() - 180},
+        },
+    )
+    page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
+    assert "Context: unavailable · stale" in page.text
+
+
+def test_inherited_concurrency_uses_project_registry_limit(ctx: Context) -> None:
+    project = replace(ctx.project, concurrency_per_project=3)
+    ctx.registry = replace(ctx.registry, projects={project.name: project})
+    ctx.store.runtime.configure("project", project.name, {"concurrency": None})
+    page = _client(ctx).get("/projects")
+    assert page.status_code == 200
+    assert "/ 3 slots" in page.text
+
+
+def test_saving_mode_does_not_replace_the_displayed_run_policy(ctx: Context) -> None:
+    ctx.store.runtime.snapshot_policy(ctx.run.id, {"profile": "core"})
+    client = _client(ctx)
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}")
+    assert '<option value="core" selected>' in page.text
+    result = client.post(
+        f"/settings/runs/{ctx.run.linear_id}",
+        data={
+            "mode": "approval",
+            "delivery_profile": "core",
+        },
+    )
+    assert result.status_code == 200
+    assert ctx.store.runtime.effective(ctx.project.name, ctx.run.id)["mode"] == "approval"
+    retained = ctx.store.runtime.policy(ctx.run.id)
+    assert retained is not None
+    assert retained["revision"] == 1
