@@ -91,7 +91,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         const target = resolve(dirname(file), app, 'harness.config.json');
         const rel = relative(root, target);
         if (isAbsolute(app) || rel.startsWith('..')) throw new Error('App escapes authority root');
-        if (Object.hasOwn(policies, relative(root, dirname(target)) || '.')) throw new Error('Cyclic app authority');
+        if (Object.hasOwn(policies, relative(root, dirname(target)) || '.'))
+          throw new Error('Cyclic app authority');
         visit(target, policy);
       }
     };

@@ -7,7 +7,9 @@ This replaces the earlier pre-compaction checkpoint; do not restart its complete
 
 ## Boundaries and environment
 
-No tickets, live runs, production databases, deployments, remote branches, or PRs were changed.
+No tickets, live runs, production databases, or deployments were changed. After the initial
+implementation checkpoint, James authorized continuing release work; feature branches and
+draft PRs are now published (see release status below).
 Historical BAC-53/54/49/22 supply curated evaluation fixtures, not captured runtime transcripts.
 No app-server activation or concurrency increase was performed.
 
@@ -26,11 +28,13 @@ Do not rebuild or delete the workspace environment.
 | Repository | Branch | Implementation revision |
 | --- | --- | --- |
 | factory | `feat/reliability-observability-profiles` | Commit containing this handoff; baseline `c74866fbc084ff273f2c988d13ee1aebf85dc180` |
-| harness | `feat/delivery-contracts-and-presets` | `d87bfcbb0` |
+| harness | `feat/delivery-contracts-and-presets` | `a024205423b60152a56011b617c97bbf360d03ee` |
 | python-harness | `feat/composable-stack-presets` | `6e69ce3f8f011c511ab2cfaa70f1c30bd749404f` |
 | frontend-harness | `feat/composable-stack-presets` | `e0601d03c6d894922bf6a41fa1f9c158ae0085c5` |
 
-All three consumers were regenerated through `vendor_sync.py` against `d87bfcb`.
+All three consumers were regenerated through `vendor_sync.py` against `a02420542`
+(the release formatting fix on top of `d87bfcb`). Consumer table revisions above are the
+initial implementation commits; each PR also contains the final vendor-pin update.
 Shared changes must reach `harness@v2` before remote freshness can pass. Do not move refs
 to simulate publication. Stack changes likewise target their respective `v2` branches.
 
@@ -114,3 +118,24 @@ needed raw reports before cleaning `/tmp`.
    cost per accepted change. Historical missing usage remains incomplete.
 
 The implementation does not establish real sandbox acceptance or measured performance gains.
+
+## Published release status
+
+Draft PRs: [shared harness #30](https://github.com/jchen1707/harness/pull/30),
+[Python #76](https://github.com/jchen1707/python-harness/pull/76),
+[frontend #54](https://github.com/jchen1707/frontend-harness/pull/54), and
+[factory #82](https://github.com/jchen1707/factory/pull/82).
+
+Factory was merged with current `origin/main` without source conflicts and its four gates
+passed again (`/tmp/factory-release-gates.json`). Its PR explicitly includes the earlier local
+`c74866f` human-review acceptance commit. Shared checks were rerun after initializing pinned
+submodules: `/tmp/harness-release-check.txt` passed including mounted-stack config and shared
+generator checks, with 149 shared hook tests.
+
+Initial GitHub checks additionally passed Python Linux/Windows verification and database
+integration, plus frontend Linux verification, generation, E2E and Lighthouse. The configured
+local Lighthouse gate being disabled does not mean the independent CI job is disabled.
+Consumer freshness remains dependent on shared PR #30 merging into `v2`; do not weaken it.
+Shared generated-tree CI exposed formatting in two new source files; these are fixed in source
+and consumed through a fresh vendor sync. Consult current PR checks for the latest commit status.
+James retains merge, production migration and activation decisions.
