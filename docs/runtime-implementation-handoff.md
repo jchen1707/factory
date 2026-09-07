@@ -16,7 +16,91 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-## Current continuation — CI repaired and additional acceptance retained
+## Latest continuation — shared source merged and consumers refreshed
+
+James merged harness #32 as `f7917ce3a66f916109c5c2d621d4b621bc6fca87`.
+[Consumer refresh evidence](runtime-merged-consumer-refresh.md) records:
+
+- Factory PR #83 now includes generated vendor refresh `4663d49`; freshness and all
+  four gates pass at that source.
+- CRUD PR #1 is refreshed at `f06e2420`, with ten gates and remote freshness passing;
+  it remains draft. No FRO-12 authority or product-main change occurred.
+- Python PR #77 (`c162e705`) and frontend PR #55 (`9980706e`) refresh the same merged
+  source. Both source/generated-main gates and all remote checks pass. James owns merges.
+- After those stack merges, update harness’s read-only submodule pins to their exact
+  merged commits. The post-merge harness Meta currency failure is still real and must
+  clear through that sequence, not a check waiver or a gitlink to an unmerged branch.
+
+[Nested accounting assessment](runtime-nested-accounting-assessment.md) distinguishes
+an established code gap from unknown historical usage: runtime child launches have no
+separate factory accounting/admission/approval records, and the app-server worker does
+not normalize child-thread events. The completed legacy transcript cannot establish
+child identities or whether parent totals include child usage. Do not sum hypothetical
+children or declare the total complete. The report specifies the next exact-runtime
+calibration and an unmeasured invocation-local no-nesting fallback; neither has been
+applied. Existing target runtime/configuration is unchanged.
+
+[Integration-base acceptance](runtime-integration-base-acceptance.md) passed in the real
+private clone: remote base advancement refused delivery and verification until explicit
+refresh/merge and fresh gates. Missing independent-review evidence still refused delivery.
+Commits and dirty work survived; no review receipt or delivery was fabricated.
+
+The [actual diagnosis/repair experiment](runtime-diagnosis-workflow-acceptance.md)
+found a contract defect: the model returned explanatory prose in `reproduction_evidence`,
+while repair admission requires the exact relative verifier-artifact identity. The model
+correctly reproduced the defect; collection safely refused, and no builder launched.
+The original invocation/artifacts are preserved in the scratch store.
+
+Factory correction `ed64ab7` publishes the host identity/hash in the handoff and immutable
+request, constrains only the diagnosis invocation schema to that identity or empty,
+and refuses changed provenance before existing integrity/admission checks. All four
+gates passed in `artifacts/runtime-diagnosis-contract-evidence/factory-gates.json`;
+57 focused tests and bounded independent review passed. Shared wording and version
+0.12.2 are in **harness PR #33**, `36bb716`, with all remote checks green. It is unmerged.
+No consumer has been silently pinned to this unmerged source.
+
+The corrected scratch retry **passed**: exact evidence binding admitted one repair;
+Sol/high diagnosis and Terra/medium implementation both observed their approval holds.
+The builder proved a zero-case failing test before repairing it. Independent factory
+verification then ran the declared gate (three tests) and reached `reviewing` at attempt 3.
+A fixture-only dispatch omission initially produced `evidence-mismatch`; its failed
+report was retained, explicit authority revision 3 added the missing dispatch paths,
+and supported deterministic verification resumed without another model invocation.
+Original commits, tracked dirty notes and untracked notes survived. No reviewer,
+delivery or tracker write occurred. Both CRUD sandboxes are stopped; FRO-12 is unchanged.
+The scratch retry alone used unmerged shared PR #33, with explicit authority replacement.
+
+Accounting remains incomplete: both diagnoses have complete API-equivalent estimates,
+but the Terra builder’s twelve request estimates lack required pricing metadata despite
+complete token usage. The known $1.3548744 subtotal is not the total workflow cost.
+Raw events and final state are in `artifacts/runtime-diagnosis-workflow-acceptance/`.
+
+### Next work after compaction
+
+1. Resolve the measured builder pricing-metadata gap using retained events, and calibrate
+   nested-thread usage/launch semantics before implementing child accounting and control.
+   The nested-accounting report provides the bounded experiment; do not infer child costs.
+2. Complete two actual concurrent factory workflows and reviewer resource/recovery checks
+   in the required layouts. Existing isolation probes and integration-base measurements
+   are useful evidence but do not establish that combined behavior.
+3. Close remaining operator/reviewer policy-adherence and model/effort coverage in the
+   rollout matrix. One real repair is now proven; model-driven repeated-failure behavior
+   still needs its own evidence beyond deterministic repair-limit checks.
+4. James can merge green shared PR #33. Refresh consumers from its exact merged SHA,
+   updating still-open Python #77/frontend #55 when possible, then require their checks.
+   After stack merges, update shared gitlinks to exact merged commits and clear currency
+   checks. Verify remote state first; do not merge any PR automatically.
+
+Factory #83 includes source correction `ed64ab7` and the reports in this checkpoint.
+This is a completed validation step, not full factory acceptance or activation approval.
+Neither experiment requires CRUD ticket completion.
+
+## Previous checkpoint — CI repaired and additional acceptance retained
+
+The following checkpoint predates James’s shared-source merge and consumer refresh;
+its PR/pin sequencing statements are superseded by Latest continuation above.
+
+
 
 Harness PR [#32](https://github.com/jchen1707/harness/pull/32) is now **green** at
 `5f4e3dd76584b4f69e74df63043f61b56eb009d9`: generation, submodules and cross-stack

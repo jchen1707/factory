@@ -3,9 +3,33 @@
 **Scope:** this inventory measures factory requirements. Disposable ticket completion,
 app hardening and fixing the CORS defect are not acceptance objectives of their own.
 Choose only workload actions needed to close a named evidence gap; FRO-12 may remain
-parked. Shared cross-stack CI is now green at `5f4e3dd`; dependent consumer freshness
-still requires James’s shared-source merge and exact-pin regeneration. Continue the
+parked. Shared source is now merged and consumer freshness is green; the remaining
+stack-merge and gitlink sequence is documented below. Continue the
 remaining factory checks. Passing local gates does not establish remote merge readiness.
+
+Latest source rollout: James merged harness #32 as `f7917ce`; factory `4663d49`,
+CRUD draft #1, Python #77 and frontend #55 now vendor it. Their checks pass; stack
+merges and then shared gitlink updates remain James-owned sequencing. See
+[consumer refresh evidence](runtime-merged-consumer-refresh.md).
+
+The [nested accounting assessment](runtime-nested-accounting-assessment.md) establishes
+missing child-specific factory admission/approval/accounting wiring. Historical child
+execution and parent/child usage overlap remain unknown, so the next step is a scoped
+runtime calibration followed by implementation of the supported boundary.
+
+[Integration-base acceptance](runtime-integration-base-acceptance.md) now passes with
+real Git/VM refresh, merge and gate execution. This establishes base guards and work
+preservation; two concurrent full workflows and actual renewed reviewer execution remain.
+
+Actual diagnosis exposed and safely refused a reproduction-field contract mismatch.
+Factory correction `ed64ab7` and shared PR #33 (`36bb716`, green CI) bind the exact
+host identity/hash and align the schema/instructions. The corrected real retry passed
+one approved diagnosis → repair → independent verification, reaching reviewing while
+preserving commits and dirty notes. A fixture dispatch correction required explicit
+authority replacement and deterministic re-verification, with the refusal retained.
+No reviewers/delivery ran, and the scratch sandbox is stopped. Builder token usage is
+complete but its twelve request prices remain incomplete; this is an open accounting
+gap. See [the workflow report](runtime-diagnosis-workflow-acceptance.md).
 
 Final continuation checkpoint: FRO-12 completed implementation and all ten independent
 gates, followed by all eight review axes. It is blocked on one reproduced high CORS

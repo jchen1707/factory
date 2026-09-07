@@ -10,18 +10,27 @@ finishing FRO-12–15 is necessary only if it enables another missing factory ch
 Use targeted isolated experiments for the remaining gaps instead of making the whole
 CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
 
-Merge readiness is not established: harness #32 currently fails `cross-stack` because
-no consumer gate ran, CRUD #1 fails source-pin freshness pending the shared merge,
-and factory #83 reports no remote check runs. Resolve and verify CI before recommending
-merge; local passes and documented dependency failures do not waive required checks.
-The current handoff records exact failure logs and post-compaction priorities.
+James merged harness #32 as `f7917ce`. Factory, CRUD draft #1, Python #77 and
+frontend #55 now vendor that exact source; local required gates and available remote
+consumer checks pass. Stack merges followed by shared submodule-pin updates remain;
+the merged harness Meta currency check must then pass. See
+[consumer refresh evidence](runtime-merged-consumer-refresh.md). Factory #83 has no
+remote workflows/checks; local gate evidence is not remote green CI.
 
 This is the execution-status update for James's approved four-repository improvement
 plan. It does not replace or reduce that plan's requirements. All major feature areas
 have implementations and the original implementation PRs are merged. **This is not
 a claim that every requirement is implemented correctly or that acceptance is complete.**
-Real testing has exposed integration defects; corrective changes are published in factory #83 and harness #32, with dependent
-consumer changes in draft CRUD #1.
+Real testing has exposed integration defects; corrective changes are published in factory #83 and harness #32/#33, with dependent
+consumer changes in Python #77, frontend #55 and draft CRUD #1.
+
+The [real diagnosis/repair experiment](runtime-diagnosis-workflow-acceptance.md)
+now reaches reviewing after one approved repair and actually running independent gates,
+with commits and dirty work preserved. Shared #33 corrects the evidence contract and
+needs merge plus consumer refresh. Actual integration-base refresh/merge/reverification
+also passes. Builder request pricing metadata and nested-agent accounting/control remain
+open; two full concurrent workflows and remaining policy/model coverage are still required.
+The current ordered continuation is in [the handoff](runtime-implementation-handoff.md).
 
 Required implementation gaps and failed acceptance checks must be resolved and retested
 as part of this work, before declaring completion or activating the affected features.
