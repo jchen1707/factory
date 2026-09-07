@@ -1,5 +1,68 @@
 # Runtime implementation handoff
 
+## Main objective and next resume — James's scope correction
+
+**Validate the factory workflow and every use case, requirement and function in the
+approved four-repository improvement plan. Close factory implementation gaps and
+retain acceptance evidence. The disposable CRUD tickets are test workloads, not a
+product delivery objective.** James explicitly corrected this after the continuation
+below spent unnecessary effort driving the tickets toward completion.
+
+Advance or modify a test workload only when it enables a specific missing factory
+acceptance check. State that check first and stop when sufficient evidence is retained.
+Do not harden the disposable app, finish every CRUD ticket, merge its implementation,
+or fix its CORS issue merely to obtain a completed ticket. The CORS finding already
+demonstrated independent review detecting a defect missed by green gates and preventing
+delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
+factory validation, and no CORS disposition is currently being requested from James.
+
+**Do not merge the pending changes while required CI fails.** The previous merge
+recommendation was premature. Latest observed remote checks:
+
+- Harness PR #32: `cross-stack` failed; `generate` and `submodules` passed.
+  [Failing run](https://github.com/jchen1707/harness/actions/runs/34077096359).
+  Both consumers installed, but their gates were `skipped_unchanged`; the checker
+  correctly failed with "layer A changed but no gate ran". Diagnose the changed-path/
+  dispatch seam in `scripts/cross_stack.py`, consumer configuration and shared runner,
+  reproduce it, then fix the responsible layer. Do not silence the failure, weaken the
+  assertion or count skipped gates as passes. The exact root cause is not yet established.
+- CRUD PR #1: `freshness` failed because its `d2992c8` pin is ahead of the unmerged
+  shared source; `harness@v2` still has `028f0c8`.
+  [Failing run](https://github.com/jchen1707/factory-crud-verification/actions/runs/34077142444).
+  Keep it draft. After shared CI is green and James merges the source, regenerate
+  against the exact merged SHA and require freshness to pass.
+- Factory PR #83: GitHub currently returns no check runs. The recorded local four-gate
+  pass is valid within its scope, but is not a remote green-CI claim. Verify the required
+  repository checks/review conditions before recommending merge.
+
+Full failed logs are retained as `artifacts/crud-runtime-test/harness-pr32-ci-failure.log`
+and `crud-pr1-ci-failure.log`. No CI fix was made during this documentation checkpoint.
+
+After James compacts and resumes, continue autonomously with:
+
+1. Resolve the CI failure above and validate final shared/consumer/factory revisions;
+   publish corrective updates and report actual remote results before merge advice.
+2. Use [the acceptance inventory](runtime-acceptance-inventory.md) to target remaining
+   requirements: actual separate test-design execution and vertical TDD/monorepo replay;
+   app-server integration through the factory workflow; bounded diagnosis/repair and
+   authority refresh; full concurrent-run scheduling, isolation, draining, recovery and
+   integration-base handling; and invocation accounting, including unresolved nested
+   collaboration attribution. Reconcile the rest of the approved matrix too—this list
+   does not reduce the original requirements or declare other rows complete.
+3. Choose the smallest isolated experiment for each gap. Reuse captured events and
+   existing successful measurements where they establish the required property. Reuse
+   or advance CRUD only where necessary; do not impose the FRO-12→13/14→15 delivery
+   sequence as a prerequisite for all factory work. Preserve normal ticket dependencies
+   if those tickets are used; never fake state, bypass authority, or fabricate evidence.
+4. Fix discovered factory/shared-contract defects in their owning repositories, rerun
+   relevant acceptance and required gates, and update the inventory and handoff. Stop
+   disposable ticket execution once the factory properties under test are established.
+
+This is a handoff for continued work, not a completion claim. Production activation
+remains separate; existing products/tickets remain excluded. Both CRUD sandboxes are
+stopped and the candidate is preserved. The following continuation is retained evidence;
+its former CORS-fix and ticket-completion instructions are superseded by this section.
+
 ## Continued validation — 2026-09-07 UTC
 
 Latest operational state: FRO-12 run `47515078d97246e9` is **blocked /
@@ -12,26 +75,10 @@ result and invocation, and evaluation output (zero accepted changes; costs incom
 The candidate is additionally preserved in verified complete-history Git bundle
 `fro12-candidate-b635ade.bundle`; do not cancel or delete its branch/worktree.
 
-Next decisions/actions:
-
-1. James must disposition the reproduced CORS finding. Proposed fix: allow the
-   documented localhost frontend origin and test that exact preflight. The factory
-   must not dismiss the finding or implement a review-driven fix before that decision.
-2. Merge corrective [factory #83](https://github.com/jchen1707/factory/pull/83) and
-   [harness #32](https://github.com/jchen1707/harness/pull/32). The generated
-   [CRUD #1](https://github.com/jchen1707/factory-crud-verification/pull/1) is a draft
-   dependency PR: after the shared merge, check the exact merged SHA, regenerate if
-   necessary, confirm freshness, and prepare it for James to merge.
-3. After consumer merge, explicitly refresh the run's authority through the supported
-   operator control and renew affected verification/review evidence. Preserve the
-   implementation branch and account for the updated integration base. If James
-   approves the CORS repair, resume through the supported fresh implementation path
-   and approve its reported next-attempt key; do not fake a verifier failure or edit DB.
-4. Complete FRO-12 delivery/review and James's merge before starting dependent CRUD
-   tickets. Continue the acceptance inventory, including actual test-design execution,
-   monorepo replay, app-server workflow, diagnosis limits, and full concurrent runs.
-   Nested collaboration usage attribution remains unknown; never claim it complete.
-   Production activation remains a later explicit decision, not the next automatic step.
+Current next actions are in the objective/CI section above. There is no requirement
+to complete FRO-12 or obtain a CORS disposition before continuing independent factory
+acceptance. The finding remains preserved and undisposed; any future review-driven
+repair still follows the normal human-decision boundary if that path is needed.
 
 Implementation commit `b635ade17a03b7adf3999b676244be8719bf7d89`
 was collected and all ten independent API/web gates ran and passed. Review approval

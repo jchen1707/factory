@@ -1,5 +1,12 @@
 # Runtime acceptance inventory
 
+**Scope:** this inventory measures factory requirements. Disposable ticket completion,
+app hardening and fixing the CORS defect are not acceptance objectives of their own.
+Choose only workload actions needed to close a named evidence gap; FRO-12 may remain
+parked. After compaction, first resolve failing shared cross-stack CI and dependent
+consumer freshness as detailed in the handoff, then continue the remaining factory
+checks. Passing local gates does not establish remote merge readiness.
+
 Final continuation checkpoint: FRO-12 completed implementation and all ten independent
 gates, followed by all eight review axes. It is blocked on one reproduced high CORS
 finding; seven axes returned no findings. See

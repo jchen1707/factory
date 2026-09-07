@@ -2,6 +2,20 @@
 
 ## Current completion criteria — 2026-09-07
 
+**The objective is factory acceptance, not completion or hardening of disposable
+CRUD tickets.** Each test-workload action must serve a named factory requirement;
+stop driving that workload once its required evidence is obtained. The reproduced
+CORS finding already exercises defect detection and blocked delivery. Fixing it or
+finishing FRO-12–15 is necessary only if it enables another missing factory check.
+Use targeted isolated experiments for the remaining gaps instead of making the whole
+CRUD delivery sequence a prerequisite. James explicitly clarified this scope.
+
+Merge readiness is not established: harness #32 currently fails `cross-stack` because
+no consumer gate ran, CRUD #1 fails source-pin freshness pending the shared merge,
+and factory #83 reports no remote check runs. Resolve and verify CI before recommending
+merge; local passes and documented dependency failures do not waive required checks.
+The current handoff records exact failure logs and post-compaction priorities.
+
 This is the execution-status update for James's approved four-repository improvement
 plan. It does not replace or reduce that plan's requirements. All major feature areas
 have implementations and the original implementation PRs are merged. **This is not
