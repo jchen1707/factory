@@ -20,7 +20,8 @@ This is the execution-status update for James's approved four-repository improve
 plan. It does not replace or reduce that plan's requirements. All major feature areas
 have implementations and the original implementation PRs are merged. **This is not
 a claim that every requirement is implemented correctly or that acceptance is complete.**
-Real testing has exposed integration defects; corrective changes remain local.
+Real testing has exposed integration defects; corrective changes are published in factory #83 and harness #32, with dependent
+consumer changes in draft CRUD #1.
 
 Required implementation gaps and failed acceptance checks must be resolved and retested
 as part of this work, before declaring completion or activating the affected features.
@@ -29,14 +30,14 @@ alternate; no new planning phase is needed.
 
 | Approved area | Implementation status | Evidence still required before completion |
 | --- | --- | --- |
-| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Real workflow coverage of conflicting parent/child authority, explicit deferrals, stale/replaced snapshots and attempted candidate self-weakening. |
+| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Fourteen host acceptance checks now cover conflict, deferral, immutable snapshot and stale-evidence refusal. Actual reviewer adherence and successful operator CLI replacement remain. |
 | Model selection and workflow | Presets, readiness, optional planning, diagnosis, repair limits and approval/suspend controls implemented. | Executing-runtime model/effort validation across selected roles; end-to-end diagnosis/repair limits, approval retries, suspend/resume and preservation of committed and dirty work. Approval preventing the first planner launch has been measured. |
-| Separate test design and vertical TDD | Test-design setting and role routing exist; builders receive shared workflow guidance. | Confirm the separate role actually produces acceptance scenarios and test boundaries and the builder proves vertical red-green slices. The role currently receives the general readiness contract; resolve any behavioral gap in layer A and sync consumers. Readiness does not require a particular test-plan filename. |
-| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Complete build/reviewer compatibility and workflow evidence, including intermediate occupancy, resets, stale measurements, model changes and reviewer usage attribution. A reviewer manifest cannot authorize the build sandbox. |
+| Separate test design and vertical TDD | Test-design setting and role routing exist; builders receive shared workflow guidance. | Confirm the separate role actually produces acceptance scenarios and test boundaries and the builder proves vertical red-green slices. The explicit shared contract now passed a real app-server test-design invocation, collection and next-approval hold. Builder vertical slices and replay remain separately evidenced. Readiness does not require a particular test-plan filename. |
+| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Exact build and reviewer compatibility manifests now pass. Complete factory workflow integration, console intermediate/freshness observation and reviewer invocation attribution; no implicit adapter switch. |
 | Accounting | Dated pricing, invocation accounting, incomplete-data labels, reconciliation and budget admission implemented. | Reconcile acceptance coverage for cached/uncached and long-context pricing, failures, duplicate events, incomplete history and all invocation roles. Retain real event evidence where runtime semantics matter; never equate estimates with account charges. |
 | Parallel execution | Atomic admission, configurable limits, per-run isolation and integration-base checks implemented. | Two simultaneous runs in both bind and clone layouts, admission races, dependency/temp/database/port isolation, reviewer resource limits, targeted cancellation/recovery, draining and renewed verification after base changes. |
-| Composable stacks | Language/framework presets and optional component generation implemented. | Complete minimal and existing preset installation/gate evidence and consumer generation checks. The disposable FastAPI/React scaffold passed ten gates, but that alone does not validate every composition. |
-| Evaluation | Intervention, failure-episode, completion-rate and estimated-cost metrics implemented. | Check metric behavior against retained outcomes. Claims of improved delivery require sufficient completed outcomes and comparable cohorts over time. |
+| Composable stacks | Language/framework presets and optional component generation implemented. | All four default presets and selected optional combinations installed and passed 32 host gates; consumer generation checks pass. Retain declared platform limits and validate any remaining service/runtime-specific behavior. |
+| Evaluation | Intervention, failure-episode, completion-rate and estimated-cost metrics implemented. | Real isolated outcomes reconcile, including incomplete costs and zero accepted changes. Claims of improved delivery require sufficient completed outcomes and comparable cohorts over time. |
 
 Completion also requires factory's four Definition-of-Done gates, layer-A contract
 checks, consumer generation checks, and the planned real sandbox measurements against
@@ -57,8 +58,9 @@ Resume from [the current handoff](runtime-implementation-handoff.md). FRO-12 pas
 real readiness recovery, supported suspend/resume, implementation and ten independent
 gates, and completed all eight isolated reviews. It is blocked on one high-severity
 CORS finding, reproduced and awaiting James's disposition. Corrective factory/shared/consumer PRs are
-open; source merges and explicit authority refresh remain prerequisites for the new
-test-design and monorepo replay declarations. Do not start broad intake or claim full
+open; source merges and explicit authority refresh remain prerequisites for changing
+FRO-12’s pinned declarations; independent scratch experiments may use exact corrective
+source revisions without changing that run. Do not start broad intake or claim full
 CRUD delivery or complete acceptance.
 
 ## Historical rollout baseline

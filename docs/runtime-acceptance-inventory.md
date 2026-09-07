@@ -3,9 +3,9 @@
 **Scope:** this inventory measures factory requirements. Disposable ticket completion,
 app hardening and fixing the CORS defect are not acceptance objectives of their own.
 Choose only workload actions needed to close a named evidence gap; FRO-12 may remain
-parked. After compaction, first resolve failing shared cross-stack CI and dependent
-consumer freshness as detailed in the handoff, then continue the remaining factory
-checks. Passing local gates does not establish remote merge readiness.
+parked. Shared cross-stack CI is now green at `5f4e3dd`; dependent consumer freshness
+still requires James’s shared-source merge and exact-pin regeneration. Continue the
+remaining factory checks. Passing local gates does not establish remote merge readiness.
 
 Final continuation checkpoint: FRO-12 completed implementation and all ten independent
 gates, followed by all eight review axes. It is blocked on one reproduced high CORS
@@ -84,6 +84,46 @@ This section supersedes corresponding open items in the audit-start table below.
   audit-start monorepo limitations below are now corrected in source, with final
   real replay and source/consumer rollout still distinct acceptance obligations.
 
+## Current continuation acceptance and CI
+
+- [Shared CI correction](runtime-cross-stack-ci-acceptance.md): exact failure reproduced,
+  real sync/reporter regression red then green, both consumer default suites actually
+  ran, and all three remote jobs passed at `5f4e3dd`.
+- [Authority acceptance](runtime-authority-acceptance.md): 14 actual host checks passed
+  for deferrals, conflicts, candidate weakening, snapshot integrity, explicit replacement
+  and stale-evidence refusal. Successful CLI replacement and model reviewer adherence
+  remain unmeasured; this is not full delivery acceptance.
+
+- [Controller acceptance](runtime-controller-acceptance.md): real production host
+  admission/guard/driver refusal, draining, separate-process state persistence and
+  targeted slot reclamation passed. The input isolation manifest is constructed and
+  identities are unprovisioned; actual simultaneous workflows, model/process cleanup
+  and daemon recovery remain unmeasured by this experiment.
+
+- [Diagnosis admission and handoffs](runtime-diagnosis-acceptance.md): six actual
+  failing gate runs fed production failure provenance and repair admission. Two repairs
+  were admitted; unchanged evidence, a third repair, tampered evidence and lifetime/spend
+  limits were refused. Classifications were supplied by the experiment; actual model
+  diagnosis and repair remain open. A reproduced porcelain whitespace defect was fixed
+  with host/clone regressions and a successful real-host preservation rerun.
+- [Separate test-design role](runtime-test-design-acceptance.md): actual app-server
+  `plan.start`/`plan.collect` produced scenarios and boundaries, preserved baseline files,
+  recorded one Sol/high invocation and held before implementation. This closes the
+  separate-role execution gap and one real factory/app-server integration path, not
+  the full workflow. Captured context renders 11% fresh then unavailable/stale under a
+  controlled clock. This invocation's eight requests have a complete API-equivalent
+  estimate; nested builder attribution and other-role completeness remain separate.
+
+- [Real monorepo replay](runtime-monorepo-replay-acceptance.md): both candidate gates
+  passed in the actual build VM; production replay applied each test patch to the base
+  and observed API and web assertion failures. Nested clone dependency linking,
+  immutable authority and scratch cleanup passed. This closes corrected replay
+  integration, not historical FRO-12 pathspecs or full workflow delivery.
+
+The additional handoff correction is committed at `746dfdd`; all four factory gates
+passed in `factory-gates-handoff-inventory.json` after independent bounded review.
+That final source report supersedes earlier gate reports for the handoff correction.
+
 ## Nested builder collaboration: remaining accounting evidence
 
 A read-only inspection of FRO-12 attempt 2 `events.jsonl` observed builder messages
@@ -92,7 +132,11 @@ claiming delegation to two reviewers through the code-review skill, followed by
 `receiver_thread_ids` list, empty `agents_states`, and no model, effort or usage fields.
 They establish a collaboration-tool interaction and the builder's claim of delegation;
 they do not independently establish child launches, child count or completed reviews.
-The run was still active when inspected, so this is a partial transcript observation.
+The initial inspection was partial. The completed transcript was subsequently audited:
+132 events end in `turn.completed`, and all 12 collaboration events are wait
+start/completion items with the same empty identity/usage fields. Retained evidence:
+`artifacts/crud-runtime-test/completed-builder-collaboration-audit.json`. Completion
+did not resolve child attribution.
 
 `agent/codex.py::parse_events` sums usage from top-level `turn.completed` events and
 retains the parent `thread.started` identity. It does not normalize collaboration

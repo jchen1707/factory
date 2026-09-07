@@ -16,35 +16,72 @@ demonstrated independent review detecting a defect missed by green gates and pre
 delivery. FRO-12 can remain parked. Its product defect is not a blocker for unrelated
 factory validation, and no CORS disposition is currently being requested from James.
 
-**Do not merge the pending changes while required CI fails.** The previous merge
-recommendation was premature. Latest observed remote checks:
+## Current continuation — CI repaired and additional acceptance retained
 
-- Harness PR #32: `cross-stack` failed; `generate` and `submodules` passed.
-  [Failing run](https://github.com/jchen1707/harness/actions/runs/34077096359).
-  Both consumers installed, but their gates were `skipped_unchanged`; the checker
-  correctly failed with "layer A changed but no gate ran". Diagnose the changed-path/
-  dispatch seam in `scripts/cross_stack.py`, consumer configuration and shared runner,
-  reproduce it, then fix the responsible layer. Do not silence the failure, weaken the
-  assertion or count skipped gates as passes. The exact root cause is not yet established.
-- CRUD PR #1: `freshness` failed because its `d2992c8` pin is ahead of the unmerged
-  shared source; `harness@v2` still has `028f0c8`.
-  [Failing run](https://github.com/jchen1707/factory-crud-verification/actions/runs/34077142444).
-  Keep it draft. After shared CI is green and James merges the source, regenerate
-  against the exact merged SHA and require freshness to pass.
-- Factory PR #83: GitHub currently returns no check runs. The recorded local four-gate
-  pass is valid within its scope, but is not a remote green-CI claim. Verify the required
-  repository checks/review conditions before recommending merge.
+Harness PR [#32](https://github.com/jchen1707/harness/pull/32) is now **green** at
+`5f4e3dd76584b4f69e74df63043f61b56eb009d9`: generation, submodules and cross-stack
+all passed remotely. The source correction requests actual declared gates when shared
+instructions change outside consumer Stop-hook filters; the skipped-gates guard remains.
+See [the reproduced failure and final CI evidence](runtime-cross-stack-ci-acceptance.md).
+No PR has been merged by the agent.
 
-Full failed logs are retained as `artifacts/crud-runtime-test/harness-pr32-ci-failure.log`
-and `crud-pr1-ci-failure.log`. No CI fix was made during this documentation checkpoint.
+CRUD PR #1 remains draft with failed freshness. After James merges the shared source,
+regenerate against the exact merged SHA and require freshness to pass. Its `d2992c8`
+pin is now superseded as well as unmerged. Do not merge it while freshness fails.
+Factory PR #83 has no remote workflows/checks, branch protection or rulesets; its recorded
+local four-gate pass must not be described as remote green CI.
+
+[Deterministic authority acceptance](runtime-authority-acceptance.md) passed 14 checks
+using actual Git, Node, SQLite and production authority/operator functions. Candidate
+weakening/conflicts were refused, explicit policy replacement produced revision 2,
+and revision-1 verification/review evidence was rejected afterward. Successful CLI
+replacement and actual reviewer adherence remain outside that experiment.
+
+The completed builder transcript was re-audited: all 12 collaboration events are wait
+start/completion items without child identities or usage. The final event is
+`turn.completed`; this is no longer a partial-transcript limitation. Nested invocation
+attribution remains unknown. Evidence: `completed-builder-collaboration-audit.json` in
+the isolated test home. Do not infer that parent totals include or exclude child usage.
+
+Additional completed acceptance:
+
+- [Controller admission/draining](runtime-controller-acceptance.md): production host
+  guards, saturated driver refusal, persistence across a separate process and targeted
+  slot reclamation passed. Constructed manifest input and unprovisioned identities mean
+  this is not two actual full sandbox workflows.
+- [Diagnosis admission/handoffs](runtime-diagnosis-acceptance.md): actual failing gate
+  reports proved two-repair admission, unchanged-evidence refusal and lifetime/spend
+  guards. Operator-supplied classifications routed correctly; no model diagnosed or
+  repaired code in this experiment. Found and fixed porcelain whitespace loss in
+  `handoffs.write`; host/clone regressions and actual host preservation rerun pass.
+- [Separate test design](runtime-test-design-acceptance.md): production app-server
+  start/collect created real scenarios and an execution brief with Sol/high. Initial
+  approval held; collection succeeded; next `1:implement:1` approval held without a
+  builder. Baseline files remained unchanged. This isolated invocation has complete
+  eight-request API-equivalent estimated USD, not an overall accounting claim.
+- [Monorepo replay](runtime-monorepo-replay-acceptance.md): actual VM candidate gates
+  passed, and production replay found actual API/web assertion failures at the base.
+  Nested clone dependency linking, frozen authority and scratch cleanup passed.
+
+Factory handoff correction is committed at `746dfdd`. Final four-gate report
+`artifacts/crud-runtime-test/factory-gates-handoff-inventory.json` records lint,
+format, mypy and pytest all passing, exit 0, against that source. The bounded independent
+review found no concrete defect. Mypy covers declared paths and the factory suite uses
+fixtures; real measurements are the separately linked reports. This correction and
+these documents are published through factory PR #83.
+
+No model or targeted driver remains running. The reused build sandbox is stopped after
+both sequential probes; reviewer remains stopped. Original FRO-12 run/state/authority
+and its candidate were untouched. Scratch stores and exact evidence paths are in the
+linked reports. No production activation, migration or writer restart occurred.
 
 After James compacts and resumes, continue autonomously with:
 
-1. Resolve the CI failure above and validate final shared/consumer/factory revisions;
-   publish corrective updates and report actual remote results before merge advice.
+1. Shared CI is repaired. Preserve the green exact revision and follow James-owned
+   merge sequencing for consumer regeneration; complete remaining factory acceptance.
 2. Use [the acceptance inventory](runtime-acceptance-inventory.md) to target remaining
-   requirements: actual separate test-design execution and vertical TDD/monorepo replay;
-   app-server integration through the factory workflow; bounded diagnosis/repair and
+   requirements: builder vertical TDD and full app-server workflow parity beyond the
+   now-passing test-design path and monorepo replay; model-driven diagnosis/repair and
    authority refresh; full concurrent-run scheduling, isolation, draining, recovery and
    integration-base handling; and invocation accounting, including unresolved nested
    collaboration attribution. Reconcile the rest of the approved matrix too—this list
