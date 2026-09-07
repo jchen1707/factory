@@ -79,15 +79,15 @@ _RUNNER_MISSING_SIGNS: tuple[str, ...] = (
 
 #: The complementary signature — the test *ran* and failed an assertion. That is the red
 #: phase: the test reached its assertion and the base-ref code did not satisfy it.
-_ASSERTION_FAILURE_SIGNS: tuple[str, ...] = (
-    "assertionerror",
-    "assert ",
-    "failed",
-    "::failed",
-    "expect(",
-    ".equal(",
-    ".tobetruthy",
-    ".tobe(",
+#: Neither FAILED summaries nor traceback source excerpts prove a comparison executed.
+#: Require assertion diagnostics; unknown runner formats remain inconclusive.
+_ASSERTION_FAILURE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.MULTILINE)
+    for pattern in (
+        r"^\s*(?:e\s+)?assertionerror\b",
+        r"^\s*e\s+assert\s",
+        r"^failed\s+[^\n]+\s+-\s+(?:assert\s|assertionerror\b)",
+    )
 )
 
 #: The test-weakening guard. A hunk in an *existing* test file that removes an assertion line
@@ -330,7 +330,7 @@ def _classify(completed: Completed, test_files: list[str]) -> tuple[str, str]:
         # with zero executed tests came back as a real red phase.
         return "inconclusive", detail
     has_collection = any(sign in output for sign in _COLLECTION_ERROR_SIGNS)
-    has_assertion = any(sign in output for sign in _ASSERTION_FAILURE_SIGNS)
+    has_assertion = any(pattern.search(output) for pattern in _ASSERTION_FAILURE_PATTERNS)
     if has_assertion and not has_collection:
         return "red", detail
     if has_collection and not has_assertion:
