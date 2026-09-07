@@ -56,17 +56,17 @@ def write(ctx: Context, target: Path) -> None:
             )
             if result.returncode:
                 raise Blocked("handoff-inventory-failed", result.stderr)
-            return result.stdout.strip()
+            return result.stdout
     else:
 
         def git(*argv: str) -> str:
-            return repo._git(ctx.worktree, *argv)
+            return repo._git_raw(ctx.worktree, *argv)
 
     payload = {
         "contract_revision": snapshot["source_revision"] if snapshot else ctx.run.base_ref,
         "policy_revision": snapshot["revision"] if snapshot else None,
         "branch": ctx.branch,
-        "commit": git("rev-parse", "HEAD"),
+        "commit": git("rev-parse", "HEAD").strip(),
         "dirty_work": git("status", "--porcelain").splitlines(),
         "verified": [
             {"name": row["check_name"], "status": row["status"], "evidence": row["artifact"]}
