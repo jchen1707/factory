@@ -210,3 +210,53 @@ caveat applies, with real evidence separately retained above. No production sour
 that report. No new application/ticket completion, live changes, migration or consumer sync.
 Prepared-launch environment/generation cases, old transient diagnosis, child execution and safe
 integration, controls, matching full runtime package and rollout remain unfinished.
+
+
+## Prepared launch identity refusal
+
+Continuation from59780fb. Regression tests showed that prepared resume's automatic selection
+could replace the certification job before detecting stale input. The launch path now checks
+local preparation first and then freshly validates the original job, without ensure/advance.
+Six mutations (evidence, generation, environment, runtime binary, launcher, mounts) refuse;
+exact restoration after store reopen launches once. Sixteen focused workflow tests pass.
+
+Real deterministic commands (exclusive fixtures; already executed, do not rerun blindly):
+
+```
+uv run python artifacts/runtime-certification-service/prepared-launch-matrix.py
+uv run python artifacts/runtime-certification-service/prepared-generation-refusal.py
+```
+
+The first backs up SQLite, seeds two synthetic preparations in that backup, and uses actual
+sbx observations plus production workflow_launches.resume. Unchanged build/reviewer identities
+reach exact invocation Approval; changed launch env refuses launch-preparation-stale; restoration
+returns to Approval. No paid launches/intents, no new certification jobs, no active slots.
+This is not another actual implement.start/review.start or verification/ticket completion claim.
+Original59 invocation records/accounting remain unchanged, and target git status stays clean.
+
+The second removes/recreates the stopped owned reviewer under the same name and measures a new
+full identity. Old generation0b2cddfb-cdb7-4a02-84f2-a51e90517e73 becomes
+75d4653d-ec0e-4e6b-aa8b-ceb97890b82f. Old prepared launch refuses certification-stale with its
+original job retained and no paid admission. The recreated reviewer needs a fresh six-check job
+before use. Existing old certificate remains historical only; build identity is unchanged.
+Both VMs are stopped. Host artifacts remain, no live settings/services/schema changed.
+
+Initial fixture intervention: SbxAdapter.remove invokes interactive sbx rm and ignores its exit.
+Removal did not occur and the fixture's generation inequality correctly failed. Retained
+prepared-launch-matrix/generation-unremoved-attempt.json. A checked noninteractive removal of
+the exact stopped owned name followed by absence assertion produced the real generation change.
+This is a remaining adapter cleanup defect, not a reason to broaden deletion or reuse certificates.
+The old028c unexplained spec-hash transient remains separate and unresolved.
+
+Final results: artifacts/runtime-workflow-real/prepared-launch-matrix/{result.json,generation-result.json}.
+Original stopped report backed up as stopped-checkpoint-before-prepared-launch.json; current
+stopped-checkpoint.json records new generation and stale reviewer. Known estimated lower bound
+USD0.920936,28 incomplete/59 records unchanged; zero paid calls in this slice.
+Bounded Standards and Spec reviews clear. Child broker/execution, safe integration, controls,
+matching runtime package and rollout still pending. Final gates are recorded in the handoff.
+
+Final gates PASS: prepared-launch-matrix/gates-final.json, Ruff67ms, format42ms, mypy106ms,
+pytest133611ms; all exit0, empty tails, no skips. Source/test paths covered by mypy; fake-suite
+caveat applies with separate runtime observations above. Final later inventory lists neither
+owned VM despite successful stopped assertions immediately after the experiments; cause unknown.
+See final-inventory.json. Neither prior identity may be assumed to exist for subsequent work.

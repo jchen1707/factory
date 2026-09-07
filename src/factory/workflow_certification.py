@@ -179,6 +179,24 @@ def select(ctx: Context, *, review: bool, baselines: dict[str, dict[str, int]]) 
     )
 
 
+def validate_prepared(ctx: Context, report: Any, *, review: bool) -> dict[str, Any]:
+    """Recheck a frozen launch's attestation without scheduling replacement probes.
+
+    A new certificate cannot authorize a request frozen against the old identity.
+    Stale preparations require explicit recovery, not paid certification on resume.
+    """
+    if not isinstance(report, dict) or not isinstance(report.get("certification"), dict):
+        raise Blocked("certification-preparation-invalid", "Missing prepared attestation")
+    job_id = report["certification"].get("job_id")
+    if not isinstance(job_id, str):
+        raise Blocked("certification-preparation-invalid", "Missing prepared job identity")
+    runner, _ = service(ctx, review=review)
+    job = runner.status(job_id)
+    if job["run_id"] != ctx.run.id:
+        raise Blocked("certification-preparation-invalid", "Attestation belongs to another run")
+    return runner.certifications.validate(job_id, runner.observe())
+
+
 def freeze_script(script: str, inputs: tuple[Path, ...]) -> str:
     """Retain executable/request bytes in argv, outside candidate-writable staging.
 

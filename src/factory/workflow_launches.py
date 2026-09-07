@@ -93,7 +93,6 @@ def resume(ctx: Context) -> bool:
         )
         if intent is None:
             authority.current(ctx)
-            select(ctx, review=ctx.state.value == "reviewing")
             metadata = invocation["metadata"]
             if (
                 payload["env_sha256"] != _environment(ctx)
@@ -105,8 +104,22 @@ def resume(ctx: Context) -> bool:
                 )
                 or metadata["policy_revision"]
                 != (ctx.store.runtime.policy(ctx.run.id) or {}).get("revision")
-                or metadata["runtime_compatibility"] != getattr(ctx.agent, "report", None)
             ):
+                raise Blocked("launch-preparation-stale", effect.step)
+            report: object
+            if (
+                ctx.store.runtime.settings("run", ctx.run.id).get("certification_mode")
+                == "automatic"
+            ):
+                from factory.workflow_certification import validate_prepared
+
+                report = validate_prepared(
+                    ctx, metadata["runtime_compatibility"], review=ctx.state is State.REVIEWING
+                )
+            else:
+                select(ctx, review=ctx.state is State.REVIEWING)
+                report = getattr(ctx.agent, "report", None)
+            if metadata["runtime_compatibility"] != report:
                 raise Blocked("launch-preparation-stale", effect.step)
             started = launches.start(
                 effect.step,

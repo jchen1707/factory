@@ -3,9 +3,10 @@
 Status: implementation in progress; feature is not complete.
 
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
-launch enforcement are implemented in the isolated worktree. Final disposable build/reviewer six-check
-acceptance now PASSES; full workflow/child acceptance and rollout remain incomplete. See
-**Usage request accounting and sandbox-scoped retirement checkpoint** at the end; earlier sections are historical.
+launch enforcement are implemented in the isolated worktree. Both prior disposable identities passed six checks. Prepared-launch environment/generation
+refusals now pass; the deliberately recreated reviewer requires fresh certification before reuse.
+Child execution/integration and rollout remain incomplete. See **Prepared launch identity checkpoint**
+at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -1034,3 +1035,84 @@ Exact next work:
 Do not backfill old undigested/unknown request histories or mark compaction/interrupted
 accounting complete. Current conservative incompleteness is intentional. No need to complete
 or harden the synthetic ticket. Checkpoint is the commit containing this section; no push/PR.
+
+
+## Prepared launch identity checkpoint
+
+Continued from 59780fb. Main objective remains factory feature/workflow validation with synthetic
+workloads, not ticket hardening or completion. No live services/settings, customer work,
+tracker/forge writes, migration, shared source or consumer pins changed.
+
+Implemented:
+- Prepared workflow resumes check environment, candidate/input hashes and policy before adapter
+  selection. Automatic mode validates the original host-published certificate against a fresh
+  full observation; it never schedules replacement certification for a stale frozen request.
+  It verifies job/run ownership and exact retained report equality before paid admission.
+- Regression reproduced changed environment/generation replacing the original certification job.
+  Now both refuse with the original job retained. Six mutation cases cover evidence, generation,
+  environment, native binary, launcher and mounts; exact restoration launches the original
+  invocation once after a store reopen. Sixteen focused workflow tests pass; mypy covers152 files.
+- Bounded Standards and Spec reviews clear. No new child transport is claimed.
+
+Real deterministic acceptance (no paid model calls):
+- prepared-launch-matrix.py uses a SQLite backup, retains original certificate/evidence roots,
+  and seeds explicitly synthetic prepared builder/reviewer invocations. It does not rerun actual
+  step entry, gates or ticket work. Original database and59 historical invocation records stay
+  unchanged. Actual workflow_launches.resume and sbx observation run on both existing VMs.
+- Unchanged identity reaches the exact invocation's Approval hold; changed launch environment
+  refuses as launch-preparation-stale; exact restoration returns to Approval. No launch intent,
+  detached holder, active lease, new certification job or paid invocation appears.
+- prepared-generation-refusal.py recreates ONLY the stopped owned reviewer under its existing
+  name, then observes its actual complete fingerprint. Old generation
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73 changed to
+  75d4653d-ec0e-4e6b-aa8b-ceb97890b82f. Resume refuses certification-stale with the old job
+  retained and zero launch intents/leases. Host-side evidence and target work remain preserved.
+- Build remains c51effe9-c5ff-44dd-b5c6-29f56513457b. Both VMs STOPPED. Old reviewer certificate
+  0cd7ca3b3b1a4f5a80ee9dc913ac3ad9 is valid historical evidence ONLY: it does not authorize the
+  recreated reviewer. Do not launch there until a new job passes all checks. No need to recertify
+  merely to repeat this refusal test. Prefer the forthcoming matching runtime package for child
+  acceptance before purchasing another full compatibility run.
+
+Evidence: artifacts/runtime-workflow-real/prepared-launch-matrix/{result.json,generation-result.json}.
+Scripts: artifacts/runtime-certification-service/{prepared-launch-matrix.py,prepared-generation-refusal.py}.
+They refuse reuse; do not rerun blindly. Original stopped report retained as
+stopped-checkpoint-before-prepared-launch.json; stopped-checkpoint.json now records current generation
+and stale reviewer. Original known USD0.920936 lower bound,28 incomplete/59 records unchanged.
+No account-charge or whole-history completeness claim. Plans remain implementing/untracked.
+
+Intervention: initial SbxAdapter.remove silently failed to remove the reviewer because sbx rm
+requires interactive confirmation and the adapter ignores its exit. Generation stayed identical;
+the fixture correctly failed rather than claim recreation. Retained generation-unremoved-attempt.json.
+A checked `sbx rm --force` for the exact stopped disposable name, with absence assertion before
+ensure, then produced the actual recreation above. Production cleanup code remains unchanged;
+address checked noninteractive owned removal and failed stop/remove reporting before relying on
+that adapter for child lifecycle cleanup. Never broaden cleanup to unrelated or human sandboxes.
+The separate old028c spec-digest transient remains unexplained; this does not resolve its cause.
+
+Exact next work:
+1. Implement durable host child broker and read-only execution/result transport on the measured
+   supported runtime. runtime_jobs has tables/admission only; no factory child transport exists
+   in app_server_worker. Include request validation/idempotence/ownership, per-child approval,
+   accounting, targeted cancellation and subtree restart recovery. Shared request schema/semantics
+   remain at harness e3fc8ad; merge/exact consumer sync still pending. Keep native spawning disabled.
+2. Fix the observed silent sandbox removal failure with a RED regression at the sandbox adapter
+   boundary before using it for child cleanup; preserve stopped/owned targeting and checked exits.
+3. Isolated writable children, safe serialized integration preserving dirty parent work, remaining
+   CLI/console controls and real synthetic acceptance. Matching full runtime package/template is
+   still required: binary-only Astra/dynamic-tool experiments do not authorize bundled launch.
+4. Shared merge/exact sync and reviewed rollout. James owns merge, live schema5→6 approval,
+   deployment and activation. Live concurrency4 and disabled delegation remain unchanged.
+
+Final canonical gates: artifacts/runtime-workflow-real/prepared-launch-matrix/gates-final.json
+PASS. Ruff check exit0/67ms; format exit0/42ms; mypy exit0/106ms; pytest exit0/133611ms.
+All tails empty, no skips. Changed files are within152-file mypy coverage. The fake-sandbox
+suite caveat applies; separate actual sbx observations/refusals are retained above. No source
+changes followed the report. Standards and Spec reviews clear. No push/PR opened.
+
+Final inventory caveat: after both scripts had successfully stopped/inspected their owned VMs,
+a later sbx ls --json listed neither test name; inspect/generation now report absent. Cause is
+not established. See prepared-launch-matrix/final-inventory.json and stopped-checkpoint.json's
+final_readback. Do not treat either prior disposable identity as currently available or recreate
+it blindly. Fresh setup/observation/certification is required for future execution. No codex-*
+sandbox was attached/stopped/removed and no live services/settings were changed by this work.
+This checkpoint is the commit containing this section.
