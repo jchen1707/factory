@@ -89,7 +89,12 @@ def project_hook_coverage(
                         i
                         for i, hook in enumerate(candidates)
                         if hook.get("enabled") is True
-                        and all(hook.get(k) == v for k, v in expected.items())
+                        # 0.146's HookMetadata omits async entirely. Only the
+                        # synchronous default is compatible with that older shape.
+                        and all(
+                            hook.get(k, False if k == "async" else None) == v
+                            for k, v in expected.items()
+                        )
                     ),
                     None,
                 )

@@ -1,5 +1,219 @@
 # Runtime implementation handoff
 
+## Continued validation — 2026-09-07 UTC
+
+The continuation closed additional integration gaps locally: supported deterministic
+readiness recollection on operator resume; explicit shared test-design instructions
+and host-snapshotted artifact requirements; builder consumption of only collected
+artifacts; semantic role accounting; and monorepo red-phase replay using child
+configuration from immutable authority, with nested sandbox dependency links.
+Independent review caught and corrected candidate-controlled child policy and mutable
+test-design request weaknesses. These changes require final integrated gates and
+corrective PR review; implementation is not yet fully accepted.
+
+New retained acceptance:
+
+- [Build compatibility](runtime-crud-build-acceptance.md): all six checks pass for
+  the exact CRUD build sandbox/runtime/worker; private clone work was preserved.
+  Build and reviewer manifests share operator directory
+  `artifacts/crud-runtime-test/compatibility/`. No adapter setting was switched.
+- [Installed dependency isolation](runtime-isolation-installed-dependencies-2026-09-07.md):
+  real distinct dependency installations, simultaneous temp/SQLite/port resources,
+  targeted cancellation and fresh-attempt recovery passed in bind and clone layouts.
+  Full controller scheduling/recovery remains separate acceptance.
+- [Composable presets](runtime-composition-acceptance-2026-09-07.md): four defaults
+  and three optional combinations installed and passed all 32 declared gates on the
+  host. Provider/service behavior and Linux-native compatibility are not implied.
+- `artifacts/crud-runtime-test/captured-accounting.json`: three production collector
+  replays of actual planner events into a database backup preserved one cost record
+  and all amounts. USD remains unknown. The evaluated cohort has no accepted changes.
+- `artifacts/crud-runtime-test/console-captured-state.json`: read-only ASGI requests
+  against actual isolated state rendered board, projects and run settings successfully,
+  including the incomplete-cost label. No production server was started.
+
+See [the detailed inventory](runtime-acceptance-inventory.md) for remaining coverage.
+The current CRUD authority omits child test path declarations. The new replay code
+must still report unavailable for that frozen configuration until generated consumer
+changes are merged and an explicit operator authority refresh occurs. Do not invent
+test paths or silently alter the current snapshot. James retains all merges.
+
+Earlier gate reports taken while parallel changes were still landing are superseded
+by the final reviewed-tree report when present; do not cite a partial/in-flight run
+as final verification. The source and retained historical reports below remain valid
+only within their named revisions and scope.
+
+## Compaction checkpoint and completion rule — 2026-09-07
+
+James requested this documentation checkpoint before compaction. **Resume using this
+section and the active checkpoint below; older status sections are historical.**
+The [rollout plan's current completion criteria](runtime-rollout.md#current-completion-criteria--2026-09-07)
+now distinguish implemented features from unfinished acceptance, covering all areas of
+the approved four-repository plan. Original PRs being merged does not mean every
+requirement is complete and working. Close implementation gaps and failed acceptance
+checks during this work, before activating affected features. Only production rollout,
+raising live concurrency and longer-term outcome comparisons wait until afterward.
+
+Next after compaction:
+
+1. Preserve the local fixes and all retained evidence. Review the final readiness
+   collection correction described below and rerun the full factory gates; the last
+   four-gate report predates that correction, although its 21 targeted tests passed.
+2. Continue the existing isolated FRO-12 run through the supported recovery path,
+   preserving its branch and dirty work. It remains blocked; no retry or implementation
+   occurred during this documentation update. Never edit the database to fake progress.
+3. Complete the rollout acceptance matrix, including the separate test-design role's
+   actual behavior. Fix shared contract gaps in harness@v2 and regenerate consumers;
+   do not impose an unrequested readiness filename or hand-edit generated vendors.
+4. Publish corrective PRs and hand them to James for merge. Finish dependent CRUD
+   acceptance after prerequisite merges, then prepare activation settings for James.
+
+This checkpoint changed documentation only. Do not restart production writers, repeat
+the migration, touch existing products/tickets, or broaden the isolated test registry.
+
+## Active isolated testing checkpoint — supersedes older status below
+
+Updated 2026-09-07 UTC. James authorized testing the new disposable CRUD workload.
+Existing products/tickets, especially `nemoclaw-dev`, remain excluded. Production
+writers remain stopped; schema migration is already complete and must not be repeated.
+
+- Isolated home: `/Users/james/factory/artifacts/crud-runtime-test`; registry contains
+  only `factory-crud-verification`. Never use broad intake/tick: team routing alone
+  could select unrelated FRO tickets. Use `drive_ticket.py FRO-12` in this home.
+- Disposable repository main is now `d99be91abc8603192f8af8aa6f24ddee66116441`.
+  FRO-16 is the non-executable parent specification. FRO-12 was explicitly made
+  ready for this authorized test; FRO-13–15 remain unstarted and depend on earlier
+  changes. James retains merges and Done transitions.
+- Current run `47515078d97246e9`, FRO-12, attempt 1, is **blocked / plan-incomplete**.
+  Planner exited 0 with schema-valid `ready` output and wrote `execution-brief.md`,
+  but not `test-plan.md`. Check shared handoff requirements against the collector
+  before retrying; do not fabricate missing planner evidence. No implementation or
+  delivery has occurred. Prior setup runs `0612cc9e686b428e` and `88015c672b884a40`
+  were cancelled after retaining their failures.
+- Build sandbox: `factory-build-crud-20260907`; private clone branch
+  `chore/FRO-12-create-and-list-sqlite-notes-in-the-api`. Reviewer sandbox
+  `factory-review-crud-20260907` was stopped after its probes. Build was restarted
+  by a read-only inspection after planner completion; preserve its clone/work.
+- Attempt evidence lives under
+  `state/clone/factory-crud-verification/FRO-12/47515078d97246e9/.factory/run/1/`
+  inside the isolated home. `plan-last-message.json`, `plan-exit`, and raw events
+  are retained. Approval key `1:plan:1` was demonstrably held without creating an
+  attempt/model usage, then explicitly approved through the CLI. Detached planner
+  holder survived launcher exit with PPID 1 (`plan-detached-observation.json`).
+- All ten scaffold gates ran and passed inside the actual build VM
+  (`sandbox-baseline-gates.json`). This does not prove CRUD functionality. API uses
+  a VM-only venv. Web installation created `.pnpm-store/`; it was excluded only in
+  the VM's `.git/info/exclude`, without changing tracked source or policy.
+- Template-inherited `GH_TOKEN` was measured invalid using `gh auth status` before
+  model work. Only that measured name was acknowledged in the isolated registry;
+  no usable credential was injected. Private base refresh now uses a host-fetched,
+  SHA-checked Git bundle over the existing protocol mount.
+
+Four additional fixes remain uncommitted atop `41f1eef`: private clone refresh;
+preserving computed acceptance criteria in readiness facts; collecting clone-only
+handoff markdown from the VM and retaining it with attempt artifacts; and treating
+absent Codex 0.146 hook `async` metadata as the synchronous default while still
+rejecting explicit mismatches. Regression tests demonstrated failures before fixes.
+All four factory gates pass in `artifacts/crud-runtime-test/factory-gates-current.json`;
+an independent review found no concrete defects in those four diffs. Preserve all
+existing changes and reports. No factory fix PR has been opened or merged.
+
+Exact reviewer app-server compatibility evidence passes production manifest validation:
+`artifacts/crud-runtime-test/reviewer-compatibility/factory-review-crud-20260907.json`.
+See `docs/runtime-crud-reviewer-acceptance.md` for six checks and limitations. It is
+specific to that sandbox/runtime/worker; it cannot authorize the build sandbox.
+Current FRO-12 remains pinned to legacy `codex exec`.
+
+Remaining: resolve the observed handoff contract mismatch; finish FRO-12 through
+implementation, real gates, isolated review and a PR waiting for James; exercise
+factory suspend/resume, diagnosis/repair, and concurrency isolation with retained
+effects. Full CRUD acceptance needs the dependent tickets after prerequisite merges.
+Build app-server compatibility and remaining runtime controls still need their own
+evidence. Then publish/review the factory fixes and prepare concrete activation
+settings for James. Do not claim all planned features verified from unit tests,
+baseline gates, or individual protocol probes.
+
+### Final collection repair at this checkpoint
+
+The observed handoff mismatch is now fixed locally, **without retrying or changing the
+blocked run**. Transition 18 names only missing `test-plan.md`; collection successfully
+read the VM-only execution brief. The retained planner transcript writes only that brief.
+This was a contract mismatch, not a sandbox shutdown or another filesystem visibility bug.
+
+Shared `ticket-readiness.md` permits a schema-valid ready result with no files, or an
+optional execution brief for technical gaps. Shared `diagnose-and-hand-off.md` explicitly
+requires both `execution-brief.md` and `test-plan.md`. `src/factory/steps/plan.py` now applies
+those distinct requirements: readiness retains any nonempty optional markdown; diagnosis
+and legacy planning still reject missing or empty required files. Collected markdown stays
+under `planning-output/` in the attempt directory and is included in its manifest.
+No start, prompt, output-directory, or live invocation paths changed.
+
+Two readiness regressions (brief only, and no markdown) failed before this repair.
+All 21 tests in `tests/integration/test_clone_plan_collection.py` and
+`tests/integration/test_handoff_fingerprints.py` now pass; targeted Ruff, mypy, and diff
+checks pass. The earlier four-gate report predates this final collection adjustment:
+rerun the full gates before claiming final verification or publishing. The new patch
+remains uncommitted, and the real blocked attempt has **not** been recollected or resumed.
+
+Remaining contract limitation: `test_designer` currently receives the same shared readiness
+prompt, which does not mandate a test-plan file. Factory cannot silently enforce that file.
+If separate test-design mode needs mandatory file output, define it explicitly in layer A
+and update its consumer contract before enforcing it. No vendored or product source was
+edited for this repair. Next step is review of this correction, full gates, then the
+isolated FRO-12 continuation with retained evidence; do not relaunch broad intake.
+
+## Latest scope and disposable verification workload
+
+Updated 2026-09-07 UTC after James's scope correction. **This section supersedes
+the earlier checkpoint below wherever they differ.**
+
+James excluded `nemoclaw-dev` and existing Linear ticket work. Do not resume the
+target-project probes described in the older checkpoint. The preceding continuation
+only inspected existing target metadata/dependencies; all sandboxes were stopped.
+It did not run models or ticket workflows in those projects or change their source,
+settings, credentials, or tickets.
+
+James then explicitly authorized creating new simple SQLite + frontend CRUD tickets
+and a dedicated verification repository. That authorization covers these new test
+items; it does not add ticket-generation behavior to the factory.
+
+- Repository: `https://github.com/jchen1707/factory-crud-verification` (private),
+  local `/Users/james/factory-crud-verification`, scaffold commit `54e1b46`.
+- Linear project: [Factory CRUD Verification](https://linear.app/development-jchen/project/factory-crud-verification-20a7294f31c7),
+  ID `19aa56d2-09d6-4370-8a49-ad04d2552d17`.
+- New tickets: FRO-12 create/list; FRO-13 edit and FRO-14 delete each depend on
+  FRO-12; FRO-15 persistence/error/browser acceptance depends on FRO-13 and FRO-14.
+  All are Backlog with no labels; none has been started or made ready for intake.
+- A FastAPI + React monorepo was generated from merged `harness@v2`
+  `028f0c8ea82a7c94d9b83eb38f1be70ec3ef5afb` with the agnostic adapter. The CRUD
+  work is intentionally left for the tickets. Dependencies and lockfiles are
+  installed/generated. All ten declared API/web gates pass; the report is committed
+  as `docs/scaffold-verification.json` in that repository. The app gates are required
+  in all three declared delivery profiles, with no deferrals.
+- Read that repository's `docs/verification-spec.md` and
+  `docs/factory-verification.md`. **Use an isolated factory home, database, registry,
+  test vault, and fresh sandbox identities.** The production FRO mapping targets
+  frontend-harness and must never execute these tickets. Isolated execution setup
+  has not yet been activated; James still controls readiness and merges.
+
+Factory fix state: core fixes/earlier evidence are committed locally at `41f1eef`
+on `ops/runtime-validation`; no fix PR was opened. A later test-only assertion
+and review/target reports remain uncommitted. Preserve them. The new assertion
+rejects fresh context after compaction invalidation; all six cases fail with the
+guard removed in memory. The unchanged production worker passes all 40 worker
+tests, and all four factory gates passed again in
+`artifacts/runtime-review-followup/factory-gates.json`.
+
+Seven review axes completed, with one test gap addressed. Repository checklists
+are absent; the standards axis could not run under its frame. See
+`docs/runtime-fix-review-2026-09-06.md` for the limited review result. The existing
+target reports remain historical evidence, not instructions to keep working there.
+
+Next: finish publishing/reviewing the factory fix; prepare isolated execution for
+the four new tickets, then measure the planned orchestration features using those
+workloads and retained operator actions. Neither the passing scaffold nor the
+earlier individual runtime probes proves all factory features end to end. Keep the
+live timer/console stopped and production settings unchanged until James's decision.
+
 Updated 2026-09-07 UTC (2026-09-06 Toronto). **Checkpoint requested by James for conversation
 compaction.** Continue from here; do not re-plan, re-run the migration, or restart completed
 investigations. The approved four-repository plan remains the specification.

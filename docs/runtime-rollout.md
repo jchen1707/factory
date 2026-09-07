@@ -1,5 +1,51 @@
 # Runtime rollout
 
+## Current completion criteria — 2026-09-07
+
+This is the execution-status update for James's approved four-repository improvement
+plan. It does not replace or reduce that plan's requirements. All major feature areas
+have implementations and the original implementation PRs are merged. **This is not
+a claim that every requirement is implemented correctly or that acceptance is complete.**
+Real testing has exposed integration defects; corrective changes remain local.
+
+Required implementation gaps and failed acceptance checks must be resolved and retested
+as part of this work, before declaring completion or activating the affected features.
+Do not defer them to post-activation work. Testing and corrective implementation can
+alternate; no new planning phase is needed.
+
+| Approved area | Implementation status | Evidence still required before completion |
+| --- | --- | --- |
+| Delivery policy and authority | Profiles, deferrals, immutable snapshots and operator controls implemented. | Real workflow coverage of conflicting parent/child authority, explicit deferrals, stale/replaced snapshots and attempted candidate self-weakening. |
+| Model selection and workflow | Presets, readiness, optional planning, diagnosis, repair limits and approval/suspend controls implemented. | Executing-runtime model/effort validation across selected roles; end-to-end diagnosis/repair limits, approval retries, suspend/resume and preservation of committed and dirty work. Approval preventing the first planner launch has been measured. |
+| Separate test design and vertical TDD | Test-design setting and role routing exist; builders receive shared workflow guidance. | Confirm the separate role actually produces acceptance scenarios and test boundaries and the builder proves vertical red-green slices. The role currently receives the general readiness contract; resolve any behavioral gap in layer A and sync consumers. Readiness does not require a particular test-plan filename. |
+| Runtime and context | App-server adapter, normalized telemetry, thresholds, freshness and compaction handling implemented; scoped runtime probes pass after local fixes. | Complete build/reviewer compatibility and workflow evidence, including intermediate occupancy, resets, stale measurements, model changes and reviewer usage attribution. A reviewer manifest cannot authorize the build sandbox. |
+| Accounting | Dated pricing, invocation accounting, incomplete-data labels, reconciliation and budget admission implemented. | Reconcile acceptance coverage for cached/uncached and long-context pricing, failures, duplicate events, incomplete history and all invocation roles. Retain real event evidence where runtime semantics matter; never equate estimates with account charges. |
+| Parallel execution | Atomic admission, configurable limits, per-run isolation and integration-base checks implemented. | Two simultaneous runs in both bind and clone layouts, admission races, dependency/temp/database/port isolation, reviewer resource limits, targeted cancellation/recovery, draining and renewed verification after base changes. |
+| Composable stacks | Language/framework presets and optional component generation implemented. | Complete minimal and existing preset installation/gate evidence and consumer generation checks. The disposable FastAPI/React scaffold passed ten gates, but that alone does not validate every composition. |
+| Evaluation | Intervention, failure-episode, completion-rate and estimated-cost metrics implemented. | Check metric behavior against retained outcomes. Claims of improved delivery require sufficient completed outcomes and comparable cohorts over time. |
+
+Completion also requires factory's four Definition-of-Done gates, layer-A contract
+checks, consumer generation checks, and the planned real sandbox measurements against
+the final revisions. Publish corrective PRs for James to review and merge. A passing
+unit suite, scaffold or protocol probe establishes only its measured scope.
+
+Only production activation, raising live concurrency, and longer-term measurement of
+delivery improvement wait until after this validation step. Activation requires James's
+explicit decision on concrete settings and writer restart. Schema 4→5 is already
+applied with all 1,889 rows preserved; do not repeat it.
+
+The original implementation scope used completed Backend tickets only as historical
+evidence. James later authorized the separate disposable CRUD verification workload.
+That exception covers only the new test project/tickets; existing products and tickets,
+especially `nemoclaw-dev`, remain excluded. Production writers remain stopped.
+
+Resume from [the current handoff](runtime-implementation-handoff.md). The retained
+FRO-12 run is blocked after readiness; its collection defect is fixed locally but has
+not been retried. Review the latest correction, rerun full gates, then continue isolated
+testing with retained evidence. Do not start broad intake or claim full CRUD delivery.
+
+## Historical rollout baseline
+
 2026-09-06 operator checkpoint: the approved live schema 4→5 migration preserved all
 1,889 rows. Follow-up fixes passed scoped real runtime and isolation probes; production
 activation has not occurred. The fixes remain local. See the current

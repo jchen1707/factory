@@ -27,8 +27,9 @@ import json
 import re
 from pathlib import Path
 
-from factory import repo
+from factory import authority, repo
 from factory.artifacts import AttemptDir
+from factory.harness import HarnessConfig, config_tree
 from factory.machine import Blocked, State
 from factory.sandbox.base import Completed
 from factory.steps import Context
@@ -120,20 +121,57 @@ def replay(ctx: Context) -> ReplayOutcome:
         # clean change on `behaviour-change-without-test`.
         return "proceed"
 
-    harness = ctx.harness
-    if harness is None or not harness.tests:
-        # §15.3: the `tests` key absent means the check could not be assembled. Never a pass,
-        # never a block — it reports `unavailable` and the run continues. The `inconclusive`
-        # policy does not apply: the check did not run, it did not fail inconclusively.
+    if ctx.harness is None:
         _record(ctx, "unavailable", reason="harness.config.json declares no `tests` pathspec")
         return "proceed"
+    scopes = [
+        (path, config)
+        for path, config in config_tree(ctx.harness, authority.current(ctx) or ctx.worktree)
+        if config.tests
+    ]
+    if not scopes:
+        _record(ctx, "unavailable", reason="harness.config.json declares no `tests` pathspec")
+        return "proceed"
+    base_ref = ctx.run.base_ref or ctx.project.base_ref
+    changed = [
+        (path, config)
+        for path, config in scopes
+        if repo.added_modified_paths(ctx.worktree / path, base_ref, list(config.tests))
+    ]
+    if not changed and len(scopes) == 1 and not scopes[0][1].gate_of_kind("test"):
+        return _replay_scope(ctx, *scopes[0])
+    if not changed:
+        _record(ctx, "fail", reason="behaviour-change-without-test")
+        raise Blocked(
+            "behaviour-change-without-test", "No declared test changed for this behaviour change"
+        )
+    result = "proceed"
+    first_check = len(ctx.store.checks(ctx.run.id))
+    for path, config in changed:
+        if _replay_scope(ctx, path, config) == "awaiting_human":
+            result = "awaiting_human"
+    if len(changed) > 1:
+        checks = ctx.store.checks(ctx.run.id)[first_check:]
+        status = next((row["status"] for row in checks if row["status"] != "pass"), "pass")
+        _record(
+            ctx,
+            status,
+            reason="app-replays",
+            detail="\n".join(
+                f"{path}: {row['status']} ({row['reason']})"
+                for (path, _), row in zip(changed, checks, strict=True)
+            ),
+        )
+    return result
 
+
+def _replay_scope(ctx: Context, relative: Path, harness: HarnessConfig) -> ReplayOutcome:
     test_gate = harness.gate_of_kind("test")
     if test_gate is None or not test_gate.run:
         _record(ctx, "unavailable", reason="no `kind: test` gate declared in harness.config.json")
         return "proceed"
 
-    worktree = ctx.worktree
+    worktree = ctx.worktree / relative
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     # The one step of the clone path that cannot follow the branch home. Everything else
     # from `reviewing` onward reads the host worktree `clone.fetch_back` made, but this
@@ -175,7 +213,7 @@ def replay(ctx: Context) -> ReplayOutcome:
         completed = ctx.sandbox.exec_sync(
             ctx.project.build_sandbox,
             list(test_gate.run),
-            workdir=str(scratch),
+            workdir=str(scratch / relative),
             env=ctx.env,
             timeout=ctx.timeout_for(State.VERIFYING),
         )
@@ -234,10 +272,22 @@ def weakening_guard(ctx: Context) -> list[str]:
     New test files are excluded: a new test has no prior assertions to weaken, and the
     replay already covers whether it catches the regression.
     """
-    if ctx.harness is None or not ctx.harness.tests:
+    if ctx.harness is None:
         return []
-    tests = list(ctx.harness.tests)
-    worktree = ctx.worktree
+    return sorted(
+        {
+            line
+            for relative, config in config_tree(ctx.harness, authority.current(ctx) or ctx.worktree)
+            for line in _weakening_scope(ctx, relative, config)
+        }
+    )
+
+
+def _weakening_scope(ctx: Context, relative: Path, config: HarnessConfig) -> list[str]:
+    if not config.tests:
+        return []
+    tests = list(config.tests)
+    worktree = ctx.worktree / relative
     base_ref = ctx.run.base_ref or ctx.project.base_ref
     existing = _existing_test_files(worktree, base_ref, tests)
     if not existing:

@@ -85,13 +85,17 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
-    role = execution.role_for(
-        ctx,
+    role_name = (
         "diagnoser"
         if ctx.run.attempt
         else "test_designer"
         if settings.get("test_design")
-        else "planner",
+        else "planner"
+    )
+    role = execution.role_for(ctx, role_name)
+    contract = handoffs.contract_name(ctx)
+    required_artifacts = (
+        handoffs.required_artifacts(ctx, contract) if role_name == "test_designer" else None
     )
     plans = plan_dir(ctx)
 
@@ -119,10 +123,13 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     prompt_path.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
-    artifacts.write_json(
-        attempt_dir.path("plan-request.json"),
-        {"contract": "noninteractive-handoff", "diagnosis": ctx.run.attempt > 0},
-    )
+    request = {
+        "contract": contract,
+        "role": role_name,
+        "diagnosis": ctx.run.attempt > 0,
+        "required_artifacts": required_artifacts,
+    }
+    artifacts.write_json(attempt_dir.path("plan-request.json"), request)
     # Recorded under the same attempt number the implement phase will use, which is why
     # both write into one attempt directory under `plan-` and bare prefixes: a rewind is
     # one attempt with two phases, not two attempts. `steps/reap.py` needs the row to
@@ -147,7 +154,15 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         exit_name=PLAN_EXIT_NAME,
         pgid_name=PLAN_PGID_NAME,
     )
-    accounting.begin(ctx, attempt, role, STEP, invocation.events_path)
+    accounting.begin(
+        ctx,
+        attempt,
+        role,
+        STEP,
+        invocation.events_path,
+        semantic_role=role_name,
+        extra_metadata={"handoff_contract": request},
+    )
     ctx.sandbox.exec_detached(handle, script, ctx.env)
     ctx.log("plan.started", model=role.model, effort=role.effort)
     return attempt_dir, handle, invocation.exit_path
@@ -157,7 +172,21 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     """Validate new structured handoffs; retain file-based collection for legacy attempts."""
     accounting.collect(ctx, ctx.run.attempt, STEP, attempt_dir.path("plan-events.jsonl"))
     request_path = attempt_dir.path("plan-request.json")
+    recorded = ctx.store.runtime.invocation(accounting.key(ctx, ctx.run.attempt, STEP))
+    retained_request = recorded["metadata"].get("handoff_contract") if recorded else None
+    request = None
     if request_path.exists():
+        try:
+            request = json.loads(request_path.read_text())
+        except (OSError, ValueError) as exc:
+            raise Blocked("handoff-request-invalid", str(exc)) from exc
+        if not isinstance(request, dict):
+            raise Blocked("handoff-request-invalid", "Expected a request object")
+    if retained_request is not None and request != retained_request:
+        raise Blocked("handoff-request-changed", "The request differs from its host snapshot")
+    diagnosis = False
+    required_outputs: tuple[str, ...] = ()
+    if request is not None:
         transcript = ctx.agent.read_transcript(
             attempt_dir.path("plan-events.jsonl"), attempt_dir.path("plan-stderr.log")
         )
@@ -165,14 +194,23 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
             raise Blocked("handoff-agent-failed", transcript.failure or "nonzero exit")
         result = json.loads(attempt_dir.path("plan-last-message.json").read_text())
         validate_against_schema(result, json.loads(attempt_dir.schema.read_text()))
-        request = json.loads(request_path.read_text())
-        if request["diagnosis"]:
+        diagnosis = request["diagnosis"]
+        if request.get("role") == "test_designer":
+            required_outputs = tuple(handoffs.artifact_names(request.get("required_artifacts")))
+        if diagnosis:
             handoffs.authorize_repair(ctx, result, ctx.run.attempt)
         elif result["status"] != "ready":
             raise Blocked("readiness-needs-human", result["summary"])
     plans = plan_dir(ctx)
-    expected = ("execution-brief.md", "test-plan.md") if request_path.exists() else PLAN_FILES
-    missing = [name for name in expected if not (plans / name).exists()]
+    expected: tuple[str, ...] = (
+        ("execution-brief.md", "test-plan.md") if request_path.exists() else PLAN_FILES
+    )
+    expected = tuple(dict.fromkeys((*expected, *required_outputs)))
+    contents = {name: _read_plan(ctx, plans / name) for name in expected}
+    # The readiness contract permits proceeding directly, or writing a brief only for
+    # technical gaps. Only diagnosis and historical planning promise mandatory files.
+    required = expected if diagnosis or not request_path.exists() else required_outputs
+    missing = [name for name in required if not contents[name].strip()]
     if missing:
         ctx.store.finish_attempt(
             ctx.run.id,
@@ -183,9 +221,18 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
         )
         raise Blocked(
             "plan-incomplete",
-            f"Handoff finished but did not write {missing} under {plans}",
+            f"Handoff finished but did not write nonempty files {missing} under {plans}",
         )
-    ctx.store.record_check(ctx.run.id, ctx.run.attempt, "plan_written", "pass", artifact=str(plans))
+    # A private clone is invisible to the host. Retain the observed markdown alongside
+    # the transcript so the attempt manifest binds the actual collected handoff too.
+    retained = attempt_dir.path("planning-output")
+    retained.mkdir(parents=True, exist_ok=True)
+    for name, content in contents.items():
+        if content.strip():
+            (retained / name).write_text(content, encoding="utf-8")
+    ctx.store.record_check(
+        ctx.run.id, ctx.run.attempt, "plan_written", "pass", artifact=str(retained)
+    )
     artifacts.write_manifest(attempt_dir.root, produced_by=str(State.PLANNING))
     ctx.store.finish_attempt(
         ctx.run.id,
@@ -195,6 +242,21 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
         outcome="planned",
     )
     ctx.log("plan.finished", plan_dir=str(plans))
+
+
+def _read_plan(ctx: Context, path: Path) -> str:
+    if ctx.project.requires_clone:
+        result = ctx.sandbox.exec_sync(
+            ctx.project.build_sandbox,
+            ["/bin/cat", "--", str(path)],
+            env=ctx.env,
+            timeout=120,
+        )
+        return result.stdout if result.ok else ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
 
 
 def _exit_code(attempt_dir: AttemptDir) -> int | None:

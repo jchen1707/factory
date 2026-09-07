@@ -541,17 +541,18 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
     ]
     handoff = ctx.factory_dir / "handoff.json"
     if handoff.exists():
-        from factory.steps.plan import plan_dir
-
-        plans = plan_dir(ctx)
+        collected = ctx.factory_dir / "run" / str(ctx.run.attempt) / "planning-output"
         sections.extend(
             [
                 "",
                 authority.contract(ctx, "consume-execution-handoff"),
                 f"Execution handoff: {handoff}",
-                f"Execution brief: {plans / 'execution-brief.md'}",
-                f"Acceptance scenarios: {plans / 'test-plan.md'}",
             ]
+        )
+        sections.extend(
+            f"Collected handoff artifact: {path}"
+            for path in sorted(collected.glob("*"))
+            if path.is_file() and path.stat().st_size
         )
     if continuation:
         sections += [

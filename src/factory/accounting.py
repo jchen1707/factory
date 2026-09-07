@@ -26,7 +26,16 @@ def key(ctx: Context, attempt: int, role: str) -> str:
     return f"{ctx.run.id}:{attempt}:{role}{suffix}"
 
 
-def begin(ctx: Context, attempt: int, role: Role, step: str, events: Path) -> str:
+def begin(
+    ctx: Context,
+    attempt: int,
+    role: Role,
+    step: str,
+    events: Path,
+    *,
+    semantic_role: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+) -> str:
     invocation_id = key(ctx, attempt, step)
     old = ctx.store.runtime.invocation(invocation_id)
     if old:
@@ -35,6 +44,8 @@ def begin(ctx: Context, attempt: int, role: Role, step: str, events: Path) -> st
     if known >= ctx.routing.usd_per_run:
         raise Blocked("budget-exceeded", f"API-equivalent estimate at least ${known:.2f}")
     metadata: dict[str, Any] = {
+        **(extra_metadata or {}),
+        "semantic_role": semantic_role or role.name,
         "model": role.model,
         "effort": role.effort,
         "preset": role.preset,

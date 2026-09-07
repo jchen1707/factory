@@ -27,7 +27,7 @@ def readiness(ctx: Context) -> bool:
         raise Blocked("workflow-contract-missing", str(contract_path))
     rules = json.loads(contract_path.read_text())
     facts = {
-        "ticket": asdict(ctx.issue),
+        "ticket": asdict(ctx.issue) | {"acceptance_criteria": ctx.issue.acceptance_criteria},
         "dependencies": open_blockers(ctx.issue),
         "tests": list(ctx.harness.tests) if ctx.harness else [],
     }
@@ -186,8 +186,39 @@ def authorize_repair(ctx: Context, diagnosis: dict[str, Any], attempt: int) -> N
         )
 
 
+def contract_name(ctx: Context) -> str:
+    if ctx.run.attempt:
+        return "diagnose-and-hand-off"
+    settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
+    return "test-design" if settings.get("test_design") else "ticket-readiness"
+
+
+def required_artifacts(ctx: Context, name: str) -> list[str]:
+    """Read the selected role's output contract from retained shared authority."""
+    root = authority.current(ctx) or ctx.project.path
+    path = root / ".agents/vendor/harness/docs/agents" / f"{name}.json"
+    try:
+        return artifact_names(json.loads(path.read_text())["required_artifacts"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Blocked("workflow-contract-invalid", f"{path}: {exc}") from exc
+
+
+def artifact_names(names: Any) -> list[str]:
+    """Artifact requests may only name files inside the supplied output directory."""
+    if (
+        not isinstance(names, list)
+        or not names
+        or any(
+            not isinstance(item, str) or not item or Path(item).name != item or item in {".", ".."}
+            for item in names
+        )
+    ):
+        raise Blocked("workflow-contract-invalid", "Expected nonempty artifact basenames")
+    return names
+
+
 def prompt(ctx: Context, plans: Path) -> str:
-    name = "diagnose-and-hand-off" if ctx.run.attempt else "ticket-readiness"
+    name = contract_name(ctx)
     return (
         authority.contract(ctx, name)
         + "\n"

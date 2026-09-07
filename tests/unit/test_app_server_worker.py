@@ -317,6 +317,33 @@ def test_incomplete_project_hook_coverage_never_starts_thread(
     assert not any(e["method"] in {"thread/start", "thread/resume"} for e in sent)
 
 
+@pytest.mark.parametrize("declared_async", [None, False, True])
+@pytest.mark.parametrize("inline", [False, True])
+def test_0146_missing_async_metadata_only_accepts_synchronous_handlers(
+    tmp_path: Path, declared_async: bool | None, inline: bool
+) -> None:
+    handler: dict[str, Any] = {"type": "command", "command": "policy-check"}
+    if declared_async is not None:
+        handler["async"] = declared_async
+    definitions = {"Stop": [{"hooks": [handler]}]}
+    discovered = [
+        {
+            "source": "sessionFlags" if inline else "project",
+            "sourcePath": str(tmp_path / ".codex/hooks.json"),
+            "enabled": True,
+            "eventName": "stop",
+            "handlerType": "command",
+            "command": "policy-check",
+            "matcher": None,
+        }
+    ]
+    if declared_async:
+        with pytest.raises(RuntimeError, match="project hook discovery is incomplete"):
+            worker.project_hook_coverage(discovered, definitions, str(tmp_path), inline=inline)
+    else:
+        assert worker.project_hook_coverage(discovered, definitions, str(tmp_path), inline=inline)
+
+
 @pytest.mark.parametrize("problem", ["duplicate", "timeout"])
 def test_declared_handler_count_and_timeout_are_required(tmp_path: Path, problem: str) -> None:
     handler = {"type": "command", "command": "policy-check", "timeout": 30}
@@ -435,7 +462,12 @@ def test_compaction_waits_for_its_turn_completion_and_retains_late_usage(
     assert code == (0 if status == "completed" else 1)
     assert sent[-1]["method"] == "thread/compact/start"
     assert sent[-2]["params"]["serviceTierForTurn"] == "default"
-    assert any(e["type"] == "factory.context.invalidated" for e in emitted)
+    context_events = [e["type"] for e in emitted if e["type"].startswith("factory.context")]
+    assert context_events == [
+        "factory.context",
+        "factory.context.invalidated",
+        "factory.context.invalidated",
+    ]
     usage = [e for e in emitted if e["type"] == "factory.usage"][-1]
     assert usage["thread_total"]["inputTokens"] == 910
     assert usage["complete"] is (status != "disconnected")

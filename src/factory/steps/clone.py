@@ -39,8 +39,10 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from factory import repo
+from factory import authority, repo
+from factory.harness import config_tree
 from factory.machine import Blocked
 from factory.registry import Project
 from factory.repo import GitError
@@ -158,24 +160,44 @@ def refresh_base(ctx: Context) -> None:
     of unknown age" once it is past here. A network blip costs a `factory cancel` and a
     re-claim; a stale base costs a ticket's worth of work aimed at the wrong tree.
 
-    `--prune` because a base branch deleted upstream should not keep resolving in here.
+    The host fetches the private remote and sends only Git objects through a temporary
+    bundle on the protocol mount. A sandbox has no remote-read capability: fetching
+    `origin` there failed with "could not read Username" in the real CRUD acceptance run.
+    The shared host Git lock covers FETCH_HEAD through bundle creation, so another run
+    cannot substitute its fetch. The clone must resolve to that exact fetched commit.
     """
     project_path = str(ctx.project.path)
-    fetched = ctx.sandbox.exec_sync(
-        ctx.project.build_sandbox,
-        ["git", "-C", project_path, "fetch", "origin", ctx.project.base_branch, "--prune"],
-        env=ctx.env,
-        timeout=600,
-    )
-    if not fetched.ok:
+    try:
+        ctx.factory_dir.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix="base-transfer-", dir=ctx.factory_dir) as directory:
+            bundle = Path(directory) / "base.bundle"
+            with repo.serialized_git(ctx.project.path):
+                repo.fetch(ctx.project.path, ctx.project.base_branch)
+                expected = repo.head_sha(ctx.project.path, "FETCH_HEAD")
+                repo._git(ctx.project.path, "bundle", "create", str(bundle), "FETCH_HEAD")
+            _exec(
+                ctx,
+                [
+                    "git",
+                    "-C",
+                    project_path,
+                    "fetch",
+                    str(bundle),
+                    f"+FETCH_HEAD:refs/remotes/origin/{ctx.project.base_branch}",
+                ],
+            )
+            actual = _exec(
+                ctx, ["git", "-C", project_path, "rev-parse", ctx.project.base_ref]
+            ).stdout.strip()
+            if actual != expected:
+                raise GitError(f"clone base is {actual}, expected fetched commit {expected}")
+    except (GitError, SbxError, OSError) as exc:
         raise Blocked(
             "clone-fetch-failed",
-            f"could not refresh origin/{ctx.project.base_branch} inside the clone "
-            f"({ctx.project.build_sandbox}), exit {fetched.returncode}. The branch would be "
-            f"cut from whatever base the clone was created with, which is silently wrong "
-            f"rather than loudly broken:\n{fetched.stdout.strip()}\n{fetched.stderr.strip()}",
-        )
-    ctx.log("clone.base_refreshed", base=ctx.project.base_ref)
+            f"could not refresh {ctx.project.base_ref} in {ctx.project.build_sandbox} "
+            f"from the host. Refusing to cut a branch from a stale base: {exc}",
+        ) from exc
+    ctx.log("clone.base_refreshed", base=ctx.project.base_ref, head=expected)
 
 
 def release_branch(sandbox: SandboxAdapter, project: Project, run: Run) -> list[str]:
@@ -462,18 +484,30 @@ def scratch_add(ctx: Context, scratch: Path, base_ref: str) -> None:
         ctx,
         ["git", "-C", str(ctx.project.path), "worktree", "add", "--detach", str(scratch), base_ref],
     )
-    dependencies = ctx.project.path / _DEPENDENCIES
-    linked = ctx.sandbox.exec_sync(
-        ctx.project.build_sandbox,
-        [
-            "/bin/sh",
-            "-c",
-            f'[ -d "{dependencies}" ] && ln -s "{dependencies}" "{scratch / _DEPENDENCIES}"',
-        ],
-        env=ctx.env,
-        timeout=120,
+    scopes = (
+        config_tree(ctx.harness, authority.current(ctx) or ctx.worktree)
+        if ctx.harness is not None
+        else [(Path("."), None)]
     )
-    ctx.log("clone.scratch_ready", scratch=str(scratch), dependencies_linked=linked.ok)
+    for relative, _ in scopes:
+        dependencies = ctx.project.path / relative / _DEPENDENCIES
+        linked = ctx.sandbox.exec_sync(
+            ctx.project.build_sandbox,
+            [
+                "/bin/sh",
+                "-c",
+                '[ -d "$1" ] && mkdir -p "$2" && ln -s "$1" "$3"',
+                "scratch-dependencies",
+                str(dependencies),
+                str(scratch / relative),
+                str(scratch / relative / _DEPENDENCIES),
+            ],
+            env=ctx.env,
+            timeout=120,
+        )
+        ctx.log(
+            "clone.scratch_ready", scratch=str(scratch / relative), dependencies_linked=linked.ok
+        )
 
 
 def scratch_apply(ctx: Context, scratch: Path, patch: str) -> None:
