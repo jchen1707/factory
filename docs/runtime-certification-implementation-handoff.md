@@ -2,12 +2,13 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: host-bound child mailbox transport and app-server dynamic-tool handling are
-implemented, with durable success/refusal replay. This is not yet wired through AppServerAdapter
-or a workflow controller. Read-only child preparation/certification, signaling and actual child
-execution remain unfinished. See **Child transport checkpoint** at the end. No live settings,
-services, sandbox or model calls changed in this checkpoint. New worker bytes invalidate old
-compatibility evidence for this implementation worktree.
+Latest checkpoint: invocation-owned mailbox provisioning and controller recovery servicing are
+implemented. Real zero-model disposable acceptance proved inbox writes, read-only response
+protection and hidden controller database. This does NOT yet select the returned specification
+in workflow creation/certification or configure AppServerAdapter. Read-only child preparation,
+execution and lifecycle remain unfinished. See **Protected mailbox controller checkpoint** at
+the end. Live services/settings unchanged; owned disposable VM stopped and removed. Worker
+bytes are unchanged since192cc71; that earlier worker still needs new six-check certification.
 
 ## Objective and approved scope
 
@@ -1348,3 +1349,94 @@ Fake-runtime caveat applies: local files/SQLite and protocol fixtures do not est
 sandbox transport, mount isolation or child execution. No production source changed after this
 report. Both bounded reviews have no outstanding findings against available guidance; the
 missing optional stack checklist remains the review coverage caveat stated above.
+
+
+## Protected mailbox controller checkpoint
+
+Continued from192cc71. Objective remains factory feature/workflow acceptance using synthetic
+workloads, not ticket completion/hardening. Branch feat/runtime-certification-and-delegation;
+shared harness remains e3fc8ad unmerged/unsynced. No live services/settings/schema/concurrency,
+consumer/template, tracker/forge, credential or customer changes. No model calls. This section
+is contained in the checkpoint commit; approved plans remain untracked and implementing.
+
+Implemented:
+- DelegationController.prepare(run_id, attempt, parent_id, source_root, base_spec) allocates
+  invocation-owned inbox/outbox under home/state/delegation-mailboxes/<parent-sha256>. It returns
+  a NEW factory-build-delegation-<digest> specification. Inbox is rw, separate outbox ro; no
+  ancestor of controller state may be among the existing mounts, even read-only. Source must
+  be mounted; project/role and external-capability boundaries are checked. Input environment
+  values are hashed in the retained spec rather than copied into the effects record.
+- Provisioning precedes accounting/invocation creation, solving the mount→certification→accounting
+  dependency. It validates trusted layer-A schema and snapshots policy revision without starting
+  or admitting a parent. Immutable effect ownership prevents another run/attempt reusing the
+  same parent ID. Repeated preparation returns the original spec; changed spec/source/policy,
+  already-admitted new preparation and replaced directory identities are refused.
+- Descriptor-relative mkdir/open refuses symlink ancestors before writing through them. Only
+  two leaf directories enter the VM; the controller root/database remain outside all mounts.
+  Configuration checks the exact retained spec, approved parent policy and directory identities.
+  It is NOT a certificate, does not ensure a VM, and cannot replace fresh fingerprint validation.
+- Shared schema loading/transport configuration now support pre-admission registration. Broker
+  requests still require an active root builder, capability policy and all previous checks.
+- workflow_launches.reconcile_run now calls controller.service_run before terminal reconciliation.
+  It restores bindings from retained host effects/invocations, services only active parents with
+  recorded launch intents, and checks recorded sandbox/workdir/root-parent ownership. Worker
+  input never supplies a database path, parent ID or source root to this controller.
+- Review reproduced poisoned inbox data preventing terminal accounting. Fixed by recording a
+  sanitized durable delegation-mailbox/failure effect and audit, fencing only that channel while
+  allowing terminal accounting to proceed. Files remain for diagnosis; no automatic resetting,
+  unlinking, process kill or child cancellation. A fresh invocation gets a fresh channel.
+
+Evidence:
+- Seven controller tests cover pre-accounting preparation, restart/replay via production workflow
+  reconciliation, cross-run ownership, overlapping mounts, symlink ancestor refusal, changed
+  mount/directory identity, and poisoned-channel terminal accounting (12 input/3 output tokens,
+  unknown pricing visibly incomplete, replay unchanged). One new broker regression verifies
+  pre-admission registration cannot authorize a request. Existing transport tests remain green.
+- RED/GREEN observed missing controller service, cross-run mailbox rebinding and poisoned inbox
+  stopping terminal accounting. Bounded Standards review clear against AGENTS/CONTEXT/available
+  guidance; optional architecture and stack-reviewer checklist files absent. Spec P1 reproduced,
+  fixed and re-review clear. Reviews do not imply completion of deferred launch/child work.
+- Real command: uv run python artifacts/runtime-mailbox-controller/check-mounts.py. Single-use
+  isolated store/source and draft shared-schema fixture; zero-model acceptance of the returned
+  production specification through SbxAdapter.ensure/exec_sync, not a fake mount assertion.
+  Result: artifacts/runtime-mailbox-controller/mount-result.json, verdict pass, exit0/stderr empty.
+  Sandbox factory-build-delegation-e69f8c4a40bd73037d5fdac1; generation
+  0083bc7c-0a22-4187-908b-a418ebeabb0c. VM inbox write and outbox read succeeded. Outbox overwrite
+  and unlink refused EROFS(30); directory rename refused EACCES(13). Controller DB read refused
+  ENOENT(2). Host response/source bytes preserved. Checked stopped state, removal and absence.
+  This is mount acceptance only: no Codex parent tool, child execution, model accounting or
+  six-check compatibility claim follows. Do not reuse this absent sandbox as an attested identity.
+
+Exact next work:
+1. Integrate provisioned parent specs into workflow creation and certification, then freeze the
+   configuration into AppServerAdapter requests. Current implement.start still calls select(ctx)
+   against build_spec(ctx), then accounting.begin with that certificate; neither calls prepare.
+   Use the known accounting.key before creating the invocation: provision mounts/spec first,
+   create/observe/certify that exact spec, then retain accounting and configuration. Preserve
+   worktrees/clone work across parent attempts and recovery; do not retrofit existing VM mounts
+   or silently replace an active sandbox. Ensure both initial launch and queued resume validate
+   the same full fingerprint and frozen payload. The controller's configuration method alone
+   is insufficient permission to enable worker tools. Parent mailbox calls must be observed on
+   foreground and daemon/restart paths within the worker's60-second acknowledgement deadline.
+2. Read-only child preparation/advancement: fresh thread, trusted task/base/authority handoff,
+   routed model/effort/preset, private scratch and read-only source/authority, unique accounted
+   child step plus parent_id, broker.bind_child and fresh exact sandbox certification before
+   AgentLaunches.start(parent_id=...). Keep exact approval, common caps, budget/lifetime limits
+   and no duplicate spawn after an existing intent. No child execution exists in this checkpoint.
+3. Owned subtree completion/cancel/suspend/recovery: account before releasing leases; validate
+   and publish bounded results from host-selected paths; signal only recorded groups. Preserve
+   ambiguous holders and partial usage. Drain/cancel queued requests before parent finalization.
+   A channel failure currently preserves pending child requests; it does not implement that drain.
+4. Real final-worker six-check certification and synthetic parent/two-child acceptance: overlap,
+   exact approval/capacity, actual source write refusal, result transport, restart, targeted
+   cancellation and idempotent accounting. The mount-only acceptance above does not cover these.
+5. Isolated writable children/integration, controls, exact shared merge/sync and reviewed rollout.
+   James owns merges, live schema5→6 approval, deployment and activation. Live concurrency4 and
+   default-disabled delegation remain unchanged. No push/PR opened.
+
+Final canonical verification: artifacts/runtime-mailbox-controller/gates-final.json PASS.
+Ruff check exit0/41ms, Ruff format exit0/42ms, mypy exit0/244ms, pytest exit0/127246ms;
+all output tails empty, no skips. Mypy covers158 source/test files, including new modules/tests.
+Fake-runtime gate caveat applies; separate real mount-only evidence is described above.
+No production source changed after this report. Both bounded reviews clear against available
+guidance; missing optional architecture/stack checklist limits Standards coverage as stated.

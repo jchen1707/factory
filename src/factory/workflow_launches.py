@@ -157,8 +157,10 @@ def reconcile_run(
 ) -> None:
     """Retain terminal costs before cancellation can archive/remove execution evidence."""
     from factory import accounting
+    from factory.delegation_controller import DelegationController
     from factory.runtime_jobs import RuntimeJobs
 
+    DelegationController(store, home).service_run(run_id)
     launches = AgentLaunches(store, sandbox)
     active = RuntimeJobs(store).active_agents(project)
     for lease in sorted(active, key=lambda row: row["parent_id"] is None):

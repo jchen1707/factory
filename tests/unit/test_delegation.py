@@ -392,3 +392,20 @@ def test_duplicate_request_returns_retained_handle_after_admission_conditions_ch
     retained = broker.inspect(first["id"])
     assert broker.request("call", task()) == retained
     store.close()
+
+
+def test_tool_registration_precedes_paid_admission_without_authorizing_requests(
+    tmp_path: Path,
+) -> None:
+    store, source = setup(tmp_path)
+    parent = store.runtime.invocation("parent")
+    assert parent is not None
+    store.runtime.start_invocation(
+        "queued", parent["run_id"], 1, "implement:queued", parent["metadata"]
+    )
+    broker = DelegationBroker(store, "queued", source)
+    assert broker.request_schema()["type"] == "object"
+    with pytest.raises(ValueError, match="active root parent"):
+        broker.request("call", task())
+    assert broker.requests() == []
+    store.close()

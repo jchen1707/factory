@@ -36,6 +36,45 @@ def refusal() -> dict[str, Any]:
     }
 
 
+def configuration(schema: dict[str, Any], inbox: Path, outbox: Path) -> dict[str, Any]:
+    """Build registration from host-owned schema and mount paths."""
+    handle_schema = {
+        "type": "object",
+        "properties": {"handle": {"type": "string"}},
+        "required": ["handle"],
+        "additionalProperties": False,
+    }
+    return {
+        "inbox": str(inbox),
+        "outbox": str(outbox),
+        "tools": [
+            {
+                "type": "function",
+                "name": name,
+                "description": description,
+                "inputSchema": schema,
+            }
+            for name, description, schema in (
+                (
+                    "factory_request_child",
+                    "Request a child; returns a pending handle, not launch approval.",
+                    schema,
+                ),
+                (
+                    "factory_child_status",
+                    "Inspect an owned child request and its result.",
+                    handle_schema,
+                ),
+                (
+                    "factory_cancel_child",
+                    "Request cancellation of an owned child.",
+                    handle_schema,
+                ),
+            )
+        ],
+    }
+
+
 class DelegationMailbox:
     def __init__(self, broker: DelegationBroker, inbox: Path, outbox: Path) -> None:
         self.broker = broker
@@ -44,41 +83,7 @@ class DelegationMailbox:
 
     def configuration(self) -> dict[str, Any]:
         """Host preparation freezes this with launch inputs; paths must be mounted as documented."""
-        handle_schema = {
-            "type": "object",
-            "properties": {"handle": {"type": "string"}},
-            "required": ["handle"],
-            "additionalProperties": False,
-        }
-        return {
-            "inbox": str(self.inbox),
-            "outbox": str(self.outbox),
-            "tools": [
-                {
-                    "type": "function",
-                    "name": name,
-                    "description": description,
-                    "inputSchema": schema,
-                }
-                for name, description, schema in (
-                    (
-                        "factory_request_child",
-                        "Request a child; returns a pending handle, not launch approval.",
-                        self.broker.request_schema(),
-                    ),
-                    (
-                        "factory_child_status",
-                        "Inspect an owned child request and its result.",
-                        handle_schema,
-                    ),
-                    (
-                        "factory_cancel_child",
-                        "Request cancellation of an owned child.",
-                        handle_schema,
-                    ),
-                )
-            ],
-        }
+        return configuration(self.broker.request_schema(), self.inbox, self.outbox)
 
     def service(self) -> bool:
         """One controller tick. Persist request before replying; safe to replay after a crash."""

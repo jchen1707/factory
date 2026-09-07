@@ -14,6 +14,16 @@ from factory.store import Store
 MAX_REQUEST_BYTES = 64 * 1024
 
 
+def request_schema(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Read the shared contract from verified host authority, without paid admission."""
+    authority.validate_integrity(snapshot)
+    return json.loads(
+        (
+            Path(snapshot["root"]) / ".agents/vendor/harness/schema/delegation-request.schema.json"
+        ).read_text()
+    )
+
+
 class DelegationBroker:
     """Bound by the controller to one invocation and its approved source root.
 
@@ -114,13 +124,8 @@ class DelegationBroker:
 
     def request_schema(self) -> dict[str, Any]:
         """Controller registration uses the same immutable contract as request admission."""
-        _, snapshot = self._admissible_parent()
-        return json.loads(
-            (
-                Path(snapshot["root"])
-                / ".agents/vendor/harness/schema/delegation-request.schema.json"
-            ).read_text()
-        )
+        _, snapshot = self._parent_contract()
+        return request_schema(snapshot)
 
     def bind_child(self, request_id: str, child_id: str) -> dict[str, Any]:
         """Attach a host-prepared accounted invocation, never a worker-selected ID."""
@@ -238,14 +243,22 @@ class DelegationBroker:
         return self.inspect(request_id)
 
     def _admissible_parent(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        parent = self.store.runtime.invocation(self.parent_id)
-        if parent is None or parent["metadata"].get("semantic_role") != "builder":
-            raise ValueError("delegation requires a builder parent")
+        parent, snapshot = self._parent_contract()
         lease = self.store.runtime.db.execute(
             "SELECT * FROM agent_leases WHERE invocation_id=?", (self.parent_id,)
         ).fetchone()
         if lease is None or lease["status"] != "active" or lease["parent_id"] is not None:
             raise ValueError("delegation requires an active root parent")
+        return parent, snapshot
+
+    def _parent_contract(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        parent = self.store.runtime.invocation(self.parent_id)
+        if (
+            parent is None
+            or parent["metadata"].get("semantic_role") != "builder"
+            or parent["metadata"].get("parent_id") is not None
+        ):
+            raise ValueError("delegation requires a root builder parent")
         run = self.store.run_by_id(parent["run_id"])
         if run is None or run.state in {
             "cancelled",
