@@ -73,10 +73,10 @@ def start(
     # already planned reuses that attempt's number and its directory. Anywhere else this
     # is a new attempt.
     attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
-    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     from factory.agent.selection import select
 
     select(ctx)
+    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = execution.role_for(ctx, "builder")

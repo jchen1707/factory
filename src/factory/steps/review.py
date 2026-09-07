@@ -356,6 +356,7 @@ def _launch_next(
         exit_path=attempt_dir.exit_file,
         body=_axis_script_block(entry),
         pgid_path=attempt_dir.pgid_file,
+        immutable=getattr(ctx.agent, "immutable", False),
     )
     with workflow_launches.preparation(ctx):
         ctx.store.start_attempt(

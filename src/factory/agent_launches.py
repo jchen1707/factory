@@ -90,6 +90,25 @@ class AgentLaunches:
                 "SELECT 1 FROM agent_leases WHERE invocation_id=?", (invocation_id,)
             ).fetchone():
                 raise ValueError("reservation has no launch intent; reconcile before launching")
+            # Certification mutates its own canary and interrupts a measured worker.
+            # Serialize it with every other paid invocation in that VM, across projects.
+            # This admission check and the new launch intent share the same transaction.
+            for active in self.store.runtime.db.execute(
+                "SELECT i.id,i.run_id,i.attempt,i.role FROM agent_leases a "
+                "JOIN invocations i ON i.id=a.invocation_id WHERE a.status='active'"
+            ):
+                if invocation["role"] != "certification" and active["role"] != "certification":
+                    continue
+                effect = self.store.find_effect(
+                    active["run_id"], active["attempt"], active["id"], "agent-launch", "spawn"
+                )
+                if effect is None or effect.external_id is None:
+                    raise ProjectQueued(
+                        "waiting for sandbox certification ownership reconciliation"
+                    )
+                occupied = json.loads(effect.external_id)["handle"]["sandbox"]
+                if occupied == handle.sandbox:
+                    raise ProjectQueued("waiting for exclusive sandbox certification access")
             for effect in self.store.runtime.db.execute(
                 "SELECT external_id FROM effects WHERE system='agent-launch' AND key='spawn'"
             ):

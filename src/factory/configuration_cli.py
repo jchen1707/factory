@@ -95,8 +95,10 @@ def configure(args: argparse.Namespace) -> int:
                 "isolation_measurement",
                 "agent_adapter",
                 "app_server_compatibility",
+                "certification_mode",
+                "certification_config",
             )
-            if getattr(args, key) is not None
+            if getattr(args, key, None) is not None
         }
         if changes.get("delivery_profile") == "inherit":
             changes["delivery_profile"] = None
@@ -156,6 +158,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     settings.add_argument("--agent-adapter", choices=("codex-exec", "app-server"))
     settings.add_argument(
         "--app-server-compatibility", help="directory of sandbox compatibility manifests"
+    )
+    settings.add_argument("--certification-mode", choices=("manual", "automatic"))
+    settings.add_argument(
+        "--certification-config", help="host-owned certification configuration JSON"
     )
     settings.add_argument("--isolation", choices=("shared", "per-run"))
     settings.add_argument("--isolation-measurement", help="retained isolation manifest path")

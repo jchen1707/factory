@@ -32,17 +32,39 @@ def configure(
         "isolation_measurement",
         "agent_adapter",
         "app_server_compatibility",
+        "certification_mode",
+        "certification_config",
     }
     if set(changes) - allowed:
         raise ValueError("unknown operator setting")
-    if {"agent_adapter", "app_server_compatibility"} & changes.keys():
+    if "certification_mode" in changes and changes["certification_mode"] not in (
+        "manual",
+        "automatic",
+    ):
+        raise ValueError("certification_mode must be manual or automatic")
+    if "certification_config" in changes and (
+        not isinstance(changes["certification_config"], str)
+        or not Path(changes["certification_config"]).is_absolute()
+    ):
+        raise ValueError("certification_config must be an absolute host configuration path")
+    if {
+        "agent_adapter",
+        "app_server_compatibility",
+        "certification_mode",
+        "certification_config",
+    } & changes.keys():
         if scope != "project":
             raise ValueError("Runtime selection applies to new project runs")
         effective = store.runtime.settings(scope, owner) | changes
         if effective.get("agent_adapter", "codex-exec") not in {"codex-exec", "app-server"}:
             raise ValueError("Unknown agent adapter")
-        if effective.get("agent_adapter") == "app-server" and not effective.get(
-            "app_server_compatibility"
+        automatic = effective.get("certification_mode", "manual") == "automatic"
+        if automatic and not effective.get("certification_config"):
+            raise ValueError("automatic certification requires certification_config")
+        if (
+            effective.get("agent_adapter") == "app-server"
+            and not automatic
+            and not effective.get("app_server_compatibility")
         ):
             raise Blocked(
                 "app-server-compatibility-incomplete", "Supply the compatibility manifest directory"

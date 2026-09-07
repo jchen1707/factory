@@ -746,3 +746,52 @@ def test_candidate_python_import_cannot_forge_runtime_identity(
     with pytest.raises(SbxError, match="native runtime identity unavailable"):
         SbxAdapter().observe_runtime("factory-build-test", binary="/missing/native")
     assert not marker.exists()
+
+
+def test_full_observation_includes_environment_capability_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    observations = iter(range(100))
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        data: dict = {}
+        if argv[1] == "ls":
+            data = {
+                "sandboxes": [
+                    {"name": "factory-build-test", "id": "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4"}
+                ]
+            }
+        elif argv[1] == "inspect":
+            data = {
+                "image_digest": "sha256:" + "a" * 64,
+                "secrets": [],
+                "kits": [],
+                "uptime": str(next(observations)),
+            }
+        elif argv[-1] == "/opt/codex":
+            data = {
+                "runtime_path": "/opt/codex",
+                "runtime_version": "codex-cli 0.153.4",
+                "runtime_sha256": "b" * 64,
+            }
+        else:
+            data = {
+                "mounts": [],
+                "environment_sha256": "c" * 64,
+                "configurations": {},
+                "hooks": {},
+                "credential_names": ["FIXTURE_CAPABILITY"],
+            }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = SbxAdapter().observe_certification(
+        SandboxSpec("test", "build", "factory-build-test", ()),
+        binary="/opt/codex",
+        workdir="/workspace",
+        env={},
+        hook_files={},
+    )
+    assert result["actual"]["credential_names"] == ["FIXTURE_CAPABILITY"]

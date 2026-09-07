@@ -78,10 +78,10 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     from factory import workflow_launches
 
     attempt = ctx.run.attempt + 1
-    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     from factory.agent.selection import select
 
     select(ctx)
+    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
     attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt) / "planning")
     attempt_dir.root.mkdir(parents=True, exist_ok=True)

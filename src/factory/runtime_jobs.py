@@ -129,6 +129,17 @@ class RuntimeJobs:
                 if existing["parent_id"] != parent_id:
                     raise ValueError("agent ownership is immutable")
                 return existing["status"] == "active"
+            if invocation["role"] == "certification" and run.state in {
+                "cancelled",
+                "suspended",
+                "blocked",
+                "failed",
+                "completed",
+                "awaiting_human",
+            }:
+                from factory.execution import ProjectQueued
+
+                raise ProjectQueued("certification owner is not active")
             project_settings = self.runtime.settings("project", run.project)
             settings = project_settings | self.runtime.settings("run", run.id)
             limits = {}

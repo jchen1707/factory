@@ -112,7 +112,9 @@ class AppServerAdapter(CodexAdapter):
         runtime_version: str,
         sandbox: str,
         baselines: dict[str, dict[str, int]] | None = None,
+        immutable: bool = False,
     ) -> None:
+        self.immutable = immutable
         self.compatibility = compatibility
         self.runtime_version = runtime_version
         self.sandbox = sandbox

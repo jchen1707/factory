@@ -37,6 +37,10 @@ def prepare(
     """Persist preparation before admission can queue it; model execution stays outside SQLite."""
     from factory import repo
 
+    if ctx.store.runtime.settings("run", ctx.run.id).get("certification_mode") == "automatic":
+        from factory.workflow_certification import freeze_script
+
+        script = freeze_script(script, inputs)
     payload = json.dumps(
         {
             "state": str(ctx.state),

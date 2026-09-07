@@ -91,6 +91,14 @@ def snapshot(
         dst = staging / relative
         dst.mkdir(parents=True, exist_ok=True)
         artifacts.write_json(dst / "harness.config.json", cfg)
+        # Runtime wiring is policy input too. Existing snapshots stay immutable;
+        # enabling certification on an older snapshot requires explicit replacement.
+        for name in (".codex/hooks.json", ".codex/config.toml"):
+            wiring = src / name
+            _safe_tree(wiring, source)
+            if wiring.is_file():
+                (dst / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(wiring, dst / name)
         review = cfg.get("review", {})
         for location in (
             ".agents/vendor/harness",

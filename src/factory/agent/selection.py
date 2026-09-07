@@ -19,9 +19,9 @@ _BASELINE_REQUIRED = frozenset(
 
 def select(ctx: Context, *, review: bool = False) -> None:
     settings = ctx.store.runtime.settings("run", ctx.run.id)
+    project = ctx.store.runtime.settings("project", ctx.project.name)
     adapter = settings.get("agent_adapter")
     if adapter is None:
-        project = ctx.store.runtime.settings("project", ctx.project.name)
         # Existing attempts must remain on their original exec transport.
         adapter = "codex-exec" if ctx.run.attempt else project.get("agent_adapter", "codex-exec")
         retained = {"agent_adapter": adapter}
@@ -33,11 +33,6 @@ def select(ctx: Context, *, review: bool = False) -> None:
         return
     if adapter != "app-server":
         raise Blocked("agent-adapter-unknown", str(adapter))
-    sandbox = ctx.project.review_sandbox if review else ctx.project.build_sandbox
-    version = ctx.sandbox.exec_sync(sandbox, ["codex", "--version"], timeout=30)
-    if not version.ok or not version.stdout.strip():
-        raise Blocked("runtime-version-unavailable", sandbox)
-    directory = Path(settings.get("app_server_compatibility", ""))
     baselines = {}
     for invocation in ctx.store.runtime.invocations(ctx.run.id):
         telemetry = invocation.get("telemetry") or {}
@@ -51,6 +46,27 @@ def select(ctx: Context, *, review: bool = False) -> None:
             and all(type(value) is int and value >= 0 for value in wire.values())
         ):
             baselines[telemetry["thread_id"]] = wire
+    mode = settings.get("certification_mode")
+    if mode is None:
+        mode = "manual" if ctx.run.attempt else project.get("certification_mode", "manual")
+        retained = {
+            "certification_mode": mode,
+            "certification_config": project.get("certification_config", ""),
+        }
+        ctx.store.runtime.configure("run", ctx.run.id, retained)
+        settings |= retained
+    if mode not in {"manual", "automatic"}:
+        raise Blocked("certification-mode-invalid", str(mode))
+    if mode == "automatic":
+        from factory import workflow_certification
+
+        workflow_certification.select(ctx, review=review, baselines=baselines)
+        return
+    sandbox = ctx.project.review_sandbox if review else ctx.project.build_sandbox
+    version = ctx.sandbox.exec_sync(sandbox, ["codex", "--version"], timeout=30)
+    if not version.ok or not version.stdout.strip():
+        raise Blocked("runtime-version-unavailable", sandbox)
+    directory = Path(settings.get("app_server_compatibility", ""))
     ctx.agent = AppServerAdapter(
         directory / f"{sandbox}.json",
         runtime_version=version.stdout.strip(),

@@ -287,6 +287,77 @@ class SbxAdapter:
             raise SbxError(f"sandbox changed during runtime observation: {name}")
         return {"generation": generation, "image_digest": image, **observed}
 
+    def observe_certification(
+        self,
+        spec: SandboxSpec,
+        *,
+        binary: str,
+        workdir: str,
+        env: Mapping[str, str],
+        hook_files: Mapping[str, str],
+        credential_names: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Fresh complete observation; metadata checks never create or modify a sandbox."""
+        from factory.certification_fingerprint import digest
+        from factory.sandbox import certification_observer
+
+        before = self.observe_runtime(spec.name, binary=binary, workdir=workdir, env=env)
+        info = self.inspect(spec.name)
+        if info.get("kits") != list(spec.kits) or (
+            spec.template and info.get("image") != spec.template
+        ):
+            raise SbxError("sandbox template or kits differ from requested specification")
+        request = {
+            "workspaces": [{"path": str(w.path), "readonly": w.readonly} for w in spec.workspaces],
+            "clone": spec.clone,
+            "env_names": sorted(env),
+            "env_sha256": digest(dict(env)),
+            "hook_files": dict(hook_files),
+            "credential_names": list(credential_names),
+        }
+        result = self.exec_sync(
+            spec.name,
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                "-c",
+                Path(certification_observer.__file__).read_text(),
+                json.dumps(request),
+            ],
+            workdir=workdir,
+            env=env,
+            timeout=60,
+        )
+        try:
+            actual = json.loads(result.stdout)
+            if (
+                not result.ok
+                or not isinstance(actual, dict)
+                or set(actual)
+                != {"mounts", "environment_sha256", "configurations", "hooks", "credential_names"}
+            ):
+                raise ValueError("sandbox observation unavailable")
+        except (ValueError, TypeError) as exc:
+            raise SbxError("sandbox certification observation failed") from exc
+        # Stable inspect properties only: session counts, uptime and state are liveness,
+        # not identity. Include all remaining properties so unknown configuration drifts.
+        volatile = {"state", "sessions", "uptime", "daemon_uptime"}
+        configuration = {k: v for k, v in info.items() if k not in volatile}
+        current = {k: v for k, v in self.inspect(spec.name).items() if k not in volatile}
+        after = self.observe_runtime(spec.name, binary=binary, workdir=workdir, env=env)
+        if before != after or current != configuration:
+            changed = sorted(
+                k
+                for k in set(configuration) | set(current)
+                if configuration.get(k) != current.get(k)
+            )
+            changed += sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+            raise SbxError(
+                "sandbox changed during certification observation: " + ", ".join(changed)
+            )
+        return {**after, "actual": {**actual, "configuration": configuration}}
+
     def exists(self, name: str) -> bool:
         """`sbx inspect` is non-zero when the sandbox is absent.
 
@@ -432,7 +503,14 @@ class SbxAdapter:
             exec_argv(name, argv, workdir=workdir, env=env), timeout=timeout, stdin=stdin
         )
 
-    def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
+    def exec_detached(
+        self,
+        handle: RunHandle,
+        script: str,
+        env: Mapping[str, str],
+        *,
+        stdout_path: Path | None = None,
+    ) -> None:
         """The single most important command in the factory (§4.2).
 
         Long work runs inside the sandbox and reports through the filesystem: the caller
@@ -494,10 +572,18 @@ class SbxAdapter:
         # is meant to be diagnosing.
         handle.attempt_dir.mkdir(parents=True, exist_ok=True)
         stderr_path = handle.attempt_dir / SBX_EXEC_STDERR
-        with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        from contextlib import ExitStack
+
+        with ExitStack() as files:
+            stderr_file = files.enter_context(stderr_path.open("w", encoding="utf-8"))
+            stdout_file = (
+                files.enter_context(stdout_path.open("x", encoding="utf-8"))
+                if stdout_path is not None
+                else subprocess.DEVNULL
+            )
             process = subprocess.Popen(
                 list(argv),
-                stdout=subprocess.DEVNULL,
+                stdout=stdout_file,
                 stderr=stderr_file,
                 text=True,
                 start_new_session=True,

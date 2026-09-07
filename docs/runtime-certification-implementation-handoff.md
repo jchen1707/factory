@@ -2,9 +2,9 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: certified native launch binding and sealed executable snapshots are implemented
-and measured. Earlier sections are historical checkpoints; see **Certified native launch checkpoint**
-at the end for current behavior and exact remaining work.
+Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
+launch enforcement are implemented in the isolated worktree. Real acceptance is INCOMPLETE. See
+**Automatic certification service checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -493,3 +493,109 @@ Exact next work:
    setting, database, project, tracker, forge or consumer pin changed in this checkpoint.
 
 Final canonical gates: `artifacts/runtime-certification-native-launch/gates-final.json`, PASS. Ruff check (114 ms), Ruff format --check (40 ms), mypy (298 ms), pytest (125,917 ms): each exit 0, empty output tails, none skipped. Mypy covers the changed source/tests in its 138-file set. The fake-sandbox caveat applies to the offline suite; the separate Linux catalogue/sealing measurements above prove only this launch slice. Both final bounded review axes have no outstanding findings.
+
+
+## Automatic certification service checkpoint
+
+Main objective remains factory workflow/runtime feature validation, using synthetic workloads.
+Do not finish CRUD tickets, resume FRO-12, touch historical Backend/nemoclaw work, deploy, or change
+live settings. User requested a compaction checkpoint during the real acceptance work. This is a
+handoff checkpoint, NOT a claim that all four requested tasks or the overall plan are finished.
+
+Implemented since 6f1c8b9:
+- Fresh complete fingerprint construction in certification_fingerprint.py and sbx observer:
+  actual/requested mounts/layout/environment, generation/image/native bytes, trusted authority and
+  hook inventory, source probe contract/parameters and execution-helper source digests. Environment
+  values are hashed, never stored in identity. Capability names use central policy. New authority
+  snapshots include `.codex/hooks.json` and `.codex/config.toml`; old snapshots are not rewritten.
+- Workflow selection now has explicit automatic/manual modes. Automatic selection uses the durable
+  service and fresh publication validation; builder/reviewer/recovery prepared launches revalidate.
+  Selection happens before root launch-counter advancement, so certification waits do not consume
+  application attempts. Existing runs/default manual behavior are retained. CLI configuration fields
+  and exact host configuration format are documented in runtime-certification-service.md.
+- CertificationRunner ensure/advance/status/collect runs nine separately admitted phases from the
+  new layer-A probe contract. Common approval/capacity/budget, invocation accounting and durable
+  intent prevent duplicated spend after controller loss. Terminal stale jobs are collected and
+  fenced failed before a new fingerprint proceeds; ambiguous holders remain held.
+- Real ProbeDriver and usage worker: deterministic preflight, canary/schema, detached wait and exact
+  process-group interruption, recovery, compaction/model-change observations, target inventory and
+  strict host report evaluation. Model statements cannot publish a certificate. Unknown compaction
+  attribution and incomplete usage stay incomplete. Each new phase requires its own admission.
+- Raw stdout is captured directly into host-only evidence. Shared certified_command embeds compressed
+  worker/request source and sealed prompt/schema memfds. `immutable=True` detached execution uses
+  retained argv, not a mutable pgid-body.sh file. Automatic application wrappers use it too.
+- Same-VM certification/application exclusion is atomic with paid admission, including cross-project
+  names; independent VMs can run together. Paused/cancelled owners cannot admit new certification.
+
+Two-axis review found and fixed two P1 defects: the first frozen bootstrap still flowed through a
+writable body file, and preflight-only sandbox exclusion could race admission. Rereview is clear.
+Shared bootstrap extraction also removed duplicate sealing logic. Fingerprints include the shared
+bootstrap, base envelope and sbx adapter sources, addressing the final reviewer follow-up.
+
+Real evidence in `artifacts/runtime-certification-service/` (ignored, preserve):
+- setup.py creates only the two owned disposable fixtures, with target/protocol/readonly trusted
+  hook mounts, codex-pnpm:v1, 1 CPU/2 GiB. Targets are tiny local Git fixtures. Declared capability
+  environment variables are explicitly empty for these invocations; no credentials were copied.
+- build VM `factory-build-cert-service-20260907`, UUID
+  `9c559ead-b11d-41c9-b553-d47d6cc7d0c4`; review VM `factory-review-cert-service-20260907`, UUID
+  `34b337e3-a962-4929-9d33-b6a5bea34a06`. Actual native CLI is 0.146.0, default image unchanged.
+- Both VMs produced stable repeated complete observations. compare-observations.py also confirmed
+  the build identity stable across an explicit stop/start. initial-identity.json predates the final
+  uptime fix; use fresh observe/ensure results, never load that old identity as current evidence.
+- Three build and two review canary invocations completed during integration. Their raw events,
+  exact invocations, costs and stale job failures remain in the isolated stores and host evidence.
+  These are limited canary/schema observations, NOT full six-check acceptance.
+- Real execution exposed an unintended repeat-certification defect: `sbx inspect` adds an `uptime`
+  field in running VMs. It was accidentally included as configuration. A red regression reproduced
+  changing uptime; the fix excludes it with state/session/daemon uptime. No identity-bearing field
+  was waived. After the fix two separate ensure-only controllers reused build job
+  `8073b7bcb7ff4964b8886f79ca1cda1f` without another paid probe. It is pending, not passed.
+- First fixture setup command was rejected by a local hook for literal protected variable names;
+  it did not execute. The fixture instead reads declared variable names from repository config and
+  never reads/prints their values. A temporary observer response-shape mismatch was reproduced and
+  fixed with a boundary regression. Retain original failures rather than presenting only green runs.
+
+Exact next work after compaction:
+1. Read this final section and runtime-certification-service.md. Stay in the implementation
+   worktree. Use source refs from git log; do not update/reset live checkout or apply schema DDL.
+2. Continue the real complete service matrix. Inputs already exist at
+   artifacts/runtime-certification-service/{build,review}/config.json. `advance.py` runs one real
+   controller tick and exits; ensure-only.py observes/requests without paid execution. Invocation:
+
+       uv run python artifacts/runtime-certification-service/advance.py artifacts/runtime-certification-service/build/config.json
+
+   Run the analogous review command independently. Poll with new controller processes; after
+   the source-declared 35 seconds, the interrupt phase must observe and stop only its owned group,
+   then recovery continues. Do not restart or duplicate an ambiguous paid launch. Nine phases have
+   NOT completed yet. Declared `usage_scope=thread` is an experiment input for 0.146; the evaluator
+   must prove it or fail, never infer a pass. If unsupported, preserve the failure and diagnose.
+3. Prove both build/review reports pass all six checks through the service. Exercise simultaneous
+   real controllers, crash/reopen after launch, tampered host evidence, changed identity and a
+   real automatic application launch/refusal with fresh fingerprints. Test frozen application
+   command quoting for paths containing spaces. Offline selection/exclusion tests are not this
+   real acceptance. Stop synthetic work when these named factory assertions are satisfied.
+4. Add any required real-tier fixes with red regressions, rerun gates/reviews as justified, then
+   prepare the remaining shared merge/consumer sync and reviewed rollout. Do not mark Step 4 or
+   the full plan complete merely because source is implemented. Child broker/execution/accounting,
+   subtree recovery, isolated integration and remaining controls are still unfinished outside
+   this four-task checkpoint. Schema 5→6, template deployment and activation remain James's.
+
+No schema DDL, live service/settings/database, template, project, tracker, forge or consumer pin
+changed. The new shared files remain authored on the harness feature branch based on v2 and are
+not vendored into any consumer. The old copy-only schema rehearsal still applies to unchanged DDL.
+
+Final checkpoint evidence: `artifacts/runtime-certification-service/gates-final.json`, PASS. Ruff
+check (87 ms), Ruff format --check (39 ms), mypy (443 ms) and pytest (127,668 ms): all exits 0,
+empty output tails, no skips. Mypy covers 152 source/test files. Earlier gate output gates.json
+failed a new fake-response dictionary annotation; corrected before the final run. Offline gates
+do not establish full runtime compatibility. Shared `python3 scripts/check.py --since origin/v2`
+passed (29 repository tests, 149 shared hook tests and generation/consumer composition checks);
+no new consumer sync or final six-check shared/runtime acceptance is claimed.
+
+Both owned service VMs are stopped; `stopped-checkpoint.json` confirms zero active agent leases.
+Final pending review job is `41282dddde9942af82f964229dd9e9e1`. The first canary jobs became
+stale during implementation/uptime correction and remain failed with costs retained. The current
+pending build/review jobs have no paid phases yet; do not mark them passed or reuse older canary
+results as complete certificates. Approved plan files remain untracked intentionally; preserve them.
+
+Shared source checkpoint is `e3fc8ad` in /Users/james/harness-runtime-certification (unpublished/unmerged). Factory checkpoint is the commit containing this handoff; retrieve it with `git log -1 --oneline`. No PR or push was performed.

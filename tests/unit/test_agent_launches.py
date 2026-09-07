@@ -209,3 +209,136 @@ def test_bare_reservation_is_not_permission_to_launch_later(tmp_path: Path) -> N
     assert sandbox.launches == 0
     assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
     store.close()
+
+
+def test_certification_and_application_exclude_each_other_in_same_sandbox(tmp_path: Path) -> None:
+    import pytest
+
+    from factory.execution import ProjectQueued
+
+    for first_role, second_role in (
+        ("builder", "certification"),
+        ("certification", "reviewer"),
+        ("certification", "certification"),
+    ):
+        directory = tmp_path / f"{first_role}-{second_role}"
+        directory.mkdir()
+        store = Store(directory / "db")
+        first_run = store.insert_run(linear_id="SYN-1", project="first", team="SYN")
+        second_run = store.insert_run(linear_id="SYN-2", project="second", team="SYN")
+        store.runtime.start_invocation("first", first_run.id, 1, first_role, {})
+        store.runtime.start_invocation("second", second_run.id, 1, second_role, {})
+        sandbox = Sandbox()
+        launches = AgentLaunches(store, sandbox)
+        first = RunHandle(
+            first_run.id, 1, "factory-build-shared", str(directory), directory / "first"
+        )
+        second = RunHandle(
+            second_run.id, 1, "factory-build-shared", str(directory), directory / "second"
+        )
+        assert launches.start("first", first, "script", {}, usd_limit=10, max_attempts=2)
+        with pytest.raises(ProjectQueued, match="sandbox certification"):
+            launches.start("second", second, "script", {}, usd_limit=10, max_attempts=2)
+        assert not launches.start("first", first, "script", {}, usd_limit=10, max_attempts=2)
+        assert sandbox.launches == 1
+        distinct = RunHandle(
+            second_run.id, 1, "factory-build-distinct", str(directory), directory / "second"
+        )
+        assert launches.start("second", distinct, "script", {}, usd_limit=10, max_attempts=2)
+        assert sandbox.launches == 2
+        store.close()
+
+
+def _exclusive_sandbox_contender(
+    database: str, directory: str, invocation_id: str, barrier: object
+) -> None:
+    from typing import Any, cast
+
+    from factory.execution import ProjectQueued
+
+    class RecordedSandbox(Sandbox):
+        def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
+            with (Path(directory) / "spawns").open("a") as stream:
+                stream.write(invocation_id + "\n")
+
+    store = Store(Path(database))
+    try:
+        invocation = store.runtime.invocation(invocation_id)
+        assert invocation is not None
+        handle = RunHandle(
+            invocation["run_id"],
+            1,
+            "factory-build-racing",
+            directory,
+            Path(directory) / invocation_id.replace(":", "-"),
+        )
+        cast(Any, barrier).wait(timeout=15)
+        try:
+            AgentLaunches(store, RecordedSandbox()).start(
+                invocation_id, handle, "script", {}, usd_limit=10, max_attempts=2
+            )
+        except ProjectQueued:
+            with (Path(directory) / "queued").open("a") as stream:
+                stream.write(invocation_id + "\n")
+    finally:
+        store.close()
+
+
+def test_independent_controllers_exclude_distinct_jobs_in_same_sandbox(tmp_path: Path) -> None:
+    import multiprocessing
+    from dataclasses import asdict, replace
+
+    from tests.unit.test_certification import identity
+
+    context = multiprocessing.get_context("spawn")
+    for first_role in ("certification", "builder"):
+        directory = tmp_path / first_role
+        directory.mkdir()
+        database = directory / "db"
+        store = Store(database)
+        run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+        store.runtime.configure("project", "synthetic", {"max_active_agents": 8})
+        jobs = [
+            RuntimeJobs(store).request_certification(
+                run.id,
+                asdict(
+                    replace(
+                        identity(), sandbox="factory-build-racing", authority_sha256=str(index) * 64
+                    )
+                ),
+            )
+            for index in (1, 2)
+        ]
+        assert jobs[0]["fingerprint"] != jobs[1]["fingerprint"]
+        invocations = [f"certification:{job['id']}:probe" for job in jobs]
+        for invocation_id, role, job in zip(
+            invocations, (first_role, "certification"), jobs, strict=True
+        ):
+            store.runtime.start_invocation(
+                invocation_id,
+                run.id,
+                1,
+                role,
+                {"certification_job": job["id"]} if role == "certification" else {},
+            )
+        store.close()
+        barrier = context.Barrier(2)
+        workers = [
+            context.Process(
+                target=_exclusive_sandbox_contender,
+                args=(str(database), str(directory), invocation_id, barrier),
+            )
+            for invocation_id in invocations
+        ]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(20)
+            assert worker.exitcode == 0
+        spawned = (directory / "spawns").read_text().splitlines()
+        queued = (directory / "queued").read_text().splitlines()
+        assert len(spawned) == len(queued) == 1
+        assert set(spawned + queued) == set(invocations)
+        reopened = Store(database)
+        assert len(RuntimeJobs(reopened).active_agents("synthetic")) == 1
+        reopened.close()
