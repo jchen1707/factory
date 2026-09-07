@@ -2,9 +2,9 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: sandbox generation and explicit native runtime observation are implemented
-and measured. Earlier sections are historical checkpoints; see **Runtime identity observation
-checkpoint** at the end for current behavior and exact remaining work.
+Latest checkpoint: certified native launch binding and sealed executable snapshots are implemented
+and measured. Earlier sections are historical checkpoints; see **Certified native launch checkpoint**
+at the end for current behavior and exact remaining work.
 
 ## Objective and approved scope
 
@@ -424,3 +424,72 @@ exit 0 with empty output tails; none skipped. Mypy includes the new source/test 
 (138 files). The offline suite's fake-boundary caveat remains; the separate real VM
 observations above establish only this identity slice, not automatic certification or
 child-workflow acceptance. The two reviews have no remaining blocking findings.
+
+
+## Certified native launch checkpoint
+
+Continued from f2840bc in the isolated implementation worktree. The next prerequisite now
+carries the native path/hash from a report's certification identity into the staged worker
+request, including resumed threads. Invalid or inconsistent native metadata refuses validation;
+an absent certification section retains explicit legacy manual behavior. This extraction is
+NOT attestation publication or full fingerprint validation and does not promote a manual report.
+
+The worker checks certified starts and hook-fallback restarts through one launch boundary.
+It requires an absolute regular native ELF, copies and hashes at most 512 MiB into a Linux
+memfd, applies write/grow/shrink/seal seals, and executes that descriptor with pass_fds.
+Malformed bindings, missing files, symlinks, wrappers, FIFO inputs and changed hashes cannot
+fall back to PATH. No binding retains the existing manual native command resolution. Worker
+startup now uses `/usr/bin/python3 -I -S` to exclude candidate import paths. Linux memfd/seal
+support is required for bound starts; there is no weaker fallback if unavailable.
+
+Review caught a defect in the initial open-file approach: an open descriptor prevents path
+replacement but not in-place modification before exec. The sealed snapshot fixes that race.
+The snapshot binds executed bytes, not all sandbox/environment/authority state. Full host
+fingerprint checks, trusted request/worker staging and orchestration remain necessary.
+Both review axes are clear for the bounded change; reviewers did not run real measurements.
+
+Tests: changed-binary and adapter-to-resume binding tests failed before implementation. Focused
+suite covers refusal, normal/resumed starts, hook restarts, immutable snapshot contents after
+original-file mutation, malformed certificate metadata and retained legacy behavior. Offline
+Linux syscalls and subprocesses are boundary fakes; real sealing is separately measured.
+
+Real acceptance used only the existing owned `factory-build-cert-identity-20260907` VM and
+its previous image/native identity. It is stopped again. No paid model turn was requested.
+Evidence: `artifacts/runtime-certification-native-launch/` (ignored, retained locally):
+- `identity.json`: fresh observer equality with the previous exact generation/image/binary.
+- `catalogue.jsonl`, `stderr.txt`: production worker run(probe_models=True), executed from a
+  sealed native snapshot, returned the actual catalogue on codex-cli 0.146.0.
+- `changed-binary-refusal.jsonl`: wrong requested native SHA refused with exit 1.
+- `race-experiment.py`, `race-result.json`: instrumented final Popen boundary changed only
+  `/tmp/factory-certification-sealed-launch-fixture`, attempted a snapshot write (EPERM), then
+  executed the original production start_server result. Observed version codex-cli 0.146.0,
+  exit 0, original_mutated=true, snapshot_write_refused=true. Native image binary untouched.
+  Re-run by concatenating the current worker source before its __main__ block with this
+  experiment and passing identity.json's runtime_path as argv[1] to `/usr/bin/python3 -I -S -c`
+  through SbxAdapter.exec_sync on the owned VM. It overwrites only that disposable /tmp fixture.
+- The initial catalogue assertion expected the wrong event name (`factory.model_probe`);
+  actual successful output uses `factory.models`. Corrected assertion passed. This was an
+  experiment assertion error, not a runtime/model failure.
+
+Worker bytes changed, so prior six-check manifests are stale for this implementation build.
+The catalogue/sealing measurements do NOT replace six-check compatibility, hook enforcement,
+sandbox isolation, detached durability, accounting or recovery acceptance. Live services use
+unchanged source; no manifest was rewritten or live adapter selected.
+
+Exact next work:
+1. Compose complete fresh fingerprint from observer results, actual/requested canonical
+   spec/mount/layout/environment and trusted authority/hooks/probe revision. Wire it to
+   certification publication and immediately before root/reviewer/recovery paid application
+   launch. Current selection still follows manual manifest lookup; do not treat this binding
+   extractor as automatic certification or feed retained job identity to validate().
+2. Load source-owned probe contracts, deterministic preflight, common paid admission and
+   durable ensure/advance/reconcile/status. Add explicit manual/automatic settings. Expired
+   certification leases must reconcile their existing detached launch before any new spend.
+3. Run all six checks against the final worker through the service, then remaining child
+   broker/execution/accounting/subtree recovery, isolated integration, controls and real
+   synthetic matrix. Stop synthetic work once the factory assertions are satisfied.
+4. Shared source merge/consumer sync, template pin, schema 5→6 and rollout remain pending.
+   James owns merges, deployment and live migration approval. No schema DDL, live service,
+   setting, database, project, tracker, forge or consumer pin changed in this checkpoint.
+
+Final canonical gates: `artifacts/runtime-certification-native-launch/gates-final.json`, PASS. Ruff check (114 ms), Ruff format --check (40 ms), mypy (298 ms), pytest (125,917 ms): each exit 0, empty output tails, none skipped. Mypy covers the changed source/tests in its 138-file set. The fake-sandbox caveat applies to the offline suite; the separate Linux catalogue/sealing measurements above prove only this launch slice. Both final bounded review axes have no outstanding findings.

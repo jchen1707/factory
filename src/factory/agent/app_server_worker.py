@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import math
+import os
+import stat
 import subprocess
 import sys
 import time
@@ -170,6 +174,66 @@ def close_server(process: subprocess.Popen[str]) -> None:
             process.wait()
 
 
+def start_server(argv: list[str], request: dict[str, Any]) -> subprocess.Popen[str]:
+    """Bind certified starts (including hook fallback) to the checked open ELF.
+
+    Absent binding preserves manual legacy execution. Presence never falls back to
+    PATH, even when malformed. The host still owns full attestation validation.
+    """
+    if "runtime_identity" not in request:
+        return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)  # noqa: S603
+    identity = request["runtime_identity"]
+    if not isinstance(identity, dict) or set(identity) != {"runtime_path", "runtime_sha256"}:
+        raise RuntimeError("invalid certified runtime binding")
+    path, expected = identity["runtime_path"], identity["runtime_sha256"]
+    if (
+        not isinstance(path, str)
+        or not Path(path).is_absolute()
+        or not isinstance(expected, str)
+        or len(expected) != 64
+        or any(c not in "0123456789abcdef" for c in expected)
+    ):
+        raise RuntimeError("invalid certified runtime binding")
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode) or stream.read(4) != b"\x7fELF":
+            raise RuntimeError("certified runtime must be a native ELF")
+        stream.seek(0)
+        # Linux memfd seals freeze the actual executable bytes, including against
+        # in-place writes after validation. A pathname or open original fd cannot.
+        # Host type checking runs on macOS; these APIs are required in the Linux VM.
+        linux_os: Any = os
+        linux_fcntl: Any = fcntl
+        descriptor = linux_os.memfd_create("factory-certified-runtime", linux_os.MFD_ALLOW_SEALING)
+        with os.fdopen(descriptor, "w+b") as executable:
+            digest = hashlib.sha256()
+            size = 0
+            while chunk := stream.read(1024 * 1024):
+                size += len(chunk)
+                if size > 512 * 1024 * 1024:
+                    raise RuntimeError("certified runtime exceeds size limit")
+                executable.write(chunk)
+                digest.update(chunk)
+            executable.flush()
+            fcntl.fcntl(
+                descriptor,
+                linux_fcntl.F_ADD_SEALS,
+                linux_fcntl.F_SEAL_WRITE
+                | linux_fcntl.F_SEAL_GROW
+                | linux_fcntl.F_SEAL_SHRINK
+                | linux_fcntl.F_SEAL_SEAL,
+            )
+            if digest.hexdigest() != expected:
+                raise RuntimeError("certified runtime binary changed")
+            # Popen completes its exec handshake before the descriptor is closed.
+            return subprocess.Popen(  # noqa: S603
+                [f"/proc/self/fd/{descriptor}", *argv[1:]],
+                pass_fds=(descriptor,),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+
+
 def run(request: dict[str, Any]) -> int:
     probe_models = request.get("probe_models") is True
     argv = ["codex", "app-server", "--stdio"]
@@ -179,7 +243,16 @@ def run(request: dict[str, Any]) -> int:
             "-c",
             f"shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY={json.dumps(request['vault'])}",
         ]
-    process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)  # noqa: S603
+    try:
+        process = start_server(argv, request)
+    except (OSError, ValueError, RuntimeError, AttributeError) as exc:
+        emit(
+            {
+                "type": "factory.model_probe.failed" if probe_models else "turn.failed",
+                "error": {"message": str(exc)},
+            }
+        )
+        return 1
     if process.stdin is None or process.stdout is None:
         raise RuntimeError("app-server pipes unavailable")
     stdin, stdout = process.stdin, process.stdout
@@ -310,9 +383,7 @@ def run(request: dict[str, Any]) -> int:
             override = "hooks=" + toml_literal(definitions)
             close_server(process)
             argv += ["-c", override]
-            process = subprocess.Popen(  # noqa: S603 - vetted hook definitions, argv only
-                argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-            )
+            process = start_server(argv, request)
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("app-server pipes unavailable")
             stdin, stdout = process.stdin, process.stdout

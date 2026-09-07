@@ -39,9 +39,30 @@ def validate_compatibility(path: Path, *, runtime_version: str, sandbox: str) ->
             evidence = read_evidence(path.parent, check["evidence"])
             if check["status"] != "pass" or hashlib.sha256(evidence).hexdigest() != check["sha256"]:
                 raise ValueError(f"unverified evidence for {name}")
+        runtime_binding(report)
         return report
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Blocked("app-server-compatibility-incomplete", str(exc)) from exc
+
+
+def runtime_binding(report: dict) -> dict[str, str] | None:
+    """Extract native launch provenance without promoting a manual report to a certificate."""
+    if "certification" not in report:
+        return None
+    identity = report["certification"]["identity"]
+    path, digest = identity["runtime_path"], identity["runtime_sha256"]
+    if (
+        not isinstance(path, str)
+        or not Path(path).is_absolute()
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(c not in "0123456789abcdef" for c in digest)
+        or any(
+            identity[key] != report[key] for key in ("runtime_version", "sandbox", "worker_sha256")
+        )
+    ):
+        raise ValueError("invalid certified runtime binding")
+    return {"runtime_path": path, "runtime_sha256": digest}
 
 
 def read_evidence(root: Path, reference: str) -> bytes:
@@ -102,7 +123,9 @@ class AppServerAdapter(CodexAdapter):
 
     def command(self, invocation: AgentInvocation) -> Sequence[str]:
         return [
-            "python3",
+            "/usr/bin/python3",
+            "-I",
+            "-S",
             str(invocation.prompt_path.parent / "app_server_worker.py"),
             str(invocation.prompt_path.with_suffix(".app-server.json")),
         ]
@@ -132,6 +155,9 @@ class AppServerAdapter(CodexAdapter):
             "vault": invocation.vault_directory,
             "context_semantics_verified": True,
         }
+        binding = runtime_binding(report)
+        if binding is not None:
+            request["runtime_identity"] = binding
         invocation.prompt_path.with_suffix(".app-server.json").write_text(json.dumps(request))
 
     def wrapper_script(self, invocation: AgentInvocation) -> str:
