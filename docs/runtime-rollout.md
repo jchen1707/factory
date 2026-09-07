@@ -1,5 +1,19 @@
 # Runtime rollout
 
+## Per-run compatibility measured — 2026-09-07
+
+After #88 merged, a fresh build/review pair received production per-run names and
+unmodified production specifications using live mount roots. Both passed all six
+real compatibility checks and production adapter selection in a separate validation
+store. The pair is stopped and retained. No live ticket or setting changed.
+See [per-run acceptance](runtime-per-run-compatibility-acceptance.md).
+
+The manifests cover only the measured identities. Future ticket runs require their
+own exact manifests before first launch; automatic certification is not implemented.
+Concurrency four remains selected, but four full live workflows are not claimed.
+Continue with independently approved work when available, without completing CRUD
+solely for testing or treating fixture identities as future-run authorization.
+
 ## Four-run capacity selected — 2026-09-07
 
 James explicitly requested four. Live `factory-crud-verification` settings now select
