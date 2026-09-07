@@ -2,6 +2,34 @@
 
 ## Continued validation — 2026-09-07 UTC
 
+Latest operational state: FRO-12 run `47515078d97246e9` is **implementing,
+attempt 2**, after a real supported suspend/resume acceptance check. Original
+session `01a079c0-a16b-7ff3-b80a-82cb727dd3ba` was resumed; exact branch, HEAD,
+tracked diff and untracked implementation/test/plan files were preserved.
+See [the recovery evidence](runtime-crud-recovery-acceptance.md). The unapproved
+resume exposed a CLI reporting exception while correctly preventing launch;
+the CLI/console correction now passes all four gates in
+`artifacts/crud-runtime-test/factory-gates-resume-holds.json`. Approval `2:implement:1` was then applied
+and the existing session resumed successfully. Do not launch another attempt.
+
+Earlier successful real `factory resume FRO-12` recollected readiness and kept
+the original attempt and archived its schema/manifest/accounting evidence in
+`run/1/recollection-original.json`. A repeated targeted drive then held at
+`1:implement:1` without launching a planner or builder. That exact implementation
+approval was applied through the CLI, and the detached builder started successfully.
+Retained files: `readiness-resume.txt`, `implementation-approval-held.json`,
+`approve-implement.json`, and `implementation-launch.json` in the isolated home.
+Use the targeted driver to observe this run; do not start another run or broad intake.
+
+Factory source is committed at `a8e1dce` and published in
+[factory PR #83](https://github.com/jchen1707/factory/pull/83). All four gates pass
+in `artifacts/crud-runtime-test/factory-gates-release.json` against the final source.
+Shared source is in [harness PR #32](https://github.com/jchen1707/harness/pull/32).
+The generated CRUD contract/test-path refresh is draft
+[CRUD PR #1](https://github.com/jchen1707/factory-crud-verification/pull/1), commit
+`fb1392a`, with ten gates and integrity checks passing; remote freshness awaits the
+shared-source merge. None of these PRs has been merged by the agent.
+
 The continuation closed additional integration gaps locally: supported deterministic
 readiness recollection on operator resume; explicit shared test-design instructions
 and host-snapshotted artifact requirements; builder consumption of only collected

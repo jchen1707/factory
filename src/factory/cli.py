@@ -30,6 +30,7 @@ from factory.agent.base import SchemaInvalid, SchemaUnsupported, validate_agains
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
 from factory.delivery import forge as forge_dispatch
+from factory.execution import AgentApprovalRequired, ProjectQueued
 from factory.harness import load_harness_config
 from factory.intake.linear import (
     Condition,
@@ -1568,6 +1569,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
     try:
         recovery.resume(ctx, from_state=args.from_state, authorise=args.authorise)
         driver.drive(ctx)
+    except (AgentApprovalRequired, ProjectQueued) as exc:
+        print(_scheduling_hold(ticket, exc))
+        _report(ctx)
+        return 0
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         _report(ctx)
@@ -1590,6 +1595,11 @@ def cmd_resume(args: argparse.Namespace) -> int:
     else:
         print(f"\nThe run came to rest at `{ctx.state}`.")
     return 0
+
+
+def _scheduling_hold(ticket: str, exc: AgentApprovalRequired | ProjectQueued) -> str:
+    waiting = "waiting for approval" if isinstance(exc, AgentApprovalRequired) else "queued"
+    return f"{ticket} {waiting}: {exc}"
 
 
 # --------------------------------------------------------------------------------
@@ -1669,6 +1679,8 @@ def dispatch_control(
         else:  # resume
             recovery.resume(ctx)
         driver.drive(ctx)
+    except (AgentApprovalRequired, ProjectQueued) as exc:
+        return 0, _scheduling_hold(run.linear_id, exc)
     except Blocked as exc:
         _block(ctx, exc.reason, exc.detail)
         return 2, f"{run.linear_id} blocked: {exc.reason} — {exc.detail}"
