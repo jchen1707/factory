@@ -163,6 +163,7 @@ def test_certified_native_binding_survives_preparation_for_resume(tmp_path: Path
         "identity": {
             "runtime_path": "/opt/codex/native",
             "runtime_sha256": "a" * 64,
+            "launcher_sha256": "b" * 64,
             "runtime_version": "fixture",
             "sandbox": "factory-build-fixture",
             "worker_sha256": report["worker_sha256"],
@@ -192,6 +193,7 @@ def test_certified_native_binding_survives_preparation_for_resume(tmp_path: Path
     assert request["runtime_identity"] == {
         "runtime_path": "/opt/codex/native",
         "runtime_sha256": "a" * 64,
+        "launcher_sha256": "b" * 64,
     }
     assert request["resume_session"] == "retained-thread"
 

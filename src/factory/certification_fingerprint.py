@@ -143,6 +143,7 @@ def observe(adapter: CertificationObserver, inputs: FingerprintInputs) -> Certif
                 }
             ),
             usage_scope=inputs.usage_scope,
+            launcher_sha256=actual["actual"]["launcher_sha256"],
         )
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise Blocked("certification-inputs-untrusted", str(exc)) from exc

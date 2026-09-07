@@ -1,10 +1,10 @@
 # Automatic sandbox certification
 
-Implementation is opt-in. Production rollout and complete real compatibility acceptance are
+Implementation is opt-in. Production rollout and complete workflow/child acceptance are
 pending; see runtime-certification-implementation-handoff.md for measured scope and remaining work.
-The disposable build service has passed all six checks. Reviewer read-only shell execution fails
-with the sealed native launch because native helper re-execution cannot reopen its executable path.
-Do not activate until immutable helper execution and the final build/review matrix pass.
+The native helper fix passed all six checks in both disposable build and reviewer sandboxes.
+Certificates from previous workers and other sandbox identities remain unusable for this build.
+Full workflow/child acceptance and production rollout checks remain unfinished; see the handoff.
 
 `factory configure --project PROJECT --agent-adapter app-server --certification-mode automatic
 --certification-config /absolute/host/config.json` selects automatic certification for new runs.
@@ -62,3 +62,19 @@ The service records its status in `runtime_certifications`, its selected build/r
 settings, and per-phase invocation/approval/accounting evidence in the existing runtime store. No
 separate unattended application or migration is needed: workflow selection/driver ticks resume it.
 The schema 5→6 live migration, shared merge/sync and activation remain separately owned rollout work.
+
+Certified native launch additionally fingerprints the packaged `codex-resources/bwrap` resource
+beside the runtime's `bin` directory. Both executables are hash-checked into sealed snapshots.
+The launcher copies them from offset zero into regular files on an invocation-private tmpfs and
+remounts that filesystem read-only. Regular files provide reopenable native helper paths; executing
+a memfd or bind-mounted anonymous file directly does not. The existing VM `/dev` is preserved for
+PTY allocation, and Codex still enforces the requested build/reviewer sandbox policy. No new session
+or parent-death kill flag is introduced; the existing detached process-group owner remains in charge.
+The mountpoint is the image's empty, root-owned `/mnt` directory. Both preflight and launch refuse
+root execution, symlink or writable ancestors, nonempty anchors and overlap with the candidate cwd.
+The immutable resource directory is first in runtime PATH, preventing helper shadowing. The existing
+image directory is never created, renamed or changed; its executable mount exists only inside the
+launch namespace. An image/layout without this protected empty anchor cannot use automatic
+certification until its template/layout is explicitly prepared. Missing packaged resources, changed
+hashes and old certificates without launcher provenance refuse launch. Standalone binary-only
+upgrades are insufficient for this launcher; retain and certify the matching package resources.

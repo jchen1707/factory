@@ -11,6 +11,8 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -191,17 +193,92 @@ def start_server(
             text=True,
         )
     identity = request["runtime_identity"]
-    if not isinstance(identity, dict) or set(identity) != {"runtime_path", "runtime_sha256"}:
+    if not isinstance(identity, dict) or set(identity) != {
+        "runtime_path",
+        "runtime_sha256",
+        "launcher_sha256",
+    }:
         raise RuntimeError("invalid certified runtime binding")
-    path, expected = identity["runtime_path"], identity["runtime_sha256"]
-    if (
-        not isinstance(path, str)
-        or not Path(path).is_absolute()
-        or not isinstance(expected, str)
-        or len(expected) != 64
-        or any(c not in "0123456789abcdef" for c in expected)
+    path = identity["runtime_path"]
+    if not isinstance(path, str) or not Path(path).is_absolute():
+        raise RuntimeError("invalid certified runtime binding")
+    for key in ("runtime_sha256", "launcher_sha256"):
+        value = identity[key]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)
+        ):
+            raise RuntimeError("invalid certified runtime binding")
+    mountpoint = native_mountpoint()
+    if mountpoint.is_relative_to(Path(request["workdir"]).resolve()):
+        raise RuntimeError("certified runtime mountpoint overlaps working directory")
+    with (
+        sealed_binary(path, identity["runtime_sha256"]) as descriptor,
+        sealed_binary(
+            str(Path(path).parent.parent / "codex-resources/bwrap"), identity["launcher_sha256"]
+        ) as launcher,
     ):
-        raise RuntimeError("invalid certified runtime binding")
+        executable = str(mountpoint / "codex")
+        # Execute the checked launcher snapshot too. No PATH or mutable-binary fallback.
+        # A regular file on read-only tmpfs gives current_exe() a stable, read-only helper pathname.
+        return subprocess.Popen(  # noqa: S603
+            [
+                f"/proc/self/fd/{launcher}",
+                "--bind",
+                "/",
+                "/",
+                "--dev-bind",
+                "/dev",
+                "/dev",
+                "--tmpfs",
+                str(mountpoint),
+                "--perms",
+                "0555",
+                "--file",
+                str(descriptor),
+                executable,
+                "--dir",
+                str(mountpoint / "codex-resources"),
+                "--perms",
+                "0555",
+                "--file",
+                str(launcher),
+                str(mountpoint / "codex-resources/bwrap"),
+                "--remount-ro",
+                str(mountpoint),
+                "--setenv",
+                "PATH",
+                str(mountpoint / "codex-resources") + ":" + os.environ.get("PATH", ""),
+                "--",
+                executable,
+                *argv[1:],
+            ],
+            pass_fds=(descriptor, launcher),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if capture_stderr else None,
+            text=True,
+        )
+
+
+def native_mountpoint() -> Path:
+    """Use an empty image-owned anchor that an agent cannot rename or replace."""
+    mountpoint = Path("/mnt")
+    if os.geteuid() == 0:
+        raise RuntimeError("certified runtime requires an unprivileged user")
+    for part in (mountpoint, *mountpoint.parents):
+        metadata = part.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise RuntimeError("certified runtime mountpoint is not image-owned")
+    if any(mountpoint.iterdir()):
+        raise RuntimeError("certified runtime mountpoint is not empty")
+    return mountpoint
+
+
+@contextmanager
+def sealed_binary(path: str, expected: str) -> Iterator[int]:
+    """Freeze checked native bytes before another process can consume them."""
     with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode) or stream.read(4) != b"\x7fELF":
             raise RuntimeError("certified runtime must be a native ELF")
@@ -232,15 +309,8 @@ def start_server(
             )
             if digest.hexdigest() != expected:
                 raise RuntimeError("certified runtime binary changed")
-            # Popen completes its exec handshake before the descriptor is closed.
-            return subprocess.Popen(  # noqa: S603
-                [f"/proc/self/fd/{descriptor}", *argv[1:]],
-                pass_fds=(descriptor,),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE if capture_stderr else None,
-                text=True,
-            )
+            executable.seek(0)
+            yield descriptor
 
 
 def run(request: dict[str, Any]) -> int:

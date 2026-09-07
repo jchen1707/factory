@@ -53,6 +53,26 @@ def run_client(
     runtime: dict[str, str] | None = None,
     replace_before_exec: bool = False,
 ) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]]]:
+    native_root = tmp_path.parent / "native-mounts"
+    native_root.mkdir(exist_ok=True)
+    monkeypatch.setattr(worker, "native_mountpoint", lambda: native_root)
+    launcher_bytes = b"\x7fELFlauncher fixture"
+    launcher_path = tmp_path / "launcher"
+    launcher_path.write_bytes(launcher_bytes)
+    real_open = os.open
+
+    def open_binary(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        return real_open(
+            launcher_path if str(path).endswith("/codex-resources/bwrap") else path,
+            flags,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(worker.os, "open", open_binary)
+    if runtime is not None:
+        runtime = {"launcher_sha256": hashlib.sha256(launcher_bytes).hexdigest(), **runtime}
+
     # Linux-specific syscalls are the boundary fake; real sealing/exec acceptance
     # runs separately in the owned Linux VM.
     def memfd(name: str, flags: int) -> int:
@@ -147,9 +167,19 @@ def run_client(
 
     def spawn(argv: list[str], **kwargs: Any) -> Any:
         if runtime is not None:
-            (descriptor,) = kwargs["pass_fds"]
-            assert argv[0] == f"/proc/self/fd/{descriptor}"
+            descriptor, launcher = kwargs["pass_fds"]
+            assert argv[0] == f"/proc/self/fd/{launcher}"
+            path_option = argv.index("--setenv")
+            assert argv[path_option + 1] == "PATH"
+            helper_directory = Path(argv[path_option + 2].split(":")[0])
+            assert not helper_directory.is_relative_to(tmp_path)
+            assert str(helper_directory / "bwrap") in argv
+            assert os.pread(launcher, 1024, 0) == launcher_bytes
+            assert os.lseek(descriptor, 0, os.SEEK_CUR) == 0
+            assert os.lseek(launcher, 0, os.SEEK_CUR) == 0
             if replace_before_exec:
+                launcher_path.write_bytes(b"\x7fELFreplaced launcher")
+                assert os.pread(launcher, 1024, 0) == launcher_bytes
                 Path(runtime["runtime_path"]).write_bytes(b"\x7fELFreplaced after validation")
             assert (
                 hashlib.sha256(os.pread(descriptor, 1024, 0)).hexdigest()
@@ -696,3 +726,24 @@ def test_in_place_replacement_cannot_change_verified_executable(
     )
     assert code == 0
     assert binary.read_bytes() == b"\x7fELFreplaced after validation"
+
+
+def test_changed_certified_launcher_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [],
+        launches=launches,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "launcher_sha256": "0" * 64,
+        },
+    )
+    assert code == 1
+    assert launches == []

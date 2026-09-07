@@ -14,6 +14,7 @@ class Observations:
     def __init__(self) -> None:
         self.generation = "generation-one"
         self.environment = "e" * 64
+        self.launcher = "c" * 64
 
     def observe_certification(self, spec: SandboxSpec, **kwargs: object) -> dict:
         return {
@@ -22,7 +23,11 @@ class Observations:
             "runtime_path": "/opt/codex",
             "runtime_version": "codex-cli 0.153.4",
             "runtime_sha256": "b" * 64,
-            "actual": {"environment_sha256": self.environment, "mounts": []},
+            "actual": {
+                "environment_sha256": self.environment,
+                "mounts": [],
+                "launcher_sha256": self.launcher,
+            },
         }
 
 
@@ -103,3 +108,12 @@ def test_automatic_certification_requires_explicit_configuration_for_new_runs(
     )
     assert store.runtime.settings("project", "synthetic")["certification_mode"] == "automatic"
     store.close()
+
+
+def test_changed_launcher_invalidates_fingerprint(tmp_path: Path) -> None:
+    adapter = Observations()
+    request = inputs(tmp_path)
+    original = observe(adapter, request)
+    assert original.launcher_sha256 == "c" * 64
+    adapter.launcher = "d" * 64
+    assert observe(adapter, request) != original

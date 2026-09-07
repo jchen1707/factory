@@ -228,7 +228,9 @@ class CertificationProbeDriver:
         identity = job["identity"]
         contract = self._contract()
         request: dict[str, Any] = {
-            "runtime_identity": {key: identity[key] for key in ("runtime_path", "runtime_sha256")},
+            "runtime_identity": {
+                key: identity[key] for key in ("runtime_path", "runtime_sha256", "launcher_sha256")
+            },
             "model": self.model,
             "effort": self.effort,
             "workdir": self.workdir,

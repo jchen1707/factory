@@ -62,7 +62,14 @@ def runtime_binding(report: dict) -> dict[str, str] | None:
         )
     ):
         raise ValueError("invalid certified runtime binding")
-    return {"runtime_path": path, "runtime_sha256": digest}
+    launcher = identity["launcher_sha256"]
+    if (
+        not isinstance(launcher, str)
+        or len(launcher) != 64
+        or any(c not in "0123456789abcdef" for c in launcher)
+    ):
+        raise ValueError("invalid certified launcher binding")
+    return {"runtime_path": path, "runtime_sha256": digest, "launcher_sha256": launcher}
 
 
 def read_evidence(root: Path, reference: str) -> bytes:

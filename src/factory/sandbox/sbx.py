@@ -308,6 +308,7 @@ class SbxAdapter:
         ):
             raise SbxError("sandbox template or kits differ from requested specification")
         request = {
+            "binary": binary,
             "workspaces": [{"path": str(w.path), "readonly": w.readonly} for w in spec.workspaces],
             "clone": spec.clone,
             "env_names": sorted(env),
@@ -335,7 +336,15 @@ class SbxAdapter:
                 not result.ok
                 or not isinstance(actual, dict)
                 or set(actual)
-                != {"mounts", "environment_sha256", "configurations", "hooks", "credential_names"}
+                != {
+                    "mounts",
+                    "environment_sha256",
+                    "configurations",
+                    "hooks",
+                    "credential_names",
+                    "launcher_sha256",
+                    "native_mount",
+                }
             ):
                 raise ValueError("sandbox observation unavailable")
         except (ValueError, TypeError) as exc:

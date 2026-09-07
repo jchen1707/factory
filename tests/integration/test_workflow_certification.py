@@ -76,7 +76,7 @@ def test_automatic_selection_requires_published_host_evidence_and_rechecks_it(
             "runtime_path": "/opt/codex",
             "runtime_version": "fixture",
             "runtime_sha256": "b" * 64,
-            "actual": {"environment_sha256": "c" * 64},
+            "actual": {"environment_sha256": "c" * 64, "launcher_sha256": "d" * 64},
         }
 
     monkeypatch.setattr(type(ctx.sandbox), "observe_certification", observe_runtime, raising=False)

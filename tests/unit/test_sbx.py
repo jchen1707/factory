@@ -783,6 +783,8 @@ def test_full_observation_includes_environment_capability_names(
                 "configurations": {},
                 "hooks": {},
                 "credential_names": ["FIXTURE_CAPABILITY"],
+                "launcher_sha256": "d" * 64,
+                "native_mount": {"path": "/mnt", "uid": 0, "mode": 16877},
             }
         return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
 

@@ -23,6 +23,7 @@ def identity() -> CertificationIdentity:
         runtime_path="/opt/codex/bin/codex",
         runtime_version="synthetic",
         runtime_sha256="3" * 64,
+        launcher_sha256="4" * 64,
         worker_sha256=hashlib.sha256(
             Path(app_server.__file__).with_name("app_server_worker.py").read_bytes()
         ).hexdigest(),

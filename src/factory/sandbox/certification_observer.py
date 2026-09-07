@@ -32,6 +32,16 @@ def file_digest(path: Path) -> str:
 
 
 def observe(request: dict[str, Any]) -> dict[str, Any]:
+    # Match the worker's protected mount anchor before buying any probe.
+    native_mount = Path("/mnt")
+    if os.geteuid() == 0 or native_mount.is_relative_to(Path.cwd().resolve()):
+        raise ValueError("certified runtime mountpoint is unavailable")
+    for part in (native_mount, *native_mount.parents):
+        metadata = part.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise ValueError("certified runtime mountpoint is not image-owned")
+    if any(native_mount.iterdir()):
+        raise ValueError("certified runtime mountpoint is not empty")
     mounts: list[dict[str, Any]] = []
     for line in Path("/proc/self/mountinfo").read_text().splitlines():
         left, right = line.split(" - ", 1)
@@ -84,6 +94,10 @@ def observe(request: dict[str, Any]) -> dict[str, Any]:
             if path.exists() or path.is_symlink():
                 configs[str(path)] = file_digest(path)
     return {
+        "native_mount": {"path": str(native_mount), "uid": 0, "mode": native_mount.stat().st_mode},
+        "launcher_sha256": file_digest(
+            Path(request["binary"]).parent.parent / "codex-resources/bwrap"
+        ),
         "mounts": sorted(mounts, key=lambda row: row["path"]),
         "environment_sha256": digest(dict(os.environ)),
         "configurations": configs,

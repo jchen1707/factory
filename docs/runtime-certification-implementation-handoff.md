@@ -3,8 +3,9 @@
 Status: implementation in progress; feature is not complete.
 
 Latest checkpoint: automatic certification service, complete fingerprint construction and workflow
-launch enforcement are implemented in the isolated worktree. Real acceptance is INCOMPLETE. See
-**Real compatibility acceptance checkpoint** at the end; earlier sections are historical.
+launch enforcement are implemented in the isolated worktree. Final disposable build/reviewer six-check
+acceptance now PASSES; full workflow/child acceptance and rollout remain incomplete. See
+**Native helper mount checkpoint** at the end; earlier sections are historical.
 
 ## Objective and approved scope
 
@@ -690,3 +691,103 @@ configured source paths include this change. The fake-sandbox caveat applies to 
 real measurements above establish the listed runtime behavior and expose the remaining defect.
 Approved plans remain intentionally untracked. Both owned service VMs are stopped again, zero active
 leases; acceptance-stopped-checkpoint.json records final jobs, accounting completeness and state.
+
+
+## Native helper mount checkpoint
+
+Continued from 845b1e3 in the isolated factory worktree. The immediate native self/helper
+re-execution defect is fixed and measured without model calls. Full feature acceptance remains
+in progress; no activation, live settings/services/schema/template changes or shared sync occurred.
+
+The launcher now hashes and seals both native Codex and the matching packaged Bubblewrap resource
+(`runtime_path.parent.parent / codex-resources/bwrap`). The bundle is also part of fresh identity
+as launcher_sha256. A private tmpfs over the existing empty, root-owned /mnt directory receives regular executable
+files, then becomes read-only. Preflight and launch require real uid0-owned, non-group/world-writable
+directory ancestors, a non-root worker and an empty anchor. No image directory is changed. It must be outside the candidate cwd, which Codex excludes from helper
+lookup. The read-only resources directory is first in runtime PATH, preventing helper shadowing. This gives current_exe() a reopenable pathname while
+preserving frozen bytes. The launcher itself executes from its checked sealed snapshot. `/dev`
+is rebound with existing device semantics so unified-exec PTYs work. Codex's reviewer read-only
+policy is unchanged; no new session, parent-death kill or mutable-binary fallback was introduced.
+The final launcher does not depend on an output path, so the intermediate usage-request change
+was removed. Its observed failure remains in the historical job evidence.
+
+Important diagnostic corrections (preserved ignored evidence under
+artifacts/runtime-certification-service/):
+- Original native-helper-repro.py reproduced ENOENT on 845b1e3 before source edits.
+- The early ro-bind-data prototype returned zero but copied from EOF, producing an empty executable.
+  That is NOT success evidence. Offsets must be reset; tests now assert both descriptors start at zero.
+  A zero exit without an explicit effect marker is insufficient. Earlier exploratory mount scripts
+  are retained as diagnosis history and must not be used as acceptance runners.
+- With actual bytes, anonymous ro-bind-data still failed helper reopening. Regular files on read-only
+  tmpfs resolve it. The suspected protocol-versus-private-directory distinction was not the cause.
+- System /usr/bin/bwrap is not the matching bundled resource: the runtime correctly rejected its
+  digest. The actual packaged resource is c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4.
+- Outer root bind initially made PTY devices unusable. No-model pty.openpty() failed before the
+  explicit existing /dev bind and passed afterward. Both real interrupt probes then passed.
+- native-helper-final-repro.py asserts the actual shell marker. native-helper-acceptance.py asserts
+  the real mounted Codex/Bubblewrap hashes, explicit output, and refused writes to both executables,
+  a new mount entry and the read-only target. native-helper-pty.py separately proves PTY allocation.
+  These scripts use only the owned review VM and no model calls; their JSON evidence is retained.
+- Intermediate jobs bce0bc33608140eeb2d7c1a53390e02e (build) and
+  9e2563a06a604f069bc5730ef7a3f16a (review) failed interrupt due to PTY permission denial.
+- Intermediate jobs 57f1ca742e9d45ce9da0726efa13afc3 (build) and
+  9c9d0b3a8ecc4ee1927a1c549c107224 (review) passed interruption/recovery, then failed usage-initial
+  with missing output. The real failure became a red/green preparation regression. These jobs remain
+  failed, with raw evidence and accounting. They are not final certificates.
+
+Further security check: intermediate build 80802e7bc399449e8b3c9f5d99884c13 and review
+ d809f65e6cdf4ba0918fba7b2d2caee2 passed all nine phases/six checks, but are now stale. A separate
+no-model attack placed a fake bwrap first in PATH; the runtime executed it (exit 88, named marker).
+The launcher moves its mount outside the candidate cwd and prefixes the immutable resource
+path. Review then identified a writable /tmp anchor rename race. The final root-owned /mnt anchor
+removes it; an actual outside-namespace uid1000 rename attempt returned EACCES (errno13), retained
+in native-anchor-rename.json. The image has /mnt uid0 mode0755 and an empty directory. The same attack now executes the checked helper and proves read-only refusals.
+native-helper-path-shadow-red.json and native-helper-path-shadow.json retain the differential pair.
+Do not promote the intermediate six-check certificates to this changed worker.
+
+Final source results:
+- Build job 1213c5fce79d4f279cb8e8a22d14c32f and reviewer job
+  8eecb63603fc43ce8747871b04b5a6c5 each passed ALL nine phases and published ALL six checks.
+  Their compatibility.json, summary-index.json, raw events and interruption.json are under
+  build/evidence/JOB and review/evidence/JOB. Final worker SHA256 is
+  dd6e05b177d59f1389898fcb9a85b5ee62660dc3d121640bddb09ef8f4573820.
+  Actual detached intervals were 37.940 and 37.943 seconds; both interrupted with exit143,
+  resumed the retained thread, and passed compaction/model-change/counter semantics.
+- Native CLI remains 0.146.0, Sol low → Terra with thread-scoped usage; no Astra/template upgrade.
+  Source-owned six-check probes remain harness e3fc8ad (unchanged/unmerged this turn).
+- mounted-refusals.py: fresh final build certificate validates; tampered host evidence refuses;
+  exact restoration validates; freshly observed environment change refuses certification-stale.
+- mounted-application.py: invocation synthetic-mounted-application-1 completed with exit0,
+  schema {"ok":true} and reconciled usage after a new controller process. Evidence is
+  mounted-application-result.json and build/protocol/mounted application with spaces/.
+  This is adapter + fresh certificate + frozen command + shared admission acceptance, NOT
+  the full Context/selection → builder/reviewer/recovery workflow matrix.
+- launcher-controller-restarts.jsonl records bounded independent build/review ticks. This does
+  NOT establish a real same-VM race at FIRST paid admission; that remains an explicit next test.
+- Canonical gates-protected-mount-final.json: PASS, no skips. Ruff check exit0 (79ms), format
+  exit0 (49ms), mypy exit0 (531ms), pytest exit0 (152724ms); all output tails empty. Source is
+  included in mypy. The fake-sandbox caveat applies to the suite; real assertions above are separate.
+  Standards review found no issues; spec review prompted the protected-anchor correction and
+  cleared the final delta. No source changed after the final gate run.
+- Both exact owned VMs are STOPPED and have zero active leases (mounted-stopped-checkpoint.json).
+  Cumulative isolated stores, including earlier failed experiments: build 53 invocations,
+  known API-equivalent USD0.8053464, 33 incomplete estimates; review 39 invocations,
+  known USD0.6016744, 23 incomplete estimates. Incomplete attribution remains visible; these are
+  lower bounds and NOT account charges or complete spend estimates. No missing data was fabricated.
+
+Exact next work:
+1. Exercise real initial paid-admission races and full automatic Context/selection → builder,
+   independent reviewer and recovery launch/refusal paths. Reuse synthetic stores/workloads; stop
+   once factory assertions are satisfied. Do not resume/harden tickets to manufacture acceptance.
+   The six-check service itself is now validated for the two exact final disposable identities.
+2. Complete child broker/execution/accounting, targeted cancellation/subtree recovery, isolated
+   writable children and safe serialized integration, remaining controls and their acceptance matrix.
+   Examine incomplete accounting evidence before making any whole-run cost-completeness claim.
+3. Prepare the full matching runtime package/template (including bundled resource and empty protected
+   /mnt), shared source merge/exact consumer sync, and rollout evidence. Candidate binary-only Astra
+   experiments do not satisfy this launcher's package requirements. Production identities need their
+   own fresh certification; these disposable reports do not authorize them. Live schema5→6 approval,
+   merge, deployment and activation remain James's decisions. Live services/settings unchanged.
+
+Factory checkpoint is the commit containing this section (`git log -1 --oneline`). No push or PR.
+Plans remain intentionally untracked, overall status implementing. Shared remains e3fc8ad.
