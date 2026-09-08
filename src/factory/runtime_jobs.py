@@ -90,6 +90,10 @@ class RuntimeJobs:
             ).fetchone()
             if row is None:
                 raise ValueError("unknown agent lease")
+            from factory.child_certifications import active_for_parent
+
+            if active_for_parent(self.store, row["run_id"], invocation_id):
+                raise ValueError("reconcile child certification before finalizing parent")
             if row["status"] != "active":
                 if row["status"] != status:
                     raise ValueError("terminal agent status is immutable")

@@ -1,14 +1,132 @@
 # Runtime certification and delegation implementation handoff
 
-Status: approved plan implemented; synthetic acceptance, final gates and reviews complete.
-Factory PR [#90](https://github.com/jchen1707/factory/pull/90) is open for review, including the
-README refresh. Shared PRs #39/#40 and final Python #80/frontend #58 are merged.
-James approved schema5→6; live services/settings and the database remain unchanged.
+## Current checkpoint after merged target PR1 (2026-09-08)
+
+The objective remains factory capability validation using bounded synthetic work. Do not
+finish/harden product tickets, resume parked FRO/Backend/nemoclaw work, or redo schema6.
+James authorized this rollout and writer restoration; do not ask again for those approvals.
+
+Target PR1 merged at `16cab7e2a21bf231992a8e49824f970bcac35143`; the live target was fast-forwarded
+cleanly, and its tree exactly matches tested PR head `bd633e2`. Fresh base build/reviewer
+certificates passed all six checks and the no-change application passed. Read-only delegation
+then passed on a fresh mailbox parent and real Luna child: correct README result, clean source,
+20 launches/20 records, three stable accounting replays. The original-parent path was absent
+inside the child as expected; it read the frozen prepared source at the merged commit.
+
+**New blocking defect found and corrected on a separate branch:** when the writable parent
+corrupted its handle and ended, the pending child cancelled but its already-running certifier
+was stranded. The exact malformed-handle refusal is correct; missing certification cancellation
+is the control-plane defect. See [diagnosis and acceptance](runtime-child-certification-cancellation.md).
+Fix workspace `/Users/james/factory-child-certification-cancel`, branch
+`fix/cancel-child-certification`, based on deployed `5a2b0ba`. No live source deployment.
+Reviewed correction `a1ab44a`: focused 58 tests and repeated real zero-model VM cancellation
+pass. Both independent reviews are clear after fixing signal-contract persistence and shared
+interrupt/timeout/cancellation fencing. Final four gates PASS (`artifacts/child-certification-cancel/gates-final.json`): Ruff86ms,
+format70ms, mypy311ms, pytest202449ms; exit0 and empty output tails throughout. Mypy covers
+185 source/test files. Fake-sandbox test limits are supplemented by the real process checks.
+Published as [factory PR91](https://github.com/jchen1707/factory/pull/91). James owns the merge;
+no live source deployment.
+The real test's two VMs were removed and verified absent. No model was called by that test.
+
+Live state: schema6; console HTTP200; writer UNLOADED AND DISABLED. Project automatic
+certification remains selected, Approval mode, read-only delegation, concurrency4,
+cap8/children2/depth1. Writable activation was rolled back to read-only after the failure.
+All three new synthetic live-store runs are CANCELLED, all probes reconciled, no active agent
+leases. Their six VMs are STOPPED with source/thread evidence retained, not removed.
+Earlier two production-cohort VMs from the previous session are also retained stopped.
+
+Private evidence `/Users/james/factory/state/runtime-rollout-merged-20260908/`:
+- `before.db`: consistent pre-continuation backup; never restore over new evidence.
+- Base run `2442549a18dd416a`: `build-job.json`, `review-job.json`, `application-result.json`,
+  `accounting-final.json`, `stopped-vms.json`; 19 launches, known USD0.388198, four incomplete
+  interrupted/compacted records.
+- `read-only/`: run `f7d2401d9ff94a8a`, parent cert `9b47a0209ec542079bb1d3531a5c6d6e`, child
+  `e854f4199253492498a49c893c840c23`/cert `1c7b5957264e4e8bba0c7c716990db21`; known USD0.6377528,
+  four incomplete interrupted/compacted records. Actual parent and child are fully priced.
+- `isolated-write/`: failed run `aa65e9816f434c57`, parent cert `a35233a5781a4e81b25e62114d84f5e2`
+  passed; child `05f7e7bd27604a86a9ce9c28c273414d` certificate `243d9964a0e34439b4216f15c774da18`
+  deliberately retired after owned containment; no child application launched. Full failed
+  parent output, handle replay, signal identity and accounting are retained.
+- First read-only driver attempt configured the parent before creating its accounting record;
+  corrected the fixture ordering to match production. No application launched on that refusal.
+- `preservation-audit.json`: existing rows and other project/existing-run settings unchanged.
+- `final-status.json`: 51 new live invocations, USD1.422172 known total, 11 explicitly incomplete
+  records; no active leases. Failed writable cohort known USD0.3962212 remains included.
+- `intake-preflight.json`: all six ready-labeled FRO/BAC issues remain ineligible, with no
+  block-write reason. No tickets were changed. `final-vm-inventory.json` confirms eight retained
+  production-cohort VMs stopped; the separate zero-model test VMs are absent.
+
+Next steps, in order:
+1. Merge the reviewed cancellation fix after inspecting its PR checks. Do not deploy an
+   unmerged branch to the live writer. No further schema or shared/vendor update is needed.
+2. After merge, fast-forward the live host source while writer is still disabled. Repeat a
+   NEW writable synthetic cohort with exact-handle instructions; do not reuse cancelled runs
+   or overwrite failed evidence. Prepared scripts under `isolated-write/` are historical;
+   create a fresh directory/run and retain prior failures. Real full implementation/integration
+   acceptance already exists; this continuation only needs target rollout validation.
+3. Check actual child result, private writable versus frozen read-only mounts, source preservation,
+   accounting replay and zero active leases; stop only exact owned generations.
+4. Refresh read-only intake assessment (`intake-preflight.py`). Never remove needs-info labels or
+   resume parked tickets to manufacture work. Current authorized target is the disposable project.
+5. Restore writer using `launchctl enable gui/501/com.jchen.factory` then bootstrap
+   `/Users/james/factory/ops/com.jchen.factory.plist`. Console is already loaded. Observe several
+   normal60s ticks, failures/interventions/accounting/capacity. Approval mode remains intentional.
+6. Update this handoff with final merged SHA and actual outcomes. Original unexpected writer
+   bootstrap caller remains unknown; explicit launchd disable is the measured maintenance hold.
+
+## Previous checkpoint (historical)
+
+Status 2026-09-08: merged factory release `5a2b0ba`; schema6 applied and preserved.
+James explicitly authorized production certification, staged delegation activation and writer
+restart in this session. Stage1 is now selected for `factory-crud-verification`: automatic
+certification, Approval mode, delegation disabled, agent cap8, child cap2, depth1; concurrency4
+and all unrelated settings are unchanged. Console remains healthy. Writer is unloaded AND
+launchd-disabled as a maintenance hold; it must be explicitly enabled at the final restart.
+
+Both fresh production-spec build/reviewer generations passed all six checks, and a real
+certified Sol/high no-change application launch passed with source clean. This covers the
+current target main `d99be91`; it does not certify future authority or mailbox mounts.
+Synthetic live-store run `f352f4d144aa4031` is now cancelled after successful acceptance,
+with evidence retained; it is not a Linear ticket and must never be resumed through intake.
+Nineteen paid invocation records match nineteen launch effects. Three accounting replays are
+stable: known API-equivalent USD0.3855512, four deliberately interrupted/compacted records
+remain incomplete. Zero active agent leases. The two exact owned VM generations were stopped,
+with source/thread evidence preserved; do not treat stopped as removed.
+
+**New activation dependency:** the live verification target lacks the delegation request/result
+schemas and read-only/writable child contracts. Child preparation would refuse against its
+current authority. Updated its existing PR1 with canonical vendor generation from merged
+harness `be33f31ca4358a6700e480ba00571eb281a5e62b`; target commit `bd633e2`.
+https://github.com/jchen1707/factory-crud-verification/pull/1
+All10 declared target gates,157 shared tests (no skips), vendor integrity/freshness and CI pass.
+No product implementation or historical ticket changes. James owns that merge.
+Target update worktree: `/Users/james/factory-crud-runtime-rollout`, branch
+`chore/runtime-target-contracts`, pushed normally to existing PR branch `fix/test-design-contracts`.
+Live target checkout remains unchanged. Do not enable children or restart intake before this
+merge and new-authority validation. Automatic certification selection is not automatic approval.
+
+Private evidence: `/Users/james/factory/state/runtime-rollout-20260908/` contains backup,
+settings-before, maintenance/investigation records, package fingerprints, build/reviewer jobs,
+exact approvals/ticks, application result, accounting replay, preservation audit, target gate/
+hook reports, intake assessment and stopped-VM record. Retain scripts and original failures.
+The script initially applied a build-only clone preflight to the reviewer; that fixture misuse
+was corrected without a production code change. First target gate run lacked frontend dependencies;
+frozen install resolved it. Final target gate report is `target-gates-final.json`.
+
+Writer reload investigation: unified log shows distinct bootstrap events at12:45:27.308 and
+12:45:32.900 local. No application bootstrap path found. A harmless neighboring-plist repro
+loaded only the requested console; the original caller remains unidentified. A second harmless
+repro proved `launchctl disable` refuses bootstrap (exit5, job absent). The current maintenance
+hold uses that mechanism. Do not claim a root-cause fix or blame console code without evidence.
+
+Migration evidence remains at `/Users/james/factory/state/backups/runtime-schema6-20260908T164102Z/`.
+All pre-existing history rows still match the pre-rollout backup; only intended project settings
+and new synthetic evidence changed. Existing runs and other project settings are unchanged.
 
 ## Current completion checkpoint
 
 Workspace: `/Users/james/factory-runtime-certification`, branch
-`feat/runtime-certification-and-delegation`. Factory implementation and final acceptance:
+`docs/schema6-applied-20260908`. Factory implementation and final acceptance:
 `c37b6e9` (the current handoff update is documentation only). Approved plan/test-plan files
 remain intentionally untracked. Earlier checkpoint sections below are historical, not pending work.
 
@@ -41,23 +159,32 @@ exact model-versus-process evidence; do not erase those limitations.
 
 ## Remaining operator-owned next steps
 
-1. Review factory PR #90, which includes the README update for main and pins merged shared
-   source `be33f31ca`. Shared and consumer dependencies are merged. Factory remains open for
-   James's review; do not assume it has merged or that the live checkout has advanced.
-2. Review [the concrete rollout](runtime-certification-rollout.md) and JSON package/settings
-   proposals. Copy-only schema5→6 rehearsal preserved all1,892 existing rows; this does not
-   itself authorize deployment. James has now approved schema5→6; retain the required writer
-   stop, verified backup and fresh rehearsal before applying it. Deployment/activation remains
-   a separate step after the release is published.
-3. At the approved window, refresh host/runtime identity, drain work, stop all writers and
-   console, take and verify the exclusive online backup, apply reviewed migration, and restart
-   using the documented checks. Certify each actual production generation before activation.
-4. Enable automatic certification, then read-only and isolated-write delegation only according
-   to that rollout. Preserve project run concurrency4 and unrelated projects/settings. Rollback
-   stops new admissions and preserves history/work; never restore an old DB over new work.
+1. James merges verification target PR1 at `bd633e2` (or inspect its final merge revision).
+   Factory rollout is already authorized; do not ask again for schema or deployment approval.
+2. Fast-forward `/Users/james/factory-crud-verification` only after checking clean state.
+   Verify merged generated contracts, then create a NEW synthetic run with current authority
+   and fresh production specs. Existing snapshot/certificates bind old target main and the
+   disabled-delegation layout; do not rewrite their evidence or repurpose the cancelled run.
+3. Certify the new build/reviewer identities and perform the synthetic launch. Then stage
+   read-only delegation and isolated-write delegation, respecting mailbox preparation and
+   per-child certification. The release's full child/integration acceptance already passed;
+   no product ticket hardening or completion is required. Validate target contract availability
+   before claiming child activation works. Preserve concurrency4, cap8, children2, depth1,
+   routing and other projects. Keep Approval mode through initial observation.
+4. Recheck intake eligibility. This session's actual `assess` found all six ready-labeled
+   tickets ineligible without a block-write reason (FRO12 In Progress+needs-info, BAC tickets
+   Done+needs-info). Do not remove labels or resume parked FRO/nemoclaw work for validation.
+5. Restore writer with `launchctl enable gui/501/com.jchen.factory`, then bootstrap its original
+   plist. Console is already loaded; don't blindly bootstrap it again. Observe several ticks,
+   runtime status, failures, interventions, accounting completeness and capacity. Continue to
+   retain incomplete usage. Root cause of the old reload is unconfirmed; explicit disable is
+   the validated maintenance safeguard.
+6. Retain schema6/history and all evidence. Do not restore the old backup over new records.
+   Stop/remove only exact owned VM generations after checking preservation; no `codex-*` access.
 
-No implementation or synthetic acceptance task remains from this approved plan. No PR was
-opened, no remote merge performed, and no live migration/deployment/activation applied.
+The factory implementation and synthetic feature acceptance remain complete. Staged live
+activation is unfinished because the target dependency merge and refreshed authority are pending.
+Earlier checkpoint sections below are historical.
 
 ## Historical audit and checkpoint log
 

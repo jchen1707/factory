@@ -86,6 +86,9 @@ class AgentLaunches:
                 if prior.external_id != contract:
                     raise ValueError("launch contract is immutable")
                 return False
+            from factory.child_certifications import authorize
+
+            authorize(self.store, invocation, handle)
             delegation = self.store.runtime.db.execute(
                 "SELECT id,parent_id,request FROM delegation_requests WHERE child_id=?",
                 (invocation_id,),

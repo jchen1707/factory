@@ -359,8 +359,10 @@ class CertificationProbeDriver:
             store = self.certifications.store
             invocation = "certification:" + job["id"] + ":" + step
             with store.runtime.transaction():
-                if store.find_effect(
-                    handle.run_id, handle.attempt, invocation, "certification", "timeout"
+                from factory.certification_signals import probe_may_signal
+
+                if not probe_may_signal(
+                    store, job["id"], handle.run_id, handle.attempt, invocation
                 ):
                     return
                 store.intend_effect(
@@ -394,10 +396,9 @@ class CertificationProbeDriver:
         store = self.certifications.store
         invocation = "certification:" + job["id"] + ":" + step
         with store.runtime.transaction():
-            prior = store.find_effect(
-                handle.run_id, handle.attempt, invocation, "certification", "interrupt"
-            )
-            if prior is not None:
+            from factory.certification_signals import probe_may_signal
+
+            if not probe_may_signal(store, job["id"], handle.run_id, handle.attempt, invocation):
                 return
             _write(
                 self._host(job) / "interruption.json",
