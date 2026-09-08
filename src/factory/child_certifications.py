@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from factory import certification_signals
 from factory.agent.app_server_worker import read_mailbox
 from factory.agent_launches import AgentLaunches, DetachedExecution
 from factory.execution import ProjectQueued
@@ -106,7 +107,7 @@ def reconcile(store: Store, sandbox: DetachedExecution, run_id: str) -> None:
             ):
                 continue
             owner = (run_id, row["attempt"], row["id"], "child-certification-cancel", "signal")
-            if store.find_effect(*owner) is not None:
+            if certification_signals.recorded(store, run_id, row["attempt"], row["id"]):
                 continue
             generation = getattr(sandbox, "generation", None)
             execute = getattr(sandbox, "exec_sync", None)
@@ -138,8 +139,13 @@ def reconcile(store: Store, sandbox: DetachedExecution, run_id: str) -> None:
                 {"sandbox": handle.sandbox, "generation": identity["generation"], "pgid": pgid}
             )
             with store.runtime.transaction():
-                if store.find_effect(*owner) is not None:
+                if certification_signals.recorded(store, run_id, row["attempt"], row["id"]):
                     continue
                 store.intend_effect(*owner)
+                store.runtime.db.execute(
+                    "UPDATE effects SET external_id=? WHERE run_id=? AND attempt=? AND step=? "
+                    "AND system=? AND key=?",
+                    (contract, *owner),
+                )
             signal(handle.sandbox, pgid)
             store.confirm_effect(*owner, contract)

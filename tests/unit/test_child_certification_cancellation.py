@@ -32,7 +32,9 @@ class ProbeSandbox(SignallingSandbox):
 
 
 @pytest.mark.parametrize("parent_ended", [False, True])
-@pytest.mark.parametrize("refusal", ["none", "generation", "process", "lost-ack"])
+@pytest.mark.parametrize(
+    "refusal", ["none", "generation", "process", "lost-ack", "prior-interrupt", "prior-timeout"]
+)
 def test_cancelled_request_drains_certifier_without_touching_sibling(
     tmp_path: Path, refusal: str, parent_ended: bool
 ) -> None:
@@ -94,6 +96,10 @@ def test_cancelled_request_drains_certifier_without_touching_sibling(
     )
     directory.mkdir()
     (directory / "pgid").write_text("123")
+    if refusal.startswith("prior-"):
+        store.intend_effect(
+            request["run_id"], 1, identifier, "certification", refusal.removeprefix("prior-")
+        )
     broker.cancel(request["id"])
     from factory.execution import ProjectQueued
 
@@ -132,7 +138,18 @@ def test_cancelled_request_drains_certifier_without_touching_sibling(
         sandbox.current_generation = "host-generation-one"
         sandbox.process_present = True
     reconcile_run(store, tmp_path, sandbox, request["run_id"], "synthetic")
-    assert sandbox.signals == [(name, 123)]
+    assert sandbox.signals == ([] if refusal.startswith("prior-") else [(name, 123)])
+    if refusal == "lost-ack":
+        pending_signal = store.find_effect(
+            request["run_id"], 1, identifier, "child-certification-cancel", "signal"
+        )
+        assert pending_signal is not None
+        assert pending_signal.status == "intended"
+        assert json.loads(pending_signal.external_id or "{}") == {
+            "sandbox": name,
+            "generation": "host-generation-one",
+            "pgid": 123,
+        }
     retired = jobs.certification(job["id"])
     assert retired is not None
     assert retired["status"] == "failed"
@@ -143,7 +160,7 @@ def test_cancelled_request_drains_certifier_without_touching_sibling(
 
     store = Store(tmp_path / "factory.db")
     reconcile_run(store, tmp_path, sandbox, request["run_id"], "synthetic")
-    assert sandbox.signals == [(name, 123)]
+    assert sandbox.signals == ([] if refusal.startswith("prior-") else [(name, 123)])
     (directory / "events").write_text(
         json.dumps({"type": "turn.completed", "usage": {"input_tokens": 12, "output_tokens": 3}})
         + "\n"

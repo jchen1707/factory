@@ -217,3 +217,55 @@ def test_detached_capture_is_host_owned_and_never_truncated(
     with pytest.raises(FileExistsError):
         SbxAdapter().exec_detached(handle, "true", {}, stdout_path=host_capture)
     assert len(spawned) == 1
+
+
+@pytest.mark.parametrize(
+    "fence", ["cancel-intent", "interrupt-intent", "timeout-intent", "retired"]
+)
+def test_timeout_does_not_resignal_after_cancellation_or_uncertain_interrupt(
+    driver: CertificationProbeDriver, monkeypatch: pytest.MonkeyPatch, fence: str
+) -> None:
+    import os
+    import time
+    from types import SimpleNamespace
+
+    from factory.runtime_jobs import RuntimeJobs
+    from factory.sandbox.base import RunHandle, RunStatus
+    from tests.unit.test_certification import identity
+
+    store = driver.certifications.store
+    run = store.insert_run(linear_id="SYN-SIGNAL", project="synthetic", team="SYN")
+    job = driver.certifications.request(run.id, identity())
+    jobs = RuntimeJobs(store)
+    token = jobs.claim_certification(job["id"], now=time.time(), duration=60)
+    assert token is not None
+    directory = driver._attempt(job, "canary")
+    directory.mkdir(parents=True)
+    (directory / "pgid").write_text("123")
+    (directory / "sbx-exec.pid").write_text("123")
+    expired = time.time() - 400
+    os.utime(directory / "sbx-exec.pid", (expired, expired))
+    driver._host(job).mkdir(parents=True)
+    driver._events_path(job, "canary").write_text("")
+    identifier = "certification:" + job["id"] + ":canary"
+    if fence == "retired":
+        jobs.finish_certification(
+            job["id"], token, now=time.time(), failure="child request cancelled"
+        )
+    else:
+        system, key = (
+            ("child-certification-cancel", "signal")
+            if fence == "cancel-intent"
+            else ("certification", fence.removesuffix("-intent"))
+        )
+        store.intend_effect(run.id, 1, identifier, system, key)
+    signals: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        driver,
+        "sandbox",
+        SimpleNamespace(kill_group=lambda name, pgid: signals.append((name, pgid))),
+    )
+    monkeypatch.setattr(driver, "_owned_group", lambda handle: 123)
+    handle = RunHandle(run.id, 1, identity().sandbox, str(directory), directory)
+    driver.advance(job, "canary", handle, RunStatus.RUNNING)
+    assert signals == []
