@@ -70,8 +70,8 @@ def test_project_ceiling_and_child_limits_cannot_be_bypassed(tmp_path: Path) -> 
         },
     )
     store.runtime.configure("run", run.id, {"max_active_agents": 3})
-    with pytest.raises(ValueError, match="project"):
-        jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
+    # A retained run choice cannot prevent a newly lowered project ceiling draining.
+    assert store.runtime.effective("synthetic", run.id)["max_active_agents"] == 2
     store.runtime.configure("run", run.id, {"max_active_agents": 2})
     assert jobs.schedule_agent("child", parent_id="parent", usd_limit=10, max_attempts=2)
     assert not jobs.schedule_agent("extra", parent_id="parent", usd_limit=10, max_attempts=2)
@@ -91,6 +91,12 @@ def test_malformed_agent_limits_refuse_admission(tmp_path: Path, field: str, val
     run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
     store.runtime.start_invocation("parent", run.id, 1, "builder", {})
     store.runtime.configure("project", "synthetic", {field: value})
+    if value is None:
+        # Public null means inherit; malformed persisted null must still fail closed.
+        store.runtime.db.execute(
+            "UPDATE operator_settings SET settings=json_set(settings,?,NULL) WHERE scope='project' AND owner='synthetic'",
+            ("$." + field,),
+        )
     jobs = RuntimeJobs(store)
     with pytest.raises(ValueError, match="positive integer"):
         jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
@@ -243,4 +249,67 @@ def test_expired_certifier_cannot_publish_after_another_owner_claims(tmp_path: P
     result = jobs.certification(job["id"])
     assert result is not None
     assert result["status"] == "passed"
+    store.close()
+
+
+def test_four_parents_keep_progress_capacity_for_children_and_certifiers(tmp_path: Path) -> None:
+    store = Store(tmp_path / "factory.db")
+    jobs = RuntimeJobs(store)
+    store.runtime.configure(
+        "project", "synthetic", {"delegation_mode": "read-only", "max_active_agents": 8}
+    )
+    runs = [
+        store.insert_run(linear_id=f"SYN-{n}", project="synthetic", team="SYN") for n in range(4)
+    ]
+    for n, run in enumerate(runs):
+        for name, role in ((f"parent-{n}", "builder"), (f"child-{n}", "documenter")):
+            store.runtime.start_invocation(name, run.id, 1, role, {})
+        assert jobs.schedule_agent(f"parent-{n}", usd_limit=10, max_attempts=2)
+    store.runtime.start_invocation("reviewer", runs[0].id, 1, "reviewer", {})
+    assert not jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
+    store.runtime.start_invocation("probe", runs[0].id, 1, "certification", {})
+    assert jobs.schedule_agent("probe", usd_limit=10, max_attempts=2)
+    for n in range(1, 4):
+        assert jobs.schedule_agent(
+            f"child-{n}", parent_id=f"parent-{n}", usd_limit=10, max_attempts=2
+        )
+    assert len(jobs.active_agents("synthetic")) == 8
+    jobs.finish_agent("probe", status="completed")
+    # An eager sibling cannot take the progress lane released by the certifier.
+    store.runtime.start_invocation("second-child", runs[1].id, 1, "documenter", {})
+    assert not jobs.schedule_agent(
+        "second-child", parent_id="parent-1", usd_limit=10, max_attempts=2
+    )
+    assert jobs.schedule_agent("child-0", parent_id="parent-0", usd_limit=10, max_attempts=2)
+    for n in range(4):
+        jobs.finish_agent(f"child-{n}", status="completed")
+        jobs.finish_agent(f"parent-{n}", status="completed")
+    assert jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
+    store.close()
+
+
+def test_delegating_builder_needs_progress_capacity_before_consuming_approval(
+    tmp_path: Path,
+) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.configure(
+        "project",
+        "synthetic",
+        {"max_active_agents": 1, "delegation_mode": "read-only", "mode": "approval"},
+    )
+    store.runtime.start_invocation("parent", run.id, 1, "implement", {"semantic_role": "builder"})
+    store.runtime.approve(run.id, "parent")
+    jobs = RuntimeJobs(store)
+    assert not jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert jobs.active_agents("synthetic") == []
+    assert store.runtime.settings("run", run.id)["approved_invocation"] == "parent"
+    store.runtime.configure("project", "synthetic", {"max_active_agents": 2})
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert store.runtime.settings("run", run.id)["approved_invocation"] is None
+    # Lowering the ceiling preserves the paid parent. Resuming does not admit it twice.
+    store.runtime.configure("run", run.id, {"max_active_agents": 2})
+    store.runtime.configure("project", "synthetic", {"max_active_agents": 1})
+    assert jobs.schedule_agent("parent", usd_limit=10, max_attempts=2)
+    assert len(jobs.active_agents("synthetic")) == 1
     store.close()

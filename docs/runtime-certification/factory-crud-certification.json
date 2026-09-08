@@ -1,0 +1,9 @@
+{
+  "binary": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
+  "source": "/Users/james/factory/state/runtime-contracts/cada9f200/plugins/harness/workflows/runtime-certification/probes.json",
+  "model": "gpt-5.6-sol",
+  "alternate_model": "gpt-5.6-terra",
+  "effort": "low",
+  "usage_scope": "connection",
+  "canary_path": "packages/contracts/openapi.json"
+}

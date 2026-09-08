@@ -738,3 +738,85 @@ def test_saving_mode_does_not_replace_the_displayed_run_policy(ctx: Context) -> 
     retained = ctx.store.runtime.policy(ctx.run.id)
     assert retained is not None
     assert retained["revision"] == 1
+
+
+def test_delegation_settings_and_certification_status_are_operator_visible(ctx: Context) -> None:
+    from factory.runtime_jobs import RuntimeJobs
+
+    client = _client(ctx)
+    response = client.post(
+        f"/settings/projects/{ctx.run.project}",
+        data={
+            "delegation_mode": "read-only",
+            "max_active_agents": "4",
+            "max_children_per_parent": "2",
+            "max_delegation_depth": "1",
+        },
+    )
+    assert response.status_code == 200
+    response = client.post(f"/settings/runs/{ctx.run.linear_id}", data={"max_active_agents": "5"})
+    assert response.status_code == 409
+    job = RuntimeJobs(ctx.store).request_certification(ctx.run.id, {"synthetic": True})
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
+    assert job["id"] in page
+    assert "pending" in page
+    assert 'name="delegation_mode"' in page
+    assert "0 active agents" in page
+    assert "incomplete" in page
+    response = client.post(f"/settings/runs/{ctx.run.linear_id}", data={"max_active_agents": "2"})
+    assert response.status_code == 200
+    response = client.post(f"/settings/runs/{ctx.run.linear_id}", data={"max_active_agents": ""})
+    assert response.status_code == 200
+    assert "max_active_agents" not in ctx.store.runtime.settings("run", ctx.run.id)
+
+
+@pytest.mark.parametrize("scope", ["projects", "runs"])
+def test_refused_settings_preserve_values_and_accessible_retry(ctx: Context, scope: str) -> None:
+    owner = ctx.run.project if scope == "projects" else ctx.run.linear_id
+    settings_scope = "project" if scope == "projects" else "run"
+    settings_owner = ctx.run.project if scope == "projects" else ctx.run.id
+    before = ctx.store.runtime.settings(settings_scope, settings_owner)
+    submitted = {
+        "mode": "approval",
+        "model_preset": "volume",
+        "delegation_mode": "read-only",
+        "max_active_agents": '<script>alert("x")</script>',
+        "max_children_per_parent": "3",
+        "max_delegation_depth": "1",
+        "concurrency": "4",
+        "certification_config": '/safe/a" autofocus onfocus="alert(1)',
+    }
+    response = _client(ctx).post(f"/settings/{scope}/{owner}", data=submitted)
+    assert response.status_code == 409
+    page = response.text
+    assert f'<form method="post" action="/settings/{scope}/{owner}"' in page
+    assert 'id="settings-error" role="alert" tabindex="-1" autofocus' in page
+    assert 'aria-describedby="settings-error"' in page
+    assert '<option value="approval" selected>' in page
+    assert '<option value="volume" selected>' in page
+    assert '<option value="read-only" selected>' in page
+    assert 'name="max_active_agents" type="text" inputmode="numeric"' in page
+    assert 'value="&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"' in page
+    assert 'value="3"' in page
+    assert "<script>alert(" not in page
+    assert "<button>Save settings</button>" in page
+    if scope == "projects":
+        assert 'name="concurrency" type="text" inputmode="numeric" value="4"' in page
+        assert 'value="/safe/a&quot; autofocus onfocus=&quot;alert(1)"' in page
+    assert ctx.store.runtime.settings(settings_scope, settings_owner) == before
+
+
+def test_refused_settings_preserve_unknown_choice_and_accept_correction(ctx: Context) -> None:
+    client = _client(ctx)
+    action = f"/settings/projects/{ctx.run.project}"
+    response = client.post(action, data={"delegation_mode": "Unknown<&", "max_active_agents": "8"})
+    assert response.status_code == 409
+    assert (
+        '<option value="Unknown&lt;&amp;" selected>Unknown&lt;&amp; (invalid)</option>'
+        in response.text
+    )
+    assert '<label>Delegation <select name="delegation_mode">' in response.text
+    assert 'tabindex="1"' not in response.text
+    saved = client.post(action, data={"delegation_mode": "read-only", "max_active_agents": "8"})
+    assert saved.status_code == 200
+    assert ctx.store.runtime.settings("project", ctx.run.project)["delegation_mode"] == "read-only"

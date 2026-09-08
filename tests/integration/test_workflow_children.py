@@ -20,7 +20,7 @@ def test_child_service_leaves_disabled_projects_unchanged(ctx: Context) -> None:
     assert not (ctx.home / "state/children").exists()
 
 
-def prepared(ctx: Context, *, child_contract: bool = True) -> None:
+def prepared(ctx: Context, *, child_contract: bool = True, writable_contract: bool = False) -> None:
     source_root = Path(__file__).parents[2]
     for name in ("hooks/delivery_policy.mjs", "docs/agents/delivery-review.md"):
         target = ctx.project.path / ".agents/vendor/harness" / name
@@ -48,6 +48,10 @@ def prepared(ctx: Context, *, child_contract: bool = True) -> None:
     )
     if not child_contract:
         target.unlink()
+    if writable_contract:
+        target.with_name("delegation-child-write.md").write_text(
+            "Execute this admitted isolated task only in its declared paths. Return the result schema."
+        )
     claim.run(ctx)
     context.run(ctx)
     sandbox.run(ctx)

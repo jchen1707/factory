@@ -16,6 +16,23 @@ if TYPE_CHECKING:
 
 
 def prepare_parent(ctx: Context, attempt: int, *, resume_session: str | None = None) -> None:
+    pending = ctx.store.runtime.db.execute(
+        "SELECT d.id,d.request,p.attempt FROM delegation_requests d "
+        "JOIN invocations p ON p.id=d.parent_id WHERE d.run_id=? AND d.status='completed'",
+        (ctx.run.id,),
+    ).fetchall()
+    import json
+
+    for request in pending:
+        if json.loads(request["request"])["task"]["mode"] == "isolated-write":
+            completed = ctx.store.find_effect(
+                ctx.run.id, request["attempt"], request["id"], "child-integration", "complete"
+            )
+            if completed is None or completed.status != "confirmed":
+                raise Blocked(
+                    "child-integration-pending",
+                    "Integrate retained child work before another writer",
+                )
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     mode = settings.get("delegation_mode", "disabled")
     if mode == "disabled":

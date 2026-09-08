@@ -138,11 +138,13 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
     from factory.store import Store
     from tests.integration.test_pipeline import _fake
 
-    ctx.store.runtime.configure("project", ctx.project.name, {"max_active_agents": 1})
+    ctx.store.runtime.configure(
+        "project", ctx.project.name, {"max_active_agents": 2 if delegation else 1}
+    )
     other = ctx.store.insert_run(linear_id="CERT-OCCUPIED", project=ctx.project.name, team="SYN")
-    ctx.store.runtime.start_invocation("occupied", other.id, 1, "builder", {})
+    ctx.store.runtime.start_invocation("occupied", other.id, 1, "reviewer", {})
     jobs = RuntimeJobs(ctx.store)
-    jobs.schedule_agent("occupied", usd_limit=10, max_attempts=3)
+    assert jobs.schedule_agent("occupied", usd_limit=10, max_attempts=3)
     with pytest.raises(ProjectQueued):
         implement.start(ctx)
     identifier = ctx.store.runtime.settings("run", ctx.run.id)["waiting_invocation"]

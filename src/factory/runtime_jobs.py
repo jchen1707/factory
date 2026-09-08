@@ -147,7 +147,7 @@ class RuntimeJobs:
 
                 raise ProjectQueued("certification owner is not active")
             project_settings = self.runtime.settings("project", run.project)
-            settings = project_settings | self.runtime.settings("run", run.id)
+            settings = self.runtime.effective(run.project, run.id)
             limits = {}
             for field, default in (
                 ("max_active_agents", 8),
@@ -218,7 +218,16 @@ class RuntimeJobs:
                     or invocation["attempt"] != parent_invocation["attempt"]
                 ):
                     raise ValueError("child must retain its parent's attempt")
-            if len(self.active_agents(run.project)) >= limits["max_active_agents"]:
+            active = self.active_agents(run.project)
+            candidate = {
+                "invocation_id": invocation_id,
+                "run_id": run.id,
+                "parent_id": parent_id,
+            }
+            if (
+                len(active) + 1 + self._progress_reservations(run.project, [*active, candidate])
+                > limits["max_active_agents"]
+            ):
                 return False
             self.runtime.db.execute(
                 "INSERT INTO agent_leases VALUES (?,?,?,'active',?)",
@@ -235,6 +244,38 @@ class RuntimeJobs:
                     "run", run.id, "approval-consumed", {"invocation": invocation_id}
                 )
             return True
+
+    def _progress_reservations(self, project: str, agents: list[dict[str, Any]]) -> int:
+        """Keep a first-child lane for every delegating builder, atomically with admission.
+
+        Certification in the same run may occupy that lane while preparing the child.
+        Further children and unrelated invocations use spare capacity only. A parent
+        waiting on a child therefore cannot have its final progress slot taken by a
+        new parent, a reviewer, or another parent's second child. Reservations are
+        derived from durable leases; controller restart does not lose them.
+        """
+        reserved = 0
+        for agent in agents:
+            if agent["parent_id"] is not None:
+                continue
+            invocation = self.runtime.invocation(agent["invocation_id"])
+            if invocation is None:
+                raise ValueError("agent lease has no invocation")
+            role = invocation["metadata"].get("semantic_role", invocation["role"])
+            settings = self.runtime.effective(project, agent["run_id"])
+            if role != "builder" or settings.get("delegation_mode", "disabled") == "disabled":
+                continue
+            occupied = any(other["parent_id"] == agent["invocation_id"] for other in agents)
+            if not occupied:
+                for other in agents:
+                    if other["run_id"] != agent["run_id"]:
+                        continue
+                    other_invocation = self.runtime.invocation(other["invocation_id"])
+                    if other_invocation is not None and other_invocation["role"] == "certification":
+                        occupied = True
+                        break
+            reserved += not occupied
+        return reserved
 
     def claim_certification(self, job_id: str, *, now: float, duration: float) -> str | None:
         import math

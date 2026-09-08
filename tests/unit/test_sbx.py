@@ -857,3 +857,50 @@ def test_cleanup_never_contacts_a_human_sandbox(
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(PermissionError):
         getattr(SbxAdapter(), operation)("codex-human-session")
+
+
+@pytest.mark.parametrize(
+    ("clone", "ports", "expected"),
+    [
+        (True, ["127.0.0.1:49248->9418/tcp"], ["127.0.0.1:<dynamic-clone-git>->9418/tcp"]),
+        (True, ["127.0.0.1:49249->9418/tcp"], ["127.0.0.1:<dynamic-clone-git>->9418/tcp"]),
+        (False, ["127.0.0.1:49249->9418/tcp"], ["127.0.0.1:49249->9418/tcp"]),
+        (True, ["0.0.0.0:49249->9418/tcp"], ["0.0.0.0:49249->9418/tcp"]),
+        (True, ["127.0.0.1:49249->9419/tcp"], ["127.0.0.1:49249->9419/tcp"]),
+        (True, ["127.0.0.1:49249->9418/udp"], ["127.0.0.1:49249->9418/udp"]),
+        (True, ["127.0.0.1:65536->9418/tcp"], ["127.0.0.1:65536->9418/tcp"]),
+        (True, ["127.0.0.1:0->9418/tcp"], ["127.0.0.1:0->9418/tcp"]),
+        (True, ["127.0.0.1:49249->8000/tcp"], ["127.0.0.1:49249->8000/tcp"]),
+        (
+            True,
+            ["127.0.0.1:49249->9418/tcp", "127.0.0.1:49250->8000/tcp"],
+            ["127.0.0.1:<dynamic-clone-git>->9418/tcp", "127.0.0.1:49250->8000/tcp"],
+        ),
+    ],
+)
+def test_clone_observation_preserves_port_exposure(
+    monkeypatch: pytest.MonkeyPatch, clone: bool, ports: list[str], expected: list[str]
+) -> None:
+    import json
+
+    adapter = SbxAdapter()
+    monkeypatch.setattr(adapter, "observe_runtime", lambda *a, **kw: {"generation": "fixed"})
+    monkeypatch.setattr(adapter, "inspect", lambda *a: {"kits": [], "ports": ports})
+    actual = {
+        "mounts": [],
+        "environment_sha256": "a" * 64,
+        "configurations": {},
+        "hooks": {},
+        "credential_names": [],
+        "launcher_sha256": "b" * 64,
+        "code_host_sha256": "c" * 64,
+        "native_mount": {},
+    }
+    monkeypatch.setattr(
+        adapter, "exec_sync", lambda *a, **kw: Completed((), 0, json.dumps(actual), "")
+    )
+    observed = adapter.observe_certification(
+        _spec(clone=clone), binary="/opt/codex", workdir="/workspace", env={}, hook_files={}
+    )
+    assert observed["actual"]["configuration"]["ports"] == expected
+    assert "<dynamic-clone-git>" not in str(ports)

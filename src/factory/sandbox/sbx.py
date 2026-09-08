@@ -52,6 +52,34 @@ SBX_EXEC_PID = "sbx-exec.pid"
 #: every start, so it is looked up rather than remembered; this is the stable half.
 GIT_DAEMON_PORT = 9418
 
+
+def _certification_configuration(info: dict[str, Any], *, clone: bool) -> dict[str, Any]:
+    """Keep exposure identity while allowing sbx's internal clone Git forwarding to move.
+
+    Docker reassigns this loopback host port whenever the same clone VM starts. It
+    is a transport locator, like the URL resolved by git_daemon_url, not a sandbox
+    capability. Preserve every endpoint, interface, protocol and other port mapping.
+    """
+    volatile = {"state", "sessions", "uptime", "daemon_uptime"}
+    configuration = {k: v for k, v in info.items() if k not in volatile}
+    ports = configuration.get("ports")
+    if clone and isinstance(ports, list):
+        normalized = []
+        for port in ports:
+            match = (
+                re.fullmatch(rf"127\.0\.0\.1:([0-9]{{1,5}})->{GIT_DAEMON_PORT}/tcp", port)
+                if isinstance(port, str)
+                else None
+            )
+            normalized.append(
+                f"127.0.0.1:<dynamic-clone-git>->{GIT_DAEMON_PORT}/tcp"
+                if match and 1 <= int(match[1]) <= 65535
+                else port
+            )
+        configuration["ports"] = normalized
+    return configuration
+
+
 #: The prefix `sbx secret set-custom` gives its substitution placeholders. Not a
 #: credential: the real value stays on the host and the proxy swaps this string into the
 #: outbound request. Named for the prefix rather than for what it stands in for, because
@@ -352,9 +380,8 @@ class SbxAdapter:
             raise SbxError("sandbox certification observation failed") from exc
         # Stable inspect properties only: session counts, uptime and state are liveness,
         # not identity. Include all remaining properties so unknown configuration drifts.
-        volatile = {"state", "sessions", "uptime", "daemon_uptime"}
-        configuration = {k: v for k, v in info.items() if k not in volatile}
-        current = {k: v for k, v in self.inspect(spec.name).items() if k not in volatile}
+        configuration = _certification_configuration(info, clone=spec.clone)
+        current = _certification_configuration(self.inspect(spec.name), clone=spec.clone)
         after = self.observe_runtime(spec.name, binary=binary, workdir=workdir, env=env)
         if before != after or current != configuration:
             changed = sorted(

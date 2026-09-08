@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from pathlib import Path
+from typing import cast
 
+from factory import child_workspaces
 from factory.agent.app_server_worker import read_mailbox
 from factory.agent.base import SchemaInvalid, validate_against_schema
+from factory.agent_launches import AgentLaunches, DetachedExecution
 from factory.delegation import MAX_REQUEST_BYTES, DelegationBroker
+from factory.sandbox.child_source import SourceSandbox, capture
 from factory.store import Store
 
 
-def collect(store: Store, run_id: str) -> None:
+def collect(store: Store, run_id: str, sandbox: DetachedExecution | None = None) -> None:
     requests = store.runtime.db.execute(
         "SELECT d.* FROM delegation_requests d JOIN agent_leases a ON a.invocation_id=d.child_id "
         "AND a.parent_id=d.parent_id AND a.run_id=d.run_id "
@@ -33,7 +39,37 @@ def collect(store: Store, run_id: str) -> None:
                 > MAX_REQUEST_BYTES
             ):
                 raise ValueError("canonical result exceeds size limit")
-        except (OSError, ValueError, SchemaInvalid):
+            if invocation["metadata"].get("child_mode") == "isolated-write":
+                task = json.loads(request["request"])["task"]
+                owner = (
+                    run_id,
+                    invocation["attempt"],
+                    request["id"],
+                    "child-workspace",
+                    "artifact",
+                )
+                retained = store.find_effect(*owner)
+                if retained and retained.status == "confirmed":
+                    encoded = retained.external_id or "{}"
+                else:
+                    if sandbox is None or not callable(getattr(sandbox, "exec_sync", None)):
+                        raise ValueError("writable child requires its recorded sandbox")
+                    handle = AgentLaunches(store, sandbox).handle(invocation["id"])
+                    workspace = invocation["metadata"]["child_workspace"]
+                    if handle.workdir != workspace["path"]:
+                        raise ValueError("child source does not match recorded launch")
+                    exported = capture(
+                        cast(SourceSandbox, sandbox), handle.sandbox, Path(handle.workdir)
+                    )
+                    artifact = child_workspaces.artifact(workspace, task["paths"], exported)
+                    encoded = json.dumps(artifact, sort_keys=True)
+                    store.intend_effect(*owner)
+                    store.confirm_effect(*owner, encoded)
+                result["artifact"] = {
+                    "sha256": hashlib.sha256(encoded.encode()).hexdigest(),
+                    "status": "awaiting-parent-drain",
+                }
+        except (OSError, ValueError, SchemaInvalid, subprocess.SubprocessError):
             result = None
             failed = True
         DelegationBroker(

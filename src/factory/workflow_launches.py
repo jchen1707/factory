@@ -169,7 +169,7 @@ def reconcile_run(
     from factory import delegation_cancellation, delegation_results
 
     delegation_cancellation.reconcile(store, sandbox, run_id)
-    delegation_results.collect(store, run_id)
+    delegation_results.collect(store, run_id, sandbox)
     launches = AgentLaunches(store, sandbox)
     active = RuntimeJobs(store).active_agents(project)
     for lease in sorted(active, key=lambda row: row["parent_id"] is None):
@@ -207,7 +207,7 @@ def reconcile_run(
         )
 
     delegation_cancellation.reconcile(store, sandbox, run_id)
-    delegation_results.collect(store, run_id)
+    delegation_results.collect(store, run_id, sandbox)
 
 
 def stop_orphans(ctx: Context) -> None:

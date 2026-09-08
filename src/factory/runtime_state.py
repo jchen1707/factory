@@ -58,6 +58,14 @@ class RuntimeState:
         with self.transaction():
             settings = self.settings(scope, owner)
             settings.update(changes)
+            for field in (
+                "delegation_mode",
+                "max_active_agents",
+                "max_children_per_parent",
+                "max_delegation_depth",
+            ):
+                if field in changes and changes[field] is None:
+                    settings.pop(field, None)
             self.db.execute(
                 "INSERT INTO operator_settings VALUES (?,?,?,1) "
                 "ON CONFLICT(scope,owner) DO UPDATE SET settings=excluded.settings, "
@@ -67,7 +75,38 @@ class RuntimeState:
             self.audit(scope, owner, "configure", changes)
 
     def effective(self, project: str, run: str) -> dict[str, Any]:
-        return self.settings("project", project) | self.settings("run", run)
+        project_settings = self.settings("project", project)
+        settings = project_settings | self.settings("run", run)
+        # Project reductions drain already admitted work; subsequent admissions use
+        # the lower ceiling without rewriting the operator's retained run choices.
+        for field, default in (
+            ("max_active_agents", 8),
+            ("max_children_per_parent", 2),
+            ("max_delegation_depth", 1),
+        ):
+            ceiling = project_settings.get(field, default)
+            value = settings.get(field, ceiling)
+            if (
+                type(ceiling) is int
+                and ceiling > 0
+                and type(value) is int
+                and value > 0
+                and field in settings
+                and (field != "max_delegation_depth" or value == ceiling == 1)
+            ):
+                settings[field] = min(value, ceiling)
+        modes = {"disabled": 0, "read-only": 1, "isolated-write": 2}
+        ceiling = project_settings.get("delegation_mode", "disabled")
+        value = settings.get("delegation_mode", ceiling)
+        if (
+            isinstance(ceiling, str)
+            and isinstance(value, str)
+            and ceiling in modes
+            and value in modes
+            and modes[value] > modes[ceiling]
+        ):
+            settings["delegation_mode"] = ceiling
+        return settings
 
     def audit(self, scope: str, owner: str, action: str, payload: dict[str, Any]) -> None:
         self.db.execute(

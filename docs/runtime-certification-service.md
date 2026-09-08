@@ -1,10 +1,11 @@
 # Automatic sandbox certification
 
-Implementation is opt-in. Production rollout and complete workflow/child acceptance are
-pending; see runtime-certification-implementation-handoff.md for measured scope and remaining work.
-The native helper fix passed all six checks in both disposable build and reviewer sandboxes.
-Certificates from previous workers and other sandbox identities remain unusable for this build.
-Full workflow/child acceptance and production rollout checks remain unfinished; see the handoff.
+Implementation is opt-in. Build/reviewer compatibility, workflow launch/recovery and read-only
+child execution have real disposable evidence. The [acceptance report](runtime-certification-completion-acceptance.md)
+and [handoff](runtime-certification-implementation-handoff.md) identify the final writable and
+lifecycle results separately. Use the [rollout procedure](runtime-certification-rollout.md) for
+the concrete deployment proposal. A previous worker or another sandbox's certificate never
+authorizes the current launch.
 
 `factory configure --project PROJECT --agent-adapter app-server --certification-mode automatic
 --certification-config /absolute/host/config.json` selects automatic certification for new runs.
@@ -21,15 +22,17 @@ The host JSON has exactly these string fields:
   "model": "gpt-5.6-sol",
   "alternate_model": "gpt-5.6-terra",
   "effort": "low",
-  "usage_scope": "thread",
+  "usage_scope": "connection",
   "canary_path": "existing-protected-file"
 }
 ```
 
 Use the measured binary, model support and counter scope for the intended runtime. This example
 does not certify them. The source contract belongs to harness@v2 and must arrive through its normal
-merged-source distribution. The disposable acceptance uses an explicit unmerged source checkout;
-no consumer freshness or production rollout is implied.
+merged-source distribution. The disposable acceptance freezes an explicit local source revision;
+prepared consumer commits have integrity and generation checks, but remote publication/freshness
+and production rollout remain separate. Codex 0.153.4 was measured with connection-local usage;
+retain thread scope for previously certified runtimes where that is the observed behavior.
 
 Automatic application selection requires an immutable authority snapshot containing runtime hook
 wiring. Older snapshots without `.codex/hooks.json` refuse automatic certification; replace policy
@@ -38,6 +41,15 @@ built by the existing builder/reviewer spec functions. Fresh observations bind g
 native bytes, actual mounts/environment/configuration, requested layout, trusted authority/hooks,
 probe contract/parameters and execution-helper revisions. Liveness fields such as uptime do not
 change identity. Missing or mismatched observations refuse launch.
+
+Before the first paid certification, a durable zero-turn preparation settles native project
+initialization in the VM's private Codex home. On 0.153.4, native `thread/start` writes project
+trust even when a request supplies trust overrides. Preparation uses the sealed native binary,
+admits no model turn, refuses explicit distrust/unexpected configuration changes, and retains
+before/after identities. The resulting configuration is still fully fingerprinted. This never
+edits the host's trust store. Frozen application launches only observe their original identity;
+they cannot run preparation to repair a mismatch. Uncertain preparation acknowledgements hold
+with retained ownership instead of starting another thread after restart.
 
 Each controller tick requests/reuses one fingerprinted job and advances at most one new paid phase.
 The nine source-declared phases cover canary/schema, interruption/durability, recovery and usage
@@ -63,8 +75,9 @@ settings, and per-phase invocation/approval/accounting evidence in the existing 
 separate unattended application or migration is needed: workflow selection/driver ticks resume it.
 The schema 5→6 live migration, shared merge/sync and activation remain separately owned rollout work.
 
-Certified native launch additionally fingerprints the packaged `codex-resources/bwrap` resource
-beside the runtime's `bin` directory. Both executables are hash-checked into sealed snapshots.
+Certified native launch fingerprints the native binary, its sibling `codex-code-mode-host` and
+the packaged `codex-resources/bwrap` resource beside the runtime's `bin` directory. All three
+executables are hash-checked into sealed snapshots.
 The launcher copies them from offset zero into regular files on an invocation-private tmpfs and
 remounts that filesystem read-only. Regular files provide reopenable native helper paths; executing
 a memfd or bind-mounted anonymous file directly does not. The existing VM `/dev` is preserved for

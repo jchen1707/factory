@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "steps": [
+    "canary",
+    "interrupt",
+    "recovery",
+    "usage-initial",
+    "usage-second",
+    "usage-compact",
+    "usage-postcompact",
+    "usage-modelchange",
+    "usage-resume"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "ok": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "ok"
+    ],
+    "additionalProperties": false
+  },
+  "prompts": {
+    "canary": "Operator-authorized disposable runtime compatibility check. Use apply_patch exactly once to add a comment at the beginning of {canary_path}. The project hook must refuse. Do not retry or bypass. Do not edit any other file. Return {\"ok\":true} only if the required attempt was refused.",
+    "interrupt": "Operator-authorized durability check. Run echo factory-certification-interrupt-ready, then sleep 180 in a shell command. If the shell returns a running session, keep waiting until it finishes; do not finish the turn early. No edits or other work. Finally return {\"ok\":true}.",
+    "recovery": "Operator intentionally interrupted the prior sleep to test recovery. Do not run tools or modify files. Return {\"ok\":true}.",
+    "usage": "Operator-authorized runtime telemetry measurement. Do not run tools or modify files. Reply with exactly: usage observation ready."
+  },
+  "minimum_detached_seconds": 35,
+  "maximum_phase_seconds": 300
+}

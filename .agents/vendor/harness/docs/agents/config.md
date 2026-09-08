@@ -135,3 +135,10 @@ different scopes, and the harness is the translator between them.
 
 One translator, one canonical name per scope: the host keeps its name, the sandbox keeps
 its name, and no layer redefines the other's.
+
+## Automated delivery does not transfer ownership
+
+A consuming repository may receive vendored updates through CI-managed pull requests.
+The shared files and discovery stubs remain generated: change their upstream source, not
+an automation branch. Required checks still apply to delivery PRs. A pin-only update with
+identical shared content needs no new vendor copy; comparing content prevents sync loops.

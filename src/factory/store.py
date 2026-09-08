@@ -106,6 +106,20 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     6: RUNTIME_JOBS_SCHEMA,
 }
 
+
+def migration_statements(version: int) -> tuple[str, ...]:
+    """The exact reviewable runtime DDL; older table rebuilds need their own review."""
+    if version < 4 or version > SCHEMA_VERSION:
+        raise Blocked(
+            "migration-review-required", f"Schema {version} needs a separately reviewed upgrade"
+        )
+    return tuple(
+        statement
+        for target in range(version + 1, SCHEMA_VERSION + 1)
+        for statement in _MIGRATIONS[target]
+    )
+
+
 _SCHEMA = (
     _runs_ddl("runs")
     + """

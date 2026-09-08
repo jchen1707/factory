@@ -115,7 +115,28 @@ def _spend_cell(usd: float | None, ceiling: float) -> str:
     )
 
 
-def _settings_form(action: str, settings: dict[str, Any], *, concurrency: int | None = None) -> str:
+def _settings_form(
+    action: str,
+    settings: dict[str, Any],
+    *,
+    concurrency: int | str | None = None,
+    error: str | None = None,
+) -> str:
+    def options_for(choices: tuple[str, ...], selected: object) -> str:
+        value = str(selected)
+        options = "".join(
+            f'<option value="{_e(choice)}"{" selected" if choice == value else ""}>{_e(choice or "repository default")}</option>'
+            for choice in choices
+        )
+        if error is not None and value not in choices:
+            options += f'<option value="{_e(value)}" selected>{_e(value)} (invalid)</option>'
+        return options
+
+    # Number inputs discard malformed text in the browser. A rejected submission
+    # uses a labeled text input so the operator can inspect and correct it.
+    number_attributes = (
+        'type="text" inputmode="numeric"' if error is not None else 'type="number" min="1"'
+    )
     fields = []
     for key, choices, default in (
         ("mode", ("automatic", "approval"), "automatic"),
@@ -124,31 +145,103 @@ def _settings_form(action: str, settings: dict[str, Any], *, concurrency: int | 
         ("workflow", ("existing", "diagnosis"), "existing"),
         ("test_design", ("false", "true"), "false"),
     ):
-        options = "".join(
-            f'<option value="{choice}"{" selected" if str(settings.get(key) if settings.get(key) is not None else default).lower() == choice else ""}>{choice or "repository default"}</option>'
-            for choice in choices
+        selected = settings.get(key) if settings.get(key) is not None else default
+        options = options_for(
+            choices, str(selected).lower() if str(selected).lower() in choices else selected
         )
         fields.append(
             f'<label>{_e(key.replace("_", " "))} <select name="{key}">{options}</select></label> '
         )
-    if "/projects/" in action:
+    choices = ("inherit", "disabled", "read-only", "isolated-write")
+    selected = settings.get("delegation_mode", "inherit")
+    options = options_for(choices, selected)
+    fields.append(f'<label>Delegation <select name="delegation_mode">{options}</select></label> ')
+    for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
         fields.append(
-            f'<label>Concurrency <input name="concurrency" type="number" min="1" value="{concurrency or ""}" placeholder="inherited"></label> '
+            f'<label>{_e(key.replace("_", " "))} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="inherited"></label> '
         )
-        options = "".join(
-            f'<option value="{mode}"{" selected" if settings.get("isolation", "shared") == mode else ""}>{mode}</option>'
-            for mode in ("shared", "per-run")
+    if "/projects/" in action:
+        options = options_for(("manual", "automatic"), settings.get("certification_mode", "manual"))
+        fields.append(
+            f'<label>Certification <select name="certification_mode">{options}</select></label> '
         )
+        fields.append(
+            f'<label>Certification configuration <input name="certification_config" value="{_e(settings.get("certification_config", ""))}"></label> '
+        )
+        fields.append(
+            f'<label>Concurrency <input name="concurrency" {number_attributes} value="{_e(concurrency if concurrency is not None else "")}" placeholder="inherited"></label> '
+        )
+        options = options_for(("shared", "per-run"), settings.get("isolation", "shared"))
         fields.append(
             f'<label>Sandbox isolation <select name="isolation">{options}</select></label> '
         )
         fields.append(
             f'<label>Isolation evidence <input name="isolation_measurement" value="{_e(settings.get("isolation_measurement", ""))}" placeholder="manifest path"></label> '
         )
+    notice = (
+        f'<p id="settings-error" role="alert" tabindex="-1" autofocus>Settings not saved: {_e(error)}</p>'
+        if error is not None
+        else ""
+    )
+    description = ' aria-describedby="settings-error"' if error is not None else ""
     return (
-        f'<form method="post" action="{_e(action)}">'
+        notice
+        + f'<form method="post" action="{_e(action)}"{description}>'
         + "".join(fields)
         + "<button>Save settings</button></form>"
+    )
+
+
+def _runtime_status(store: Store, project: str, run_id: str | None = None) -> str:
+    from factory.operator_controls import status
+
+    observed = status(store, project, run_id)
+    completeness = "complete" if observed["cost_complete"] else "incomplete"
+    return (
+        f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents · "
+        f"{observed['queued_children']} queued children · {observed['pending_certifications']} pending/checking certifications</p>"
+        f"<p>API-equivalent estimated USD: ${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
+        "These are not Codex account charges. Queued children and certification jobs may overlap.</p>"
+        + _runtime_table(
+            "Children",
+            ("Child", "Parent", "Status"),
+            [
+                (
+                    child["id"],
+                    child["parent_id"],
+                    "running"
+                    if any(
+                        agent["invocation_id"] == child["child_id"] and agent["status"] == "active"
+                        for agent in observed["agents"]
+                    )
+                    else child["status"],
+                )
+                for child in observed["children"]
+            ],
+        )
+        + _runtime_table(
+            "Certifications",
+            ("Certification", "Status", "Failure"),
+            [
+                (job["id"], job["status"], job["failure"] or "—")
+                for job in observed["certifications"]
+            ],
+        )
+        + f"<details><summary>Effective limits, waiting reasons and accounting details</summary><pre>{_e(json.dumps(observed, indent=2))}</pre></details>"
+    )
+
+
+def _runtime_table(title: str, headings: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    if not rows:
+        return f"<h3>{_e(title)}</h3><p>None recorded.</p>"
+    return (
+        f"<h3>{_e(title)}</h3><table><thead><tr>"
+        + "".join(f"<th scope='col'>{_e(label)}</th>" for label in headings)
+        + "</tr></thead><tbody>"
+        + "".join(
+            "<tr>" + "".join(f"<td>{_e(value)}</td>" for value in row) + "</tr>" for row in rows
+        )
+        + "</tbody></table>"
     )
 
 
@@ -523,6 +616,7 @@ def create_app(
                     body += "<p>No project deferrals declared.</p>"
             except (OSError, ValueError):
                 body += "<p>Delivery policy unavailable.</p>"
+            body += _runtime_status(st, name)
             body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
         return HTMLResponse(_page("projects", body))
 
@@ -537,7 +631,19 @@ def create_app(
         if policy:
             settings["delivery_profile"] = policy["profile"]
         body = f"<h1>{_e(run.linear_id)} controls</h1>"
-        body += _settings_form(f"/settings/runs/{run.linear_id}", settings)
+        body += _runtime_status(st, run.project, run.id)
+        form_settings = settings | {
+            key: st.runtime.settings("run", run.id).get(key)
+            for key in (
+                "delegation_mode",
+                "max_active_agents",
+                "max_children_per_parent",
+                "max_delegation_depth",
+            )
+        }
+        form_settings = {key: value for key, value in form_settings.items() if value is not None}
+        body += f"<p>Effective delegation/capacity: {_e(json.dumps({key: settings.get(key, default) for key, default in (('delegation_mode', 'disabled'), ('max_active_agents', 8), ('max_children_per_parent', 2), ('max_delegation_depth', 1))}))}</p>"
+        body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings)
         body += f"<h2>Effective delivery policy</h2><pre>{_e(json.dumps(policy, indent=2))}</pre>"
         body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
         body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
@@ -600,15 +706,27 @@ def create_app(
                     changes["concurrency"] = (
                         int(form["concurrency"]) if form["concurrency"] else None
                     )
+                for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
+                    if key in form:
+                        changes[key] = int(form[key]) if form[key] else None
+                if changes.get("delegation_mode") == "inherit":
+                    changes["delegation_mode"] = None
                 if "test_design" in changes:
                     changes["test_design"] = changes["test_design"] == "true"
                 operator_controls.configure(
                     st, "run" if run else "project", target, changes, registry=reg
                 )
         except (ValueError, KeyError, Blocked) as exc:
-            return HTMLResponse(
-                _page("settings refused", f"<p>{_e(str(exc))}</p>"), status_code=409
-            )
+            if (scope == "runs" and run) or (scope == "projects" and owner in reg.projects):
+                body = _settings_form(
+                    f"/settings/{scope}/{owner}",
+                    form,
+                    concurrency=form.get("concurrency"),
+                    error=str(exc),
+                )
+            else:
+                body = f"<p>{_e(str(exc))}</p>"
+            return HTMLResponse(_page("settings refused", body), status_code=409)
         return HTMLResponse(
             _page(
                 "settings saved",

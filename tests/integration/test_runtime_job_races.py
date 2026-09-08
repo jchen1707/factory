@@ -110,3 +110,29 @@ def test_two_controllers_launch_the_same_invocation_only_once(tmp_path: Path) ->
     assert (tmp_path / "spawns").read_text().splitlines() == ["spawn"]
     assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
     store.close()
+
+
+def test_independent_controllers_preserve_child_progress_reservations(tmp_path: Path) -> None:
+    path = tmp_path / "factory.db"
+    store = Store(path)
+    store.runtime.configure(
+        "project", "synthetic", {"max_active_agents": 8, "delegation_mode": "read-only"}
+    )
+    for number in range(8):
+        run = store.insert_run(linear_id=f"SYN-{number}", project="synthetic", team="SYN")
+        store.runtime.start_invocation(str(number), run.id, 1, "builder", {})
+    results = race(path, "agent", [str(number) for number in range(8)])
+    assert results.count(True) == 4
+    assert results.count(False) == 4
+    store.close()
+    reopened = Store(path)
+    jobs = RuntimeJobs(reopened)
+    parents = jobs.active_agents("synthetic")
+    for parent in parents:
+        identifier = "child-" + parent["invocation_id"]
+        reopened.runtime.start_invocation(identifier, parent["run_id"], 1, "documenter", {})
+        assert jobs.schedule_agent(
+            identifier, parent_id=parent["invocation_id"], usd_limit=10, max_attempts=2
+        )
+    assert len(jobs.active_agents("synthetic")) == 8
+    reopened.close()

@@ -1,0 +1,22 @@
+{
+  "status": "proposal; verify against each deployment sandbox; not a certificate",
+  "measured_at": "2026-09-08",
+  "package": "@openai/codex@0.153.4",
+  "platform": "linux-arm64",
+  "template": "codex-pnpm:v1",
+  "image_digest": "sha256:27da869735104ffff1dbb2a4fb9318034e2674c7fd9246b1be9772db28740c26",
+  "runtime_version": "codex-cli 0.153.4",
+  "files": {
+    "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex": "4d76e542c222ea8c75861d8c4ade60a1a332a63255ce1c60bdaebf7c2a2869e6",
+    "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host": "d677dedf8179ca28ceb869a2e0b60d3ffad3d26f6e7738f7617d34500128a369",
+    "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap": "c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4"
+  },
+  "mount_anchor": {
+    "path": "/mnt",
+    "owner_uid": 0,
+    "mode": "0755",
+    "empty": true
+  },
+  "usage_scope": "connection",
+  "provenance": "artifacts/runtime-cold-fingerprint/before.json; full six-check acceptance remains per fresh identity"
+}

@@ -1,21 +1,58 @@
 # Runtime certification and delegation implementation handoff
 
-Status: implementation in progress; feature is not complete.
+Status: approved plan implemented; synthetic acceptance, final gates and reviews complete.
+Ready for publication and James-owned rollout. Live services/settings remain unchanged.
 
-Latest checkpoint: real read-only child execution/results, overlapping child turns, accounting
-replay and same-VM/native-thread ownership-transfer resume validated. Fixed the omitted sealed
-Code Mode helper and separated child execution instructions from parent delegation instructions.
-See the final acceptance section for exact evidence and still-open work. Full feature PR is
-not ready; live services/settings remain unchanged.
+## Current completion checkpoint
 
-Main objective: validate factory capabilities with synthetic work, not ticket/CRUD completion
-or hardening. Next implementation focus is coherent clone-source child snapshots; keep the
-remaining lifecycle, integration, control and rollout requirements open.
+Workspace: `/Users/james/factory-runtime-certification`, branch
+`feat/runtime-certification-and-delegation`. Factory completion is being committed with this
+entry; the next short record pins the resulting source commit. Approved plan/test-plan files
+remain intentionally untracked. Earlier checkpoint sections below are historical, not pending work.
 
-The audit below is the historical898c0c5 baseline. Later checkpoint sections supersede its
-implementation status: read-only child wiring/results and retained parent VM ownership are
-implemented; real child/thread acceptance, clone-source snapshots and the other listed gaps
-must be checked against the newest evidence rather than this historical table.
+The three requested capabilities are validated on the supported runtime: exact Astra high/xhigh,
+automatic six-check certification with launch/recovery enforcement, and factory-owned read-only
+and isolated writable children. Clone snapshots, native thread ownership, accounting, approval,
+shared capacity, integration, controls and owned cleanup are implemented and tested.
+
+Main objective: factory capability acceptance using synthetic work. No product/Linear ticket
+completion or application hardening is needed. Do not resume parked FRO or nemoclaw work.
+
+Final evidence: [acceptance report](runtime-certification-completion-acceptance.md).
+All four factory gates PASS in `artifacts/runtime-rollout-readiness/factory-gates-complete.json`;
+source inputs match `source-freeze-complete.json`. Both independent reviews are clear, including
+the final settings error-preservation and integration-cancellation corrections.
+Shared `cada9f200`, Python `f66c81b` and frontend `8429ecf` are clean local commits with shared
+checks, applicable consumer gates, exact pin integrity and three generation checks passing.
+These are not remote publication or merge claims.
+
+Final writable run `5d685f0c773443e6` passed four fresh sandbox certificates, two actual Terra
+children with 123.146s overlap and native RED/GREEN/Stop evidence, exact approvals, live cap
+draining, conflict preservation, one scoped integration commit, independent Sol review,
+accounting replay and zero-model targeted/uncertain-signal cancellation. All four original
+VM generations were removed and individually verified absent. Private clone/history/dirty note
+and full logs remain preserved. Run-2 known estimate USD1.2639784; combined run1/run2 USD2.5756652,
+with incomplete records explicitly retained. See the report for failed fixture attempts and
+exact model-versus-process evidence; do not erase those limitations.
+
+## Remaining operator-owned next steps
+
+1. Publish/review shared source, then reconcile normal generated consumer sync and factory pins
+   against the final merged SHA. James merges. Recheck changed pins/generation after publication.
+2. Review [the concrete rollout](runtime-certification-rollout.md) and JSON package/settings
+   proposals. Copy-only schema5→6 rehearsal preserved all1,892 existing rows; this does not
+   authorize applying it live. James approves the exact migration and deployment.
+3. At the approved window, refresh host/runtime identity, drain work, stop all writers and
+   console, take and verify the exclusive online backup, apply reviewed migration, and restart
+   using the documented checks. Certify each actual production generation before activation.
+4. Enable automatic certification, then read-only and isolated-write delegation only according
+   to that rollout. Preserve project run concurrency4 and unrelated projects/settings. Rollback
+   stops new admissions and preserves history/work; never restore an old DB over new work.
+
+No implementation or synthetic acceptance task remains from this approved plan. No PR was
+opened, no remote merge performed, and no live migration/deployment/activation applied.
+
+## Historical audit and checkpoint log
 
 ## Audited remaining work and final-PR readiness
 
@@ -1883,3 +1920,190 @@ preparations; old retained requests keep their immutable old instructions. Missi
 visible before paid certification. Merge/sync the shared commit before enabling new delegation.
 Live services/settings/schema/templates, credentials, tickets and customer work remain unchanged.
 Factory/harness changes are local commits only; no push, PR, merge or deployment was performed.
+
+## Completion continuation — in progress after 0a91ccb
+
+Objective: finish the approved certification/Astra/delegation plan to reviewable production
+readiness using synthetic factory workflows. Live migration, deployment and activation remain
+operator-owned; no product ticket completion is required. Current changes are UNCOMMITTED.
+Do not interpret the earlier checkpoint's gates as verification of this continuation.
+
+Implemented so far (final review/gates and remaining real acceptance pending):
+- Coherent bounded clone export with committed Git history, staged patch, working/untracked
+  source and stable before/after inventory. Ignored dependencies stay private. Source snapshots
+  have durable publication/replay, generation/base/tamper checks and separate read-only mounts.
+  Unsupported symlinks/submodules/oversized or changing trees refuse explicitly, preserving work.
+- Project/run delegation and capacity controls, inherited limits, truthful status/accounting;
+  shared agent admission reserves progress for each delegating parent's first child/certifier.
+- Writable child preparation, host-derived scoped artifacts and serialized integration are
+  being implemented and tested. Integration commit finalization is still being completed.
+
+Real snapshot evidence: artifacts/runtime-child-source/run-4/result.json PASS, zero model calls.
+VM-private committed/staged/unstaged/untracked source reached the child snapshot; direct child
+write returned EROFS; original VM dependency bytes and stale host checkout were unchanged.
+Both owned VMs stopped/removed/verified absent. Earlier run1/2 export failures preserved;
+run2 captured the atime false-positive, fixed by excluding read-only access timestamp changes.
+Run3 exported successfully but its fixture lacked the required writable primary workspace;
+corrected only the fixture before run4. All earlier owned snapshot VMs also removed.
+
+Current independent work:
+- capacity_fairness: artifacts/runtime-capacity-lifecycle/run-1, four parents + four children,
+  isolated shared cap8 / USD5 per run, real cancellation/Suspend/draining/reviewer contention.
+  This experiment owns its recorded VMs; do not touch them without coordinating that agent.
+- delegation_controls: cold fingerprint drift diagnosed without model calls. Native0.153.4
+  thread/start persists projects.<cwd>.trust_level in the VM config. Both request/process
+  overrides still persisted it. Zero-model preparation before fingerprinting is being designed;
+  full configuration hashing must remain. No host trust store edits.
+- writable_children: isolated-write end-to-end and commit/integration replay; then actual model
+  acceptance including target-declared gates and independent review.
+
+Still required before full-plan completion: finish these implementations/real acceptances,
+final source gates and reviews, shared/consumer dependency and generation checks, and concrete
+reviewable migration/runtime deployment/configuration/rollback artifacts. No live action has
+been performed. Re-read the newest section below if later progress supersedes this checkpoint.
+
+
+### Completion acceptance continuation — source stable, models still running
+
+Current implementations include safe canonical in-tree aliases, because the actual frontend and
+Python stack repositories track `.claude` aliases. Whole-repository blanket symlink refusal would
+block supported stacks. Exact relative link bytes/Git120000 are preserved; external/missing/cyclic/
+noncanonical/Git-metadata targets refuse. Added/changed/deleted symlink artifacts still refuse.
+The real full frontend consumer8429ecf clone acceptance passed in
+artifacts/runtime-child-source/run-5/result.json; source/dirty/index/aliases replayed, EROFS in child,
+original private dependencies and host checkout unchanged. Both VMs removed, no model calls.
+
+Owned GC now passes32 regressions plus real zero-model publicsweep against a recorded generation:
+artifacts/runtime-capacity-lifecycle/gc-real-2/result.json. Wrong generation refused, dry-run did
+nothing, exact generation stopped/removed, host source retained. Final parent-hold tightening
+also preserves source for an unreconciled certification lease before child_id exists.
+
+Fresh parent preparation passed six checks on first fingerprint. Resume exposed another measured
+spec-only drift: sbx remaps its internal clone Git loopback host port when restarting the same VM.
+All4 historical hashes reconstructed from that single component; normalize only exact clone
+127.0.0.1:<validport>→9418/tcp. Exposure/target/protocol/otherports/generation remain bound.
+Real explicit stop/start now has equal FULLidentity despite49250→49251, in writable run1
+port-stability.json. New parent resume certificatef8c397131c6949be8eed99c2c2a8a659 passed allsix.
+Sol resumed original native thread01a0816e-93f4-7191-9406-76e49fcabc1d and generation
+bd62876d-d5d7-4eb1-8f3d-01e0fec17409. It now requests and checks both new child handles.
+The first Terra parent ended prematurely after timed waits without any status calls; its two
+unlaunched requests were correctly cancelled, all usage retained. Do not erase that intervention.
+The source unchanged shared Stop hook still enforces a target's full child gates. Do not add a
+bypass merely because a synthetic fixture starts with sibling-dependent failing assertions.
+
+Current writable owner: writable_acceptance, artifacts/runtime-writable-acceptance/run-1,
+run07c0a47670f64eb9; parentfactory-build-delegation-b9f9e26bbcc37de838a04e75; two new child
+requests2e8dce5ec5754075b5c92cbfb6728241 and a41fb5fddfb74ed5884d44f69b294abd. Model budgetUSD8,
+separate store, Solparent and Terramedium children. Exact Approval holds, livecapdraining,
+actual artifacts/conflict/integration/gates/reviewer and zero-model liveprocess cancellation/
+sibling/ambiguous-signal assertions remain running. Do not touch owned VMs without coordinating.
+All previous12capacityVMs, old2unlaunched writableVMs,6diagnosticVMs and snapshotVMs removed.
+
+Reviews: current Standards/Spec/security clear after lowerboundcost displayfix, GC, portnormalization
+and aliascheck.35 source/integration tests independently passed. Final combined canonical report
+is RUNNING at artifacts/runtime-rollout-readiness/factory-gates-release.json. Prior working and
+completion reports include caught fixtureformat/type failures while agents edited; those are not
+finalPASS evidence. Their fullpytest passes do not override earlier gate failures. New source
+mypy181 files passes. Finalreport must be read after completion and no source changed silently.
+
+Rollout proposals are concrete in docs/runtime-certification-rollout.md and
+ docs/runtime-certification/{package-manifest,factory-crud-certification,settings-proposal}.json.
+Measured codex-pnpm:v1 image already has fullnative0.153.4+CodeMode+bwrap resources; no blind
+package/image rebuild needed if freshly verified exactbytesmatch. No live templates/settings/
+services/store migration changed. Stopwriters+backup+reviewed schema5→6 application and deployment
+remain James-owned. FactoryPR body draft is retained locally in artifacts/runtime-rollout-readiness;
+no PR created, as the implementation skill reserves PR creation for an explicit request.
+
+Still before full-plan completion: finish writable/lifecycle actual assertions and cleanup; read
+finalallfourgates; update acceptance report/plan/handoff to final honest scope; commit factory.
+Sharedcada9f200/Pythonf66c81b/frontend8429ecf are clean local commits with checks/generation/integrity.
+No new ticket completion or application hardening is required. Continue until these named items
+are settled, rather than treating this in-progress update as the requested finished handoff.
+
+
+### Final gate pass and writable fixture correction
+
+Final factory report artifacts/runtime-rollout-readiness/factory-gates-release.json PASS:
+Ruffcheck53ms, format41ms, mypy560ms, pytest202401ms; all exit0/emptytails. Current source/trusted
+input hashes retained in source-freeze.json and subsequently compared unchanged (178 files).
+No production code changed for the following fixture correction.
+
+The second writable child certificate pair failed closed at isolation evaluation: target contents
+changed. Exact cause was the synthetic fixture's absolute PreToolUse hook command pointing to the
+original parent checkout, absent after child source relocation. Native hook reportedfailed/exit1;
+canary protected.txt received '// runtime compatibility check'. Bothcertificates refused and ZERO
+child application models launched. Preservebefore/rawevents/modifiedcanary evidence; do not restore
+that fixture and call it certified. This is recorded test setup failure, not passing enforcement.
+
+Ownerwritable_acceptance is preparing a fresh bounded syntheticcohort with portable relativehooks,
+matching the realstacks, and deterministichookpreflight BEFOREpaidchecks. FullStopis retained:
+GREENbase alpha/beta return0, separateunittestfiles assert0; each child ownsits function+test,
+changesownexpectation1/provesRED/implements1, leavingthesiblingbaselinesuitegreen. Combinedcandidate
+has both1 afterintegration. This avoids an artificial prefailedsiblinggate requiringaStopbypass.
+Solparent/Terramediumchildren, dirtyparentnotepreservation, realApproval/drain/integration/reviewer
+andzero-modelcancellation/sibling/ambiguoussignals remain the namedacceptance targets. Modelspend
+remains bounded acrossold/newisolatedstores by the existingUSD8 testbudget. Oldparentmustbedrained,
+allusage/evidencepreserved, andonlyownedVMscleaned. Coordinateowner forcurrentnames/runnerbefore
+anyVMaction; earlierrun1namesabovearehistoricaloncetheircleanupcompletes.
+
+
+### Fresh writable acceptance run 2
+
+Run 1 is drained and all five lifetime VMs are verified absent. Its private parent clone,
+failed isolation canaries, raw evidence and accounting remain retained. Three accounting
+replays preserve the known API-equivalent estimate of USD 1.3116868.
+
+Fresh run `5d685f0c773443e6` writes to `artifacts/runtime-writable-acceptance/run-2`.
+The parent uses Sol low; implementation children use Terra medium. The USD 6.68 run limit
+keeps the two runs' combined known estimates below USD 8. Portable real consumer hooks and
+a passing baseline replace the failed fixture. Before any model launch, the real parent VM's
+Write hook returned exit 2 and preserved the protected bytes. Each relocated child's hook
+must pass the same deterministic protection check before its paid certification probes.
+Parent certificate `f5b0c8011d8b428aa71ffb7b5617aa43` is in progress.
+
+The writable_acceptance agent owns the live driver; writable_children is adapting the audit,
+reviewer and lifecycle artifacts. Remaining assertions: two actual child implementations
+with native Stop gates, exact approval holds, live capacity draining, conflict preservation,
+serialized integration, independent review, cancellation isolation and accounting replay.
+Finish and clean only these owned VMs before claiming full acceptance. Final production source
+remains unchanged from `factory-gates-release.json`; no live services/settings changed.
+
+
+### Final audit corrections and updated gates
+
+The plan-to-evidence audit found two remaining gaps and both are corrected: settings validation
+errors now preserve editable values with escaped, labeled, focusable recovery; integration
+observes a concurrent human stop after a surviving synchronous command settles and before the
+next write/commit. The latter preserves receipts/artifacts and the operator's state without
+tracker actions. Cancelled remains terminal; Suspended resumes only through explicit recovery.
+See docs/runtime-integration-cancellation-acceptance.md. Both incremental reviews are clear.
+
+Updated complete-source gates PASS in artifacts/runtime-rollout-readiness/factory-gates-complete.json:
+Ruff check132ms, format73ms, mypy544ms (182files), pytest291784ms. All ran, exit0, empty tails.
+source-freeze-complete.json binds current inputs. Previous release report remains historical
+evidence before these three production files changed: console/app.py, child_integration.py, driver.py.
+
+Writable run2: all three parent/child sandboxes passed all six compatibility checks. Exact-ID
+child approvals held across two advances; real live cap4→2 draining preserved all three leases
+and PGIDs, refused an additional approved reviewer admission, then restored4. Both actual
+Terra children are executing. Final artifact/integration/reviewer/lifecycle/cleanup acceptance
+remains in progress. Artifact audit also corrected generation ownership before cleanup and
+tightened RED proof to the actual child's test, not any failed AssertionError command.
+
+
+### Completion result
+
+Final writable run2 integration, reviewer, lifecycle and cleanup all passed. Exact evidence:
+- `artifacts/runtime-writable-acceptance/run-2/integration-result.json`: real two-child RED/GREEN,
+  native Stop markers, private note preservation, intentional conflict refusal and one commit
+  `052bceb349e62f50c85713cbb28d92ba96e07962` from base `c7e73ef03033af047325d0d94137c881c539d965`.
+- `independent-review/result.json`: distinct Sol thread, unchanged readonly snapshot, zero findings,
+  actual two-test success. Trailing macOS stat command failed on Linux; overall exit1 retained.
+- `cancel-processes/result.json`: zero-model targeted cancellation and ambiguous signal replay;
+  parent/sibling preservation, no repeated signal, release only after natural exit/accounting.
+- `cleanup-result.json`: four recorded generations removed/absence verified, final clone retained,
+  zero active leases, three stable accounting replays.44 records;12 incomplete explicitly split
+  into8interrupted/compacted,1unpaidcanary,3zero-modelprocess records.
+
+Final source gates and reviews pass. All remaining actions are the publication and separately
+approved production rollout listed at the top; no ticket completion work is needed.

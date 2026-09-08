@@ -84,11 +84,11 @@ class DelegationBroker:
             validate_against_schema(arguments, schema)
             if not isinstance(arguments, dict):
                 raise ValueError("delegation task must be an object")
-            if arguments["mode"] != "read-only":
-                raise ValueError("only read-only delegation is implemented")
+            if arguments["mode"] == "isolated-write":
+                self._writable_scope(arguments["paths"], parent["run_id"])
             if not arguments["task"].strip():
                 raise ValueError("empty delegation task")
-            self._paths(arguments["paths"])
+            self._paths(arguments["paths"], allow_missing=arguments["mode"] == "isolated-write")
             payload = json.dumps(
                 {
                     "task": arguments,
@@ -102,7 +102,7 @@ class DelegationBroker:
             if run is None:
                 raise ValueError("delegation owner disappeared")
             project = self.store.runtime.settings("project", run.project)
-            settings = self.store.runtime.settings("run", run.id)
+            settings = self.store.runtime.effective(run.project, run.id)
             ceiling = project.get("max_children_per_parent", 2)
             limit = settings.get("max_children_per_parent", ceiling)
             if type(ceiling) is not int or type(limit) is not int or not 1 <= limit <= ceiling:
@@ -184,7 +184,11 @@ class DelegationBroker:
             raise ValueError("delegation authority is stale")
         if request["request"]["source_root"] != str(self.source_root):
             raise ValueError("delegation source root changed")
-        self._paths(request["request"]["task"]["paths"])
+        self._requested_mode(request)
+        self._paths(
+            request["request"]["task"]["paths"],
+            allow_missing=request["request"]["task"]["mode"] == "isolated-write",
+        )
 
     def authorize_launch(self, request_id: str, child_id: str) -> None:
         """Called inside the common launch transaction, before slot/approval consumption."""
@@ -196,7 +200,11 @@ class DelegationBroker:
             raise ValueError("delegation authority is stale")
         if request["request"]["source_root"] != str(self.source_root):
             raise ValueError("delegation source root changed")
-        self._paths(request["request"]["task"]["paths"])
+        self._requested_mode(request)
+        self._paths(
+            request["request"]["task"]["paths"],
+            allow_missing=request["request"]["task"]["mode"] == "isolated-write",
+        )
 
     def publish_result(
         self, request_id: str, result: object, *, failed: bool = False
@@ -296,7 +304,7 @@ class DelegationBroker:
         }:
             raise ValueError("delegation owner is not active")
         project = self.store.runtime.settings("project", run.project)
-        settings = self.store.runtime.settings("run", run.id)
+        settings = self.store.runtime.effective(run.project, run.id)
         modes = {"disabled": 0, "read-only": 1, "isolated-write": 2}
         ceiling = project.get("delegation_mode", "disabled")
         mode = settings.get("delegation_mode", ceiling)
@@ -315,7 +323,66 @@ class DelegationBroker:
         authority.validate_integrity(snapshot)
         return parent, snapshot
 
-    def _paths(self, paths: list[str]) -> None:
+    def _requested_mode(self, request: dict[str, Any]) -> None:
+        run = self.store.run_by_id(request["run_id"])
+        if request["request"]["task"]["mode"] == "isolated-write" and (
+            run is None
+            or self.store.runtime.effective(run.project, run.id).get("delegation_mode", "disabled")
+            != "isolated-write"
+        ):
+            raise ValueError("isolated-write delegation is no longer enabled")
+
+    def _writable_scope(self, paths: list[str], run_id: str) -> None:
+        run = self.store.run_by_id(run_id)
+        if (
+            run is None
+            or self.store.runtime.effective(run.project, run.id).get("delegation_mode", "disabled")
+            != "isolated-write"
+        ):
+            raise ValueError("isolated-write delegation is not enabled")
+        if not paths or any(
+            name == "." or any(part in {".git", ".factory"} for part in PurePosixPath(name).parts)
+            for name in paths
+        ):
+            raise ValueError("writable delegation requires bounded edit scopes")
+        snapshot = self.store.runtime.policy(run_id) or {}
+        protected = snapshot.get("files", {})
+        if any(
+            name == item or name.startswith(item + "/") or item.startswith(name + "/")
+            for name in paths
+            for item in protected
+        ):
+            raise ValueError("writable scope overlaps trusted authority")
+        siblings = self.store.runtime.db.execute(
+            "SELECT request FROM delegation_requests WHERE parent_id=? "
+            "AND status NOT IN ('failed','cancelled')",
+            (self.parent_id,),
+        ).fetchall()
+        prior = [
+            name
+            for row in siblings
+            if json.loads(row["request"])["task"]["mode"] == "isolated-write"
+            for name in json.loads(row["request"])["task"]["paths"]
+        ]
+        for name in paths:
+            if any(
+                name == other or name.startswith(other + "/") or other.startswith(name + "/")
+                for other in prior
+            ):
+                raise ValueError("writable child scopes overlap")
+
+    def _paths(self, paths: list[str], *, allow_missing: bool = False) -> None:
+        parent = self.store.runtime.invocation(self.parent_id)
+        mailbox = (
+            self.store.find_effect(
+                parent["run_id"], parent["attempt"], self.parent_id, "delegation-mailbox", "mounts"
+            )
+            if parent
+            else None
+        )
+        cloned = bool(
+            mailbox and json.loads(mailbox.external_id or "{}").get("spec", {}).get("clone")
+        )
         if len(paths) > 128:
             raise ValueError("delegation scope exceeds path limit")
         for name in paths:
@@ -325,14 +392,18 @@ class DelegationBroker:
                 or "\x00" in name
                 or "\\" in name
                 or relative.is_absolute()
-                or ".." in relative.parts
+                or any(part in {"..", ".git", ".factory"} for part in relative.parts)
                 or relative.as_posix() != name
             ):
                 raise ValueError("delegation scope requires canonical relative paths")
+            if cloned:
+                # Host checkout contents are not the VM's private source. Existence and
+                # file types are checked against the exported snapshot before paid work.
+                continue
             current = self.source_root
             for component in relative.parts:
                 current = current / component
                 if current.is_symlink():
                     raise ValueError("delegation scope cannot traverse symlinks")
-            if not current.resolve(strict=True).is_relative_to(self.source_root):
+            if not current.resolve(strict=not allow_missing).is_relative_to(self.source_root):
                 raise ValueError("delegation scope escapes source root")

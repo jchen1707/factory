@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from factory import accounting, authority, execution, repo
+from factory import accounting, authority, child_snapshots, child_workspaces, execution, repo
 from factory.agent.app_server import AppServerAdapter
 from factory.agent.base import AgentInvocation
 from factory.agent_launches import AgentLaunches
@@ -58,13 +58,16 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
     if parent is None:
         raise Blocked("child-parent-missing", broker.parent_id)
     payload, scratch, trusted = _retain_request(ctx, parent, request)
+    writable = request["request"]["task"]["mode"] == "isolated-write"
+    source = Path(payload.get("source", str(ctx.worktree)))
+    source_mount = source if "snapshot" in payload else ctx.project.path
     spec = SandboxSpec(
         project=ctx.project.name,
-        role="review",
+        role="build" if writable else "review",
         name=payload["sandbox"],
         workspaces=(
             Workspace(scratch),
-            Workspace(ctx.project.path, readonly=True),
+            Workspace(source_mount, readonly=not writable),
             Workspace(trusted, readonly=True),
         ),
         template=ctx.project.template or None,
@@ -76,8 +79,11 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
     )
     child_ctx = replace(
         ctx,
+        run=replace(ctx.run, worktree=str(source)),
         project=replace(
             ctx.project,
+            path=source_mount,
+            requires_clone=False,
             env={
                 **ctx.project.env,
                 "TMPDIR": str(scratch / "tmp"),
@@ -91,15 +97,20 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
     if ctx.store.find_effect(ctx.run.id, parent["attempt"], identifier, "agent-launch", "spawn"):
         return
     ctx.sandbox.ensure(spec)
-    runner, inputs = service(child_ctx, review=True, spec=spec, scratch=scratch / "certification")
     frozen = ctx.store.find_effect(
         ctx.run.id, parent["attempt"], identifier, "child-execution", "launch"
+    )
+    runner, inputs = service(
+        child_ctx,
+        review=not writable,
+        spec=spec,
+        scratch=scratch / "certification",
+        prepare_runtime=frozen is None,
     )
     if frozen is not None:
         launch = json.loads(frozen.external_id or "{}")
         runner.certifications.validate(launch["job"], runner.observe())
-        if payload["head"] != repo.head_sha(ctx.worktree):
-            raise Blocked("child-base-stale", request["id"])
+        _validate_source(ctx, payload, request["id"])
         if launch["env"] != child_ctx.env:
             raise Blocked("child-environment-stale", request["id"])
     else:
@@ -139,7 +150,7 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
         invocation = AgentInvocation(
             model=role.model,
             effort=role.effort,
-            workdir=str(ctx.worktree),
+            workdir=str(source),
             prompt_path=prompt,
             schema_path=schema,
             output_path=directory / "result.json",
@@ -151,7 +162,7 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
             vault_directory=str(ctx.registry.vault.path),
             env=child_ctx.env,
         )
-        child_ctx.agent.prepare(invocation, readonly=True)
+        child_ctx.agent.prepare(invocation, readonly=not writable)
         script = detached_shell_script(
             heartbeat_path=invocation.heartbeat_path,
             exit_path=invocation.exit_path,
@@ -182,17 +193,25 @@ def _advance(ctx: Context, broker: DelegationBroker, request: dict[str, Any]) ->
                     "parent_id": parent["id"],
                     "child_result": str(invocation.output_path),
                     "child_result_schema": payload["schema"],
+                    "child_mode": request["request"]["task"]["mode"],
+                    **(
+                        {
+                            "child_workspace": payload["workspace"],
+                            "child_source_snapshot": payload["snapshot"],
+                        }
+                        if writable
+                        else {}
+                    ),
                 },
             )
             broker.bind_child(request["id"], identifier)
             launch_owner = (ctx.run.id, parent["attempt"], identifier, "child-execution", "launch")
             ctx.store.intend_effect(*launch_owner)
             ctx.store.confirm_effect(*launch_owner, json.dumps(launch, sort_keys=True))
-    if payload["head"] != repo.head_sha(ctx.worktree):
-        raise Blocked("child-base-stale", request["id"])
+    _validate_source(ctx, payload, request["id"])
     runner.certifications.validate(launch["job"], runner.observe())
     handle = RunHandle(
-        ctx.run.id, parent["attempt"], spec.name, str(ctx.worktree), Path(launch["directory"])
+        ctx.run.id, parent["attempt"], spec.name, str(source), Path(launch["directory"])
     )
     launches.start(
         identifier,
@@ -223,8 +242,23 @@ def _retain_request(
         raise Blocked("child-mount-overlap", request["id"])
     if not ctx.worktree.resolve().is_relative_to(ctx.project.path.resolve()):
         raise Blocked("child-source-mount-required", request["id"])
-    if ctx.project.requires_clone:
-        raise Blocked("child-clone-snapshot-required", request["id"])
+    cloned = None
+    workspace = None
+    writable = request["request"]["task"]["mode"] == "isolated-write"
+    contract = "delegation-child-write.md" if writable else "delegation-child.md"
+    if ctx.project.requires_clone or writable:
+        try:
+            if not (trusted / ".agents/vendor/harness/docs/agents" / contract).read_text().strip():
+                raise ValueError("empty child contract")
+            cloned = child_snapshots.prepare(ctx, parent, request, root)
+            for name in request["request"]["task"]["paths"]:
+                path = Path(cloned["path"]) / name
+                if (not writable and not path.exists()) or path.is_symlink():
+                    raise ValueError("requested clone source path unavailable")
+            if writable:
+                workspace = child_workspaces.prepare(ctx, parent, request, root, cloned)
+        except (OSError, ValueError) as exc:
+            raise Blocked("child-source-snapshot-refused", request["id"]) from exc
     scratch = root / "scratch"
     owner = (ctx.run.id, parent["attempt"], request["id"], "child-execution", "prepare")
     with ctx.store.runtime.transaction():
@@ -237,7 +271,7 @@ def _retain_request(
                     ).read_text()
                 )
                 instructions = (
-                    trusted / ".agents/vendor/harness/docs/agents/delegation-child.md"
+                    trusted / ".agents/vendor/harness/docs/agents" / contract
                 ).read_text()
                 if not instructions.strip():
                     raise ValueError("empty child contract")
@@ -248,9 +282,19 @@ def _retain_request(
             payload = {
                 "parent_id": parent["id"],
                 "request": request["request"],
-                "sandbox": "factory-review-child-" + request["id"],
+                "sandbox": ("factory-build-child-" if writable else "factory-review-child-")
+                + request["id"],
                 "scratch": str(scratch),
-                "head": repo.head_sha(ctx.worktree),
+                "head": cloned["head"] if cloned else repo.head_sha(ctx.worktree),
+                **(
+                    {
+                        "source": workspace["path"] if workspace else cloned["path"],
+                        "snapshot": cloned,
+                    }
+                    if cloned
+                    else {}
+                ),
+                **({"workspace": workspace} if workspace else {}),
                 "directories": {
                     str(p): [p.stat().st_dev, p.stat().st_ino] for p in (root, scratch)
                 },
@@ -272,3 +316,10 @@ def _retain_request(
         ):
             raise Blocked("child-directory-stale", request["id"])
     return payload, scratch, trusted
+
+
+def _validate_source(ctx: Context, payload: dict[str, Any], identifier: str) -> None:
+    if "snapshot" in payload:
+        child_snapshots.validate(ctx, payload["snapshot"])
+    elif payload["head"] != repo.head_sha(ctx.worktree):
+        raise Blocked("child-base-stale", identifier)
