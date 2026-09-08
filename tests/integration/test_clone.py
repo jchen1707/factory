@@ -13,6 +13,7 @@ table is in `steps/clone.py`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -940,3 +941,45 @@ def test_removing_the_repository_itself_is_refused_by_name(clone_ctx: Context) -
 
     assert "the repository itself" in str(caught.value)
     assert clone_ctx.project.path.is_dir()
+
+
+def test_fresh_clone_with_children_reaches_worktree_ready(
+    clone_ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import driver
+
+    # Install the same trusted child contract as delegation tests without creating
+    # a worktree: clone mailbox preparation occurs before the first branch exists.
+    claim_step.run(clone_ctx)
+    context_step.run(clone_ctx)
+    root = clone_ctx.home / "state/authority-fixture"
+    snapshot: dict[str, Any] = {"root": str(root), "files": {}, "profile": "core"}
+    relative = ".agents/vendor/harness/schema/delegation-request.schema.json"
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        (Path(__file__).parents[1] / "fixtures/delegation/request.schema.json").read_bytes()
+    )
+    snapshot["files"][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (root / "snapshot.json").write_text(json.dumps(snapshot))
+    clone_ctx.store.runtime.snapshot_policy(clone_ctx.run.id, snapshot, replace=True)
+    clone_ctx.store.runtime.configure(
+        "project",
+        clone_ctx.project.name,
+        {
+            "delegation_mode": "isolated-write",
+            "agent_adapter": "app-server",
+            "certification_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        type(clone_ctx.sandbox), "generation", lambda *_: "fixture-generation", raising=False
+    )
+    assert clone_ctx.run.worktree is None
+    assert driver.step(clone_ctx).outcome == driver.Outcome.PROGRESSED
+    assert clone_ctx.state == State.SANDBOX_READY
+    assert clone_ctx.store.runtime.settings("run", clone_ctx.run.id)["delegation_parent"]
+    assert driver.step(clone_ctx).outcome == driver.Outcome.PROGRESSED
+    assert clone_ctx.state == State.WORKTREE_READY
+    assert clone_ctx.run.worktree == str(clone_ctx.project.path)
+    assert clone_ctx.store.runtime.invocations(clone_ctx.run.id) == []

@@ -29,6 +29,10 @@ def advance(ctx: Context) -> None:
     from factory.workflow_launches import reconcile_run
 
     reconcile_run(ctx.store, ctx.home, ctx.sandbox, ctx.run.id, ctx.project.name)
+    # Clone mailboxes are prepared before worktree creation. Until the parent
+    # invocation exists there is no launched owner whose children can execute.
+    if ctx.store.runtime.invocation(retained["id"]) is None:
+        return
     broker = DelegationBroker(ctx.store, retained["id"], ctx.worktree)
     for request in broker.requests():
         if request["status"] not in {"pending", "prepared"}:
