@@ -1,5 +1,232 @@
 # Runtime certification and delegation implementation handoff
 
+## Fresh eligible FRO-12 startup failure (2026-09-08)
+
+James moved FRO-12–15 to Todo and cleared FRO-12's blocking label. FRO-12
+passed all eleven intake checks. Closed obsolete intake-only run
+`0a89bc796a294596` through the Store transition API, preserving its evidence;
+it had no branch, worktree or model attempt. Fresh run `d2349875047e4b30`
+progressed through claim, context and sandbox preflight, then blocked with
+`no-worktree` at `sandbox_ready`, attempt0. No model invocation or spend.
+FRO-13/14 wait for FRO-12; FRO-15 waits for FRO-13/14. This cohort cannot
+provide four simultaneous deliveries because of its declared dependencies.
+
+Reproduced through the actual driver with a fresh clone and delegation enabled:
+mailbox preparation precedes worktree creation, but the next driver step called
+child servicing, which accessed `ctx.worktree` before the parent invocation
+existed. Fix in `fix/child-broker-before-worktree` defers child servicing until
+that parent invocation exists; reconciliation still runs first. The regression
+uses real local Git clone/branch operations with fake sandbox transport and
+reaches `worktree_ready` with zero model invocations after the fix.
+
+Private evidence: `/Users/james/factory/artifacts/runtime-fro-startup-20260908/blocked.json`.
+Owned sandbox `factory-build-delegation-c06a5d34ce3adebcd2e4fb24`, generation
+`c74a9dfa-5665-4fd5-810a-fbdd02795a25`, was checked and stopped; source and
+controller evidence retained. Live deployment remains `fd1f44e`; writer and
+project settings unchanged. Earlier implementation-complete statements are
+superseded by this measured fresh-start defect until the fix is deployed and
+real startup is repeated.
+
+Validation: all four gates passed (Ruff88ms, format54ms, mypy4093ms,
+pytest228133ms), each exit0 and empty output tail. No gates skipped. The
+changed files are in mypy scope; sandbox tests use fakes, so real post-deploy
+startup remains required. Gate JSON retained with the private failure evidence.
+
+Next: merge/deploy the reviewed fix, safely retire the attempt-zero blocked run
+and repeat fresh FRO-12 startup through certification/Approval controls. Preserve
+existing evidence and exact VM ownership. Do not resume directly into implementation:
+this run never created its branch/worktree. Observe accounting and interventions;
+James still merges delivered changes and owns dependency completion decisions.
+
+
+## Ready-label follow-up (2026-09-08)
+
+James applied ready labels and removed the blocking label to authorize workload
+observation. Fresh Linear inspection shows FRO-13–15 ready-labeled but still
+Backlog; FRO-12 is In Progress. Intake requires the exact state `Todo`
+(`src/factory/intake/linear.py`, condition2). The writer created run
+`0a89bc796a294596` for FRO-12 and blocked at attempt0 with `state-not-todo`.
+Live effects500/501 confirm the block comment and re-added `needs-info` label;
+this explains why the removed label returned. No model execution occurred for
+this run. This is an intake intervention, not loaded execution evidence.
+
+Next: James should move the intended workload tickets to Todo and clear the
+re-added blocking label after correcting the state. Recheck dependencies and
+eligibility, then observe admission and existing Approval-mode requests. Do not
+bypass intake or change project controls. No source/settings/service changes in
+this follow-up; documentation-only, no new gate run.
+
+## Post-load follow-up observation (2026-09-08)
+
+Follow-up from `c3ab012`: another read-only snapshot 2,390 seconds later found
+38 additional `nothing to do` writer results, no new stderr, console HTTP200,
+and zero new runs, transitions, invocations or operator events. Zero active
+leases/slots; project settings unchanged. Fresh read-only Linear inspection
+confirms FRO-12 still carries `needs-info`; FRO-13–15 remain Backlog without
+`ready-for-agent`. No eligible FRO workload is available. Evidence:
+`/Users/james/factory/artifacts/runtime-observation-resume-1788898548/snapshot.json`.
+No model calls, ticket/service/settings changes, or new gate run. Next action
+remains observation of eligible authorized work; repeated idle checks cannot
+complete the throughput or cost-per-accepted-change measurement.
+
+Resumed from `44951cc`. The next actionable step was read-only observation of naturally
+eligible work. A fresh live database snapshot approximately 777 seconds after the load
+checkpoint found zero new runs, transitions, invocations or operator events, zero active
+agent leases and zero project slots. Writer remains loaded, last exit0, on its normal
+60-second timer; recent output is `nothing to do`. Console returned HTTP200. Stderr's
+modification time predates the load checkpoint; its old schema/network messages are not
+new failures. Project settings remain revision7, matching the load baseline: Approval mode,
+concurrency4, automatic certification and isolated-write children.
+
+Evidence: `/Users/james/factory/artifacts/runtime-observation-after-load-20260908/snapshot.json`.
+No source, service, setting, ticket or sandbox changes; no model calls. This documentation-only
+update does not claim a new gate run. Existing implementation/rollout acceptance stands.
+
+There is no remaining implementation or rollout task in this handoff. Further throughput,
+completion-rate, corrective-intervention and cost-per-accepted-change measurements require
+an eligible authorized workload. When one appears, capture a baseline and follow its runs
+through completion using the cohort fields below. Do not resume closed measurement runs,
+unblock parked tickets or repeat certification to create activity. The eight incomplete
+probe records from the bounded cohort remain explicitly incomplete; this empty observation
+adds no accounting evidence and does not establish sustained capacity or delivery quality.
+
+## FRO load-capacity and accounting checkpoint (2026-09-08)
+
+James authorized reuse of FRO tickets for load/accounting measurement. Completed a bounded
+real workload using frozen FRO-12/13/14/15 descriptions: four independent source/requirement
+analyses, not ticket implementation or delivery. Linear states/labels remained unchanged.
+Deployed code `fd1f44e` and target `16cab7e` remain unchanged. Evidence and detailed limits:
+[runtime-fro-load-capacity-accounting.md](runtime-fro-load-capacity-accounting.md).
+
+- Four new isolated production-spec sandbox identities each passed all six automatic checks.
+- Four real Sol/high application turns overlapped for 50.96 seconds, measured from captured
+  turn-start/completion events, with no artificial sleep. All four schema-valid results passed;
+  private clone and host target sources remained clean.
+- Four project slots admitted; fifth refused. A lower limit of two refused new admission and
+  preserved existing slots. This used the actual admission API in an isolated Store; no live
+  concurrency or mode changes. Capacity beyond four or long-running builds was not measured.
+- 40 paid launches = 40 invocation records (36 certification + 4 application); three accounting
+  replays identical. Known API-equivalent estimate USD1.300542, including application USD0.4067528
+  and known certification USD0.8937892. All four applications fully priced. Eight intentional
+  interrupt/compaction probe records remain incomplete; the total is a known subtotal, not
+  a complete charge estimate. No Codex account charge inference.
+- Zero failed workload runs or recorded failure episodes; 44 approval events (36 probes plus
+  separate guard/launch approvals for each application), all covered by this bounded authorization.
+  No corrective runtime intervention. One fixture-storage hook refusal was resolved before paid
+  execution by moving artifacts outside protected state storage; no runtime fix was required.
+- Four exact owned VM generations verified stopped. Five measurement runs (including the
+  no-model fifth-admission probe) closed/cancelled; zero active agent leases or child requests.
+  Terminal project-slot rows remain in this archived test database until normal admission prunes
+  them; they are not live capacity. Do not resume these closed measurement runs.
+- Console HTTP200 throughout sampling; live writer loaded with last exit0. Live settings exactly
+  match the pre-measurement snapshot; no new live runs, invocations, transitions or operator events.
+
+Private evidence `/Users/james/factory/artifacts/runtime-load-fro-20260908/` includes
+`validation.db`, frozen issues, per-run certificates/results/events references, `admission.json`,
+`runtime-overlap.json`, `accounting-final.json`, samples and final inventory/live status.
+This is an isolated measurement database, never a replacement for live `state/factory.db`.
+Source-owned certificate evidence remains under live home's `state/certifications/<id>/` and
+prepared clone/thread evidence under their unique recorded run paths.
+
+Requested bounded load/accounting measurement is complete. No further test ticket work is
+needed. Remaining optional operational observation is long-running organically authorized
+work: throughput, completion rate, corrective interventions and cost per accepted change.
+These short analyses do not establish full implementation/review/delivery throughput or the
+host's maximum capacity. Preserve Approval mode and concurrency4 unless James changes them.
+
+## Normal-use observation checkpoint (2026-09-08)
+
+Resumed observation after rollout, using read-only SQLite transactions, launchd/log inspection,
+console HTTP requests and read-only intake assessment. Deployed HEAD remains `fd1f44e`.
+Private evidence: `/Users/james/factory/state/runtime-observation-20260908-post-rollout/`;
+`observe.py`, `observations.jsonl` and `intake.json` retain measurements. No model calls,
+ticket writes, service changes or settings changes were made by this observation.
+
+Measured since the last rollout observation, across approximately 956 seconds:
+- 15 additional `nothing to do` writer results; no new stderr or log rotation. Writer enabled
+  and loaded, last exit0, observed running and subsequently idle between normal timer ticks.
+- Console HTTP200 on both samples. Zero new runs, transitions, invocations or operator events.
+- Zero active agent leases and zero occupied project slots. No recorded failure episodes.
+- Fresh intake assessment: all six ready-labeled tickets ineligible. FRO-12 remains In Progress
+  with a blocking label; five historical BAC tickets remain Done with blocking labels and
+  identifiers already on the base. None has a block-write reason. Leave them unchanged.
+- Verification project still automatic certification / isolated-write children / Approval mode,
+  concurrency4, active-agent cap8, child cap2, depth1 (settings revision7).
+
+This is evidence of healthy idle operation, not loaded-capacity or delivery-quality acceptance.
+There are no new invocations on which to assess accounting completeness; the prior rollout's
+four explicitly incomplete interrupt/compaction probes remain the last cohort's known limitation.
+No completion-rate, intervention-rate or estimated cost per accepted change can be calculated
+from this empty workload. Do not interpret zero observed failures as a loaded success rate.
+
+Next observation should follow naturally authorized eligible work without creating synthetic
+activity or resuming parked tickets. Keep Approval mode until James explicitly changes it.
+For that cohort, record run/invocation IDs and authority, failures and repair episodes, operator
+approvals versus corrective interventions, accepted changes, invocation/launch reconciliation,
+known estimates and incomplete reasons, peak occupied slots/agent leases and capacity wait reasons.
+Capture a baseline before work and compare through completion; retain failed attempts in the
+accounting denominator. Investigate any discrepancy with preserved runtime evidence before fixes.
+Implementation and staged rollout remain complete; observation under actual load remains pending
+eligible work. This session did not install a new background observer or alter the writer timer.
+
+## Current checkpoint — PR91 deployed, writable rollout passed (2026-09-08)
+
+Objective: validate factory capabilities with bounded synthetic work. Product ticket completion,
+hardening, and parked FRO/Backend/nemoclaw implementation are outside this rollout.
+
+James merged PR91 as `fd1f44e64411437b395866f29cf0debd303b2863`. Live
+`/Users/james/factory` was fast-forwarded to that exact merged tree with the writer unloaded
+and disabled. It matches reviewed PR head `3acb85b` exactly. No schema, shared package, target
+source or worker update was needed. Schema6 remains intact. Local `main` is stale; inspect
+deployed HEAD/remote main rather than assuming the local branch represents production.
+
+Fresh writable synthetic run `7c568f0f315c4272` PASSED:
+- Parent certificate `5165ca1cbb5e44179a682fb4063ba7ca` and writable child certificate
+  `3935d052af1241ca9d68cb534f04a085` each passed all six real compatibility checks.
+- Sol parent requested Luna documenter child `630c4d03a01b4a5f83ed49128dfa35f1`, preserved
+  its exact handle through certification, consumed the correct README heading/project name,
+  and returned schema-valid `no_change_needed`. No repair or malformed-handle intervention.
+- Actual private child source allowed O_RDWR; frozen authority refused O_RDWR with EROFS.
+  Both checks preserved bytes. The host-validated child artifact has zero changes and the same
+  base/head `16cab7e`; no integration commit or product gates are needed for this observation.
+  Prior full write/integration acceptance remains recorded separately.
+- 20 launches = 20 invocation records; three accounting replays stable; zero active leases.
+  Known API-equivalent estimate USD0.6747978. Four interrupted/compaction probe records remain
+  explicitly incomplete; actual parent and child are fully priced. Do not infer account charges.
+- Run transitioned to CANCELLED solely to close synthetic work. Its two exact owned VM
+  generations were stopped, source/thread evidence retained. Do not resume the cancelled run.
+- All four local gates passed on deployed code: Ruff165ms, format57ms, mypy1504ms,
+  pytest257310ms; every exit0 and empty output tail. Test suite uses fake sandboxes, supplemented
+  here by real certification/child/mount checks. No GitHub CI checks were reported for PR91.
+
+Private evidence: `/Users/james/factory/state/runtime-rollout-pr91-20260908/` (0700).
+`before.db` is a consistent pre-rollout backup (0600); never restore it over new evidence.
+`deployment.json`, `certificates-final.json`, `application-result.json`, `child-result.json`,
+`mounts.json`, `empty-artifact.json`, `accounting-final.json`, `preservation-audit.json`,
+`stopped-vms.json`, `gates.json`, full ticks/approvals and source-owned probe logs preserve scope.
+Prior failed writable evidence remains under `runtime-rollout-merged-20260908/isolated-write/`.
+
+Writer was enabled and bootstrapped using its original plist after successful acceptance and
+fresh read-only intake assessment. All six ready-labeled issues remained ineligible without
+block-write reasons; no labels or tickets changed. Three normal timer ticks exited0, each `nothing to do`,
+no new stderr; console HTTP200 and zero active leases throughout 136 seconds of observation.
+Final `final-status.json` and `observation.jsonl` record the measurements. The final preservation
+audit passes after restoration; existing rows and unrelated settings remain unchanged.
+Project now uses automatic certification + isolated-write delegation, still Approval mode,
+concurrency4, cap8/children2/depth1. Other projects, existing runs, routing and budgets unchanged.
+Eight earlier cohort VMs and these two are retained stopped. No codex-* sandbox was touched.
+
+The requested deployment, writable rollout and writer restoration are complete. No further
+implementation or activation step is outstanding for this rollout. Do not repeat certification,
+migration or product work just to manufacture activity. Long-term delivery
+quality observation requires naturally authorized work; this empty intake window cannot
+measure completion-rate improvement. The earlier unexpected writer-bootstrap caller remains
+unknown; explicit launchd disable is the validated maintenance safeguard, not a root-cause fix.
+
+## Historical checkpoints below
+
+All prior pending-merge/restart instructions below are historical and superseded above.
+
 ## Current checkpoint after merged target PR1 (2026-09-08)
 
 The objective remains factory capability validation using bounded synthetic work. Do not
