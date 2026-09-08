@@ -19,7 +19,12 @@ was stranded. The exact malformed-handle refusal is correct; missing certificati
 is the control-plane defect. See [diagnosis and acceptance](runtime-child-certification-cancellation.md).
 Fix workspace `/Users/james/factory-child-certification-cancel`, branch
 `fix/cancel-child-certification`, based on deployed `5a2b0ba`. No live source deployment.
-Focused 44 tests and real zero-model VM cancellation pass; final gates/publication are pending.
+Reviewed correction `a1ab44a`: focused 58 tests and repeated real zero-model VM cancellation
+pass. Both independent reviews are clear after fixing signal-contract persistence and shared
+interrupt/timeout/cancellation fencing. Final four gates PASS (`artifacts/child-certification-cancel/gates-final.json`): Ruff86ms,
+format70ms, mypy311ms, pytest202449ms; exit0 and empty output tails throughout. Mypy covers
+185 source/test files. Fake-sandbox test limits are supplemented by the real process checks.
+Publication is next; no live source deployment.
 The real test's two VMs were removed and verified absent. No model was called by that test.
 
 Live state: schema6; console HTTP200; writer UNLOADED AND DISABLED. Project automatic
@@ -44,9 +49,14 @@ Private evidence `/Users/james/factory/state/runtime-rollout-merged-20260908/`:
 - First read-only driver attempt configured the parent before creating its accounting record;
   corrected the fixture ordering to match production. No application launched on that refusal.
 - `preservation-audit.json`: existing rows and other project/existing-run settings unchanged.
+- `final-status.json`: 51 new live invocations, USD1.422172 known total, 11 explicitly incomplete
+  records; no active leases. Failed writable cohort known USD0.3962212 remains included.
+- `intake-preflight.json`: all six ready-labeled FRO/BAC issues remain ineligible, with no
+  block-write reason. No tickets were changed. `final-vm-inventory.json` confirms eight retained
+  production-cohort VMs stopped; the separate zero-model test VMs are absent.
 
 Next steps, in order:
-1. Finish review/gates and publish the cancellation fix for James's merge. Do not deploy an
+1. Merge the reviewed cancellation fix after inspecting its PR checks. Do not deploy an
    unmerged branch to the live writer. No further schema or shared/vendor update is needed.
 2. After merge, fast-forward the live host source while writer is still disabled. Repeat a
    NEW writable synthetic cohort with exact-handle instructions; do not reuse cancelled runs

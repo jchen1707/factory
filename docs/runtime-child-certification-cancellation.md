@@ -22,17 +22,19 @@ signals only their recorded active probes, after checking VM generation and proc
 The effect is persisted before signalling; an uncertain acknowledgement is never resent.
 Terminal observation retains accounting before capacity release. Parent finalization also
 waits for these probes, and paid admission rechecks job/request ownership in its transaction.
-No schema, worker, routing, model, shared contract or target dependency change is required.
+Interruption, timeout and cancellation share the same signal fence, including uncertain prior
+signals and concurrent retirement. No schema, worker, routing, model, shared contract or target
+dependency change is required.
 
-Eight regression cases exercise explicit cancellation and parent-exit draining with valid,
+Twelve cancellation regression cases exercise explicit cancellation and parent-exit draining with valid,
 replaced-generation, changed-process and lost-acknowledgement evidence. They also assert that
 another prepared probe cannot launch after cancellation, a sibling request is preserved,
 restart does not repeat a signal, and terminal usage is retained. The initial regression
 failed because reconciliation issued no cancellation signal; it passes with the correction.
-The focused cancellation/runner/admission suite passes 44 tests.
+The focused cancellation/runner/admission suite, including reverse signal-ordering cases, passes 58 tests.
 
 A real zero-model check at
-`/Users/james/factory-child-certification-cancel/artifacts/child-certification-cancel/real-1/`
+`/Users/james/factory-child-certification-cancel/artifacts/child-certification-cancel/real-2/`
 ran detached parent and probe processes in two disposable VMs. Parent exit automatically
 cancelled the pending child, retired its certificate, signalled the exact probe once, observed
 exit143, and released all leases. Three replays added no signal. Both recorded generations
@@ -44,3 +46,5 @@ cohort. Keep the exact returned child handle; an unknown-handle refusal does not
 original request was refused. Finish child/result/mount/accounting checks, refresh intake
 eligibility, then enable/bootstrap the writer and observe normal ticks. Earlier read-only
 acceptance is retained; no product ticket completion or hardening is required.
+
+Final `gate_report.mjs --force --json` report is `artifacts/child-certification-cancel/gates-final.json`: all four gates pass (Ruff86ms, format70ms, mypy311ms, pytest202449ms), exit0 and empty output tails. Mypy covers the new source/test files; the test gate's fake-sandbox caveat is supplemented by the real process acceptance above. Both independent review axes are clear after preserving signal intent identity and unifying the signal fence.

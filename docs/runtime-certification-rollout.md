@@ -1,11 +1,24 @@
 # Runtime certification and delegation rollout
 
-This is a reviewable deployment procedure, not an applied rollout. James owns the schema
-5→6 approval, merges, deployment and activation. James explicitly approved schema 5→6
-in the publication session after reviewing the completed work. The migration remains unapplied;
-writer shutdown and backup requirements below still apply. The objective is factory capability acceptance;
-synthetic workloads suffice. Do not finish test tickets, change Backend tickets, resume
-parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
+Current checkpoint 2026-09-08: schema6 is applied on merged factory `5a2b0ba`. Target PR1
+merged at `16cab7e`; the live target was fast-forwarded cleanly. Fresh base build/reviewer
+identities passed all six checks, the no-change application passed, and real read-only child
+execution/result/accounting passed with the merged contracts.
+
+Writable rollout found a lifecycle defect: a parent mistyped its child handle and ended;
+the child request cancelled but its paid certifier remained active. The certifier was stopped
+with exact generation/process ownership checked, all accounting retained, and cohort VMs
+stopped. The correction is on `fix/cancel-child-certification` in
+`/Users/james/factory-child-certification-cancel`; see the
+[diagnosis and acceptance](runtime-child-certification-cancellation.md).
+
+Automatic certification remains selected in Approval mode, read-only delegation, concurrency4,
+cap8/children2/depth1. Writer is unloaded AND disabled; console is healthy. After James merges
+the correction, deploy the merged host source, repeat a new bounded writable cohort, then
+restore intake and observe normal ticks. No schema, shared/target dependency or runtime package
+change is required. Do not rerun completed migrations or overwrite failed evidence.
+The [handoff](runtime-certification-implementation-handoff.md) records exact remaining steps.
+James has authorized staged activation and intake restart; no repeat approval is needed.
 
 ## Release inputs and dependencies
 
@@ -18,8 +31,7 @@ parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
 | Sandbox package | [Package manifest](runtime-certification/package-manifest.json) | Full native Codex 0.153.4 package, matching helpers and protected mount anchor |
 
 Shared and consumer sources above are published and merged; shared mount PR #41 closes the
-read-only dependency loop. Factory PR #90 remains open
-for review. Record its final merged release commit before deployment. Managed sync PRs may appear
+read-only dependency loop. Factory PR #90 is merged as `5a2b0ba27a8e334363ee722e407e943083f4e9b8`. Managed sync PRs may appear
 after the shared merge; reconcile those with the prepared consumer branches rather than
 racing their automation. If merging changes a required source SHA, regenerate and recheck
 all pins against the final source. Never edit generated `main` or vendored content by hand.
@@ -28,8 +40,7 @@ The final factory commit and all acceptance outcomes must be fixed before deploy
 Shared `scripts/check.py`, Python/frontend applicable declared gates, pin integrity and all
 three generation checks passed in the preparation session. Final combined factory gates also
 pass (`factory-gates-complete.json`). Real writable/reviewer/lifecycle acceptance also passes; see
-[the acceptance report](runtime-certification-completion-acceptance.md). This procedure remains
-an unapplied proposal and does not authorize deployment.
+[the acceptance report](runtime-certification-completion-acceptance.md). Schema maintenance is complete; remaining activation requires the staged checks below.
 
 ## Read-only preflight
 
@@ -62,11 +73,15 @@ changing code. Suspended children/threads/worktrees must be reconciled and prese
 Stopping the timer alone does not stop detached agents or standalone CLI controllers.
 
 ```sh
+launchctl disable gui/501/com.jchen.factory
 launchctl bootout gui/501/com.jchen.factory
 launchctl bootout gui/501/com.jchen.factory.console
 lsof /Users/james/factory/state/factory.db /Users/james/factory/state/factory.db-wal /Users/james/factory/state/factory.db-shm
 ```
 
+Disable the writer before unloading it: bootout alone removes the job but does not prevent
+a subsequent bootstrap. A harmless launchd reproduction confirmed that the disabled job
+refuses bootstrap. Restore that disabled override only at the authorized final restart.
 Confirm both services are unloaded and no other process is writing the store. Do not use a
 broad kill command. Preserve active sandbox holders and source artifacts until their owned
 lifecycle is settled. The console is stopped because its controls can write settings.
@@ -151,8 +166,8 @@ contract directory outside every candidate-writable mount:
 ```sh
 set -euo pipefail
 mkdir -p /Users/james/factory/state/runtime-contracts
-mkdir /Users/james/factory/state/runtime-contracts/cada9f200
-git -C /Users/james/harness-runtime-certification archive cada9f200 plugins/harness | tar -x -C /Users/james/factory/state/runtime-contracts/cada9f200
+mkdir /Users/james/factory/state/runtime-contracts/be33f31ca4358a6700e480ba00571eb281a5e62b
+git -C /Users/james/harness-runtime-certification archive be33f31ca4358a6700e480ba00571eb281a5e62b plugins/harness | tar -x -C /Users/james/factory/state/runtime-contracts/be33f31ca4358a6700e480ba00571eb281a5e62b
 mkdir -p /Users/james/factory/state/runtime-config
 cp /Users/james/factory/docs/runtime-certification/factory-crud-certification.json /Users/james/factory/state/runtime-config/factory-crud-certification.json
 ```
@@ -226,6 +241,7 @@ the normal writer only after the maintenance/selection checks pass and James app
 
 ```sh
 launchctl bootstrap gui/501 /Users/james/factory/ops/com.jchen.factory.console.plist
+launchctl enable gui/501/com.jchen.factory
 launchctl bootstrap gui/501 /Users/james/factory/ops/com.jchen.factory.plist
 curl --fail http://127.0.0.1:7717/
 ```
