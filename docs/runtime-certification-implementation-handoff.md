@@ -2,13 +2,62 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: invocation-owned mailbox provisioning and controller recovery servicing are
-implemented. Real zero-model disposable acceptance proved inbox writes, read-only response
-protection and hidden controller database. This does NOT yet select the returned specification
-in workflow creation/certification or configure AppServerAdapter. Read-only child preparation,
-execution and lifecycle remain unfinished. See **Protected mailbox controller checkpoint** at
-the end. Live services/settings unchanged; owned disposable VM stopped and removed. Worker
-bytes are unchanged since192cc71; that earlier worker still needs new six-check certification.
+Latest code checkpoint: **09953bc**. Repository audit on2026-09-07 confirms that the
+checkpoint passes its four code gates but the approved feature plan is incomplete.
+**Not ready for the final feature PR.** Read the audited completion checklist immediately
+below before resuming; older checkpoint sections are historical evidence, not completion claims.
+
+Invocation-owned mailbox provisioning, controller recovery servicing and real mount-only
+acceptance are implemented. Workflow creation/certification still does not consume those specs;
+AppServerAdapter does not enable delegation. No actual child execution is wired. Worker bytes
+are unchanged since192cc71 and still need fresh six-check acceptance before application use.
+
+## Audited remaining work and final-PR readiness
+
+Audit baseline: factory09953bc on feat/runtime-certification-and-delegation, in
+/Users/james/factory-runtime-certification. Tracked worktree was clean before this documentation
+update; approved plan/test-plan files remain intentionally untracked. Shared harness worktree
+is clean at e3fc8ad. This audit inspected local source and retained evidence; it did not query
+remote merge status, inspect current live services, run models or change sandbox settings.
+
+| Area | Verified repository state | Remaining completion requirement |
+| --- | --- | --- |
+| Parent launch and recovery | The only production DelegationController caller is service_run in workflow_launches.reconcile_run. prepare/configuration have no production workflow caller. AppServerAdapter.prepare writes no delegation field. workflow_certification.service still selects build_spec or _review_spec. | Provision the parent-specific mounts before certification/accounting, create and certify the exact returned spec, freeze tool configuration into the request, and revalidate that spec at initial launch and queued/recovery launch. Preserve existing bind/clone work and service tools promptly in both foreground and daemon paths. |
+| Read-only children | Broker request/admission primitives exist. bind_child and publish_result have no production callers. AgentLaunches calls authorize_launch for an already-bound child, but no workflow prepares and starts that child. | Implement fresh-thread child preparation, trusted task/base/authority handoff, read-only source/authority and private scratch, routed invocation accounting, binding, certification and actual admitted launch. |
+| Child lifecycle and accounting | Common leases, parent IDs, accounting collector and finalization fences exist. Broker cancellation records intent. Mailbox faults preserve accounting but do not drain requests. | Advance/recover queued children, reconcile actual child usage/results, validate bounded outputs, signal only owned groups for cancellation/suspension, and drain or cancel pending requests before parent finalization. Prove no duplicate launch or accounting on restart. |
+| Writable children and integration | Broker explicitly refuses every mode except read-only; no child integration path is present. Existing run isolation/integration-base helpers are not child integration. | Add isolated worktrees/private clones and writable environments, disjoint scopes, parent-writer coordination, serialized integration, dirty-work preservation, conflict/stale-base holds, evidence invalidation, fresh gates and independent review. |
+| Controls and status | operator_controls/configuration_cli expose certification mode/config for new project runs. RuntimeJobs consumes delegation/cap fields internally, but operator_controls rejects them and the console has no delegation/certification views. | Add validated delegation mode, agent/child/depth controls and project/run restrictions; exact child approvals; certification/child-tree/queue/failure views; truthful aggregate cost completeness. Cover absent/empty/invalid fields, inherited limits, draining and keyboard operation. |
+| Real acceptance | Earlier Astra and automatic certification experiments are recorded.09953bc adds real inbox/outbox mount protection only; no model was called. | Fresh final-worker six-check certification, real parent/two-child execution and write refusal, approval/capacity/restart/cancel/result/accounting acceptance, then writable integration/conflict acceptance. Also exercise four synthetic parents with child/reviewer/certification contention at the proposed agent cap, without deadlock or broad cancellation. |
+| Cross-repository completion and rollout preparation | Shared source remains locally at e3fc8ad; this checkpoint did not merge/sync consumers or deploy a matching runtime package. | Finish shared/consumer source and exact pin/generation checks, validate the matching full runtime package, assemble final evidence/review and concrete schema/deployment/config/rollback artifacts for James. |
+
+Resume order:
+1. Complete parent spec creation → certification → accounting → frozen worker configuration,
+   including queued/recovery identity checks. Use the known accounting.key before inserting the
+   invocation; provisioning is intentionally possible before accounting records a certificate.
+2. Complete read-only child execution and subtree lifecycle together, then run their real
+   synthetic acceptance. A pending handle or mount-only test does not establish child execution.
+3. Complete writable child isolation/integration and its preservation/conflict acceptance.
+4. Complete controls, full resource-contention/accounting matrix and cross-repository validation.
+5. Run the final configured gates and review against the approved plan; prepare the final PR
+   with supported acceptance evidence and remaining operator-owned rollout actions clearly stated.
+
+Final-PR completion criteria:
+- All implementation and acceptance rows above are complete, or an explicit scope change from
+  James is recorded. Do not silently defer writable children or controls to call the plan done.
+- The final source/worker/runtime combination has fresh evidence.09953bc's passing gate report
+  is evidence for that checkpoint only; it cannot certify subsequent source changes or new VMs.
+- Shared changes/pins and consumer generation have a concrete reviewed dependency path; no
+  generated vendor tree is hand-edited. Outstanding review findings are resolved.
+- Live deployment/activation and applying schema5→6 are **separate from PR readiness**. Prepare
+  reviewable artifacts and rollback; do not perform those human-owned actions to make a PR ready.
+- Synthetic factory workloads are sufficient. No ticket delivery, CRUD hardening, customer work
+  or historical ticket modification is required once the named feature assertions are satisfied.
+
+Retained09953bc verification: artifacts/runtime-mailbox-controller/gates-final.json PASS;
+Ruff check, Ruff format, mypy and pytest all exit0, no skips, empty output tails. Mypy included
+158 source/test files. Unit/integration fixtures prove control-plane behavior, not real child
+execution. Separate mount-result.json proves only the documented VM mount assertions. No code
+gates were rerun for this documentation-only audit; production source is unchanged.
 
 ## Objective and approved scope
 
