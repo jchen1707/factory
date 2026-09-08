@@ -38,6 +38,12 @@ def run(ctx: Context) -> None:
 
 
 def build_spec(ctx: Context) -> SandboxSpec:
+    from factory.workflow_delegation import parent_spec
+
+    return parent_spec(ctx, base_build_spec(ctx))
+
+
+def base_build_spec(ctx: Context) -> SandboxSpec:
     """The build sandbox. Every creation-time decision is made here, once.
 
     The vault is mounted read-write and not `:ro`, because `session_learnings.mjs`

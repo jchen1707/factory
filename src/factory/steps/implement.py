@@ -74,7 +74,20 @@ def start(
     # is a new attempt.
     attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
     from factory.agent.selection import select
+    from factory.workflow_delegation import prepare_parent
 
+    if (
+        resume_session is not None
+        and ctx.store.runtime.effective(ctx.project.name, ctx.run.id).get(
+            "delegation_mode", "disabled"
+        )
+        != "disabled"
+    ):
+        raise Blocked(
+            "delegation-session-transfer-required",
+            "Retain the previous runtime thread before moving recovery to a new mailbox sandbox",
+        )
+    prepare_parent(ctx, attempt)
     select(ctx)
     execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
@@ -100,7 +113,6 @@ def start(
         env=ctx.env,
         resume_session=resume_session,
     )
-    script = ctx.agent.wrapper_script(invocation)
 
     attempt_dir.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(schema_source, attempt_dir.schema)
@@ -150,6 +162,10 @@ def start(
             attempt_dir=attempt_dir.root,
         )
         identifier = accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
+        from factory.workflow_delegation import configure_parent
+
+        configure_parent(ctx, identifier)
+        script = ctx.agent.wrapper_script(invocation)
         inputs: tuple[Path, ...] = (attempt_dir.prompt, attempt_dir.schema, attempt_dir.request)
         worker_request = attempt_dir.prompt.with_suffix(".app-server.json")
         if worker_request.exists():

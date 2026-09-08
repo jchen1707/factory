@@ -94,6 +94,10 @@ def resume(ctx: Context) -> bool:
         if intent is None:
             authority.current(ctx)
             metadata = invocation["metadata"]
+            if metadata.get("semantic_role") == "builder" and metadata.get("parent_id") is None:
+                from factory.workflow_delegation import parent_configuration
+
+                parent_configuration(ctx, effect.step)
             if (
                 payload["env_sha256"] != _environment(ctx)
                 or payload["head"] != repo.head_sha(ctx.worktree)
@@ -160,7 +164,8 @@ def reconcile_run(
     from factory.delegation_controller import DelegationController
     from factory.runtime_jobs import RuntimeJobs
 
-    DelegationController(store, home).service_run(run_id)
+    controller = DelegationController(store, home)
+    controller.service_run(run_id)
     launches = AgentLaunches(store, sandbox)
     active = RuntimeJobs(store).active_agents(project)
     for lease in sorted(active, key=lambda row: row["parent_id"] is None):
@@ -176,6 +181,16 @@ def reconcile_run(
             is None
         ):
             continue
+        handle = launches.handle(invocation["id"])
+        if lease["parent_id"] is None and (handle.attempt_dir / handle.exit_name).exists():
+            controller.cancel_requests(invocation["id"])
+            # A paid child still requires owned signalling and terminal collection.
+            # Retain parent usage now, but never finalize it over an active subtree.
+            if any(child["parent_id"] == invocation["id"] for child in active):
+                accounting.collect_invocation(
+                    store, home, invocation["id"], Path(invocation["metadata"]["events"])
+                )
+                continue
         launches.reconcile(
             invocation["id"],
             collect=partial(

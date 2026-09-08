@@ -2,15 +2,16 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest code checkpoint: **09953bc**. Repository audit on2026-09-07 confirms that the
-checkpoint passes its four code gates but the approved feature plan is incomplete.
-**Not ready for the final feature PR.** Read the audited completion checklist immediately
-below before resuming; older checkpoint sections are historical evidence, not completion claims.
+Latest checkpoint: parent launch wiring (see final section for verification).
+The full feature plan remains incomplete and is not ready for the final feature PR.
 
-Invocation-owned mailbox provisioning, controller recovery servicing and real mount-only
-acceptance are implemented. Workflow creation/certification still does not consume those specs;
-AppServerAdapter does not enable delegation. No actual child execution is wired. Worker bytes
-are unchanged since192cc71 and still need fresh six-check acceptance before application use.
+Bind-mounted builders now provision their invocation-owned mailbox VM before automatic
+certification/accounting, freeze the child-tool configuration, and revalidate retained
+specifications and permissions on queued launch after restart. This is parent wiring,
+not actual child execution. Clone replacement and runtime-thread transfer refuse explicitly
+pending preservation support. Worker bytes remain unchanged since192cc71 and require
+fresh real six-check acceptance. The following audit is the historical898c0c5 baseline;
+the newest checkpoint at the end supersedes its parent-wiring status.
 
 ## Audited remaining work and final-PR readiness
 
@@ -1489,3 +1490,50 @@ all output tails empty, no skips. Mypy covers158 source/test files, including ne
 Fake-runtime gate caveat applies; separate real mount-only evidence is described above.
 No production source changed after this report. Both bounded reviews clear against available
 guidance; missing optional architecture/stack checklist limits Standards coverage as stated.
+
+
+## Parent launch wiring checkpoint
+
+Implemented after898c0c5:
+- workflow_delegation.prepare_parent creates the exact invocation-owned bind-layout spec
+  before selection/accounting. Its durable run binding reconstructs that spec for certification,
+  later steps and reopened controllers. Project restoration supports individual sandbox overrides.
+- Launch identity uses the upcoming launch counter and the same accounting key construction as
+  admission. Certification ticks retain the same binding while its certifier is active; changing
+  owners waits for previous agents to reconcile.
+- implement.start records invocation accounting before constructing the worker request. The
+  host-retained schema/paths become three dynamic tools in the frozen request. Only immutable
+  certified builder adapters can carry delegation configuration.
+- Queued launch checks mailbox directory identity, mounts, authority and current project
+  permission alongside full fingerprint/evidence validation.
+- Mailbox failure cancels pending requests, including restart after committing the failure fence.
+  Exited parents also fence pending requests before terminal accounting. Active paid children
+  remain reserved; this does not implement subtree signalling or child result collection.
+
+Offline evidence uses production implement/selection/preparation/resume paths, isolated SQLite,
+real temporary Git trees and a fake sandbox observer/executor. Original and delegated builders
+reject changed evidence, generation, runtime, launcher, environment and mounts; delegated
+builders also reject revoked project permission and replaced mailbox directories. Exact
+restoration launches once. Controller restart and dirty-source preservation pass. These fixture
+certificates are NOT real sandbox acceptance. No VM/model calls, live changes, schema migration,
+consumer sync or deployment occurred.
+
+Remaining launch gaps:
+1. Clone layouts require durable transfer of private commits, dirty/untracked files and writable
+   environment state. delegation-clone-transfer-required refuses before sandbox replacement.
+2. Actual thread recovery requires retaining runtime thread state and compatible registration.
+   delegation-session-transfer-required refuses before moving resume_session to another VM.
+   Queued prepared-launch restart is implemented; actual thread transfer is a different case.
+3. Actual child preparation/certification/admission/execution, binding/result publication and
+   owned signalling remain unfinished. Parent tools can return pending handles only.
+4. Writable integration, controls, final real synthetic resource/accounting acceptance,
+   shared/consumer validation and reviewable rollout artifacts remain required. No live activation.
+
+Both bounded review axes are clear; the Spec crash-window finding was fixed and rechecked.
+The regression asserts request cancellation immediately after mailbox service, before terminal
+reconciliation could hide the failure. Full gate evidence belongs to this source checkpoint.
+
+Main objective: factory feature/workflow acceptance using synthetic work. No ticket completion,
+review substitution or CRUD hardening is required. This checkpoint does not complete the plan.
+
+Final gate evidence: artifacts/runtime-parent-delegation/gates-final.json PASS. All four configured gates exited0, no skips, empty tails. Mypy covers160 source/test files including this change; fake sandbox tests do not establish real runtime compatibility. Both bounded reviews clear.

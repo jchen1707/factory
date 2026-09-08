@@ -21,9 +21,10 @@ if TYPE_CHECKING:
     from factory.store import Store
 
 
-def key(ctx: Context, attempt: int, role: str) -> str:
+def key(ctx: Context, attempt: int, role: str, *, launch: int | None = None) -> str:
     group = "review" if role.startswith("review:") else role
-    launch = ctx.store.runtime.settings("run", ctx.run.id).get(f"launch:{attempt}:{group}", 1)
+    if launch is None:
+        launch = ctx.store.runtime.settings("run", ctx.run.id).get(f"launch:{attempt}:{group}", 1)
     suffix = f":launch-{launch}" if launch > 1 else ""
     return f"{ctx.run.id}:{attempt}:{role}{suffix}"
 

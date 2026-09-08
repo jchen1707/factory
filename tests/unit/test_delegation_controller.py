@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from factory.delegation_controller import DelegationController
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.store import Store
@@ -223,8 +225,12 @@ def test_retained_configuration_refuses_changed_mounts_and_directory_identity(
     store.close()
 
 
-def test_poisoned_mailbox_does_not_prevent_terminal_accounting(tmp_path: Path) -> None:
+@pytest.mark.parametrize("retained_failure", [False, True])
+def test_poisoned_mailbox_does_not_prevent_terminal_accounting(
+    tmp_path: Path, retained_failure: bool
+) -> None:
     from factory.agent_launches import AgentLaunches
+    from factory.delegation import DelegationBroker
     from factory.runtime_jobs import RuntimeJobs
     from factory.sandbox.base import RunHandle, RunStatus
     from factory.workflow_launches import reconcile_run
@@ -280,6 +286,12 @@ def test_poisoned_mailbox_does_not_prevent_terminal_accounting(tmp_path: Path) -
     AgentLaunches(store, sandbox).start(
         "queued", handle, "script", {}, usd_limit=10, max_attempts=2
     )
+    pending = DelegationBroker(store, "queued", source).request("pending", task())
+    if retained_failure:
+        # A controller died after recording the fault but before cancelling requests.
+        fence = (parent["run_id"], 1, "queued", "delegation-mailbox", "failure")
+        store.intend_effect(*fence)
+        store.confirm_effect(*fence, "ValueError")
     (Path(config["inbox"]) / "request.json").write_bytes(b"x" * (80 * 1024 + 1))
     handle.attempt_dir.mkdir()
     (handle.attempt_dir / "exit").write_text("0")
@@ -287,6 +299,11 @@ def test_poisoned_mailbox_does_not_prevent_terminal_accounting(tmp_path: Path) -
     store.close()
     reopened = Store(tmp_path / "factory.db")
     try:
+        DelegationController(reopened, home).service_run(parent["run_id"])
+        assert (
+            DelegationBroker(reopened, "queued", source).inspect(pending["id"])["status"]
+            == "cancelled"
+        )
         reconcile_run(reopened, home, sandbox, parent["run_id"], "synthetic")
         assert [
             row["invocation_id"] for row in RuntimeJobs(reopened).active_agents("synthetic")
@@ -295,6 +312,10 @@ def test_poisoned_mailbox_does_not_prevent_terminal_accounting(tmp_path: Path) -
         assert invocation is not None
         assert invocation["telemetry"]["usage"]["input_tokens"] == 12
         assert invocation["telemetry"]["estimate"]["complete"] is False
+        assert (
+            DelegationBroker(reopened, "queued", source).inspect(pending["id"])["status"]
+            == "cancelled"
+        )
         fault = reopened.find_effect(parent["run_id"], 1, "queued", "delegation-mailbox", "failure")
         assert fault is not None
         assert fault.status == "confirmed"

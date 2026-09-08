@@ -126,6 +126,7 @@ class AppServerAdapter(CodexAdapter):
         self.runtime_version = runtime_version
         self.sandbox = sandbox
         self.baselines = baselines or {}
+        self.delegation: dict | None = None
         self.report = validate_compatibility(
             compatibility, runtime_version=runtime_version, sandbox=sandbox
         )
@@ -165,6 +166,10 @@ class AppServerAdapter(CodexAdapter):
             "context_semantics_verified": True,
         }
         binding = runtime_binding(report)
+        if self.delegation is not None:
+            if readonly or not self.immutable or binding is None:
+                raise Blocked("delegation-runtime-required", "A certified builder is required")
+            request["delegation"] = self.delegation
         if binding is not None:
             request["runtime_identity"] = binding
         invocation.prompt_path.with_suffix(".app-server.json").write_text(json.dumps(request))

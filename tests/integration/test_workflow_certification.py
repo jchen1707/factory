@@ -18,10 +18,16 @@ from tests.unit.test_certification import write_report
 
 
 @pytest.mark.parametrize(
-    "change", ["evidence", "generation", "environment", "runtime", "mount", "launcher"]
+    ("delegation", "change"),
+    [
+        (mode, change)
+        for mode in (False, True)
+        for change in ("evidence", "generation", "environment", "runtime", "mount", "launcher")
+    ]
+    + [(True, "disabled"), (True, "mailbox")],
 )
 def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch, change: str
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, change: str, delegation: bool
 ) -> None:
     source_root = Path(__file__).parents[2]
     for name in ("hooks/delivery_policy.mjs", "docs/agents/delivery-review.md"):
@@ -39,6 +45,10 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
     wiring = ctx.project.path / ".codex/hooks.json"
     wiring.parent.mkdir(exist_ok=True)
     wiring.write_text('{"hooks":{"PreToolUse":[]}}')
+    if delegation:
+        schema = ctx.project.path / ".agents/vendor/harness/schema/delegation-request.schema.json"
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_root / "tests/fixtures/delegation/request.schema.json", schema)
     claim.run(ctx)
     context.run(ctx)
     sandbox.run(ctx)
@@ -75,6 +85,11 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
             "app_server_compatibility": "/absent/manual",
         },
     )
+    if delegation:
+        from factory.workflow_delegation import prepare_parent
+
+        ctx.store.runtime.configure("project", ctx.project.name, {"delegation_mode": "read-only"})
+        prepare_parent(ctx, 1)
 
     generation = "fresh-generation"
     runtime_digest = "b" * 64
@@ -130,12 +145,20 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
     with pytest.raises(ProjectQueued):
         implement.start(ctx)
     identifier = ctx.store.runtime.settings("run", ctx.run.id)["waiting_invocation"]
+    if delegation:
+        request = json.loads((ctx.factory_dir / "run/1/prompt.app-server.json").read_text())
+        assert {tool["name"] for tool in request["delegation"]["tools"]} == {
+            "factory_request_child",
+            "factory_child_status",
+            "factory_cancel_child",
+        }
     jobs.finish_agent("occupied", status="completed")
     database = ctx.store.path
     ctx.store.close()
     ctx.store = Store(database)
     original_project = ctx.project
     original_evidence = report.with_name("evidence.txt").read_bytes()
+    outbox = None
     if change == "runtime":
         runtime_digest = "e" * 64
     elif change == "launcher":
@@ -146,9 +169,18 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
         generation = "recreated-generation"
     elif change == "environment":
         ctx.project = replace(ctx.project, env={**ctx.project.env, "FIXTURE_CHANGED": "1"})
+    elif change == "disabled":
+        ctx.store.runtime.configure("project", ctx.project.name, {"delegation_mode": "disabled"})
+    elif change == "mailbox":
+        outbox = Path(request["delegation"]["outbox"])
+        outbox.rename(outbox.with_name("original-outbox"))
+        outbox.mkdir()
     else:
         report.with_name("evidence.txt").write_text("candidate-authored replacement")
-    with pytest.raises(Blocked, match=r"compatibility-|certification-|launch-preparation-stale"):
+    with pytest.raises(
+        Blocked,
+        match=r"compatibility-|certification-|launch-preparation-stale|delegation-preparation-stale",
+    ):
         workflow_launches.resume(ctx)
     assert ctx.run.attempt == 1
     assert len(ctx.store.runtime.invocations(ctx.run.id)) == 1
@@ -162,6 +194,11 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
     launcher_digest = "d" * 64
     mount = "original-mount"
     report.with_name("evidence.txt").write_bytes(original_evidence)
+    if change == "disabled":
+        ctx.store.runtime.configure("project", ctx.project.name, {"delegation_mode": "read-only"})
+    if outbox is not None:
+        outbox.rmdir()
+        outbox.with_name("original-outbox").rename(outbox)
     assert workflow_launches.resume(ctx)
     assert not workflow_launches.resume(ctx)
     assert len(_fake(ctx).detached) == 1

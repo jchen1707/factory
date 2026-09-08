@@ -155,6 +155,7 @@ class DelegationController:
                 continue
             failure = (run_id, parent["attempt"], parent["id"], "delegation-mailbox", "failure")
             if self.store.find_effect(*failure) is not None:
+                self.cancel_requests(parent["id"])
                 continue
             try:
                 record = self._record(parent["id"])
@@ -189,7 +190,17 @@ class DelegationController:
                             "delegation-transport-failed",
                             {"parent": parent["id"], "error": type(exc).__name__},
                         )
+                self.cancel_requests(parent["id"])
         return serviced
+
+    def cancel_requests(self, parent_id: str) -> None:
+        """Fence admission when a parent exits or loses its channel; retain paid leases."""
+        record = self._record(parent_id)
+        if record is None:
+            return
+        broker = DelegationBroker(self.store, parent_id, Path(record["source"]))
+        for request in broker.requests():
+            broker.cancel(request["id"])
 
     def _parent(self, parent_id: str) -> dict[str, Any]:
         parent = self.store.runtime.invocation(parent_id)

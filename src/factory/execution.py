@@ -86,8 +86,9 @@ def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None 
     wanted = attempt_key(attempt, step, previous + 1)
     exact = wanted
     if invocation_role is not None:
-        suffix = f":launch-{previous + 1}" if previous else ""
-        exact = f"{ctx.run.id}:{attempt}:{invocation_role}{suffix}"
+        from factory.accounting import key
+
+        exact = key(ctx, attempt, invocation_role, launch=previous + 1)
     if settings.get("mode", "automatic") == "approval" and settings.get(
         "approved_invocation"
     ) not in {wanted, exact}:
