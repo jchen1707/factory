@@ -2122,8 +2122,8 @@ James requested publishing/merging the completed work and updating README.md for
 explicitly approved the schema5→6 change. This supersedes earlier pending-schema-approval
 statements in the historical log. It does not waive stop-writers, verified online backup,
 fresh rehearsal, identity validation or controlled activation. No live migration applied yet.
-The factory-PR merge scope is being clarified while dependency publication and README work
-proceed. Keep the final factory PR open unless its merge is explicitly confirmed.
+Dependency merges are complete. The stated publication scope leaves factory PR #90 open
+for James's review unless he confirms he also wants it merged.
 
 
 ### Publication checkpoint: PR #90 and safe hook tests
@@ -2160,9 +2160,14 @@ frontend#58 merged ate39f63b18a285731f3ddc4d304784d898cbd8b3d. Both include sour
 and pass required Linux/Windows, generation and freshness checks; applicable integration,
 e2e and Lighthouse CI also pass. The existing Go consumer's managed#3 update merged normally.
 Manual duplicate publication branches were removed from GitHub; local evidence remains.
-The shared read-only mount reconciliation is being finished through its normal checked workflow.
+The shared read-only mount reconciliation merged as harness #41 at61a509f975dd921aa249b929199a80620701a5d3 after all required checks passed.
 
 Final factory PR90 gates pass after the merged shared fixes: Ruff122ms, format42ms, mypy295ms,
 pytest176302ms, all exits0. README factual review resolved the distinction between readonly bind
 mounts and frozen clone snapshots; CLI/default/link checks pass. The final PR includes the merged
 shared pin and schema authorization record. No live service or database changes were made.
+
+Publication complete: harness #39/#40/#41 and managed Python #80/frontend #58 are merged.
+The existing Go managed #3 merge completes the shared mount loop. Factory PR #90 is open,
+non-draft and mergeable, with README updated for main. Source publication commit18eeccd passed
+all four gates; this final status update is documentation only. No live migration or restart.

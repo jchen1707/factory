@@ -14,10 +14,11 @@ parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
 | Shared `harness@v2` | `be33f31ca` (merged PRs #39/#40; plugin 0.13.1) | Shared certification/delegation contracts and consumer generation |
 | `python-harness@v2` | `3ade70f` (merged managed Python PR #80) | Exact shared pin and regenerated content |
 | `frontend-harness@v2` | `e39f63b` (merged managed frontend PR #58) | Exact shared pin and regenerated content |
-| Factory | `c37b6e9` (final source; subsequent handoff update is documentation only) | Schema 6, controller, workers, and synchronized shared content |
+| Factory | `18eeccd` (factory PR #90; final handoff updates are documentation only) | Schema 6, controller, workers, and synchronized shared content |
 | Sandbox package | [Package manifest](runtime-certification/package-manifest.json) | Full native Codex 0.153.4 package, matching helpers and protected mount anchor |
 
-Shared and consumer sources above are published and merged; factory PR #90 remains open
+Shared and consumer sources above are published and merged; shared mount PR #41 closes the
+read-only dependency loop. Factory PR #90 remains open
 for review. Record its final merged release commit before deployment. Managed sync PRs may appear
 after the shared merge; reconcile those with the prepared consumer branches rather than
 racing their automation. If merging changes a required source SHA, regenerate and recheck
