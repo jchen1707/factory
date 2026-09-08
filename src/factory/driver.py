@@ -111,8 +111,18 @@ def step(ctx: Context) -> Result:
         # that a state with no entry action is one `is_human_held` derives as James's.
         return Result(Outcome.NEEDS_HUMAN, f"{before} is held for a human")
 
+    from factory.child_integration import IntegrationHeld
+
     try:
+        from factory.workflow_children import advance as advance_children
+
+        advance_children(ctx)
+        from factory.child_integration import advance as integrate_children
+
+        integrate_children(ctx)
         result = _perform(ctx, action, before)
+    except IntegrationHeld as exc:
+        return Result(Outcome.STOPPED, exc.detail, exc.reason)
     except AgentApprovalRequired as exc:
         return Result(Outcome.NEEDS_HUMAN, f"agent attempt waiting: {exc}", "approval-required")
     except ProjectQueued as exc:

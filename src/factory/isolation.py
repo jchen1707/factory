@@ -15,9 +15,11 @@ from factory.store import Run, Store
 def project_for_run(project: Project, run: Run, store: Store) -> Project:
     settings = store.runtime.settings("run", run.id)
     build, review = settings.get("build_sandbox"), settings.get("review_sandbox")
-    if build and review:
-        return replace(project, build_sandbox=build, review_sandbox=review)
-    return project
+    return replace(
+        project,
+        build_sandbox=build or project.build_sandbox,
+        review_sandbox=review or project.review_sandbox,
+    )
 
 
 def prepare(project: Project, run: Run, store: Store) -> Project:

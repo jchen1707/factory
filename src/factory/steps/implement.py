@@ -22,8 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from factory import accounting, artifacts, authority, execution, policy
-from factory.agent import timings
+from factory import accounting, artifacts, authority, execution, policy, workflow_launches
 from factory.agent.base import (
     AgentInvocation,
     SchemaInvalid,
@@ -74,10 +73,12 @@ def start(
     # already planned reuses that attempt's number and its directory. Anywhere else this
     # is a new attempt.
     attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
-    execution.guard(ctx, attempt, STEP)
     from factory.agent.selection import select
+    from factory.workflow_delegation import prepare_parent
 
+    prepare_parent(ctx, attempt, resume_session=resume_session)
     select(ctx)
+    execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = execution.role_for(ctx, "builder")
@@ -101,7 +102,6 @@ def start(
         env=ctx.env,
         resume_session=resume_session,
     )
-    script = ctx.agent.wrapper_script(invocation)
 
     attempt_dir.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(schema_source, attempt_dir.schema)
@@ -125,38 +125,42 @@ def start(
 
     _write_vault_snapshot(ctx, attempt_dir)
 
-    ctx.store.start_attempt(
-        ctx.run.id,
-        attempt,
-        State.IMPLEMENTING,
-        sandbox=ctx.project.build_sandbox,
-        artifact_dir=str(attempt_dir.root),
-    )
-    ctx.refresh()
-    # The hop into `implementing` is recorded once, by whoever put the run here. From
-    # `worktree_ready`/`planning`/`suspended`/`blocked`/`resumable` that is this `start`; from
-    # a verify-fail loop-back it was `verify` (`verifying -> implementing`), and re-recording
-    # `implementing -> implementing` is an illegal transition that blocked FRO-6's resume.
-    # `start` begins a fresh attempt against the existing worktree either way — the attempt
-    # counter (above) is what marks the new attempt, not the state hop.
-    if ctx.state is not State.IMPLEMENTING:
-        advance(ctx, State.IMPLEMENTING, actor=actor)
+    with workflow_launches.preparation(ctx):
+        ctx.store.start_attempt(
+            ctx.run.id,
+            attempt,
+            State.IMPLEMENTING,
+            sandbox=ctx.project.build_sandbox,
+            artifact_dir=str(attempt_dir.root),
+        )
+        ctx.refresh()
+        # The hop into `implementing` is recorded once, by whoever put the run here. From
+        # `worktree_ready`/`planning`/`suspended`/`blocked`/`resumable` that is this `start`; from
+        # a verify-fail loop-back it was `verify` (`verifying -> implementing`), and re-recording
+        # `implementing -> implementing` is an illegal transition that blocked FRO-6's resume.
+        # `start` begins a fresh attempt against the existing worktree either way — the attempt
+        # counter (above) is what marks the new attempt, not the state hop.
+        if ctx.state is not State.IMPLEMENTING:
+            advance(ctx, State.IMPLEMENTING, actor=actor)
 
-    handle = RunHandle(
-        run_id=ctx.run.id,
-        attempt=attempt,
-        sandbox=ctx.project.build_sandbox,
-        workdir=str(worktree),
-        attempt_dir=attempt_dir.root,
-    )
-    accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
-    ctx.sandbox.exec_detached(handle, script, ctx.env)
-    # Phase 2 (opt-in): a host-side tailer that stamps each `events.jsonl` line with an
-    # `observed_at`, so the run-timeline can defend a per-call `duration_s`. Gated by
-    # `registry.defaults.timings` — off by default, so the test suite (which does not set
-    # it) never spawns a real process, and arming the writer is James's call per project.
-    if ctx.registry.defaults.timings:
-        timings.spawn(attempt_dir.events, attempt_dir.exit_file)
+        handle = RunHandle(
+            run_id=ctx.run.id,
+            attempt=attempt,
+            sandbox=ctx.project.build_sandbox,
+            workdir=str(worktree),
+            attempt_dir=attempt_dir.root,
+        )
+        identifier = accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
+        from factory.workflow_delegation import configure_parent
+
+        configure_parent(ctx, identifier)
+        script = ctx.agent.wrapper_script(invocation)
+        inputs: tuple[Path, ...] = (attempt_dir.prompt, attempt_dir.schema, attempt_dir.request)
+        worker_request = attempt_dir.prompt.with_suffix(".app-server.json")
+        if worker_request.exists():
+            inputs += (worker_request,)
+        workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
+    workflow_launches.resume(ctx)
     ctx.log(
         "implement.started",
         sandbox=handle.sandbox,
@@ -541,7 +545,13 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
     ]
     handoff = ctx.factory_dir / "handoff.json"
     if handoff.exists():
-        collected = ctx.factory_dir / "run" / str(ctx.run.attempt) / "planning-output"
+        planning = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.PLANNING)
+        planning_root = (
+            Path(planning["artifact_dir"])
+            if planning is not None
+            else ctx.factory_dir / "run" / str(ctx.run.attempt)
+        )
+        collected = planning_root / "planning-output"
         sections.extend(
             [
                 "",

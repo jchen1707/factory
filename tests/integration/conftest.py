@@ -361,6 +361,20 @@ class FakeSandbox:
     ) -> Completed:
         self.sync_calls.append((name, tuple(argv)))
         self._start(name)
+        if any("prepare_runtime(json.loads" in str(arg) for arg in argv):
+            return Completed(
+                tuple(argv),
+                0,
+                json.dumps(
+                    {
+                        "thread_id": "synthetic-preparation",
+                        "configuration_before": "a" * 64,
+                        "configuration_after": "b" * 64,
+                        "model_turns": 0,
+                    }
+                ),
+                "",
+            )
         if argv and argv[0] == "git" and self.clone_dir(name) is not None:
             # Run it, for real, against the clone. Faking git here would fake exactly the
             # thing the clone path is made of: cutting the branch inside the VM, and the
@@ -517,7 +531,11 @@ class FakeSandbox:
     def poll(self, handle: RunHandle) -> RunStatus:
         if self.poll_status is not None:
             return self.poll_status
-        return RunStatus.EXITED if (handle.attempt_dir / "exit").exists() else RunStatus.RUNNING
+        return (
+            RunStatus.EXITED
+            if (handle.attempt_dir / handle.exit_name).exists()
+            else RunStatus.RUNNING
+        )
 
     def collect(self, handle: RunHandle) -> RunResult:
         return RunResult(

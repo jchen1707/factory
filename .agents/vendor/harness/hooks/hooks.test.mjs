@@ -634,6 +634,73 @@ describe('gate report — base diff (factory post-commit)', () => {
   });
 });
 
+it('keeps fixture Git and gate discovery isolated from the invoking hook repository', () => {
+  const outer = mkdtempSync(join(tmpdir(), 'hook-outer-repository-'));
+  const clean = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !key.startsWith('GIT_') && key !== 'NODE_TEST_CONTEXT',
+    ),
+  );
+  function outerGit(...args) {
+    const result = spawnSync('git', args, { cwd: outer, env: clean, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  }
+  try {
+    outerGit('init', '-q');
+    outerGit('config', 'user.name', 'outer owner');
+    outerGit('config', 'user.email', 'outer@example.invalid');
+    writeFileSync(join(outer, 'preserved.txt'), 'committed outer work\n');
+    outerGit('add', '-A');
+    outerGit('commit', '-qm', 'preserved outer commit');
+    writeFileSync(join(outer, 'preserved.txt'), 'staged outer work\n');
+    outerGit('add', '-A');
+    const head = outerGit('rev-parse', 'HEAD');
+    const index = readFileSync(join(outer, '.git', 'index'));
+    const config = readFileSync(join(outer, '.git', 'config'));
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--test',
+        '--test-name-pattern=^gate report — base diff integration',
+        fileURLToPath(import.meta.url),
+      ],
+      {
+        cwd: outer,
+        env: {
+          ...clean,
+          GIT_DIR: join(outer, '.git'),
+          GIT_WORK_TREE: outer,
+          GIT_INDEX_FILE: join(outer, '.git', 'index'),
+        },
+        encoding: 'utf8',
+        timeout: 30000,
+      },
+    );
+    assert.equal(
+      outerGit('rev-parse', 'HEAD'),
+      head,
+      'fixture commits changed the invoking repository',
+    );
+    assert.deepEqual(
+      readFileSync(join(outer, '.git', 'index')),
+      index,
+      'fixture changed the invoking index',
+    );
+    assert.deepEqual(
+      readFileSync(join(outer, '.git', 'config')),
+      config,
+      'fixture changed invoking Git configuration',
+    );
+    assert.equal(readFileSync(join(outer, 'preserved.txt'), 'utf8'), 'staged outer work\n');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /runs the gate for a committed change/);
+    assert.match(result.stdout, /skips the gate when no --base is given/);
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
 describe('gate report — base diff integration (real git)', () => {
   // The one test the fakes above cannot stand in for: run the real `gate_report.mjs --base`
   // against a temp repo whose working tree is clean (the work is committed) and assert the
@@ -642,9 +709,14 @@ describe('gate report — base diff integration (real git)', () => {
   // skipped — exactly the BAC-5 evidence-mismatch. This is the failing-first proof.
   const hook = join(dirname(fileURLToPath(import.meta.url)), 'gate_report.mjs');
   const gatesRoots = [];
+  // Git hooks export repository selectors. Cwd alone cannot isolate a fixture;
+  // gate_report also spawns Git and must receive the same clean environment.
+  const fixtureEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+  );
 
   function git(cwd, ...args) {
-    const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    const r = spawnSync('git', args, { cwd, env: fixtureEnv, encoding: 'utf8' });
     assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
     return r.stdout.trim();
   }
@@ -679,6 +751,7 @@ describe('gate report — base diff integration (real git)', () => {
 
     const base = git(root, 'rev-parse', 'HEAD~1');
     const r = spawnSync('node', [hook, '--base', base, '--json', '--cwd', root], {
+      env: fixtureEnv,
       encoding: 'utf8',
     });
     assert.equal(r.status, 0, r.stderr);
@@ -699,7 +772,10 @@ describe('gate report — base diff integration (real git)', () => {
     git(root, 'add', '-A');
     git(root, 'commit', '-qm', 'add foo');
 
-    const r = spawnSync('node', [hook, '--json', '--cwd', root], { encoding: 'utf8' });
+    const r = spawnSync('node', [hook, '--json', '--cwd', root], {
+      env: fixtureEnv,
+      encoding: 'utf8',
+    });
     assert.equal(r.status, 0, r.stderr);
     const report = JSON.parse(r.stdout);
     assert.equal(report.gates[0].status, 'skipped_unchanged');

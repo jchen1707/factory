@@ -583,3 +583,324 @@ def test_kill_agent_defaults_to_codex(tmp_path: Path, monkeypatch: pytest.Monkey
     SbxAdapter().kill_agent("factory-build-python-harness")
 
     assert captured[0][3:] == ["pkill", "-x", "codex"]
+
+
+def test_generation_is_observed_again_when_a_sandbox_name_is_reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    identifiers = iter(
+        [
+            "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4",
+            "9df815b9-b769-401e-96ef-018d9d32aa5d",
+        ]
+    )
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps(
+                {
+                    "sandboxes": [
+                        {
+                            "name": "factory-build-test",
+                            "id": next(identifiers),
+                        }
+                    ]
+                }
+            ),
+            "",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    adapter = SbxAdapter()
+    assert adapter.generation("factory-build-test") == "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4"
+    assert adapter.generation("factory-build-test") == "9df815b9-b769-401e-96ef-018d9d32aa5d"
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [
+        {},
+        {"sandboxes": []},
+        {"sandboxes": None},
+        {"sandboxes": [None]},
+        {"sandboxes": [{"name": "factory-build-test"}]},
+        {"sandboxes": [{"name": "factory-build-test", "id": "same-name"}]},
+        {
+            "sandboxes": [
+                {"name": "factory-build-test", "id": "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4"}
+            ]
+            * 2
+        },
+    ],
+)
+def test_generation_refuses_unknown_or_ambiguous_identity(
+    listing: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, json.dumps(listing), ""),
+    )
+    with pytest.raises(SbxError, match="generation unavailable"):
+        SbxAdapter().generation("factory-build-test")
+
+
+def test_generation_refuses_human_sandbox() -> None:
+    with pytest.raises(PermissionError):
+        SbxAdapter().generation("codex-factory")
+
+
+def test_runtime_observation_refuses_recreation_during_binary_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    generations = iter(
+        [
+            "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4",
+            "9df815b9-b769-401e-96ef-018d9d32aa5d",
+        ]
+    )
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        data: dict[str, object]
+        if argv[1] == "ls":
+            data = {"sandboxes": [{"name": "factory-build-test", "id": next(generations)}]}
+        elif argv[1] == "inspect":
+            data = {
+                "name": "factory-build-test",
+                "image_digest": "sha256:" + "a" * 64,
+                "secrets": [],
+            }
+        else:
+            data = {
+                "runtime_path": "/opt/codex",
+                "runtime_version": "codex-cli 0.153.4",
+                "runtime_sha256": "b" * 64,
+            }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="changed during runtime observation"):
+        SbxAdapter().observe_runtime("factory-build-test", binary="/opt/codex")
+
+
+def test_candidate_python_import_cannot_forge_runtime_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    import sys
+
+    marker = tmp_path / "candidate-executed"
+    forged = {
+        "runtime_path": "/opt/codex",
+        "runtime_version": "codex-cli 0.153.4",
+        "runtime_sha256": "b" * 64,
+    }
+    (tmp_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+        f"print({json.dumps(forged)!r})\nraise SystemExit(0)\n"
+    )
+    actual_run = subprocess.run
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1] == "ls":
+            data = {
+                "sandboxes": [
+                    {"name": "factory-build-test", "id": "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4"}
+                ]
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps(
+                    {
+                        "image_digest": "sha256:" + "a" * 64,
+                        "secrets": [],
+                    }
+                ),
+                "",
+            )
+        command = [sys.executable, *argv[argv.index("/usr/bin/python3") + 1 :]]
+        return actual_run(
+            command,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": str(tmp_path)},
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="native runtime identity unavailable"):
+        SbxAdapter().observe_runtime("factory-build-test", binary="/missing/native")
+    assert not marker.exists()
+
+
+def test_full_observation_includes_environment_capability_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    observations = iter(range(100))
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        data: dict = {}
+        if argv[1] == "ls":
+            data = {
+                "sandboxes": [
+                    {"name": "factory-build-test", "id": "6aa2ecf7-415f-41f0-9ec1-b3c1c9e3e0c4"}
+                ]
+            }
+        elif argv[1] == "inspect":
+            data = {
+                "image_digest": "sha256:" + "a" * 64,
+                "secrets": [],
+                "kits": [],
+                "uptime": str(next(observations)),
+            }
+        elif argv[-1] == "/opt/codex":
+            data = {
+                "runtime_path": "/opt/codex",
+                "runtime_version": "codex-cli 0.153.4",
+                "runtime_sha256": "b" * 64,
+            }
+        else:
+            data = {
+                "mounts": [],
+                "environment_sha256": "c" * 64,
+                "configurations": {},
+                "hooks": {},
+                "credential_names": ["FIXTURE_CAPABILITY"],
+                "launcher_sha256": "d" * 64,
+                "code_host_sha256": "e" * 64,
+                "native_mount": {"path": "/mnt", "uid": 0, "mode": 16877},
+            }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = SbxAdapter().observe_certification(
+        SandboxSpec("test", "build", "factory-build-test", ()),
+        binary="/opt/codex",
+        workdir="/workspace",
+        env={},
+        hook_files={},
+    )
+    assert result["actual"]["credential_names"] == ["FIXTURE_CAPABILITY"]
+
+
+@pytest.mark.parametrize("operation", ["stop", "remove"])
+def test_cleanup_reports_command_failure(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+        return subprocess.CompletedProcess(argv, 1, "", "cleanup refused")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="failed"):
+        getattr(SbxAdapter(), operation)("factory-review-cleanup-test")
+
+
+def test_remove_is_noninteractive_and_only_removes_stopped_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[str] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+        if argv == ["sbx", "rm", "--force", "factory-review-cleanup-test"]:
+            removed.append(argv[-1])
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 1, "", "interactive confirmation required")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    SbxAdapter().remove("factory-review-cleanup-test")
+    assert removed == ["factory-review-cleanup-test"]
+
+
+@pytest.mark.parametrize("state", ["running", "starting", "", None])
+def test_remove_refuses_an_unstopped_or_unknown_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    state: str | None,
+) -> None:
+    import json
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert argv[1] == "inspect", "refusal must not issue any destructive command"
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"state": state}), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SbxError, match="must be stopped"):
+        SbxAdapter().remove("factory-review-cleanup-test")
+
+
+@pytest.mark.parametrize("operation", ["stop", "remove"])
+def test_cleanup_never_contacts_a_human_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    def run(*args: object, **kwargs: object) -> None:
+        pytest.fail("must refuse before contacting sbx")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(PermissionError):
+        getattr(SbxAdapter(), operation)("codex-human-session")
+
+
+@pytest.mark.parametrize(
+    ("clone", "ports", "expected"),
+    [
+        (True, ["127.0.0.1:49248->9418/tcp"], ["127.0.0.1:<dynamic-clone-git>->9418/tcp"]),
+        (True, ["127.0.0.1:49249->9418/tcp"], ["127.0.0.1:<dynamic-clone-git>->9418/tcp"]),
+        (False, ["127.0.0.1:49249->9418/tcp"], ["127.0.0.1:49249->9418/tcp"]),
+        (True, ["0.0.0.0:49249->9418/tcp"], ["0.0.0.0:49249->9418/tcp"]),
+        (True, ["127.0.0.1:49249->9419/tcp"], ["127.0.0.1:49249->9419/tcp"]),
+        (True, ["127.0.0.1:49249->9418/udp"], ["127.0.0.1:49249->9418/udp"]),
+        (True, ["127.0.0.1:65536->9418/tcp"], ["127.0.0.1:65536->9418/tcp"]),
+        (True, ["127.0.0.1:0->9418/tcp"], ["127.0.0.1:0->9418/tcp"]),
+        (True, ["127.0.0.1:49249->8000/tcp"], ["127.0.0.1:49249->8000/tcp"]),
+        (
+            True,
+            ["127.0.0.1:49249->9418/tcp", "127.0.0.1:49250->8000/tcp"],
+            ["127.0.0.1:<dynamic-clone-git>->9418/tcp", "127.0.0.1:49250->8000/tcp"],
+        ),
+    ],
+)
+def test_clone_observation_preserves_port_exposure(
+    monkeypatch: pytest.MonkeyPatch, clone: bool, ports: list[str], expected: list[str]
+) -> None:
+    import json
+
+    adapter = SbxAdapter()
+    monkeypatch.setattr(adapter, "observe_runtime", lambda *a, **kw: {"generation": "fixed"})
+    monkeypatch.setattr(adapter, "inspect", lambda *a: {"kits": [], "ports": ports})
+    actual = {
+        "mounts": [],
+        "environment_sha256": "a" * 64,
+        "configurations": {},
+        "hooks": {},
+        "credential_names": [],
+        "launcher_sha256": "b" * 64,
+        "code_host_sha256": "c" * 64,
+        "native_mount": {},
+    }
+    monkeypatch.setattr(
+        adapter, "exec_sync", lambda *a, **kw: Completed((), 0, json.dumps(actual), "")
+    )
+    observed = adapter.observe_certification(
+        _spec(clone=clone), binary="/opt/codex", workdir="/workspace", env={}, hook_files={}
+    )
+    assert observed["actual"]["configuration"]["ports"] == expected
+    assert "<dynamic-clone-git>" not in str(ports)

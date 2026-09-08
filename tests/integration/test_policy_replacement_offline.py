@@ -87,3 +87,25 @@ def test_policy_replacement_uses_local_authority_without_reading_ticket(
     for step in ("verify", "review"):
         with pytest.raises(Blocked, match="authority-evidence-stale"):
             authority.require_current_evidence(ctx, step)
+
+
+def test_authority_snapshot_retains_runtime_hook_configuration(ctx: Context) -> None:
+    for name in ("hooks/delivery_policy.mjs", "docs/agents/delivery-review.md"):
+        target = ctx.project.path / ".agents/vendor/harness" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(__file__).parents[2] / ".agents/vendor/harness" / name, target)
+    root = ctx.project.path
+    config_path = root / "harness.config.json"
+    config = json.loads(config_path.read_text())
+    config["delivery"] = {
+        "default": "core",
+        "requirements": {},
+        "profiles": {"core": {"required": [], "deferrals": []}},
+    }
+    config_path.write_text(json.dumps(config))
+    wiring = root / ".codex/hooks.json"
+    wiring.parent.mkdir(exist_ok=True)
+    wiring.write_text('{"hooks": {"PreToolUse": []}}')
+    snapshot = authority.snapshot(ctx)
+    assert snapshot is not None
+    assert (Path(snapshot["root"]) / ".codex/hooks.json").read_text() == wiring.read_text()

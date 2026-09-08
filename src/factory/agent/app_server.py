@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -25,22 +27,83 @@ COMPATIBILITY_CHECKS = frozenset(
 
 def validate_compatibility(path: Path, *, runtime_version: str, sandbox: str) -> dict:
     try:
-        report = json.loads(path.read_text())
+        report = json.loads(read_evidence(path.parent, path.name))
         _validate_worker(report, Path(__file__).with_name("app_server_worker.py").read_bytes())
+        if report.get("usage_scope", "thread") not in {"thread", "connection"}:
+            raise ValueError("unknown usage counter scope")
         if report["runtime_version"] != runtime_version or report["sandbox"] != sandbox:
             raise ValueError("runtime or sandbox changed")
-        if set(report["checks"]) != COMPATIBILITY_CHECKS:
+        if not isinstance(report["checks"], dict) or set(report["checks"]) != COMPATIBILITY_CHECKS:
             raise ValueError("compatibility checks incomplete")
         for name, check in report["checks"].items():
-            evidence = path.parent / check["evidence"]
-            if (
-                check["status"] != "pass"
-                or hashlib.sha256(evidence.read_bytes()).hexdigest() != check["sha256"]
-            ):
+            evidence = read_evidence(path.parent, check["evidence"])
+            if check["status"] != "pass" or hashlib.sha256(evidence).hexdigest() != check["sha256"]:
                 raise ValueError(f"unverified evidence for {name}")
+        runtime_binding(report)
         return report
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Blocked("app-server-compatibility-incomplete", str(exc)) from exc
+
+
+def runtime_binding(report: dict) -> dict[str, str] | None:
+    """Extract native launch provenance without promoting a manual report to a certificate."""
+    if "certification" not in report:
+        return None
+    identity = report["certification"]["identity"]
+    path, digest = identity["runtime_path"], identity["runtime_sha256"]
+    if (
+        not isinstance(path, str)
+        or not Path(path).is_absolute()
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(c not in "0123456789abcdef" for c in digest)
+        or any(
+            identity[key] != report[key] for key in ("runtime_version", "sandbox", "worker_sha256")
+        )
+    ):
+        raise ValueError("invalid certified runtime binding")
+    binding = {"runtime_path": path, "runtime_sha256": digest}
+    for key in ("launcher_sha256", "code_host_sha256"):
+        helper = identity[key]
+        if (
+            not isinstance(helper, str)
+            or len(helper) != 64
+            or any(c not in "0123456789abcdef" for c in helper)
+        ):
+            raise ValueError("invalid certified helper binding")
+        binding[key] = helper
+    return binding
+
+
+def read_evidence(root: Path, reference: str) -> bytes:
+    """Read a bounded regular file beneath a controller-selected report directory.
+
+    Open each component relative to its directory descriptor without following links,
+    so a path replacement cannot race the containment check. The root is host-owned.
+    """
+    if not isinstance(reference, str) or not reference or "\x00" in reference:
+        raise ValueError("invalid evidence reference")
+    relative = Path(reference)
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise ValueError("evidence must stay beneath its report directory")
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in relative.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        descriptor = os.open(
+            relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("evidence must be a regular file")
+            data = stream.read(64 * 1024 * 1024 + 1)
+            if len(data) > 64 * 1024 * 1024:
+                raise ValueError("evidence exceeds size limit")
+            return data
+    finally:
+        os.close(directory)
 
 
 def _validate_worker(report: dict, worker: bytes) -> None:
@@ -59,20 +122,33 @@ class AppServerAdapter(CodexAdapter):
         runtime_version: str,
         sandbox: str,
         baselines: dict[str, dict[str, int]] | None = None,
+        immutable: bool = False,
     ) -> None:
+        self.immutable = immutable
+        self.compatibility = compatibility
+        self.runtime_version = runtime_version
+        self.sandbox = sandbox
         self.baselines = baselines or {}
+        self.delegation: dict | None = None
         self.report = validate_compatibility(
             compatibility, runtime_version=runtime_version, sandbox=sandbox
         )
 
     def command(self, invocation: AgentInvocation) -> Sequence[str]:
         return [
-            "python3",
+            "/usr/bin/python3",
+            "-I",
+            "-S",
             str(invocation.prompt_path.parent / "app_server_worker.py"),
             str(invocation.prompt_path.with_suffix(".app-server.json")),
         ]
 
     def prepare(self, invocation: AgentInvocation, *, readonly: bool = False) -> None:
+        report = validate_compatibility(
+            self.compatibility, runtime_version=self.runtime_version, sandbox=self.sandbox
+        )
+        if report != self.report:
+            raise Blocked("app-server-compatibility-incomplete", "report changed after selection")
         worker = Path(__file__).with_name("app_server_worker.py")
         # Recheck at launch: an adapter can outlive a source update on the host.
         worker_bytes = worker.read_bytes()
@@ -88,9 +164,17 @@ class AppServerAdapter(CodexAdapter):
             "output": str(invocation.output_path),
             "resume_session": invocation.resume_session,
             "usage_baseline": self.baselines.get(invocation.resume_session or ""),
+            "usage_scope": self.report.get("usage_scope", "thread"),
             "vault": invocation.vault_directory,
             "context_semantics_verified": True,
         }
+        binding = runtime_binding(report)
+        if self.delegation is not None:
+            if readonly or not self.immutable or binding is None:
+                raise Blocked("delegation-runtime-required", "A certified builder is required")
+            request["delegation"] = self.delegation
+        if binding is not None:
+            request["runtime_identity"] = binding
         invocation.prompt_path.with_suffix(".app-server.json").write_text(json.dumps(request))
 
     def wrapper_script(self, invocation: AgentInvocation) -> str:

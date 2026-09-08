@@ -1,0 +1,30 @@
+{
+  "status": "not applied; James deployment and schema approval required",
+  "project": "factory-crud-verification",
+  "initial": {
+    "agent_adapter": "app-server",
+    "certification_mode": "automatic",
+    "certification_config": "/Users/james/factory/state/runtime-config/factory-crud-certification.json",
+    "delegation_mode": "disabled",
+    "max_active_agents": 8,
+    "max_children_per_parent": 2,
+    "max_delegation_depth": 1,
+    "mode": "approval"
+  },
+  "subsequent_stages": [
+    {
+      "delegation_mode": "read-only"
+    },
+    {
+      "delegation_mode": "isolated-write"
+    }
+  ],
+  "preserve": [
+    "existing run concurrency (live explicit 4)",
+    "model routing/preset",
+    "delivery policy",
+    "existing run snapshots",
+    "all other projects"
+  ],
+  "automatic_mode": "separate later operator selection after initial approvals/accounting review"
+}

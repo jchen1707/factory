@@ -27,6 +27,10 @@ _BLOCKING_EXIT = 2
 
 
 def run(ctx: Context) -> None:
+    if ctx.project.requires_clone:
+        from factory.workflow_delegation import prepare_parent
+
+        prepare_parent(ctx, ctx.run.attempt + 1)
     spec = build_spec(ctx)
 
     advance(ctx, State.SANDBOX_CREATING)
@@ -38,6 +42,12 @@ def run(ctx: Context) -> None:
 
 
 def build_spec(ctx: Context) -> SandboxSpec:
+    from factory.workflow_delegation import parent_spec
+
+    return parent_spec(ctx, base_build_spec(ctx))
+
+
+def base_build_spec(ctx: Context) -> SandboxSpec:
     """The build sandbox. Every creation-time decision is made here, once.
 
     The vault is mounted read-write and not `:ro`, because `session_learnings.mjs`

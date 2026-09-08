@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import math
+import os
+import stat
 import subprocess
 import sys
+import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +177,233 @@ def close_server(process: subprocess.Popen[str]) -> None:
             process.wait()
 
 
+def start_server(
+    argv: list[str], request: dict[str, Any], *, capture_stderr: bool = False
+) -> subprocess.Popen[str]:
+    """Bind certified starts (including hook fallback) to the checked open ELF.
+
+    Absent binding preserves manual legacy execution. Presence never falls back to
+    PATH, even when malformed. The host still owns full attestation validation.
+    """
+    if "runtime_identity" not in request:
+        return subprocess.Popen(  # noqa: S603
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if capture_stderr else None,
+            text=True,
+        )
+    identity = request["runtime_identity"]
+    if not isinstance(identity, dict) or set(identity) != {
+        "runtime_path",
+        "runtime_sha256",
+        "launcher_sha256",
+        "code_host_sha256",
+    }:
+        raise RuntimeError("invalid certified runtime binding")
+    path = identity["runtime_path"]
+    if not isinstance(path, str) or not Path(path).is_absolute():
+        raise RuntimeError("invalid certified runtime binding")
+    for key in ("runtime_sha256", "launcher_sha256", "code_host_sha256"):
+        value = identity[key]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)
+        ):
+            raise RuntimeError("invalid certified runtime binding")
+    mountpoint = native_mountpoint()
+    if mountpoint.is_relative_to(Path(request["workdir"]).resolve()):
+        raise RuntimeError("certified runtime mountpoint overlaps working directory")
+    with (
+        sealed_binary(path, identity["runtime_sha256"]) as descriptor,
+        sealed_binary(
+            str(Path(path).parent.parent / "codex-resources/bwrap"), identity["launcher_sha256"]
+        ) as launcher,
+        sealed_binary(
+            str(Path(path).parent / "codex-code-mode-host"), identity["code_host_sha256"]
+        ) as code_host,
+    ):
+        executable = str(mountpoint / "codex")
+        # Execute the checked launcher snapshot too. No PATH or mutable-binary fallback.
+        # A regular file on read-only tmpfs gives current_exe() a stable, read-only helper pathname.
+        return subprocess.Popen(  # noqa: S603
+            [
+                f"/proc/self/fd/{launcher}",
+                "--bind",
+                "/",
+                "/",
+                "--dev-bind",
+                "/dev",
+                "/dev",
+                "--tmpfs",
+                str(mountpoint),
+                "--perms",
+                "0555",
+                "--file",
+                str(descriptor),
+                executable,
+                "--dir",
+                str(mountpoint / "codex-resources"),
+                "--perms",
+                "0555",
+                "--file",
+                str(launcher),
+                str(mountpoint / "codex-resources/bwrap"),
+                "--perms",
+                "0555",
+                "--file",
+                str(code_host),
+                str(mountpoint / "codex-code-mode-host"),
+                "--remount-ro",
+                str(mountpoint),
+                "--setenv",
+                "PATH",
+                str(mountpoint / "codex-resources") + ":" + os.environ.get("PATH", ""),
+                "--",
+                executable,
+                *argv[1:],
+            ],
+            pass_fds=(descriptor, launcher, code_host),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if capture_stderr else None,
+            text=True,
+        )
+
+
+def native_mountpoint() -> Path:
+    """Use an empty image-owned anchor that an agent cannot rename or replace."""
+    mountpoint = Path("/mnt")
+    if os.geteuid() == 0:
+        raise RuntimeError("certified runtime requires an unprivileged user")
+    for part in (mountpoint, *mountpoint.parents):
+        metadata = part.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise RuntimeError("certified runtime mountpoint is not image-owned")
+    if any(mountpoint.iterdir()):
+        raise RuntimeError("certified runtime mountpoint is not empty")
+    return mountpoint
+
+
+@contextmanager
+def sealed_binary(path: str, expected: str) -> Iterator[int]:
+    """Freeze checked native bytes before another process can consume them."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode) or stream.read(4) != b"\x7fELF":
+            raise RuntimeError("certified runtime must be a native ELF")
+        stream.seek(0)
+        # Linux memfd seals freeze the actual executable bytes, including against
+        # in-place writes after validation. A pathname or open original fd cannot.
+        # Host type checking runs on macOS; these APIs are required in the Linux VM.
+        linux_os: Any = os
+        linux_fcntl: Any = fcntl
+        descriptor = linux_os.memfd_create("factory-certified-runtime", linux_os.MFD_ALLOW_SEALING)
+        with os.fdopen(descriptor, "w+b") as executable:
+            digest = hashlib.sha256()
+            size = 0
+            while chunk := stream.read(1024 * 1024):
+                size += len(chunk)
+                if size > 512 * 1024 * 1024:
+                    raise RuntimeError("certified runtime exceeds size limit")
+                executable.write(chunk)
+                digest.update(chunk)
+            executable.flush()
+            fcntl.fcntl(
+                descriptor,
+                linux_fcntl.F_ADD_SEALS,
+                linux_fcntl.F_SEAL_WRITE
+                | linux_fcntl.F_SEAL_GROW
+                | linux_fcntl.F_SEAL_SHRINK
+                | linux_fcntl.F_SEAL_SEAL,
+            )
+            if digest.hexdigest() != expected:
+                raise RuntimeError("certified runtime binary changed")
+            executable.seek(0)
+            yield descriptor
+
+
+MAILBOX_LIMIT = 80 * 1024
+MAILBOX_RESPONSE_LIMIT = 256 * 1024
+
+
+def read_mailbox(directory: Path, name: str, *, limit: int = MAILBOX_LIMIT) -> bytes:
+    """Fixed mailbox filenames under host-selected mounts; never follow candidate links."""
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("mailbox requires a regular file")
+            raw = stream.read(limit + 1)
+            if len(raw) > limit:
+                raise ValueError("mailbox message exceeds size limit")
+            return raw
+    finally:
+        os.close(root)
+
+
+def write_mailbox(directory: Path, name: str, raw: bytes, *, limit: int = MAILBOX_LIMIT) -> None:
+    if len(raw) > limit:
+        raise ValueError("mailbox message exceeds size limit")
+    descriptor, temporary = tempfile.mkstemp(prefix=".mailbox-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, directory / name)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def delegation_call(config: dict[str, Any], params: dict[str, Any], thread: str) -> dict[str, Any]:
+    """Transport only. Host response is not approval to spawn from this worker."""
+    if (
+        not isinstance(params, dict)
+        or not thread
+        or params.get("threadId") != thread
+        or params.get("namespace") is not None
+        or params.get("tool") not in {tool["name"] for tool in config["tools"]}
+        or not isinstance(params.get("callId"), str)
+        or not params["callId"].strip()
+        or len(params["callId"]) > 128
+    ):
+        raise RuntimeError("unregistered or foreign delegation call")
+    raw = json.dumps(
+        {"call_id": params["callId"], "tool": params["tool"], "arguments": params["arguments"]},
+        allow_nan=False,
+    ).encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    write_mailbox(Path(config["inbox"]), "request.json", raw)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            response = json.loads(
+                read_mailbox(Path(config["outbox"]), "response.json", limit=MAILBOX_RESPONSE_LIMIT)
+            )
+        except FileNotFoundError:
+            response = {}
+        if response.get("request_sha256") == digest:
+            result = response["result"]
+            if (
+                type(result.get("success")) is not bool
+                or not isinstance(result.get("contentItems"), list)
+                or any(
+                    not isinstance(item, dict)
+                    or set(item) != {"type", "text"}
+                    or item["type"] != "inputText"
+                    or not isinstance(item["text"], str)
+                    for item in result["contentItems"]
+                )
+            ):
+                raise RuntimeError("invalid delegation response")
+            return result
+        time.sleep(0.1)
+    # The durable request remains available to the controller after disconnection.
+    raise RuntimeError("delegation controller response unavailable; request retained")
+
+
 def run(request: dict[str, Any]) -> int:
     probe_models = request.get("probe_models") is True
     argv = ["codex", "app-server", "--stdio"]
@@ -179,7 +413,16 @@ def run(request: dict[str, Any]) -> int:
             "-c",
             f"shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY={json.dumps(request['vault'])}",
         ]
-    process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)  # noqa: S603
+    try:
+        process = start_server(argv, request)
+    except (OSError, ValueError, RuntimeError, AttributeError) as exc:
+        emit(
+            {
+                "type": "factory.model_probe.failed" if probe_models else "turn.failed",
+                "error": {"message": str(exc)},
+            }
+        )
+        return 1
     if process.stdin is None or process.stdout is None:
         raise RuntimeError("app-server pipes unavailable")
     stdin, stdout = process.stdin, process.stdout
@@ -188,7 +431,13 @@ def run(request: dict[str, Any]) -> int:
     model = request.get("model", "")
     total: dict[str, int] = {}
     baseline: dict[str, int] | None = request.get("usage_baseline")
-    if not request.get("resume_session"):
+    usage_scope = request.get("usage_scope", "thread")
+    if usage_scope not in {"thread", "connection"}:
+        close_server(process)
+        raise RuntimeError("unverified usage counter scope")
+    if not request.get("resume_session") or usage_scope == "connection":
+        # Only a compatibility-verified connection-local runtime may start at zero
+        # on resume. Never infer a reset merely because a counter regressed.
         baseline = {}
     pending: list[dict[str, Any]] = []
     requests: list[dict[str, Any]] = []
@@ -216,6 +465,15 @@ def run(request: dict[str, Any]) -> int:
             raise RuntimeError("app-server disconnected")
         event: dict[str, Any] = json.loads(line)
         emit({"type": "factory.runtime", "observed_at": time.time(), "event": event})
+        if (
+            event.get("method") == "item/tool/call"
+            and "id" in event
+            and request.get("delegation") is not None
+        ):
+            result = delegation_call(request["delegation"], event["params"], thread)
+            stdin.write(json.dumps({"id": event["id"], "result": result}) + "\n")
+            stdin.flush()
+            return {"method": "factory/tool/handled"}
         # An unattended adapter cannot answer an approval or product decision.
         if "method" in event and "id" in event:
             raise RuntimeError(f"app-server requires operator input: {event['method']}")
@@ -250,6 +508,7 @@ def run(request: dict[str, Any]) -> int:
                 "model": model,
                 "observed_at": time.time(),
                 "thread_total": total,
+                "usage_scope": usage_scope,
                 "usage": delta,
                 "complete": complete,
                 "requests": requests,
@@ -303,9 +562,7 @@ def run(request: dict[str, Any]) -> int:
             override = "hooks=" + toml_literal(definitions)
             close_server(process)
             argv += ["-c", override]
-            process = subprocess.Popen(  # noqa: S603 - vetted hook definitions, argv only
-                argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-            )
+            process = start_server(argv, request)
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("app-server pipes unavailable")
             stdin, stdout = process.stdin, process.stdout
@@ -335,6 +592,8 @@ def run(request: dict[str, Any]) -> int:
             params["threadId"] = request["resume_session"]
             started = rpc("thread/resume", params)
         else:
+            if request.get("delegation") is not None:
+                params["dynamicTools"] = request["delegation"]["tools"]
             started = rpc("thread/start", params)
         thread = started["thread"]["id"]
         emit({"type": "thread.started", "thread_id": thread})

@@ -178,6 +178,12 @@ def reap(ctx: Context) -> Verdict:
     if state not in DETACHED_STATES:
         return Verdict(Outcome.NOT_APPLICABLE, f"{state} spawns no detached run")
 
+    from factory import workflow_launches
+
+    if workflow_launches.resume(ctx):
+        return Verdict(Outcome.STARTED, "prepared agent launch reconciled")
+    workflow_launches.reconcile(ctx)
+
     row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, state)
     if row is None or not row["artifact_dir"]:
         # A detached state entered with no attempt row. For planning/implementing that
@@ -324,6 +330,9 @@ def _overrun_seconds(ctx: Context, state: State) -> float | None:
                     entered = int(row["started_at"])
     if entered is None:
         return None
+    from factory import workflow_launches
+
+    entered = workflow_launches.started_at(ctx) or entered
     elapsed = time.time() - entered
     timeout = ctx.timeout_for(state)
     return elapsed - timeout if elapsed > timeout else None
@@ -339,6 +348,9 @@ def _entered_state_at(ctx: Context, /) -> int | None:
 
 def _orphan(ctx: Context, reason: str, detail: str) -> Verdict:
     """An attempt with no terminal record: nothing is running and no `exit` ever landed."""
+    from factory import workflow_launches
+
+    workflow_launches.stop_orphans(ctx)
     return _stopped(ctx, reason, detail, exit_code=None, outcome="orphaned")
 
 

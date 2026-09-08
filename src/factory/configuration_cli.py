@@ -13,28 +13,26 @@ from factory.store import Store
 
 
 def migrate(args: argparse.Namespace) -> int:
-    from factory.runtime_state import SCHEMA
+    from factory.store import SCHEMA_VERSION, migration_statements
 
+    if args.database.is_file():
+        connection = sqlite3.connect(args.database.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            connection.close()
+    elif args.apply:
+        raise Blocked("migration-database-missing", str(args.database))
+    else:
+        version = SCHEMA_VERSION - 1
+    statements = migration_statements(version)
     if not args.apply:
-        print("Schema 4 -> 5; existing run and effects rows are preserved.")
-        print("\n".join(statement + ";" for statement in SCHEMA))
+        print(f"Schema {version} -> {SCHEMA_VERSION}; existing run and effects rows are preserved.")
+        print("\n".join(statement + ";" for statement in statements))
         print(
             "Review before applying with --apply. Stop factory writers and back up the database first."
         )
         return 0
-    # The preview above authorizes only this migration, not older table rebuilds.
-    if not args.database.is_file():
-        raise Blocked("migration-database-missing", str(args.database))
-    connection = sqlite3.connect(args.database.resolve().as_uri() + "?mode=ro", uri=True)
-    try:
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-    finally:
-        connection.close()
-    if version not in {4, 5}:
-        raise Blocked(
-            "migration-review-required",
-            f"Schema {version} needs its own reviewed upgrade before 4 -> 5",
-        )
     store = Store(args.database, migrate=True)
     try:
         print(store.integrity_ok()[1])
@@ -95,8 +93,11 @@ def configure(args: argparse.Namespace) -> int:
                 "isolation_measurement",
                 "agent_adapter",
                 "app_server_compatibility",
+                "certification_mode",
+                "certification_config",
+                "delegation_mode",
             )
-            if getattr(args, key) is not None
+            if getattr(args, key, None) is not None
         }
         if changes.get("delivery_profile") == "inherit":
             changes["delivery_profile"] = None
@@ -104,6 +105,12 @@ def configure(args: argparse.Namespace) -> int:
             changes["concurrency"] = (
                 None if args.concurrency == "inherit" else int(args.concurrency)
             )
+        if changes.get("delegation_mode") == "inherit":
+            changes["delegation_mode"] = None
+        for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
+            value = getattr(args, key, None)
+            if value is not None:
+                changes[key] = None if value == "inherit" else int(value)
         if changes:
             operator_controls.configure(
                 store,
@@ -112,7 +119,20 @@ def configure(args: argparse.Namespace) -> int:
                 changes,
                 registry=load_registry(home / "config/projects.toml"),
             )
-        print(json.dumps(store.runtime.settings("run" if run else "project", owner), indent=2))
+        print(
+            json.dumps(
+                {
+                    "settings": store.runtime.settings("run" if run else "project", owner),
+                    "effective": store.runtime.effective(run.project, run.id)
+                    if run
+                    else store.runtime.settings("project", owner),
+                    "runtime": operator_controls.status(
+                        store, run.project if run else owner, run.id if run else None
+                    ),
+                },
+                indent=2,
+            )
+        )
     finally:
         store.close()
     return 0
@@ -156,6 +176,17 @@ def register(sub: argparse._SubParsersAction) -> None:
     settings.add_argument("--agent-adapter", choices=("codex-exec", "app-server"))
     settings.add_argument(
         "--app-server-compatibility", help="directory of sandbox compatibility manifests"
+    )
+    settings.add_argument(
+        "--delegation-mode", choices=("inherit", "disabled", "read-only", "isolated-write")
+    )
+    for option in ("--max-active-agents", "--max-children-per-parent", "--max-delegation-depth"):
+        settings.add_argument(
+            option, help="positive count or inherit; run values cannot exceed project limits"
+        )
+    settings.add_argument("--certification-mode", choices=("manual", "automatic"))
+    settings.add_argument(
+        "--certification-config", help="host-owned certification configuration JSON"
     )
     settings.add_argument("--isolation", choices=("shared", "per-run"))
     settings.add_argument("--isolation-measurement", help="retained isolation manifest path")

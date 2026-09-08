@@ -23,12 +23,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory.machine import TERMINAL, Blocked, State, can
+from factory.runtime_jobs import SCHEMA as RUNTIME_JOBS_SCHEMA
 from factory.runtime_state import SCHEMA as RUNTIME_SCHEMA
 from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -102,7 +103,22 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     3: ("ALTER TABLE runs ADD COLUMN full_review INTEGER NOT NULL DEFAULT 0",),
     4: ("ALTER TABLE runs ADD COLUMN force_plan INTEGER NOT NULL DEFAULT 0",),
     5: RUNTIME_SCHEMA,
+    6: RUNTIME_JOBS_SCHEMA,
 }
+
+
+def migration_statements(version: int) -> tuple[str, ...]:
+    """The exact reviewable runtime DDL; older table rebuilds need their own review."""
+    if version < 4 or version > SCHEMA_VERSION:
+        raise Blocked(
+            "migration-review-required", f"Schema {version} needs a separately reviewed upgrade"
+        )
+    return tuple(
+        statement
+        for target in range(version + 1, SCHEMA_VERSION + 1)
+        for statement in _MIGRATIONS[target]
+    )
+
 
 _SCHEMA = (
     _runs_ddl("runs")
@@ -242,7 +258,7 @@ class Store:
             self._conn.close()
             raise Blocked(
                 "schema-approval-required",
-                "Review docs/runtime-rollout.md before applying schema version 5",
+                f"Review docs/runtime-rollout.md before applying schema version {SCHEMA_VERSION}",
             )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")
@@ -325,13 +341,8 @@ class Store:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
+        with RuntimeState(self._conn).transaction():
             yield self._conn
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
-        self._conn.execute("COMMIT")
 
     # -- runs ---------------------------------------------------------------------
 

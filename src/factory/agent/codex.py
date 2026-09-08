@@ -101,6 +101,7 @@ class CodexAdapter:
             exit_path=invocation.exit_path,
             body=body,
             pgid_path=invocation.pgid_path,
+            immutable=getattr(self, "immutable", False),
         )
 
     def read_transcript(self, events: Path, stderr: Path) -> Transcript:

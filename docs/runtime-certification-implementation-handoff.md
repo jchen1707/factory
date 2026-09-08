@@ -1,0 +1,2173 @@
+# Runtime certification and delegation implementation handoff
+
+Status: approved plan implemented; synthetic acceptance, final gates and reviews complete.
+Factory PR [#90](https://github.com/jchen1707/factory/pull/90) is open for review, including the
+README refresh. Shared PRs #39/#40 and final Python #80/frontend #58 are merged.
+James approved schema5→6; live services/settings and the database remain unchanged.
+
+## Current completion checkpoint
+
+Workspace: `/Users/james/factory-runtime-certification`, branch
+`feat/runtime-certification-and-delegation`. Factory implementation and final acceptance:
+`c37b6e9` (the current handoff update is documentation only). Approved plan/test-plan files
+remain intentionally untracked. Earlier checkpoint sections below are historical, not pending work.
+
+The three requested capabilities are validated on the supported runtime: exact Astra high/xhigh,
+automatic six-check certification with launch/recovery enforcement, and factory-owned read-only
+and isolated writable children. Clone snapshots, native thread ownership, accounting, approval,
+shared capacity, integration, controls and owned cleanup are implemented and tested.
+
+Main objective: factory capability acceptance using synthetic work. No product/Linear ticket
+completion or application hardening is needed. Do not resume parked FRO or nemoclaw work.
+
+Final evidence: [acceptance report](runtime-certification-completion-acceptance.md).
+All four final publication gates PASS in `artifacts/runtime-rollout-readiness/factory-gates-pr90.json`.
+The earlier `factory-gates-complete.json` and source-freeze record remain implementation evidence;
+publication updates generated formatting, fixture tests and the shared source pin. Both independent reviews are clear, including
+the final settings error-preservation and integration-cancellation corrections.
+Published shared source is `be33f31ca` (PRs #39/#40); final generated consumer merges are
+Python `3ade70f` (#80) and frontend `e39f63b` (#58). Their required GitHub checks pass.
+The original local preparation refs below remain historical evidence, not deployment refs.
+
+Final writable run `5d685f0c773443e6` passed four fresh sandbox certificates, two actual Terra
+children with 123.146s overlap and native RED/GREEN/Stop evidence, exact approvals, live cap
+draining, conflict preservation, one scoped integration commit, independent Sol review,
+accounting replay and zero-model targeted/uncertain-signal cancellation. All four original
+VM generations were removed and individually verified absent. A subsequent fresh inventory
+confirms all nine lifetime writable-cohort VMs absent. Private clone/history/dirty note
+and full logs remain preserved. Run-2 known estimate USD1.2639784; combined run1/run2 USD2.5756652,
+with incomplete records explicitly retained. See the report for failed fixture attempts and
+exact model-versus-process evidence; do not erase those limitations.
+
+## Remaining operator-owned next steps
+
+1. Review factory PR #90, which includes the README update for main and pins merged shared
+   source `be33f31ca`. Shared and consumer dependencies are merged. Factory remains open for
+   James's review; do not assume it has merged or that the live checkout has advanced.
+2. Review [the concrete rollout](runtime-certification-rollout.md) and JSON package/settings
+   proposals. Copy-only schema5→6 rehearsal preserved all1,892 existing rows; this does not
+   itself authorize deployment. James has now approved schema5→6; retain the required writer
+   stop, verified backup and fresh rehearsal before applying it. Deployment/activation remains
+   a separate step after the release is published.
+3. At the approved window, refresh host/runtime identity, drain work, stop all writers and
+   console, take and verify the exclusive online backup, apply reviewed migration, and restart
+   using the documented checks. Certify each actual production generation before activation.
+4. Enable automatic certification, then read-only and isolated-write delegation only according
+   to that rollout. Preserve project run concurrency4 and unrelated projects/settings. Rollback
+   stops new admissions and preserves history/work; never restore an old DB over new work.
+
+No implementation or synthetic acceptance task remains from this approved plan. No PR was
+opened, no remote merge performed, and no live migration/deployment/activation applied.
+
+## Historical audit and checkpoint log
+
+## Audited remaining work and final-PR readiness
+
+Audit baseline: factory09953bc on feat/runtime-certification-and-delegation, in
+/Users/james/factory-runtime-certification. Tracked worktree was clean before this documentation
+update; approved plan/test-plan files remain intentionally untracked. Shared harness worktree
+is clean at e3fc8ad. This audit inspected local source and retained evidence; it did not query
+remote merge status, inspect current live services, run models or change sandbox settings.
+
+| Area | Verified repository state | Remaining completion requirement |
+| --- | --- | --- |
+| Parent launch and recovery | The only production DelegationController caller is service_run in workflow_launches.reconcile_run. prepare/configuration have no production workflow caller. AppServerAdapter.prepare writes no delegation field. workflow_certification.service still selects build_spec or _review_spec. | Provision the parent-specific mounts before certification/accounting, create and certify the exact returned spec, freeze tool configuration into the request, and revalidate that spec at initial launch and queued/recovery launch. Preserve existing bind/clone work and service tools promptly in both foreground and daemon paths. |
+| Read-only children | Broker request/admission primitives exist. bind_child and publish_result have no production callers. AgentLaunches calls authorize_launch for an already-bound child, but no workflow prepares and starts that child. | Implement fresh-thread child preparation, trusted task/base/authority handoff, read-only source/authority and private scratch, routed invocation accounting, binding, certification and actual admitted launch. |
+| Child lifecycle and accounting | Common leases, parent IDs, accounting collector and finalization fences exist. Broker cancellation records intent. Mailbox faults preserve accounting but do not drain requests. | Advance/recover queued children, reconcile actual child usage/results, validate bounded outputs, signal only owned groups for cancellation/suspension, and drain or cancel pending requests before parent finalization. Prove no duplicate launch or accounting on restart. |
+| Writable children and integration | Broker explicitly refuses every mode except read-only; no child integration path is present. Existing run isolation/integration-base helpers are not child integration. | Add isolated worktrees/private clones and writable environments, disjoint scopes, parent-writer coordination, serialized integration, dirty-work preservation, conflict/stale-base holds, evidence invalidation, fresh gates and independent review. |
+| Controls and status | operator_controls/configuration_cli expose certification mode/config for new project runs. RuntimeJobs consumes delegation/cap fields internally, but operator_controls rejects them and the console has no delegation/certification views. | Add validated delegation mode, agent/child/depth controls and project/run restrictions; exact child approvals; certification/child-tree/queue/failure views; truthful aggregate cost completeness. Cover absent/empty/invalid fields, inherited limits, draining and keyboard operation. |
+| Real acceptance | Earlier Astra and automatic certification experiments are recorded.09953bc adds real inbox/outbox mount protection only; no model was called. | Fresh final-worker six-check certification, real parent/two-child execution and write refusal, approval/capacity/restart/cancel/result/accounting acceptance, then writable integration/conflict acceptance. Also exercise four synthetic parents with child/reviewer/certification contention at the proposed agent cap, without deadlock or broad cancellation. |
+| Cross-repository completion and rollout preparation | Shared source remains locally at e3fc8ad; this checkpoint did not merge/sync consumers or deploy a matching runtime package. | Finish shared/consumer source and exact pin/generation checks, validate the matching full runtime package, assemble final evidence/review and concrete schema/deployment/config/rollback artifacts for James. |
+
+Resume order:
+1. Complete parent spec creation → certification → accounting → frozen worker configuration,
+   including queued/recovery identity checks. Use the known accounting.key before inserting the
+   invocation; provisioning is intentionally possible before accounting records a certificate.
+2. Complete read-only child execution and subtree lifecycle together, then run their real
+   synthetic acceptance. A pending handle or mount-only test does not establish child execution.
+3. Complete writable child isolation/integration and its preservation/conflict acceptance.
+4. Complete controls, full resource-contention/accounting matrix and cross-repository validation.
+5. Run the final configured gates and review against the approved plan; prepare the final PR
+   with supported acceptance evidence and remaining operator-owned rollout actions clearly stated.
+
+Final-PR completion criteria:
+- All implementation and acceptance rows above are complete, or an explicit scope change from
+  James is recorded. Do not silently defer writable children or controls to call the plan done.
+- The final source/worker/runtime combination has fresh evidence.09953bc's passing gate report
+  is evidence for that checkpoint only; it cannot certify subsequent source changes or new VMs.
+- Shared changes/pins and consumer generation have a concrete reviewed dependency path; no
+  generated vendor tree is hand-edited. Outstanding review findings are resolved.
+- Live deployment/activation and applying schema5→6 are **separate from PR readiness**. Prepare
+  reviewable artifacts and rollback; do not perform those human-owned actions to make a PR ready.
+- Synthetic factory workloads are sufficient. No ticket delivery, CRUD hardening, customer work
+  or historical ticket modification is required once the named feature assertions are satisfied.
+
+Retained09953bc verification: artifacts/runtime-mailbox-controller/gates-final.json PASS;
+Ruff check, Ruff format, mypy and pytest all exit0, no skips, empty output tails. Mypy included
+158 source/test files. Unit/integration fixtures prove control-plane behavior, not real child
+execution. Separate mount-result.json proves only the documented VM mount assertions. No code
+gates were rerun for this documentation-only audit; production source is unchanged.
+
+## Objective and approved scope
+
+Implement the approved automatic certification, Astra resolution, and controlled delegation
+plan. Synthetic workflows are sufficient. Do not finish/harden CRUD, resume FRO-12, change
+historical tickets or require customer work to prove acceptance. Preserve live concurrency four.
+The proposed separate agent cap eight, two children per parent and depth one are approved
+implementation targets, not activated live settings.
+
+Plans are under `.agents/plans/feat-runtime-certification-and-delegation/` in the implementation
+worktree. Both were approved; implementation status is now in progress. Preserve their original
+Goal/Approach/Steps and append findings/progress rather than rewriting the approved design.
+
+## Worktrees and live boundary
+
+- Factory: `/Users/james/factory-runtime-certification`, branch
+  `feat/runtime-certification-and-delegation`, based on main `a82d91c` (merged #89).
+- Shared source: `/Users/james/harness-runtime-certification`, same branch name based on
+  `harness@v2` `cc7bf33`. Source files only; no vendored tree was hand-edited.
+- Live checkout `/Users/james/factory` was left detached at `a82d91c` so new code/schema
+  cannot be picked up by the existing services. Live schema remains 5; no live settings,
+  migration, writer restart, template deployment, tracker or forge write occurred.
+- The two pre-existing untracked frontend/nemoclaw reports remain untouched.
+
+## Step 1 findings and implemented correction
+
+Astra discovery was reproduced on Codex 0.146.0 and corrected by testing 0.153.4 in the SAME
+fresh sandbox, with unchanged authentication. Both experimental initialization settings on
+0.146 omitted Astra. The candidate 0.153.4 advertises it and actual high/xhigh turns completed
+with schema-valid output. Host CLI 0.153.4 also advertises Astra. Host account classification
+is ChatGPT Pro; sandbox account/read reports no local account and requiresOpenaiAuth=false,
+consistent with its separate provider context. No credentials were copied or changed.
+
+Candidate installed only under `/tmp/factory-codex-candidate` in experiment VMs. Their default
+image/binary remains unchanged; probes supplied the candidate PATH. This is not a production
+runtime upgrade or a claim that default `select` on these VMs uses the candidate binary.
+
+Current candidate protocol supports dynamicTools registration. A real Astra parent invoked
+a host-serviced request tool, received a pending handle, then retrieved the result through
+another registered tool after app-server restart. Native spawning was disabled. This proves
+transport only: no actual delegated child was launched by this probe.
+
+The compatibility audit exposed a counter-scope difference: 0.153.4 restarted total counters
+on app-server restart, including ordinary completed-thread resume and interrupted recovery.
+The first unchanged-worker recovery correctly reported incomplete usage instead of subtracting
+an invalid historical baseline. Original failing records are retained.
+
+The worker and AppServerAdapter now accept an explicit compatibility-declared `usage_scope`
+(`thread` default or `connection`). Only an explicitly certified connection-local runtime uses
+zero as the new process baseline. Unknown scope is refused; regression alone never triggers a
+reset inference. Existing thread baseline behavior remains. A red-before-green regression
+and the focused worker/model suite passed. New real final-worker build/review checks passed
+all six compatibility requirements, including recovery input 9,864 and 9,457 respectively.
+The legacy live worker was not edited, so its existing manifests are not invalidated in place.
+
+`agent/runtime_diagnostic.py` is a standalone bounded metadata diagnostic:
+
+    uv run python -m factory.agent.runtime_diagnostic --model gpt-6-astra --effort high
+
+It generates the executing binary's schema before deciding whether account/read is supported,
+retains catalogue findings even if account inspection is unsupported, uses refreshToken=false,
+and emits only selected account classification fields. No thread/model turn is started.
+Review corrections handle unknown classification values and malformed account objects.
+
+## Source foundations (not operational features yet)
+
+- Layer A adds delegation request schema and delegation/certification instructions.
+  A schema test refuses caller-supplied approval/authority/parent ownership and invalid modes.
+  No consumer has been synced to these unmerged changes.
+- Layer D has a schema 5→6 DDL draft for certification jobs, agent leases and delegation
+  requests. RuntimeJobs covers idempotent fingerprinted requests, durable reads, fenced job
+  ownership, sequential agent admission/draining and child-before-parent finalization.
+- These APIs are not wired into application launches, a certification runner, broker,
+  console, cancellation/recovery, or writable child integration. `finish_certification`
+  trusts its control-plane caller; the future service MUST validate evidence first and
+  reconcile detached holders after lease expiry before launching another paid probe.
+- A consistent SQLite copy migrated 5→6 with every prior row digest unchanged: 1,892 rows,
+  quick_check=ok. Only the three new tables were added. Live schema was NOT migrated.
+  The DDL may evolve before service integration; repeat rehearsal after DDL changes.
+
+## Evidence and experiment state
+
+Everything is local under `/Users/james/factory/artifacts/runtime-certification-implementation/`:
+`host-standard.json`, `host-experimental.json`, `host-final-diagnostic.json`,
+`sandbox-old-False.json`, `sandbox-old-True.json`, `sandbox-candidate.json`, generated
+host/candidate protocol, install logs, dynamic-result.json, and Astra attempt handles/specs.
+Each role retains original and final canary/interruption/recovery records, usage observations,
+identity, isolation result, digest indexes and exact candidate-runtime manifests.
+`migration-rehearsal.json` and mode-0600 `schema5-rehearsal.db` retain copy-only migration proof.
+Do not publish the private database or raw transcripts.
+
+Run fixture: `f38b67392efd499c`, ticket key COMPAT-EXTENSION in the separate validation store.
+Build/review names are `factory-build-crud-live-20260907-f38b67392efd499c` and
+`factory-review-crud-live-20260907-f38b67392efd499c`. Both were stopped after measurements.
+No other sandbox was stopped or modified. The candidate package remains only in these VMs.
+Full raw runtime files are also under the live clone/review per-run protocol mounts, but
+there is no corresponding live database run.
+
+The initial factory gate report failed formatting, a new-test Optional typing check, and an
+old migration fixture that removed schema-5 tables but left new schema-6 tables before stamping
+version 4. Those were corrected; use `factory-gates-final.json` for the final check result.
+The fake suite does not prove real compatibility. Mypy covers configured paths; artifact
+scripts are not part of its production coverage. Review found an account-schema support gap
+and malformed-account handling concern; both were corrected before the final run.
+
+## Exact remaining work
+
+1. Finish/review the runtime diagnostic and source-contract checkpoint; retain candidate
+   version/counter-scope evidence. Prepare a pinned template change through the image owner
+   before production rollout; do not install the candidate globally or change live routing.
+2. Complete and merge shared contracts on harness@v2, then sync exact merged content through
+   the normal consumer process. James owns merges. No PR is opened by this implementation
+   command unless requested; do not claim consumer freshness before it has been measured.
+3. Complete Step 3 launch integration and durable reconciliation. The follow-up below adds
+   guarded reservations and real transaction races; these are not yet connected to launch sites.
+4. Implement automatic certification service: generation marker, full fingerprint, source-owned
+   probe contracts, bounded/paid job scheduling, evidence validation, CLI/daemon resume,
+   launch-time revalidation and status. No name-based or unchecked-scope bypass.
+5. Implement host-serviced read-only delegation using the proven transport, persistent calls,
+   per-child approval/usage, fair agent slots and safe subtree suspension/recovery.
+6. Implement isolated-write child environments and serialized dirty-work-preserving integration,
+   then run controls, policy snapshots and the remaining synthetic acceptance matrix.
+7. Run final source/consumer gates and reviews; update both approved plan checklists accurately.
+   Only then prepare migration/deployment/activation requests. Existing approvals do not
+   authorize live schema 5→6 application or template deployment.
+
+Do not mark the overall plan implemented from the Step 1 probes or partial persistence tests.
+
+## Final checkpoint verification
+
+Factory canonical final report is PASS: Ruff check, Ruff format --check, mypy and pytest
+all exited 0 with empty output tails; none skipped. Two independent review axes checked
+this bounded foundation, found the two diagnostic issues above, and confirmed their fixes.
+This is not a full-feature review or acceptance claim. Shared-source final checking is
+recorded separately in harness-check-final.txt after the committed source snapshot.
+
+## Admission follow-up checkpoint
+
+The implementation worktree now has one `RuntimeJobs.schedule_agent` reservation entry point.
+The earlier unchecked `admit_agent` primitive was removed. Within one SQLite transaction it
+checks project/run capacity ceilings, delegation enablement, same-run/attempt parent ownership,
+depth one and child limits, per-invocation Approval, known run spend and lifetime attempt limits.
+Successful admission consumes the exact invocation's approval atomically. A queued/refused
+reservation does not consume approval. Existing active reservations drain when limits decrease;
+re-reading a reservation is NOT permission to spawn a second process.
+
+`RuntimeState.start_invocation` now rejects replay with a different run, attempt or role even
+when metadata is identical. This closed a reproduced ownership weakness. Review also found
+child attempt reset and malformed approval-mode fallthrough; both have red-before-green
+regressions and were corrected. Both review axes confirmed their findings addressed.
+
+`tests/integration/test_runtime_job_races.py` starts independent Python controllers with
+separate SQLite connections. One wins the last agent slot; simultaneous requests join one
+certification job and only one claims its lease. These are actual database contention tests,
+not real sandbox/model acceptance. The focused admission/race suite passed 39 tests.
+
+No new schema DDL, shared source, live database, sandbox, routing or service changes occurred
+in this follow-up. The previous schema-copy rehearsal remains applicable to unchanged DDL.
+The new reservation method is NOT called by existing application launch sites yet. Next:
+wire invocation-specific admission into accounting/execution and reviewer fan-out, with durable
+launch ownership and terminal reconciliation before releasing capacity. Do not attach a simple
+`schedule_agent` check to launch without that reconciliation: duplicate reservation success
+must never become duplicate paid execution. Then continue the certification service and broker
+steps above. Approval keys for new invocations are exact invocation IDs; adapt operator-facing
+approval display together with launch wiring, preserving legacy attempt approval behavior.
+
+Factory final gate evidence is `artifacts/runtime-admission/gates-final.json` in the
+implementation worktree: PASS, all four gates exit 0, empty output tails, none skipped.
+Mypy includes the new production/test paths. The first run failed three test-style lint
+checks; those were corrected. Overall plan status remains implementing; this checkpoint
+does not complete Step 3 or the full feature.
+
+## Durable launch follow-up checkpoint
+
+`AgentLaunches` now owns a bounded paid-launch operation over `RuntimeJobs` and the existing
+sandbox adapter. It atomically reserves capacity, consumes exact invocation approval and writes
+an effects-ledger intent before calling the adapter. An immutable contract records the handle,
+parent identity, script digest and environment digest (not environment values). Only the winning
+controller calls `exec_detached`; an existing intent returns False and must be observed, never
+interpreted as permission for a retry. An adapter exception retains intent and capacity because
+spawn may already have succeeded. An older bare reservation without an intent is refused as
+ambiguous, not adopted as fresh launch permission.
+
+`RuntimeState.transaction` supports nested savepoints so reservation and intent commit together.
+`AgentLaunches.start` refuses an enclosing transaction: no adapter call can precede the outer
+commit. A storage-failure regression proves approval/capacity/effect rollback together. Existing
+launch directories cannot be assigned to another invocation; unrecorded exit/heartbeat/holder/
+process-group evidence refuses a new launch without deleting anything.
+
+`observe` recovers the stored handle. `reconcile` collects terminal usage through an idempotent
+control-plane callback before freeing a slot; collection failure retains capacity. Running and
+orphaned/ambiguous observations do not release it. Active descendants still prevent parent
+finalization. This is intentionally not a complete orphan recovery policy: an intent with no
+conclusive terminal evidence remains held, and targeted recovery must be implemented before
+claiming automatic recovery parity.
+
+Focused tests: 49 pass across agent launches, runtime jobs and real SQLite controller races.
+The new process race invokes the launch service from two independent controllers and records
+one sandbox-boundary spawn. Lost acknowledgement, store reopen, stale evidence, immutable
+contract, reservation replay and atomic rollback have regressions. These use a fake sandbox
+boundary, not a real model/VM compatibility measurement.
+
+Two-axis review found a stale-evidence gap and a bare-reservation admission bypass; both were
+reproduced and fixed before final verification. Standards review found no hard violations. Its
+nonblocking concern remains: directory ownership scans historical launch effects under the
+write transaction. Add an indexed canonical ownership representation before broad rollout;
+any DDL change requires a fresh copy-only migration rehearsal.
+
+Next work remains application integration, not a repeat of these tests: wire this operation
+into builder, execution-brief/diagnosis and reviewer launch sites together with durable queued
+requests and exact invocation approval display. Existing `execution.guard` uses legacy
+attempt/group keys and advances launch counters before preparation; simply replacing
+`exec_detached` would mishandle approval/capacity waits and controller restarts. Preserve those
+legacy approvals while making new pending invocations recoverable without incrementing again.
+Connect terminal collectors and targeted orphan/subtree recovery before releasing capacity.
+Then implement the certification service and child broker/integration from Steps 4–8.
+
+No workflow launch site calls `AgentLaunches` yet. Overall Step 3 and the full feature remain
+unfinished. No live service/settings/database, schema DDL, sandbox, shared source or consumer
+pins changed in this checkpoint. This turn adds source and isolated test evidence only.
+
+Final canonical gate evidence: `artifacts/runtime-launches/gates-final.json` in this worktree.
+PASS: Ruff check, Ruff format --check, mypy and pytest all exit 0, empty output tails, none
+skipped. New source/tests are within configured mypy coverage. The pytest caveat applies:
+fake sandbox tests establish controller behavior, not real runtime compatibility. Spec reviewer
+re-ran the bare-reservation reproduction after the fix and confirmed no launch; both findings
+are resolved. No full-feature acceptance claim is made.
+
+## Workflow launch integration checkpoint
+
+Builder, execution-brief/test-design/diagnosis and individual reviewer launches now use
+`workflow_launches` and `AgentLaunches`; deterministic verification remains outside paid agent
+capacity. The workflow attempt, state transition and prepared request commit together;
+invocations are retained before launch (review bookkeeping is staged earlier). SQLite
+savepoints cover nested accounting transactions; failed preparation also
+refreshes the in-memory Context back to the committed state.
+
+Capacity waits retain one prepared invocation. Reaping resumes the recorded script and handle
+without rerunning preparation or advancing attempt/launch counters. Admission still checks
+current approval, known spend and limits. Prepared inputs (prompt/schema/worker request),
+candidate HEAD, environment digest, authority integrity, policy revision and compatibility
+report are checked before launch. No environment values are copied into the prepared record.
+The execution timeout starts from the durable launch timestamp, excluding time queued.
+
+New planning phases use `run/<attempt>/planning` to keep their liveness/evidence independent
+of the builder. Legacy planning rows continue to use recorded paths and filenames; builder
+handoff loading follows that recorded directory. New approval prompts identify the exact
+invocation, legacy attempt/group approvals are translated at the workflow guard, and the
+console pre-fills the waiting invocation ID without submitting approval automatically.
+
+Reaping and scheduling collect terminal invocation usage before freeing slots. Orphan recovery
+signals only a recorded process group belonging to an owned launch, and releases capacity only
+after a valid terminal exit and successful accounting collection. Missing/ambiguous evidence
+remains held; an orphan observation alone cannot authorize another paid process. This is not
+complete real-runtime orphan/subtree recovery acceptance.
+
+Suspend/Cancel can retire never-launched preparations transactionally, fenced against racing
+admission. Launched cancellation reconciles costs before archive/removal and refuses cleanup
+while any owned lease remains active. Suspended terminal agents release capacity while parked.
+`accounting.collect_invocation` permits cancellation collection without model routing or
+tracker context. No native or broker child execution has been enabled.
+
+Focused regressions cover queue/reopen/one launch, approval changes while queued, preparation
+rollback, independent brief/builder evidence, reviewer capacity, queued Suspend, cancellation
+accounting, stale input/candidate refusal and queue-excluded timeouts. Other accounting/admission
+and cancellation suites pass. These use isolated SQLite/local Git and fake sandbox adapters,
+not real model or sandbox compatibility evidence.
+
+Two-axis review found and resolved queue-timeout, stale queued-input, queued suspension and
+cancellation-accounting defects. Final spec rereview found no further hard defects. Standards
+found no hard violations; a nonblocking duplication concern remains in owned-active-launch
+selection across reconciliation and orphan signaling.
+
+Next: finish Step 3's remaining ambiguous-holder/subtree recovery with the child lifecycle,
+then implement Step 4 automatic certification (generation identity, full fingerprint, trusted
+probe contracts, paid admission, validated attestation and launch revalidation). Continue
+Steps 5–7 broker children, isolated-write integration and controls, then the real synthetic
+matrix and cross-repository rollout checks. Do not repeat standalone launch-foundation work
+or substitute ticket completion for feature acceptance. The optional timing observer now
+starts at the actual builder launch, including queued resume, with a focused regression.
+
+No DDL changed; the prior copy-only schema rehearsal still applies. Live services/settings,
+database, sandboxes, shared source and consumer pins remain unchanged. Migration 5→6, template
+deployment and activation still need separately reviewed rollout actions.
+
+Final canonical evidence: `artifacts/runtime-workflow-launches/gates-final.json` in this
+worktree. PASS: Ruff check, Ruff format --check, mypy and pytest each exited 0; all output
+tails empty, none skipped. Mypy covered 134 source/test files including the new paths.
+The first full suite had 1,038 passes and two failures expecting old approval-key text;
+those assertions now require exact invocation IDs and the final run passes. The sandbox
+fake caveat applies: this is not real-runtime acceptance or full-feature completion.
+
+## Attestation validation checkpoint
+
+Added `certification.Certifications` and an immutable `CertificationIdentity`. The identity
+requires sandbox generation, canonical spec digest (including mounts/layout), image identity,
+absolute runtime path/version/binary digest, worker digest, authority/hook digest, probe-suite
+digest and explicit measured usage scope. These are inputs from a trusted controller observer,
+not measurements performed by this module. A missing identity component is refused.
+
+The service requests the existing fingerprinted durable job, validates a host-authored report
+at `<host-root>/<job-id>/compatibility.json`, and publishes the report plus its digest using the
+existing fenced SQLite transition. A report file alone never authorizes a launch. Publication
+requires all existing compatibility checks and exact job/fingerprint/identity binding. Validation
+rereads all evidence, compares the published report and its digest, and refuses changed identity,
+pending jobs, altered reports and evidence. Reopening the store preserves the attestation.
+The caller must supply a freshly observed identity at publication and launch. Candidate model
+output is not a host-authored report, even if it contains matching hashes or says `pass`.
+
+Evidence roots are rejected beneath configured candidate-writable roots, including aliases.
+Compatibility evidence reads now use bounded regular-file reads through directory descriptors:
+absolute references, traversal and symlink components are refused. This also tightens manual
+manifest validation; manual report evidence must reside beneath its report directory. Existing
+manual manifests are not promoted to generation-bound certificates. Malformed check lists now
+produce a classified refusal instead of an AttributeError. AppServerAdapter revalidates its
+manifest/evidence and rejects a changed report before copying the worker/preparing a request.
+This closes selection-to-preparation evidence staleness; it does NOT establish fresh runtime
+identity at the actual detached launch boundary.
+
+Focused verification: 28 tests passed across attestation publication/reopen, generation change,
+evidence tampering, missing identity fields, candidate-writable roots, path escapes, malformed
+reports and changed evidence after adapter selection. Path escapes, malformed check lists and
+post-selection evidence changes were reproduced failing before their fixes. The new service's
+first test failed because the implementation module did not exist. Fixtures use local files
+and SQLite only: no runtime/model observations or automatic certification acceptance are claimed.
+Both review axes found no blocking issues within this bounded checkpoint.
+
+Next work is still Step 4 orchestration, not another attestation-only implementation:
+1. Implement and measure the sandbox generation observer/fallback and exact executing binary
+   provenance. Do not fill `CertificationIdentity` from retained job data or a version string.
+2. Load source-owned probe contracts, perform deterministic preflight, and run/reconcile the six
+   bounded real checks through common paid admission/accounting. Preserve detached probe ownership
+   across lease expiry; an expired certification lease never authorizes duplicate execution.
+3. Supply fresh identity to this service at publication and immediately before application launch;
+   wire ensure/advance/status into build/reviewer/recovery and explicit automatic/manual settings.
+4. Continue broker children, subtree recovery, isolated writable integration, remaining controls,
+   real synthetic acceptance and rollout preparation. Synthetic feature assertions remain the
+   objective; CRUD ticket completion and live workload changes are unnecessary.
+
+No schema DDL, shared source, consumer pins, live services/settings/database, sandbox/template,
+tracker or forge writes occurred. The earlier copy-only migration rehearsal still applies.
+Overall plan remains implementing; the automatic runner and child features remain unfinished.
+
+Final attestation gate report: `artifacts/runtime-certification-attestations/gates-final.json`.
+PASS: Ruff check, Ruff format --check, mypy and pytest all exited 0, no skips, empty output
+tails. Pytest ran for 124,949 ms. Configured mypy coverage includes the two new files (136
+source/test files). The fake-sandbox caveat applies; no real runtime acceptance was performed.
+
+
+## Runtime identity observation checkpoint
+
+`SbxAdapter.generation` now reads the creation UUID from `sbx ls --json` on every call.
+The previous concern was specific to `inspect`, which does not expose the UUID. A new
+owned disposable VM proved that its UUID survives stop/start and changes after same-name
+removal/recreation. No fallback nonce is needed for the measured v0.38.0 listing contract;
+missing, malformed or ambiguous identity fails closed. No IDs are inferred from names.
+
+`SbxAdapter.observe_runtime` reads generation and image identity, refuses capability
+credentials, and executes a standalone metadata observer with isolated Python imports.
+The observer requires an explicit absolute native ELF path, hashes the open executable,
+queries its version through that same inherited descriptor, and rechecks bytes/path before
+returning. It refuses wrappers and detects replacement during observation. Nonblocking opens
+refuse FIFO inputs. The adapter rechecks generation, image and secret classification after
+the query. No model turn or app-server is started by this observer.
+
+The real template's `codex` is a JavaScript launcher, so hashing it is insufficient. The
+measured native path is:
+`/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex`.
+This is evidence for the experiment image, not a new hardcoded production path or template
+upgrade. The caller must eventually launch the observed absolute native binary with the same
+environment; current application workers still resolve `codex` and are NOT wired to this API.
+No claim of certification-to-launch race closure is made.
+
+Real evidence is in this worktree at `artifacts/runtime-certification-identity/`:
+- `created.json`, `stopped.json`, `restarted.json`: UUID
+  `b9a92ac6-ea4a-41f7-8297-d4e3a8c6593d` remained stable.
+- `recreated.json`: same name received `a45373ad-ce24-412b-ae67-c0bb7821146f`.
+- `native-observation.json`, `isolated-native-observation.json`: actual 0.146.0 native SHA
+  `cb5e8cb8a333a408ce6adbe0d4fad1845c69772c2216af7c1f88c98a11460dc6`;
+  image digest `sha256:8ab3deaa75f9c10fb0e95d866a57280bc1494950c1a90b2cc636c8b1391fd574`.
+- `same-version-changed-binary.json`: appending bytes to a disposable `/tmp` binary copy
+  retained the version while changing the observed SHA. The image binary was not modified.
+- `wrapper-refusal.txt`: the npm launcher cannot stand in for native binary evidence.
+
+Experiment name: `factory-build-cert-identity-20260907`, using only the local artifact
+workspace, template `codex-pnpm:v1`, one CPU and 2 GiB. It was stopped after final measurements;
+its private `/tmp` copy and intentionally hostile fixture `workspace/json.py` remain evidence.
+No application work was present. The first noninteractive `sbx rm` refused terminal input;
+explicit `sbx rm --force` removed only this newly created experiment before recreating it.
+Do not use the existing adapter's unchecked `remove` return as proof of removal.
+
+Review reproduced a forged identity via candidate `json.py`/PYTHONPATH before the fix.
+The adapter now uses `/usr/bin/python3 -I -S`; the regression and real VM both prove the
+candidate import does not execute. Standards found no hard violations; spec review confirmed
+that fix. Reviewers did not independently run tests. Focused tests also cover malformed
+UUID listings, namespace refusal, recreation during query, changed bytes at the same version,
+concurrent replacement and FIFO refusal. Full-feature acceptance remains unfinished.
+
+Exact next steps:
+1. Compose the full fingerprint from these fresh observations plus canonical actual/requested
+   spec/mount/layout/environment, trusted authority/hook and source-owned probe inputs. Pin the
+   measured native command through worker preparation and recovery, then enforce fresh identity
+   immediately before paid application launch. Do not feed retained job identity to `validate`.
+2. Implement the source-owned probe runner and deterministic preflight, common paid admission,
+   durable ensure/advance/reconcile/status, and automatic/manual configuration. An expired
+   certification lease must reconcile its detached launch rather than authorize another probe.
+   The six prior checks and attestation validator are inputs, not an automatic runner.
+3. Continue child broker/execution/accounting, subtree recovery, isolated writable integration,
+   controls and real synthetic acceptance from the approved plan. Do not revisit CRUD completion.
+4. Shared merge/consumer sync, template pin, migration and rollout remain pending. James owns
+   merges, deployment and live schema 5→6 approval. No live setting/service/database, shared
+   source, consumer pin, tracker or forge change occurred here. No DDL changed.
+
+Final canonical gate evidence: `artifacts/runtime-certification-identity/gates-final.json`.
+PASS: Ruff check (67 ms), Ruff format (40 ms), mypy (231 ms), pytest (125,071 ms), each
+exit 0 with empty output tails; none skipped. Mypy includes the new source/test paths
+(138 files). The offline suite's fake-boundary caveat remains; the separate real VM
+observations above establish only this identity slice, not automatic certification or
+child-workflow acceptance. The two reviews have no remaining blocking findings.
+
+
+## Certified native launch checkpoint
+
+Continued from f2840bc in the isolated implementation worktree. The next prerequisite now
+carries the native path/hash from a report's certification identity into the staged worker
+request, including resumed threads. Invalid or inconsistent native metadata refuses validation;
+an absent certification section retains explicit legacy manual behavior. This extraction is
+NOT attestation publication or full fingerprint validation and does not promote a manual report.
+
+The worker checks certified starts and hook-fallback restarts through one launch boundary.
+It requires an absolute regular native ELF, copies and hashes at most 512 MiB into a Linux
+memfd, applies write/grow/shrink/seal seals, and executes that descriptor with pass_fds.
+Malformed bindings, missing files, symlinks, wrappers, FIFO inputs and changed hashes cannot
+fall back to PATH. No binding retains the existing manual native command resolution. Worker
+startup now uses `/usr/bin/python3 -I -S` to exclude candidate import paths. Linux memfd/seal
+support is required for bound starts; there is no weaker fallback if unavailable.
+
+Review caught a defect in the initial open-file approach: an open descriptor prevents path
+replacement but not in-place modification before exec. The sealed snapshot fixes that race.
+The snapshot binds executed bytes, not all sandbox/environment/authority state. Full host
+fingerprint checks, trusted request/worker staging and orchestration remain necessary.
+Both review axes are clear for the bounded change; reviewers did not run real measurements.
+
+Tests: changed-binary and adapter-to-resume binding tests failed before implementation. Focused
+suite covers refusal, normal/resumed starts, hook restarts, immutable snapshot contents after
+original-file mutation, malformed certificate metadata and retained legacy behavior. Offline
+Linux syscalls and subprocesses are boundary fakes; real sealing is separately measured.
+
+Real acceptance used only the existing owned `factory-build-cert-identity-20260907` VM and
+its previous image/native identity. It is stopped again. No paid model turn was requested.
+Evidence: `artifacts/runtime-certification-native-launch/` (ignored, retained locally):
+- `identity.json`: fresh observer equality with the previous exact generation/image/binary.
+- `catalogue.jsonl`, `stderr.txt`: production worker run(probe_models=True), executed from a
+  sealed native snapshot, returned the actual catalogue on codex-cli 0.146.0.
+- `changed-binary-refusal.jsonl`: wrong requested native SHA refused with exit 1.
+- `race-experiment.py`, `race-result.json`: instrumented final Popen boundary changed only
+  `/tmp/factory-certification-sealed-launch-fixture`, attempted a snapshot write (EPERM), then
+  executed the original production start_server result. Observed version codex-cli 0.146.0,
+  exit 0, original_mutated=true, snapshot_write_refused=true. Native image binary untouched.
+  Re-run by concatenating the current worker source before its __main__ block with this
+  experiment and passing identity.json's runtime_path as argv[1] to `/usr/bin/python3 -I -S -c`
+  through SbxAdapter.exec_sync on the owned VM. It overwrites only that disposable /tmp fixture.
+- The initial catalogue assertion expected the wrong event name (`factory.model_probe`);
+  actual successful output uses `factory.models`. Corrected assertion passed. This was an
+  experiment assertion error, not a runtime/model failure.
+
+Worker bytes changed, so prior six-check manifests are stale for this implementation build.
+The catalogue/sealing measurements do NOT replace six-check compatibility, hook enforcement,
+sandbox isolation, detached durability, accounting or recovery acceptance. Live services use
+unchanged source; no manifest was rewritten or live adapter selected.
+
+Exact next work:
+1. Compose complete fresh fingerprint from observer results, actual/requested canonical
+   spec/mount/layout/environment and trusted authority/hooks/probe revision. Wire it to
+   certification publication and immediately before root/reviewer/recovery paid application
+   launch. Current selection still follows manual manifest lookup; do not treat this binding
+   extractor as automatic certification or feed retained job identity to validate().
+2. Load source-owned probe contracts, deterministic preflight, common paid admission and
+   durable ensure/advance/reconcile/status. Add explicit manual/automatic settings. Expired
+   certification leases must reconcile their existing detached launch before any new spend.
+3. Run all six checks against the final worker through the service, then remaining child
+   broker/execution/accounting/subtree recovery, isolated integration, controls and real
+   synthetic matrix. Stop synthetic work once the factory assertions are satisfied.
+4. Shared source merge/consumer sync, template pin, schema 5→6 and rollout remain pending.
+   James owns merges, deployment and live migration approval. No schema DDL, live service,
+   setting, database, project, tracker, forge or consumer pin changed in this checkpoint.
+
+Final canonical gates: `artifacts/runtime-certification-native-launch/gates-final.json`, PASS. Ruff check (114 ms), Ruff format --check (40 ms), mypy (298 ms), pytest (125,917 ms): each exit 0, empty output tails, none skipped. Mypy covers the changed source/tests in its 138-file set. The fake-sandbox caveat applies to the offline suite; the separate Linux catalogue/sealing measurements above prove only this launch slice. Both final bounded review axes have no outstanding findings.
+
+
+## Automatic certification service checkpoint
+
+Main objective remains factory workflow/runtime feature validation, using synthetic workloads.
+Do not finish CRUD tickets, resume FRO-12, touch historical Backend/nemoclaw work, deploy, or change
+live settings. User requested a compaction checkpoint during the real acceptance work. This is a
+handoff checkpoint, NOT a claim that all four requested tasks or the overall plan are finished.
+
+Implemented since 6f1c8b9:
+- Fresh complete fingerprint construction in certification_fingerprint.py and sbx observer:
+  actual/requested mounts/layout/environment, generation/image/native bytes, trusted authority and
+  hook inventory, source probe contract/parameters and execution-helper source digests. Environment
+  values are hashed, never stored in identity. Capability names use central policy. New authority
+  snapshots include `.codex/hooks.json` and `.codex/config.toml`; old snapshots are not rewritten.
+- Workflow selection now has explicit automatic/manual modes. Automatic selection uses the durable
+  service and fresh publication validation; builder/reviewer/recovery prepared launches revalidate.
+  Selection happens before root launch-counter advancement, so certification waits do not consume
+  application attempts. Existing runs/default manual behavior are retained. CLI configuration fields
+  and exact host configuration format are documented in runtime-certification-service.md.
+- CertificationRunner ensure/advance/status/collect runs nine separately admitted phases from the
+  new layer-A probe contract. Common approval/capacity/budget, invocation accounting and durable
+  intent prevent duplicated spend after controller loss. Terminal stale jobs are collected and
+  fenced failed before a new fingerprint proceeds; ambiguous holders remain held.
+- Real ProbeDriver and usage worker: deterministic preflight, canary/schema, detached wait and exact
+  process-group interruption, recovery, compaction/model-change observations, target inventory and
+  strict host report evaluation. Model statements cannot publish a certificate. Unknown compaction
+  attribution and incomplete usage stay incomplete. Each new phase requires its own admission.
+- Raw stdout is captured directly into host-only evidence. Shared certified_command embeds compressed
+  worker/request source and sealed prompt/schema memfds. `immutable=True` detached execution uses
+  retained argv, not a mutable pgid-body.sh file. Automatic application wrappers use it too.
+- Same-VM certification/application exclusion is atomic with paid admission, including cross-project
+  names; independent VMs can run together. Paused/cancelled owners cannot admit new certification.
+
+Two-axis review found and fixed two P1 defects: the first frozen bootstrap still flowed through a
+writable body file, and preflight-only sandbox exclusion could race admission. Rereview is clear.
+Shared bootstrap extraction also removed duplicate sealing logic. Fingerprints include the shared
+bootstrap, base envelope and sbx adapter sources, addressing the final reviewer follow-up.
+
+Real evidence in `artifacts/runtime-certification-service/` (ignored, preserve):
+- setup.py creates only the two owned disposable fixtures, with target/protocol/readonly trusted
+  hook mounts, codex-pnpm:v1, 1 CPU/2 GiB. Targets are tiny local Git fixtures. Declared capability
+  environment variables are explicitly empty for these invocations; no credentials were copied.
+- build VM `factory-build-cert-service-20260907`, UUID
+  `9c559ead-b11d-41c9-b553-d47d6cc7d0c4`; review VM `factory-review-cert-service-20260907`, UUID
+  `34b337e3-a962-4929-9d33-b6a5bea34a06`. Actual native CLI is 0.146.0, default image unchanged.
+- Both VMs produced stable repeated complete observations. compare-observations.py also confirmed
+  the build identity stable across an explicit stop/start. initial-identity.json predates the final
+  uptime fix; use fresh observe/ensure results, never load that old identity as current evidence.
+- Three build and two review canary invocations completed during integration. Their raw events,
+  exact invocations, costs and stale job failures remain in the isolated stores and host evidence.
+  These are limited canary/schema observations, NOT full six-check acceptance.
+- Real execution exposed an unintended repeat-certification defect: `sbx inspect` adds an `uptime`
+  field in running VMs. It was accidentally included as configuration. A red regression reproduced
+  changing uptime; the fix excludes it with state/session/daemon uptime. No identity-bearing field
+  was waived. After the fix two separate ensure-only controllers reused build job
+  `8073b7bcb7ff4964b8886f79ca1cda1f` without another paid probe. It is pending, not passed.
+- First fixture setup command was rejected by a local hook for literal protected variable names;
+  it did not execute. The fixture instead reads declared variable names from repository config and
+  never reads/prints their values. A temporary observer response-shape mismatch was reproduced and
+  fixed with a boundary regression. Retain original failures rather than presenting only green runs.
+
+Exact next work after compaction:
+1. Read this final section and runtime-certification-service.md. Stay in the implementation
+   worktree. Use source refs from git log; do not update/reset live checkout or apply schema DDL.
+2. Continue the real complete service matrix. Inputs already exist at
+   artifacts/runtime-certification-service/{build,review}/config.json. `advance.py` runs one real
+   controller tick and exits; ensure-only.py observes/requests without paid execution. Invocation:
+
+       uv run python artifacts/runtime-certification-service/advance.py artifacts/runtime-certification-service/build/config.json
+
+   Run the analogous review command independently. Poll with new controller processes; after
+   the source-declared 35 seconds, the interrupt phase must observe and stop only its owned group,
+   then recovery continues. Do not restart or duplicate an ambiguous paid launch. Nine phases have
+   NOT completed yet. Declared `usage_scope=thread` is an experiment input for 0.146; the evaluator
+   must prove it or fail, never infer a pass. If unsupported, preserve the failure and diagnose.
+3. Prove both build/review reports pass all six checks through the service. Exercise simultaneous
+   real controllers, crash/reopen after launch, tampered host evidence, changed identity and a
+   real automatic application launch/refusal with fresh fingerprints. Test frozen application
+   command quoting for paths containing spaces. Offline selection/exclusion tests are not this
+   real acceptance. Stop synthetic work when these named factory assertions are satisfied.
+4. Add any required real-tier fixes with red regressions, rerun gates/reviews as justified, then
+   prepare the remaining shared merge/consumer sync and reviewed rollout. Do not mark Step 4 or
+   the full plan complete merely because source is implemented. Child broker/execution/accounting,
+   subtree recovery, isolated integration and remaining controls are still unfinished outside
+   this four-task checkpoint. Schema 5→6, template deployment and activation remain James's.
+
+No schema DDL, live service/settings/database, template, project, tracker, forge or consumer pin
+changed. The new shared files remain authored on the harness feature branch based on v2 and are
+not vendored into any consumer. The old copy-only schema rehearsal still applies to unchanged DDL.
+
+Final checkpoint evidence: `artifacts/runtime-certification-service/gates-final.json`, PASS. Ruff
+check (87 ms), Ruff format --check (39 ms), mypy (443 ms) and pytest (127,668 ms): all exits 0,
+empty output tails, no skips. Mypy covers 152 source/test files. Earlier gate output gates.json
+failed a new fake-response dictionary annotation; corrected before the final run. Offline gates
+do not establish full runtime compatibility. Shared `python3 scripts/check.py --since origin/v2`
+passed (29 repository tests, 149 shared hook tests and generation/consumer composition checks);
+no new consumer sync or final six-check shared/runtime acceptance is claimed.
+
+Both owned service VMs are stopped; `stopped-checkpoint.json` confirms zero active agent leases.
+Final pending review job is `41282dddde9942af82f964229dd9e9e1`. The first canary jobs became
+stale during implementation/uptime correction and remain failed with costs retained. The current
+pending build/review jobs have no paid phases yet; do not mark them passed or reuse older canary
+results as complete certificates. Approved plan files remain untracked intentionally; preserve them.
+
+Shared source checkpoint is `e3fc8ad` in /Users/james/harness-runtime-certification (unpublished/unmerged). Factory checkpoint is the commit containing this handoff; retrieve it with `git log -1 --oneline`. No PR or push was performed.
+
+## Real compatibility acceptance checkpoint
+
+Continued from factory a733980 / harness e3fc8ad. Objective remains synthetic factory feature
+validation, not ticket completion. Live services, settings, templates, schema and consumer pins
+remain unchanged. Overall acceptance is NOT complete: the build service passed, but certified
+reviewer shell execution has a reproduced native re-execution defect. Do not activate this build.
+
+Implemented correction: the usage client required a stderr pipe while shared start_server inherited
+stderr. Added an explicit keyword-only capture_stderr option, requested only by the usage client;
+ordinary application/legacy callers preserve inherited stderr. Both native-bound and legacy launch
+branches honor it. The shared-launcher/Client regression failed before the fix and passes afterward.
+Focused worker/usage tests pass; two-axis bounded review found no issues. No shared source change.
+
+Real findings and evidence (all under ignored artifacts/runtime-certification-service/, preserve):
+- The original tiny fixture used hooks.protected strings, while the source hook consumes objects
+  with a glob field. The resumed build canary actually modified protected.txt; this was NOT hook
+  enforcement. Raw events and failed-fixture-protected.txt preserve those bytes. retire-fixture.py
+  stopped the owned fixtures, marked those jobs failed, and corrected/committed the tiny fixture
+  configuration. configure.py refreshed the explicit observed hook hashes. Do not rerun the old
+  setup.py without correcting its protected-path shape first.
+- Stopping the first build interrupt left no terminal file. collect-stopped.py independently
+  confirmed the exact VM state stopped, retained partial usage, and released that isolated failed
+  reservation as an operator recovery. It fabricated no exit file. operator-stopped-proof.json
+  is evidence. Automatic recovery did NOT resolve that orphan; this intervention must stay counted.
+- Corrected canaries in BOTH VMs produced actual blocked hook/completed events. Build job
+  4f267c5959384779ba567a70d02ad4fe then proved detached interruption (41.695 seconds, exact owned
+  group, exit 143) and same-thread recovery before failing usage-initial with
+  "app-server pipes unavailable". That failure motivated the committed pipe correction.
+- Final build job 8bb83b69220c4fffbb110bbb622447f1 completed all NINE separately admitted phases
+  and published all SIX checks through the real service. Its compatibility.json and
+  summary-index.json contain exact identity, raw captured events and measurements. Sol→Terra,
+  compaction notification/reset and thread-scoped cumulative usage across resumed controller
+  connections were measured on native 0.146.0. Compaction attribution remains visibly incomplete.
+  This report certifies only its exact build fingerprint, not reviewer or production identities.
+- controller-restarts.jsonl records separate short-lived controllers for every tick and independent
+  build/review progress. concurrent-passed-requests.json records two simultaneous fresh controllers
+  reusing the same passed build job. This does not claim a real same-VM race at first paid admission;
+  that case remains covered offline and still needs a real acceptance measurement.
+- fresh-refusals.json: fresh original validation passed; altering host summary-index.json refused;
+  restoring exact original bytes passed; a freshly observed changed invocation environment refused
+  with certification-stale. No certificate was rewritten to accept changed identity/evidence.
+- frozen-paths.py exercised the real Linux frozen wrapper with spaces AND single quotes in paths,
+  after replacing the writable staged worker/request. The retained source returned the native model
+  catalogue. This is command/staging acceptance, not a paid application turn.
+- application.py then ran one schema-valid no-tool synthetic application through AppServerAdapter,
+  freeze_script, fresh Certifications.validate and AgentLaunches admission. A new controller
+  collected its exit 0, {"ok":true} and usage (application-result.json). This exercises the actual
+  adapter/admission composition, not full Context/selection→builder/reviewer/recovery wiring.
+  The experiment initially omitted required metadata.adapter, causing collection to refuse. The
+  original metadata was saved, the isolated correction audited, and collection then completed
+  without a second launch. Production snapshots were not changed; this script correction is not
+  evidence that normal workflow callers omit metadata.
+
+Remaining blocking runtime finding:
+- Review job 22b6cede534b46f6a36122e4fb6b00b4 failed the interrupt phase. Actual shell requests
+  (/bin/bash and /bin/sh) returned CreateProcess / No such file or directory. A model returning
+  {"ok":false} or a schema-valid final answer cannot satisfy durability.
+- native-helper-repro.py reduces this to NO model call: native `codex sandbox -- /bin/true`
+  succeeds through the installed path; the same command through production sealed start_server
+  fails exit 1 / ENOENT. native-helper-{sealed,path}.json retain the pair. The initial experiment
+  mistakenly included a `linux` subcommand; the corrected reproduction removes it.
+- Upstream 0.146 arg0 code derives self/helper paths from current_exe and creates helper aliases;
+  a memfd executable reports a deleted, non-reopenable filesystem name. Retained upstream source
+  is in upstream/. Reference:
+  https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/arg0/src/lib.rs
+  This explains why catalogue/schema/build commands can pass while read-only shell execution fails.
+  Do NOT fix by disabling the reviewer sandbox, dropping native binding, or executing a mutable
+  candidate path. The sealed-byte guarantee and read-only enforcement both remain required.
+
+Exact next work:
+1. Resolve stable, immutable native self/helper re-execution, using native-helper-repro.py as the
+   fast red signal. Investigate a trusted read-only executable mount/namespace or runtime-supported
+   helper binding; neither is an implemented/approved final design here. Bind any new helper or
+   launcher dependency into fresh identity. Retain mutation/seal refusal guarantees and validate
+   real read-only shell execution before buying more reviewer turns. Do not retry the failed job
+   unchanged or synthesize its report.
+2. Worker/helper changes invalidate the passed build certificate. Rerun both complete service
+   matrices against the final source, then real initial-admission concurrent controllers and full
+   automatic workflow selection/launch/recovery refusal paths. Existing real evidence above is
+   useful but must not be promoted to those unexecuted claims.
+3. Remaining children/execution/accounting/cancellation/subtree recovery, isolated integration,
+   controls and rollout work remains as previously recorded. Shared e3fc8ad remains unpublished;
+   source merge/sync, template pin, live schema 5→6 and deployment remain James's decisions.
+
+Canonical gate report gates-stderr-fix.json: PASS, no skips. Ruff check exit 0 (98 ms), Ruff format
+exit 0 (43 ms), mypy exit 0 (535 ms), pytest exit 0 (142,960 ms); every output tail empty. Mypy's
+configured source paths include this change. The fake-sandbox caveat applies to the suite; separate
+real measurements above establish the listed runtime behavior and expose the remaining defect.
+Approved plans remain intentionally untracked. Both owned service VMs are stopped again, zero active
+leases; acceptance-stopped-checkpoint.json records final jobs, accounting completeness and state.
+
+
+## Native helper mount checkpoint
+
+Continued from 845b1e3 in the isolated factory worktree. The immediate native self/helper
+re-execution defect is fixed and measured without model calls. Full feature acceptance remains
+in progress; no activation, live settings/services/schema/template changes or shared sync occurred.
+
+The launcher now hashes and seals both native Codex and the matching packaged Bubblewrap resource
+(`runtime_path.parent.parent / codex-resources/bwrap`). The bundle is also part of fresh identity
+as launcher_sha256. A private tmpfs over the existing empty, root-owned /mnt directory receives regular executable
+files, then becomes read-only. Preflight and launch require real uid0-owned, non-group/world-writable
+directory ancestors, a non-root worker and an empty anchor. No image directory is changed. It must be outside the candidate cwd, which Codex excludes from helper
+lookup. The read-only resources directory is first in runtime PATH, preventing helper shadowing. This gives current_exe() a reopenable pathname while
+preserving frozen bytes. The launcher itself executes from its checked sealed snapshot. `/dev`
+is rebound with existing device semantics so unified-exec PTYs work. Codex's reviewer read-only
+policy is unchanged; no new session, parent-death kill or mutable-binary fallback was introduced.
+The final launcher does not depend on an output path, so the intermediate usage-request change
+was removed. Its observed failure remains in the historical job evidence.
+
+Important diagnostic corrections (preserved ignored evidence under
+artifacts/runtime-certification-service/):
+- Original native-helper-repro.py reproduced ENOENT on 845b1e3 before source edits.
+- The early ro-bind-data prototype returned zero but copied from EOF, producing an empty executable.
+  That is NOT success evidence. Offsets must be reset; tests now assert both descriptors start at zero.
+  A zero exit without an explicit effect marker is insufficient. Earlier exploratory mount scripts
+  are retained as diagnosis history and must not be used as acceptance runners.
+- With actual bytes, anonymous ro-bind-data still failed helper reopening. Regular files on read-only
+  tmpfs resolve it. The suspected protocol-versus-private-directory distinction was not the cause.
+- System /usr/bin/bwrap is not the matching bundled resource: the runtime correctly rejected its
+  digest. The actual packaged resource is c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4.
+- Outer root bind initially made PTY devices unusable. No-model pty.openpty() failed before the
+  explicit existing /dev bind and passed afterward. Both real interrupt probes then passed.
+- native-helper-final-repro.py asserts the actual shell marker. native-helper-acceptance.py asserts
+  the real mounted Codex/Bubblewrap hashes, explicit output, and refused writes to both executables,
+  a new mount entry and the read-only target. native-helper-pty.py separately proves PTY allocation.
+  These scripts use only the owned review VM and no model calls; their JSON evidence is retained.
+- Intermediate jobs bce0bc33608140eeb2d7c1a53390e02e (build) and
+  9e2563a06a604f069bc5730ef7a3f16a (review) failed interrupt due to PTY permission denial.
+- Intermediate jobs 57f1ca742e9d45ce9da0726efa13afc3 (build) and
+  9c9d0b3a8ecc4ee1927a1c549c107224 (review) passed interruption/recovery, then failed usage-initial
+  with missing output. The real failure became a red/green preparation regression. These jobs remain
+  failed, with raw evidence and accounting. They are not final certificates.
+
+Further security check: intermediate build 80802e7bc399449e8b3c9f5d99884c13 and review
+ d809f65e6cdf4ba0918fba7b2d2caee2 passed all nine phases/six checks, but are now stale. A separate
+no-model attack placed a fake bwrap first in PATH; the runtime executed it (exit 88, named marker).
+The launcher moves its mount outside the candidate cwd and prefixes the immutable resource
+path. Review then identified a writable /tmp anchor rename race. The final root-owned /mnt anchor
+removes it; an actual outside-namespace uid1000 rename attempt returned EACCES (errno13), retained
+in native-anchor-rename.json. The image has /mnt uid0 mode0755 and an empty directory. The same attack now executes the checked helper and proves read-only refusals.
+native-helper-path-shadow-red.json and native-helper-path-shadow.json retain the differential pair.
+Do not promote the intermediate six-check certificates to this changed worker.
+
+Final source results:
+- Build job 1213c5fce79d4f279cb8e8a22d14c32f and reviewer job
+  8eecb63603fc43ce8747871b04b5a6c5 each passed ALL nine phases and published ALL six checks.
+  Their compatibility.json, summary-index.json, raw events and interruption.json are under
+  build/evidence/JOB and review/evidence/JOB. Final worker SHA256 is
+  dd6e05b177d59f1389898fcb9a85b5ee62660dc3d121640bddb09ef8f4573820.
+  Actual detached intervals were 37.940 and 37.943 seconds; both interrupted with exit143,
+  resumed the retained thread, and passed compaction/model-change/counter semantics.
+- Native CLI remains 0.146.0, Sol low → Terra with thread-scoped usage; no Astra/template upgrade.
+  Source-owned six-check probes remain harness e3fc8ad (unchanged/unmerged this turn).
+- mounted-refusals.py: fresh final build certificate validates; tampered host evidence refuses;
+  exact restoration validates; freshly observed environment change refuses certification-stale.
+- mounted-application.py: invocation synthetic-mounted-application-1 completed with exit0,
+  schema {"ok":true} and reconciled usage after a new controller process. Evidence is
+  mounted-application-result.json and build/protocol/mounted application with spaces/.
+  This is adapter + fresh certificate + frozen command + shared admission acceptance, NOT
+  the full Context/selection → builder/reviewer/recovery workflow matrix.
+- launcher-controller-restarts.jsonl records bounded independent build/review ticks. This does
+  NOT establish a real same-VM race at FIRST paid admission; that remains an explicit next test.
+- Canonical gates-protected-mount-final.json: PASS, no skips. Ruff check exit0 (79ms), format
+  exit0 (49ms), mypy exit0 (531ms), pytest exit0 (152724ms); all output tails empty. Source is
+  included in mypy. The fake-sandbox caveat applies to the suite; real assertions above are separate.
+  Standards review found no issues; spec review prompted the protected-anchor correction and
+  cleared the final delta. No source changed after the final gate run.
+- Both exact owned VMs are STOPPED and have zero active leases (mounted-stopped-checkpoint.json).
+  Cumulative isolated stores, including earlier failed experiments: build 53 invocations,
+  known API-equivalent USD0.8053464, 33 incomplete estimates; review 39 invocations,
+  known USD0.6016744, 23 incomplete estimates. Incomplete attribution remains visible; these are
+  lower bounds and NOT account charges or complete spend estimates. No missing data was fabricated.
+
+Exact next work:
+1. Exercise real initial paid-admission races and full automatic Context/selection → builder,
+   independent reviewer and recovery launch/refusal paths. Reuse synthetic stores/workloads; stop
+   once factory assertions are satisfied. Do not resume/harden tickets to manufacture acceptance.
+   The six-check service itself is now validated for the two exact final disposable identities.
+2. Complete child broker/execution/accounting, targeted cancellation/subtree recovery, isolated
+   writable children and safe serialized integration, remaining controls and their acceptance matrix.
+   Examine incomplete accounting evidence before making any whole-run cost-completeness claim.
+3. Prepare the full matching runtime package/template (including bundled resource and empty protected
+   /mnt), shared source merge/exact consumer sync, and rollout evidence. Candidate binary-only Astra
+   experiments do not satisfy this launcher's package requirements. Production identities need their
+   own fresh certification; these disposable reports do not authorize them. Live schema5→6 approval,
+   merge, deployment and activation remain James's decisions. Live services/settings unchanged.
+
+Factory checkpoint is the commit containing this section (`git log -1 --oneline`). No push or PR.
+Plans remain intentionally untracked, overall status implementing. Shared remains e3fc8ad.
+
+## Workflow authority and admission checkpoint
+
+Continued from 0fa1109 in `/Users/james/factory-runtime-certification`. The main objective
+remains factory feature/workflow validation with synthetic workloads. No ticket hardening,
+customer workflows, tracker/forge writes, shared sync, migration or live activation occurred.
+Shared harness remains e3fc8ad; plans remain intentionally untracked and implementing.
+
+Completed this continuation:
+- Real first paid-admission race: two independent controllers ensure the same job and race
+  its first canary. One exits 73 after real detached spawn before host acknowledgement;
+  the other exits 0. A new controller does not relaunch the intended effect. One invocation,
+  one independent actual-launch marker, actual exit 0, idempotent terminal collection and
+  zero remaining leases. Known API-equivalent USD0.0108136. Race-only job is intentionally
+  failed with a named synthetic-stop reason; never presented as a six-check certificate.
+  `artifacts/runtime-certification-service/initial-admission-race/result.json` and
+  `admission-race.py` retain exact seed, commands and evidence. Original owned build VM stopped.
+- The full Context/production-spec fixture exposed a real preflight bug: snapshotting
+  `harness.config.json` reformatted JSON, invalidating its digest against unchanged candidate
+  bytes. `authority.snapshot` now copies original bytes for root and app configurations.
+  A strengthened integration observer reproduces the raw-digest mismatch before the fix
+  and passes afterward. Existing snapshots stay immutable; only synthetic revisions were
+  explicitly replaced. Older reformatted snapshots may require explicit operator replacement.
+- Fourteen focused tests pass. Canonical `artifacts/runtime-workflow-real/gates.json` PASS:
+  Ruff check82ms, format41ms, mypy442ms, pytest135430ms; all exits0, no skips, empty tails.
+  Both changed files are covered. Standards and spec reviews clear. Fake suite limitations
+  still apply; real evidence is separate. No production source changed after the gate run.
+- Real production Context → automatic selection passed all nine phases/six checks for build
+  job `66103cc8e21547c0aa15e9b6ec643b04`, authority revision3, synthetic run
+  `ad5647f4dfbd45ae`, VM `factory-build-cert-workflow-20260907`.
+  Evidence under `artifacts/runtime-workflow-real/home/state/certifications/JOB`.
+- Actual `implement.start` refused tampered host summary evidence with attempt0 and no
+  application invocation; exact restoration allowed launch. Real builder returned
+  `no_change_needed`, exit0, no changed files. A new controller reconciled usage, retained
+  the session and released all slots. `builder-refusal.json`, `builder-launch.json` and
+  `builder-result.json` retain this evidence in `artifacts/runtime-workflow-real/`.
+
+Fixture/diagnosis corrections (do not repeat or misreport):
+- Do not rerun older `setup.py`; its minimal gate declaration does not satisfy HarnessConfig.
+  New `workflow-acceptance.py setup` creates actual Context inputs with a declared gate,
+  copied pinned layer-A tree, original config/hook bytes and an isolated pricing table.
+  Its setup refuses an existing directory; two abandoned pre-VM setup directories remain
+  as ignored diagnosis history. No real tracker/delivery client is constructed.
+- Initial snapshot revision1 failed deterministically before paid work. Revision2 used the
+  source fix. Job028c7ffaed35499bb35e9e66186fb1d5 changed specification digest once after
+  its canary; exact changing input was not captured, so do not claim a cause. It is failed.
+- Job9602588764ed48528980db6422dfdc86 ran all phases but correctly refused final isolation:
+  fixture lacked `.factory/` ignore, so its protocol files appeared as application additions.
+  `isolation-failure-diff.json` proves additions only under protocol, no existing file edits,
+  unchanged HEAD/tracked diff. Added the target's ignore, committed it locally and explicitly
+  refreshed synthetic authority to3. Production isolation was not weakened.
+- The first actual builder preparation refused `lease-lost` because the fixture omitted the
+  controller run lease. Transaction rollback kept attempt0/no spawn. The fixture now acquires
+  and releases the same production lease around step execution; subsequent launch succeeded.
+
+Recovery result and stopped state:
+- `workflow-recovery.py start` injected a named synthetic `resumable` boundary after the
+  successful builder result, then called production `recovery.resume_run`. This is a routing
+  test, not a claim of another actual crash. Tampered evidence refused before attempt2;
+  exact restoration selected `session-intact`, launched attempt2 and exited0 on the same
+  retained session. `recovery-launch.json` / `recovery-result.json` retain assertions.
+- `workflow-stop.py` reconciled every isolated certificate and both application invocations,
+  repeated accounting without changing the known total, checked a clean target and zero leases,
+  then stopped both workflow VMs. `stopped-checkpoint.json`: 21 invocations, known
+  API-equivalent USD0.1269232, 17 estimates incomplete. These include failed fixtures and
+  are a lower bound, not account charges or complete whole-run spend. Preserve incompleteness.
+- Build generation c51effe9-c5ff-44dd-b5c6-29f56513457b; reviewer generation
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73. Both STOPPED. The older service VMs remain stopped.
+  No live services/settings/template/schema changed. No publication or push.
+
+Exact next steps:
+1. Continue the independent reviewer workflow matrix in this synthetic Context. Start with
+   `uv run python artifacts/runtime-certification-service/workflow-drive.py review` (bounded
+   independent controller ticks through production selection). The reviewer VM exists but has
+   not been certified through this new Context. Its prior service-only sibling certificate does
+   not authorize it. Do not rerun setup or reuse stale/failed job evidence.
+2. After fresh reviewer certification, exercise actual review entry/launch, queued restart and
+   stale-identity/authority refusal before paid admission. Preserve the no-change synthetic
+   candidate and stop once those factory assertions hold; no PR/ticket delivery is needed.
+   Actual builder and builder recovery launch/refusal now have real coverage. Additional
+   environment/generation changes at prepared launch remain part of the acceptance matrix.
+3. Inspect the 17 incomplete estimates and the initial transient spec-digest change before
+   claiming accounting completeness or effortless certification. All paid records are retained;
+   missing pricing/usage is not permission to fabricate an estimate.
+4. Complete child broker/execution/accounting, targeted cancellation/subtree recovery,
+   isolated writable children/safe serialized integration, remaining controls and real matrix.
+5. Prepare matching full runtime package/template, shared source merge and exact consumer sync,
+   plus rollout evidence. Binary-only Astra experiments remain insufficient for the current
+   launcher package contract. Production needs its own fresh certification. James still owns
+   merge, live schema5→6 approval, deployment and activation.
+
+See `docs/discovery/runtime-workflow-certification-acceptance.md` for reproducible commands,
+red/green evidence and limitations. This checkpoint is the commit containing this section.
+
+## Independent reviewer and pricing checkpoint
+
+Continued from 1363fc9. Main objective remains factory feature validation with synthetic
+workloads, not ticket hardening/completion. No customer, Backend/nemoclaw, tracker/forge,
+live service/configuration, migration or consumer-sync work occurred. Shared e3fc8ad unchanged.
+
+Completed:
+- Fresh production Context reviewer certification: job 128af452f95745dfbe4273503e7f7782,
+  twelve independent controller ticks, all nine phases/six checks, same exact generation.
+- Actual review.start queued on a synthetic occupied slot without paid spawn. A new controller
+  resumed the same prepared invocation. Tampered certificate and authority bytes refused
+  before intent; exact restoration launched once. Standards and Spec each exited0; final
+  collector raised review-finding for a missing synthetic checklist. Preserve that finding;
+  do NOT harden the fixture or drive it to delivery. No real verify transition or tracker block
+  is claimed: boundaries were explicitly synthetic; direct collector returned the human hold.
+- Fixed equal-sequence accounting replay ignoring newly available dated prices. Stored valid-event
+  digest plus unchanged observations now permit pricing-only refresh in a transaction. Unknown
+  legacy digest, altered request evidence and shorter streams refuse refresh. Two observed RED
+  regressions (missing price; same-length changed request context band) now pass; 12 focused tests.
+- Controlled fresh-store replay of original 21 real logs:7 complete / 14 incomplete, known
+  API-equivalent USD 0.2268688, unchanged usage/raw files and idempotent replay. Final evidence:
+  artifacts/runtime-workflow-real/accounting-replay-final/result.json. Original undigested rows
+  are not automatically rebuilt by final code. During development four disposable estimates
+  were refreshed before the digest guard; retained raw files prove their inputs, but do not
+  mistake that for supported automatic legacy backfill.
+- Both workflow VMs STOPPED, original generations unchanged, target clean, zero active leases.
+  stopped-checkpoint.json:32 invocations, known lower bound USD 0.5031968,21 incomplete estimates.
+  No account-charge or whole-run completeness claim. Older service VMs remain stopped.
+
+Evidence/commands: artifacts/runtime-certification-service/workflow-review.py queue|resume|collect,
+workflow-review-result.py, accounting-retained-replay.py, workflow-stop.py. Existing fixtures
+are already terminal: do not rerun queue/resume/setup, and collect has no incomplete axis now.
+review-queued.json, review-launch.json and review-result.json retain exact assertions. The
+isolated run remains reviewing after direct collector refusal, with a complete review plan;
+no agent is running. See discovery/runtime-workflow-certification-acceptance.md for limitations.
+
+Exact next work:
+1. Complete request-level pricing in agent/certification_usage_worker.py. Its six usage stages
+   currently emit requests=[]/pricing_complete=false even when usage deltas are known. Reuse
+   measured app_server_worker request attribution where valid; retain explicit incompleteness
+   for compaction/unknown scope/interruption. Add RED tests at the approved accounting seam,
+   then recertify changed probe implementation in disposable identities. Never turn latest or
+   cumulative totals into invented request prices. Legacy undigested records need a separately
+   explicit trusted-evidence rebuild; final equal-sequence refresh intentionally does not guess.
+2. Remaining prepared-launch environment/generation refusal matrix and the old transient spec
+   digest change remain open. New reviewer job was stable, but that does not explain the old
+   build transient. Existing builder/recovery/reviewer launch, evidence/authority refusals and
+   first-paid-admission race now have actual coverage; don't repeat full tickets for these.
+3. Complete child broker/execution/accounting, targeted cancellation/subtree recovery, isolated
+   writable children/safe serialized integration, remaining controls and real acceptance matrix.
+4. Prepare matching full runtime package/template, shared merge/exact consumer sync and rollout.
+   Binary-only Astra measurements don't authorize the bundled launcher in production. James
+   owns merge, live schema5→6 approval, deployment and activation. No activation this turn.
+
+Plans remain untracked/implementing. This checkpoint is the commit containing this section.
+
+Final verification: artifacts/runtime-workflow-real/gates-review-pricing-final.json PASS.
+Ruff check exit0 (39ms), format exit0 (42ms), mypy exit0 (432ms), pytest exit0 (132645ms),
+all output tails empty, no skips. Changed paths are in mypy coverage; fake-sandbox suite
+limitations apply, with separate real reviewer evidence above. No production source changed
+after this report. Standards review clear; spec review's evidence-identity finding fixed and
+re-review clear. No push or PR opened.
+
+
+## Usage request accounting and sandbox-scoped retirement checkpoint
+
+Continued from cad2f6e in the isolated implementation worktree. Objective remains factory
+feature/workflow validation using synthetic workloads, not ticket completion or hardening.
+No live services/settings, migrations, consumer pins, tracker/forge or customer work changed.
+Shared harness remains e3fc8ad; both approved plans remain untracked and implementing.
+
+Implemented and reviewed:
+- Usage probes now retain request-level price evidence only when a known-baseline counter
+  delta equals the observed latest request. Duplicate notifications add no requests; combined
+  requests remain incomplete. Preserve the accepted high-water counter, including when the
+  first resumed observation is below the retained baseline. Request records carry model,
+  observation time, service tier and known long-context classification.
+- Flush partial accounted observations before reading more runtime events, so interruption
+  does not depend on finally executing. Only terminal success can mark usage/pricing complete.
+  Unknown resumed scopes, compaction and reroutes retain explicit pricing incompleteness;
+  stale-turn notifications do not become this invocation's requests. No historical backfill.
+- Real concurrent build/reviewer certification exposed another bug: ensure(build) retired
+  the queued reviewer as stale because retirement scanned all same-run identities. Retirement
+  now applies only to the observed sandbox. Same-name generation changes still retire the
+  old job. The regression also covers reopening the store and reusing the reviewer job.
+- Observed RED/GREEN cases: missing request pricing, model reroute, prior-turn usage,
+  preterminal flush, automatic compaction, first-resume counter regression, cross-sandbox
+  retirement. Forty focused tests pass; mypy covers all four changed source/test paths.
+- Standards review has no violations (optional shared request-metadata extraction deferred);
+  spec review's resumed-baseline finding fixed and final extended re-review clear.
+
+Final canonical gates: artifacts/runtime-workflow-real/gates-usage-pricing-final.json PASS;
+Ruff check exit0/71ms, format exit0/43ms, mypy exit0/119ms, pytest exit0/154832ms. All output
+tails empty, no skips. Configured mypy coverage includes changed files. Fake-sandbox suite
+limitations apply; real certification/accounting evidence is recorded separately below.
+No production source changed after that report.
+
+Real acceptance completed:
+- Two independent workflow-drive.py controllers drove build/review concurrently under the
+  isolated project's existing one-agent cap. Both jobs retained their IDs while alternating
+  active/queued work: build bbc1d006fa5240c5a5d1e81abb6388d7 (ticks0–14), reviewer
+  0cd7ca3b3b1a4f5a80ee9dc913ac3ad9 (ticks0–20). Both pass all nine phases/six checks.
+- Final 18 invocations:14 complete estimates /4 incomplete (two explicit compaction stages,
+  two interrupted probes). All ten ordinary usage stages have complete request-level pricing.
+  Known API-equivalent USD0.1308816 build +0.0937736 review, lower bounds due to incompleteness.
+  usage-pricing-result.py replays retained accounting repeatedly, checks unchanged raw digests,
+  requests/estimates, partial flush and zero leases. Result: usage-pricing-result.json.
+- workflow-stop.py reconciled all retained history and stopped only the two owned workflow
+  VMs. stopped-checkpoint.json:59 invocation records,28 incomplete, known lower bound
+  USD0.920936, clean target, zero active agent leases. This includes earlier failed fixtures
+  and a prepared but never launched canary; it is not59 paid invocations or account charges.
+  Previous stop report preserved as stopped-checkpoint-before-usage-pricing.json.
+- Generations unchanged: build c51effe9-c5ff-44dd-b5c6-29f56513457b; reviewer
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73. Both STOPPED. Older service VMs remain stopped.
+  No synthetic application/ticket work was repeated; original reviewer finding is untouched.
+
+Interventions/failed experiments retained:
+- Job9b2cd2a4e16b4738a1d17470b14ece3c ran three probes before the review finding caused
+  controller pause/source correction; it was reconciled and retired for the changed probe hash.
+- Jobed0f7b430ed54b2492ae00488237bc98 ran five probes before the cross-sandbox defect caused
+  another pause/correction. Its costs remain retained; the final implementation invalidated it.
+- Queued reviewer a346574dec24432583b337df2550d1ed was incorrectly retired by build observation.
+  Its canary was prepared but had no paid launch. The real stable spec hashes establish this
+  new cross-sandbox retirement cause; they do NOT explain the earlier028c spec-hash transient.
+  No failed job was reset or reused as passing evidence. Final fixed-source jobs above are fresh.
+
+Evidence directory: artifacts/runtime-workflow-real/; exact controllers and accounting/cleanup
+scripts: artifacts/runtime-certification-service/{workflow-drive.py,usage-pricing-result.py,
+workflow-stop.py}. build-ticks.jsonl/review-ticks.jsonl retain earlier failed runs as well as final
+runs; use job IDs to distinguish them. Shared source remains e3fc8ad, unchanged/unmerged.
+
+Exact next work:
+1. Complete the prepared application launch environment/generation refusal matrix. Existing
+   actual builder/recovery/reviewer launches and authority/evidence refusals already pass.
+   The old transient spec digest change remains unexplained; capture the underlying observation
+   before/after if it recurs. Cross-sandbox retirement is fixed, not an explanation of that event.
+2. Implement the durable child broker and read-only child execution/result transport on the
+   measured supported runtime. Existing runtime_jobs records/admission are foundations only:
+   app_server_worker still has no factory child transport, and child lifecycle is unfinished.
+   Include per-child accounting/approval, targeted cancellation and subtree restart recovery.
+3. Add isolated writable child environments and safe serialized integration preserving dirty
+   parent work; remaining console/CLI controls and real synthetic acceptance matrix follow.
+4. Prepare matching full runtime package/template, shared merge/exact consumer sync and rollout.
+   Binary-only Astra experiments still do not authorize the production bundled launcher.
+   James owns merge, live schema5→6 approval, deployment and activation. No live activation.
+
+Do not backfill old undigested/unknown request histories or mark compaction/interrupted
+accounting complete. Current conservative incompleteness is intentional. No need to complete
+or harden the synthetic ticket. Checkpoint is the commit containing this section; no push/PR.
+
+
+## Prepared launch identity checkpoint
+
+Continued from 59780fb. Main objective remains factory feature/workflow validation with synthetic
+workloads, not ticket hardening or completion. No live services/settings, customer work,
+tracker/forge writes, migration, shared source or consumer pins changed.
+
+Implemented:
+- Prepared workflow resumes check environment, candidate/input hashes and policy before adapter
+  selection. Automatic mode validates the original host-published certificate against a fresh
+  full observation; it never schedules replacement certification for a stale frozen request.
+  It verifies job/run ownership and exact retained report equality before paid admission.
+- Regression reproduced changed environment/generation replacing the original certification job.
+  Now both refuse with the original job retained. Six mutation cases cover evidence, generation,
+  environment, native binary, launcher and mounts; exact restoration launches the original
+  invocation once after a store reopen. Sixteen focused workflow tests pass; mypy covers152 files.
+- Bounded Standards and Spec reviews clear. No new child transport is claimed.
+
+Real deterministic acceptance (no paid model calls):
+- prepared-launch-matrix.py uses a SQLite backup, retains original certificate/evidence roots,
+  and seeds explicitly synthetic prepared builder/reviewer invocations. It does not rerun actual
+  step entry, gates or ticket work. Original database and59 historical invocation records stay
+  unchanged. Actual workflow_launches.resume and sbx observation run on both existing VMs.
+- Unchanged identity reaches the exact invocation's Approval hold; changed launch environment
+  refuses as launch-preparation-stale; exact restoration returns to Approval. No launch intent,
+  detached holder, active lease, new certification job or paid invocation appears.
+- prepared-generation-refusal.py recreates ONLY the stopped owned reviewer under its existing
+  name, then observes its actual complete fingerprint. Old generation
+  0b2cddfb-cdb7-4a02-84f2-a51e90517e73 changed to
+  75d4653d-ec0e-4e6b-aa8b-ceb97890b82f. Resume refuses certification-stale with the old job
+  retained and zero launch intents/leases. Host-side evidence and target work remain preserved.
+- Build remains c51effe9-c5ff-44dd-b5c6-29f56513457b. Both VMs STOPPED. Old reviewer certificate
+  0cd7ca3b3b1a4f5a80ee9dc913ac3ad9 is valid historical evidence ONLY: it does not authorize the
+  recreated reviewer. Do not launch there until a new job passes all checks. No need to recertify
+  merely to repeat this refusal test. Prefer the forthcoming matching runtime package for child
+  acceptance before purchasing another full compatibility run.
+
+Evidence: artifacts/runtime-workflow-real/prepared-launch-matrix/{result.json,generation-result.json}.
+Scripts: artifacts/runtime-certification-service/{prepared-launch-matrix.py,prepared-generation-refusal.py}.
+They refuse reuse; do not rerun blindly. Original stopped report retained as
+stopped-checkpoint-before-prepared-launch.json; stopped-checkpoint.json now records current generation
+and stale reviewer. Original known USD0.920936 lower bound,28 incomplete/59 records unchanged.
+No account-charge or whole-history completeness claim. Plans remain implementing/untracked.
+
+Intervention: initial SbxAdapter.remove silently failed to remove the reviewer because sbx rm
+requires interactive confirmation and the adapter ignores its exit. Generation stayed identical;
+the fixture correctly failed rather than claim recreation. Retained generation-unremoved-attempt.json.
+A checked `sbx rm --force` for the exact stopped disposable name, with absence assertion before
+ensure, then produced the actual recreation above. Production cleanup code remains unchanged;
+address checked noninteractive owned removal and failed stop/remove reporting before relying on
+that adapter for child lifecycle cleanup. Never broaden cleanup to unrelated or human sandboxes.
+The separate old028c spec-digest transient remains unexplained; this does not resolve its cause.
+
+Exact next work:
+1. Implement durable host child broker and read-only execution/result transport on the measured
+   supported runtime. runtime_jobs has tables/admission only; no factory child transport exists
+   in app_server_worker. Include request validation/idempotence/ownership, per-child approval,
+   accounting, targeted cancellation and subtree restart recovery. Shared request schema/semantics
+   remain at harness e3fc8ad; merge/exact consumer sync still pending. Keep native spawning disabled.
+2. Fix the observed silent sandbox removal failure with a RED regression at the sandbox adapter
+   boundary before using it for child cleanup; preserve stopped/owned targeting and checked exits.
+3. Isolated writable children, safe serialized integration preserving dirty parent work, remaining
+   CLI/console controls and real synthetic acceptance. Matching full runtime package/template is
+   still required: binary-only Astra/dynamic-tool experiments do not authorize bundled launch.
+4. Shared merge/exact sync and reviewed rollout. James owns merge, live schema5→6 approval,
+   deployment and activation. Live concurrency4 and disabled delegation remain unchanged.
+
+Final canonical gates: artifacts/runtime-workflow-real/prepared-launch-matrix/gates-final.json
+PASS. Ruff check exit0/67ms; format exit0/42ms; mypy exit0/106ms; pytest exit0/133611ms.
+All tails empty, no skips. Changed files are within152-file mypy coverage. The fake-sandbox
+suite caveat applies; separate actual sbx observations/refusals are retained above. No source
+changes followed the report. Standards and Spec reviews clear. No push/PR opened.
+
+Final inventory caveat: after both scripts had successfully stopped/inspected their owned VMs,
+a later sbx ls --json listed neither test name; inspect/generation now report absent. Cause is
+not established. See prepared-launch-matrix/final-inventory.json and stopped-checkpoint.json's
+final_readback. Do not treat either prior disposable identity as currently available or recreate
+it blindly. Fresh setup/observation/certification is required for future execution. No codex-*
+sandbox was attached/stopped/removed and no live services/settings were changed by this work.
+This checkpoint is the commit containing this section.
+
+
+## Checked sandbox cleanup checkpoint
+
+Continued from593ca70 in the isolated implementation worktree. Objective remains factory
+feature/workflow validation with synthetic workloads, not ticket hardening or completion.
+No live services/settings, schema, consumer pins, shared source, tracker/forge writes or
+customer work changed. This commit completes the cleanup prerequisite only; child execution
+is not implemented by this slice.
+
+Implemented and measured:
+- SbxAdapter.stop/remove now raise on unsuccessful command exits, naming the action, exact
+  sandbox and exit code. They do not copy raw command output into cleanup errors.
+- Removal requires an observed stopped sandbox, then uses checked noninteractive rm --force
+  for that exact name. Human sandbox names refuse before any adapter command. Running or
+  unknown state refuses; removal never implicitly stops a running VM.
+- GC retains registry/run-derived names and active-run exclusions, and records an unsuccessful
+  action when the adapter refuses/fails instead of claiming success or aborting the sweep.
+  An eligible but still-running VM is retained with a stopped-state refusal; its owner must
+  safely stop it before removal. No broader targeting or implicit forced stop was introduced.
+- RED regressions reproduced swallowed stop/remove failures, interactive removal doing nothing,
+  and GC aborting on the new exception. Focused sandbox/GC suites pass (69 tests); mypy covers
+  all152 source/test files. Unknown-state and human-name guards also pass.
+- Real single-use script artifacts/runtime-cleanup-validation/check.py created only
+  factory-review-cleanup-593ca70, generation385b393b-cdf0-4155-bfe5-a99e129e48a7. It executed
+  /bin/true (no model), observed running-state removal refusal and preserved generation,
+  stopped/inspected the VM, removed it through the production adapter and verified absence.
+  A host artifact survived unchanged. Result: artifacts/runtime-cleanup-validation/result.json.
+  Final sbx ls --json lists no sandboxes. No historical workflow VM was recreated.
+- Both bounded Standards and Spec reviews clear. This establishes adapter behavior, not an
+  atomic child-cleanup admission boundary: future child callers must reconcile owned leases
+  and exclude concurrent starts before removal. The sbx CLI observation/removal pair is not
+  a compare-and-swap operation. Child lifecycle safety remains unclaimed.
+
+Exact next work:
+1. Durable host child broker and read-only execution/result transport on the measured supported
+   runtime. runtime_jobs still has tables/admission only; app_server_worker still has no factory
+   child transport. Validate schema/size/paths, bind requests to the executing parent/run,
+   persist idempotent requests/results, and enforce authority, separate child approval,
+   accounting, targeted cancellation and subtree restart recovery. Keep native spawn disabled.
+2. Isolated writable children and serialized safe integration preserving dirty parent work;
+   remaining CLI/console controls and real synthetic acceptance. Use the checked adapter only
+   after owned children are terminal/reconciled and concurrent starts are excluded.
+3. Matching full runtime package/template, shared merge/exact consumer sync and reviewed
+   rollout. Harness remains e3fc8ad, unchanged/unmerged. Binary-only runtime experiments do
+   not authorize a new bundled launcher. James owns merge, live schema5→6 approval, deployment
+   and activation. Live concurrency4 and disabled delegation remain unchanged.
+
+Overall plans remain implementing and untracked. No push/PR opened. This checkpoint is the
+commit containing this section. Prior certification/accounting history is unchanged; no new
+paid calls or accounting backfill. See final gate evidence below.
+
+Final canonical verification: artifacts/runtime-cleanup-validation/gates-final.json PASS.
+Ruff check exit0/80ms, Ruff format exit0/48ms, mypy exit0/202ms, pytest exit0/137584ms;
+all output tails empty, no skips. Configured mypy paths cover all changed source/tests.
+Fake-sandbox test caveat applies; the real cleanup observation above supplies separate sbx
+behavior evidence. No production source changed after this report. Both review axes clear.
+
+
+## Durable child broker checkpoint
+
+Continued from b32ddab. Objective remains factory workflow/feature acceptance on synthetic
+workloads, not ticket completion/hardening. Live services/settings, schema, concurrency4,
+consumer pins, shared source and tracker/forge/customer work remain unchanged. No sandbox
+or model call was made. Shared harness remains e3fc8ad, unmerged; shared sync still pending.
+
+Implemented:
+- New host service src/factory/delegation.py, DelegationBroker(store, parent_id, source_root).
+  Parent identity and source root are controller arguments, never tool data. request, requests,
+  inspect, bind_child, authorize_launch, cancel and publish_result operate on existing schema6
+  delegation_requests. No new DDL or second accounting ledger.
+- Read the exact shared request schema from the immutable authority snapshot; validate its
+  integrity and parent policy revision. Read-only requests only for active root builder parents,
+  within project capability and bounded pending-child limits. Reject forged fields, oversized
+  arguments, noncanonical/traversing/duplicate paths and symlinks. Shared schema fixture comes
+  from e3fc8ad; production still consumes target authority. No vendored file edited.
+- Added uniqueItems support to the factory schema validator so the shared schema works unchanged.
+  Tests distinguish JSON booleans/numbers and detect equal numeric/nested duplicate values.
+- Persist before returning a pending handle. Exact owned replay returns the retained handle even
+  after policy changes, disabling delegation, scope deletion or parent completion. Changed task
+  or source root cannot reuse a call identity. Two real spawned controller processes prove one
+  request identity and atomic pending-child limits against isolated SQLite.
+- Host-prepared child invocations bind once to matching run/attempt/parent/policy/semantic role.
+  AgentLaunches checks broker status/current authority/paths inside its existing atomic launch
+  transaction. Separate child approval and common capacity/budget admission remain in force;
+  cancellation of an unlaunched child fences admission before approval can be consumed.
+- Existing launch intents survive restart with no duplicate spawn. Active cancellation stays
+  cancelling and retains slots until execution is terminal/reconciled. RuntimeJobs refuses parent
+  finalization while broker requests/results remain outstanding, including queued children.
+- Host result publication requires a terminal reconciled child lease and retains an immutable,
+  size-bounded result. Child output never advances verification or independent review. Existing
+  accounting.collect_invocation retains child usage once across repeated collection and leaves
+  unpriced fixture usage USD=None. Result completion is NOT a tree-cost completeness claim.
+
+Evidence and limits:
+- Twenty-three broker cases pass, including real independent-process request races; existing
+  launch/admission/schema regression suites pass. Tests use actual temporary SQLite/filesystem
+  and fake detached sandbox execution. This does not prove child model execution or isolation.
+- Spec review reproduced an initial replay bug (current admission checked before old request).
+  Four new RED cases reproduced it; lookup now precedes new-admission checks. Re-review clear.
+  Standards review clear; optional shared extraction of duplicated settings interpretation was
+  deferred until controls expand. No hard findings remain for this bounded slice.
+- Source is not yet wired into a worker tool or workflow controller. bind_child is host-only and
+  attaches an already prepared invocation; it does NOT construct a fresh sandbox, immutable
+  prompt, model route or certificate. AgentLaunches alone does not certify/read-only-isolate a
+  child. cancel records intent; it does NOT send a signal. publish_result is host collector-only,
+  not a dynamic tool. These limitations must remain explicit until next work is accepted.
+
+Exact next work:
+1. Connect app-server dynamic-tool registration and request/result transport to this broker on
+   the measured supported full runtime package. Current worker receive rejects every server
+   request with method+id; agents.enabled remains false. Bind transport to the executing parent
+   and its owned mailbox/channel. Bound reads/paths, persist broker request before responding,
+   and return pending handles without waiting for human child approval. Never expose Store,
+   bind_child, authorize_launch or publish_result as model tools. Unknown tools fail closed.
+2. Implement host read-only child preparation/controller advancement: fresh thread, trusted
+   task/authority/base handoff, routed model/effort/preset, private scratch and source/authority
+   mounted read-only. Use accounting.begin with a unique child step and parent_id metadata,
+   then bind_child. Freeze launch inputs and validate a fresh complete sandbox fingerprint
+   before calling AgentLaunches.start(parent_id=...). Keep its existing no-duplicate intent.
+   The parent/run identity and source root passed to broker must come from host launch records.
+3. Wire owned pending requests and active children into observation/recovery/suspend/cancel.
+   Kill only recorded child process groups, retain ambiguous holders and partial usage, collect
+   terminal costs before releasing child slots, publish schema-validated bounded results from
+   controller-selected evidence paths, and only then finalize the parent. Parent completion
+   must drain or cancel pending broker requests, or its lease correctly remains held.
+4. Real synthetic acceptance: two read-only children, exact approvals/capacity, actual write
+   refusal, result transport, restart and targeted cancellation, repeated accounting. New worker
+   bytes/full runtime require fresh certification; old absent workflow VMs/certificates do not
+   authorize execution. No need to complete/harden synthetic tickets.
+5. Isolated writable child integration, controls, shared merge/exact sync and reviewed rollout
+   remain later work. James owns merges, live schema5→6 approval, deployment and activation.
+
+Plans remain implementing/untracked. This checkpoint is the commit containing this section.
+No push/PR opened. Final canonical gate evidence is recorded below after verification.
+
+Final canonical verification: artifacts/runtime-child-broker/gates-final.json PASS.
+Ruff check exit0/43ms, Ruff format exit0/41ms, mypy exit0/236ms, pytest exit0/136341ms;
+all output tails empty, no skips. Mypy covers154 source/test files including new broker/tests.
+Fake sandbox caveat applies: there is no real child execution claim. Separate spawned-process
+SQLite races are covered in the broker tests. No production source changed after the final
+report. Standards review clear; Spec replay finding fixed and re-review clear. Earlier passing
+pre-fix gate report retained as gates-before-replay-fix.json, not the final evidence.
+
+
+## Child transport checkpoint
+
+Continued from e8d10ef. Objective remains factory feature/workflow acceptance with synthetic
+workloads, not ticket completion/hardening. Factory branch feat/runtime-certification-and-delegation;
+shared harness stays e3fc8ad, unmerged/unsynced. No live, schema, concurrency, template, consumer,
+tracker/forge or customer changes. No VM or model call was made. This checkpoint is the commit
+containing this section; approved plan files remain intentionally untracked and implementing.
+
+Implemented:
+- src/factory/delegation_transport.py adds DelegationMailbox, bound by the host to a broker and
+  two directories. configuration() derives the request tool schema from immutable layer-A
+  authority; service() handles one bounded mailbox request per controller tick. No database,
+  approval, child binding, launch or result-publication capability enters the tool interface.
+- Three tools only: factory_request_child, factory_child_status, factory_cancel_child. Responses
+  expose only handle/status/result, not host paths, run metadata or authority records. All actual
+  request/inspection/cancellation operations use the existing owned broker.
+- Successful AND refused valid calls retain immutable receipts in the existing effects ledger,
+  in the same transaction as the broker operation. Parent/call identity and source root bind the
+  receipt. Replay returns the same result across restart; changed payloads cannot reuse a call.
+  A new call ID is required for an intentional retry after capacity/policy changes.
+- app_server_worker.py registers dynamicTools only on thread/start and services item/tool/call
+  on start/resume. Wire shape comes from captured 0.153.4 schemas and the earlier real dynamic
+  probe under /Users/james/factory/artifacts/runtime-certification-implementation/. Resume relies
+  on retained thread registration, as measured there. Native agents.enabled remains false;
+  unknown tools, namespaces, foreign threads and other operator requests still fail closed.
+- The worker writes one atomic request.json in its private inbox and waits at most60seconds for
+  a digest-matched host response.json from a separate read-only outbox. This waits for controller
+  acknowledgement, never for child approval/completion. Timeout retains the request and marks
+  parent usage incomplete; host recovery can subsequently persist the pending handle.
+- Fixed filenames, no-follow regular-file reads, nonblocking opens and bounded reads refuse
+  symlinks/FIFOs/oversized messages. Atomic replacement prevents partial responses. Request cap
+  is80KiB; response cap256KiB accommodates the broker's64KiB result after JSON escaping.
+  Safety REQUIRES trusted directory ancestors and a separately mounted read-only outbox; these
+  helpers do not create/enforce sandbox mounts or certify a configuration by themselves.
+
+Evidence and review:
+-17 transport tests pass using real temporary files/SQLite plus the existing fake app-server
+  protocol boundary. Combined worker/broker/transport suite passed107 tests before the final
+  refusal-replay regression; final transport17 and mypy156files pass. No real transport/child
+  execution/isolation claim follows from these tests.
+- RED/GREEN cases reproduced replay cancellation targeting a different child and escaped valid
+  results exceeding the original response cap. Spec review separately reproduced a capacity
+  refusal becoming success on replay; a RED test captured it, durable refusal receipts fix it,
+  and re-review is clear.
+- Standards review found no documented-rule violations or actionable heuristic smells. The
+  optional architecture/stack reviewer checklist files are absent, so this is an AGENTS/CONTEXT
+  and available-guidance review, not a claim that the absent checklist was executed.
+- Final canonical gate result is recorded below after completion. No push/PR opened.
+
+Exact next work:
+1. Finish host parent preparation and controller transport wiring. AppServerAdapter.prepare
+   currently does NOT emit delegation configuration; no production workflow calls mailbox.service.
+   Allocate invocation-owned mailbox directories outside every candidate-writable host ancestor;
+   mount inbox privately rw and outbox separately ro, include both in fresh fingerprint/spec
+   validation, freeze configuration/worker inputs, and bind broker identity from retained host
+   invocation records. Observe mailbox requests during normal polling and restart. Do not enable
+   a worker config by itself without the mount/controller service. configuration() currently reads
+   through request_schema(), which requires an active parent: preparation-before-admission needs
+   a trusted schema read path without relaxing actual request admission. Do not launch the parent
+   early merely to obtain its schema.
+2. Host read-only child preparation/advancement: fresh thread and explicit trusted task/base/
+   authority handoff; normal model/effort/preset routing; private scratch and read-only source/
+   authority; unique accounting.begin child step with parent_id; bind_child; frozen launch inputs;
+   fresh full fingerprint/certification before AgentLaunches.start(parent_id=...). No duplicate
+   spawn on an existing launch intent. Keep approval, budget, attempts and common agent caps.
+3. Owned subtree lifecycle: reconcile/account terminal children before releasing slots; host
+   collector validates bounded results against the approved output contract and publishes them;
+   signal only recorded child process groups for cancel/suspend; retain ambiguous holders and
+   partial usage. Drain/cancel queued requests and collect results before finalizing a parent.
+   A mailbox cancellation receipt records intent and is not proof a process was stopped.
+4. Real synthetic acceptance on a fresh supported FULL runtime package, including final-worker
+   certification: actual parent requests two read-only children, pending/approval/capacity,
+   overlap, write refusal, result transport, restart, targeted cancellation and accounting replay.
+   Old certificates are stale after these worker changes; prior absent VMs cannot authorize runs.
+   No ticket delivery/hardening is needed once the assertions are met.
+5. Isolated writable children/integration, controls, shared merge/exact sync and reviewed rollout
+   remain later work. James owns merges, schema5→6 approval, deployment and activation. Live
+   concurrency4 and disabled delegation remain unchanged.
+
+Final canonical verification: artifacts/runtime-child-transport/gates-final.json PASS.
+Ruff check exit0/80ms, Ruff format exit0/39ms, mypy exit0/198ms, pytest exit0/128040ms;
+all output tails empty, no skips. Mypy covers156 source/test files including the new transport.
+Fake-runtime caveat applies: local files/SQLite and protocol fixtures do not establish real
+sandbox transport, mount isolation or child execution. No production source changed after this
+report. Both bounded reviews have no outstanding findings against available guidance; the
+missing optional stack checklist remains the review coverage caveat stated above.
+
+
+## Protected mailbox controller checkpoint
+
+Continued from192cc71. Objective remains factory feature/workflow acceptance using synthetic
+workloads, not ticket completion/hardening. Branch feat/runtime-certification-and-delegation;
+shared harness remains e3fc8ad unmerged/unsynced. No live services/settings/schema/concurrency,
+consumer/template, tracker/forge, credential or customer changes. No model calls. This section
+is contained in the checkpoint commit; approved plans remain untracked and implementing.
+
+Implemented:
+- DelegationController.prepare(run_id, attempt, parent_id, source_root, base_spec) allocates
+  invocation-owned inbox/outbox under home/state/delegation-mailboxes/<parent-sha256>. It returns
+  a NEW factory-build-delegation-<digest> specification. Inbox is rw, separate outbox ro; no
+  ancestor of controller state may be among the existing mounts, even read-only. Source must
+  be mounted; project/role and external-capability boundaries are checked. Input environment
+  values are hashed in the retained spec rather than copied into the effects record.
+- Provisioning precedes accounting/invocation creation, solving the mount→certification→accounting
+  dependency. It validates trusted layer-A schema and snapshots policy revision without starting
+  or admitting a parent. Immutable effect ownership prevents another run/attempt reusing the
+  same parent ID. Repeated preparation returns the original spec; changed spec/source/policy,
+  already-admitted new preparation and replaced directory identities are refused.
+- Descriptor-relative mkdir/open refuses symlink ancestors before writing through them. Only
+  two leaf directories enter the VM; the controller root/database remain outside all mounts.
+  Configuration checks the exact retained spec, approved parent policy and directory identities.
+  It is NOT a certificate, does not ensure a VM, and cannot replace fresh fingerprint validation.
+- Shared schema loading/transport configuration now support pre-admission registration. Broker
+  requests still require an active root builder, capability policy and all previous checks.
+- workflow_launches.reconcile_run now calls controller.service_run before terminal reconciliation.
+  It restores bindings from retained host effects/invocations, services only active parents with
+  recorded launch intents, and checks recorded sandbox/workdir/root-parent ownership. Worker
+  input never supplies a database path, parent ID or source root to this controller.
+- Review reproduced poisoned inbox data preventing terminal accounting. Fixed by recording a
+  sanitized durable delegation-mailbox/failure effect and audit, fencing only that channel while
+  allowing terminal accounting to proceed. Files remain for diagnosis; no automatic resetting,
+  unlinking, process kill or child cancellation. A fresh invocation gets a fresh channel.
+
+Evidence:
+- Seven controller tests cover pre-accounting preparation, restart/replay via production workflow
+  reconciliation, cross-run ownership, overlapping mounts, symlink ancestor refusal, changed
+  mount/directory identity, and poisoned-channel terminal accounting (12 input/3 output tokens,
+  unknown pricing visibly incomplete, replay unchanged). One new broker regression verifies
+  pre-admission registration cannot authorize a request. Existing transport tests remain green.
+- RED/GREEN observed missing controller service, cross-run mailbox rebinding and poisoned inbox
+  stopping terminal accounting. Bounded Standards review clear against AGENTS/CONTEXT/available
+  guidance; optional architecture and stack-reviewer checklist files absent. Spec P1 reproduced,
+  fixed and re-review clear. Reviews do not imply completion of deferred launch/child work.
+- Real command: uv run python artifacts/runtime-mailbox-controller/check-mounts.py. Single-use
+  isolated store/source and draft shared-schema fixture; zero-model acceptance of the returned
+  production specification through SbxAdapter.ensure/exec_sync, not a fake mount assertion.
+  Result: artifacts/runtime-mailbox-controller/mount-result.json, verdict pass, exit0/stderr empty.
+  Sandbox factory-build-delegation-e69f8c4a40bd73037d5fdac1; generation
+  0083bc7c-0a22-4187-908b-a418ebeabb0c. VM inbox write and outbox read succeeded. Outbox overwrite
+  and unlink refused EROFS(30); directory rename refused EACCES(13). Controller DB read refused
+  ENOENT(2). Host response/source bytes preserved. Checked stopped state, removal and absence.
+  This is mount acceptance only: no Codex parent tool, child execution, model accounting or
+  six-check compatibility claim follows. Do not reuse this absent sandbox as an attested identity.
+
+Exact next work:
+1. Integrate provisioned parent specs into workflow creation and certification, then freeze the
+   configuration into AppServerAdapter requests. Current implement.start still calls select(ctx)
+   against build_spec(ctx), then accounting.begin with that certificate; neither calls prepare.
+   Use the known accounting.key before creating the invocation: provision mounts/spec first,
+   create/observe/certify that exact spec, then retain accounting and configuration. Preserve
+   worktrees/clone work across parent attempts and recovery; do not retrofit existing VM mounts
+   or silently replace an active sandbox. Ensure both initial launch and queued resume validate
+   the same full fingerprint and frozen payload. The controller's configuration method alone
+   is insufficient permission to enable worker tools. Parent mailbox calls must be observed on
+   foreground and daemon/restart paths within the worker's60-second acknowledgement deadline.
+2. Read-only child preparation/advancement: fresh thread, trusted task/base/authority handoff,
+   routed model/effort/preset, private scratch and read-only source/authority, unique accounted
+   child step plus parent_id, broker.bind_child and fresh exact sandbox certification before
+   AgentLaunches.start(parent_id=...). Keep exact approval, common caps, budget/lifetime limits
+   and no duplicate spawn after an existing intent. No child execution exists in this checkpoint.
+3. Owned subtree completion/cancel/suspend/recovery: account before releasing leases; validate
+   and publish bounded results from host-selected paths; signal only recorded groups. Preserve
+   ambiguous holders and partial usage. Drain/cancel queued requests before parent finalization.
+   A channel failure currently preserves pending child requests; it does not implement that drain.
+4. Real final-worker six-check certification and synthetic parent/two-child acceptance: overlap,
+   exact approval/capacity, actual source write refusal, result transport, restart, targeted
+   cancellation and idempotent accounting. The mount-only acceptance above does not cover these.
+5. Isolated writable children/integration, controls, exact shared merge/sync and reviewed rollout.
+   James owns merges, live schema5→6 approval, deployment and activation. Live concurrency4 and
+   default-disabled delegation remain unchanged. No push/PR opened.
+
+Final canonical verification: artifacts/runtime-mailbox-controller/gates-final.json PASS.
+Ruff check exit0/41ms, Ruff format exit0/42ms, mypy exit0/244ms, pytest exit0/127246ms;
+all output tails empty, no skips. Mypy covers158 source/test files, including new modules/tests.
+Fake-runtime gate caveat applies; separate real mount-only evidence is described above.
+No production source changed after this report. Both bounded reviews clear against available
+guidance; missing optional architecture/stack checklist limits Standards coverage as stated.
+
+
+## Parent launch wiring checkpoint
+
+Implemented after898c0c5:
+- workflow_delegation.prepare_parent creates the exact invocation-owned bind-layout spec
+  before selection/accounting. Its durable run binding reconstructs that spec for certification,
+  later steps and reopened controllers. Project restoration supports individual sandbox overrides.
+- Launch identity uses the upcoming launch counter and the same accounting key construction as
+  admission. Certification ticks retain the same binding while its certifier is active; changing
+  owners waits for previous agents to reconcile.
+- implement.start records invocation accounting before constructing the worker request. The
+  host-retained schema/paths become three dynamic tools in the frozen request. Only immutable
+  certified builder adapters can carry delegation configuration.
+- Queued launch checks mailbox directory identity, mounts, authority and current project
+  permission alongside full fingerprint/evidence validation.
+- Mailbox failure cancels pending requests, including restart after committing the failure fence.
+  Exited parents also fence pending requests before terminal accounting. Active paid children
+  remain reserved; this does not implement subtree signalling or child result collection.
+
+Offline evidence uses production implement/selection/preparation/resume paths, isolated SQLite,
+real temporary Git trees and a fake sandbox observer/executor. Original and delegated builders
+reject changed evidence, generation, runtime, launcher, environment and mounts; delegated
+builders also reject revoked project permission and replaced mailbox directories. Exact
+restoration launches once. Controller restart and dirty-source preservation pass. These fixture
+certificates are NOT real sandbox acceptance. No VM/model calls, live changes, schema migration,
+consumer sync or deployment occurred.
+
+Remaining launch gaps:
+1. Clone layouts require durable transfer of private commits, dirty/untracked files and writable
+   environment state. delegation-clone-transfer-required refuses before sandbox replacement.
+2. Actual thread recovery requires retaining runtime thread state and compatible registration.
+   delegation-session-transfer-required refuses before moving resume_session to another VM.
+   Queued prepared-launch restart is implemented; actual thread transfer is a different case.
+3. Actual child preparation/certification/admission/execution, binding/result publication and
+   owned signalling remain unfinished. Parent tools can return pending handles only.
+4. Writable integration, controls, final real synthetic resource/accounting acceptance,
+   shared/consumer validation and reviewable rollout artifacts remain required. No live activation.
+
+Both bounded review axes are clear; the Spec crash-window finding was fixed and rechecked.
+The regression asserts request cancellation immediately after mailbox service, before terminal
+reconciliation could hide the failure. Full gate evidence belongs to this source checkpoint.
+
+Main objective: factory feature/workflow acceptance using synthetic work. No ticket completion,
+review substitution or CRUD hardening is required. This checkpoint does not complete the plan.
+
+Final gate evidence: artifacts/runtime-parent-delegation/gates-final.json PASS. All four configured gates exited0, no skips, empty tails. Mypy covers160 source/test files including this change; fake sandbox tests do not establish real runtime compatibility. Both bounded reviews clear.
+
+## Child cancellation checkpoint (after 8dd5eac)
+
+Implemented the next owned-subtree lifecycle seam:
+- Production workflow reconciliation now advances cancelled child requests through their
+  recorded launch handles. It signals only the selected sandbox/process group, with a durable
+  effects-ledger intent committed before the adapter call. No process-name or sandbox-wide kill.
+- Missing, nonpositive, oversized, nonregular or symlinked process-group evidence cannot signal.
+  Active leases remain reserved until terminal accounting; a signal is not terminal evidence.
+- Confirmed or ambiguous signal intents are never automatically repeated after restart. A lost
+  acknowledgement or a controller crash before signal requires terminal observation or explicit
+  owned recovery; this deliberately does not claim automatic resolution of ambiguous signals.
+- Terminal cancelled children publish an immutable null result through the broker after lease
+  reconciliation. Publication resumes even when a controller died after releasing the child lease.
+  Ordinary successful child output collection/schema validation remains unfinished.
+- Human-held and terminal runs fence pending child requests during reconciliation. Exited
+  mailbox parents cancel/drain children and retain their own lease until the subtree reconciles.
+  Cancellation preserves files and does not remove sandboxes or modify source worktrees.
+
+Nine new offline cases exercise production reconciliation, broker/admission, isolated SQLite
+reopen and fake sandbox signalling: selected-child/sibling isolation; repeat reconciliation;
+lost acknowledgement; missing/zero/symlink PGID refusal; Suspend/Cancel/failure pending fences;
+parent exit and crash between terminal child reconciliation and cancellation publication.
+Usage fixture retains 12 input/3 output tokens with unpriced usage explicitly incomplete.
+RED observed no signal, followed symlink signal, and stopped-run pending requests; GREEN after
+fixes. These are control-plane tests, not a real paid child or sandbox cancellation measurement.
+
+Remaining work, in priority order:
+1. Prepare and execute read-only children: freeze task/base/authority and routed model/effort,
+   private scratch with read-only source/authority, fresh exact certification, accounted child
+   binding, durable admission/queue/restart and fresh app-server thread. No production child
+   preparation/launch caller exists yet; parent tools still return pending handles.
+2. Collect schema-validated bounded successful/failed child results and expose them to parents.
+   Add owned recovery for ambiguous cancellation and prove end-to-end Suspend/Cancel cleanup.
+   Cancellation wiring above does not make the complete child lifecycle operational.
+3. Preserve clone dirty/untracked/private environment state and native thread state across parent
+   attempts. Current clone/session-transfer refusals remain; queued prepared restart is distinct.
+4. Isolated writable children and serialized integration, controls and fair shared-capacity
+   scheduling/visibility, final real six-check and parent/two-child/resource/accounting acceptance.
+5. Shared-source merge/sync, consumer checks, exact runtime packaging and reviewable rollout.
+   James owns merges, live schema 5→6 approval, deployment and activation. Full feature PR
+   readiness is still not achieved. No push or PR opened in this checkpoint.
+
+Main objective remains factory feature/workflow acceptance with synthetic work, not ticket or
+CRUD completion/hardening. No live services/settings/schema/templates, tickets or credentials
+changed; no model calls or sandbox operations occurred during this checkpoint.
+
+Final canonical verification: artifacts/runtime-child-cancellation/gates-final.json PASS.
+Ruff check exit 0 (86 ms), Ruff format exit 0 (52 ms), mypy exit 0 (288 ms), pytest exit 0
+(133475 ms). No skips; all output tails empty. Mypy covers 162 source/test files, including
+the new modules. Bounded Standards and Spec reviews clear; final parent-exit regression passes.
+These gates establish offline control-plane behavior, not real sandbox compatibility.
+
+## Continuation baseline after aafb933 (superseded by the checkpoint below)
+
+User scope: actual child preparation/execution/results plus clone/thread preservation now;
+keep all other remaining tasks recorded. Current tracked/untracked diff adds workflow_children,
+delegation_results, child-specific certification spec/scratch inputs, workflow observation-loop
+servicing, and a shared layer-A result schema/doc in harness-runtime-certification. Offline
+child tests cover exact certification fixtures, fresh read-only request, accounted/bound launch,
+approval, stale environment/generation, reopen/no duplicate spawn and bounded validated results.
+These are fake sandbox tests; no real child or new sandbox compatibility claim. Review fixes
+for canonical JSON expansion overflow and hidden waiting reasons have passing regressions.
+Full final gates/re-review and commits still pending for this continuation.
+
+Still to do in current scope:
+- Complete child refusal/status visibility and final review/real execution acceptance.
+- Clone/thread preservation: retain the exact original VM/private clone/runtime state across
+  drained parent invocations, validate generation and authority, and rotate mailbox ownership
+  without replaying the previous owner's inbox. Provision clone mailboxes before initial clone
+  creation. Existing clone/thread refusals are still present at this writing.
+- Cloned-source child snapshots remain refused: child-clone-snapshot-required. Build a preserved
+  host-readable read-only snapshot of the private clone before child launch; host checkout must
+  never silently substitute for VM-local commits/dirty files.
+Other unchanged remaining tasks: writable children/integration; operator controls; fair shared
+resource acceptance; final real model/parent-child/cancellation/accounting tests; shared merge/
+consumer sync and exact runtime packaging; reviewable migration/rollout. James owns merges,
+live schema 5→6 approval and deployment. Live services/settings remain unchanged.
+
+
+## Child execution/results and retained-runtime transfer checkpoint
+
+Implemented in the continuation after aafb933:
+- workflow_children.advance runs from the common driver observation path while a parent is
+  active. It services/reconciles mailboxes, authorizes owned pending requests, and provisions
+  per-child scratch plus read-only project/authority mounts. No static MCP or shared skills.
+- Each bind-layout child waits for its own exact automatic certificate using the production
+  certification runner. Its fresh read-only app-server request, source-owned instructions/schema,
+  model/effort/preset, parent link, evidence paths and launch script are frozen/accounted before
+  common approval/resource/budget admission. Child opinions never enter independent review.
+- Queued launch revalidates generation, environment, authority and base. A durable existing paid
+  intent never respawns. Child waiting/refusal reasons now travel through owned status handles.
+- Host result collection uses the recorded path/schema, bounded no-follow file reads and bounded
+  canonical JSON. Valid output is published only after terminal accounting; invalid/missing/
+  oversized/symlinked output yields a failed null result, rather than poisoning observation.
+- Parent transfer retains the SAME VM, private clone/environment and native runtime state. It
+  requires drained predecessor/children, exact original generation/spec/authority, and a matching
+  recorded thread for resume. Requested thread identity (including fresh=None) is immutable on
+  every replay. It does not export a Codex home or credentials to another VM.
+- Clone mailboxes are provisioned before initial clone creation. Old clones created without the
+  required mailbox still refuse replacement; no silent conversion or loss of private work.
+- Mailbox transfer has a dedicated committed intent, archived old request/response evidence,
+  single-successor ownership and a host lock across archive/recheck/publication. Interrupted
+  archiving resumes; a delayed controller cannot archive a successor's live request.
+
+Review findings resolved: canonical JSON expansion overflow; hidden child waiting reasons;
+thread identity changes on preparation replay; archive operations before committed intent;
+concurrent archive/controller race. Focused tests cover the failing behaviors and fixes.
+Factory's four gates and shared scripts/check.py results are recorded below when final.
+Shared instructions/result schema are authored in harness-runtime-certification under
+plugins/harness; only a disposable test fixture copy exists in factory. No vendor hand edits.
+
+Real zero-model acceptance:
+- Command: uv run python artifacts/runtime-child-execution/clone-preservation.py
+- Evidence: artifacts/runtime-child-execution/clone-acceptance-2/result.json, PASS.
+- Sandbox factory-build-delegation-00cf7c05c32499f878a14e21; generation
+  60da0dc1-62af-4669-83e8-7ae3985ceb97 preserved across production controller transfer/ensure.
+- Private commit 0a928d626ae1ca4de47623c61430df4e3918868c, VM-only untracked work and writable
+  environment marker preserved; host checkout unchanged. Owned VM stopped/removed; absence
+  verified. No paid calls. This proves filesystem/clone retention, NOT native thread resume.
+- First experiment stopped at an acceptance-script AttributeError (Completed.returncode was
+  incorrectly named exit_code). Its VM was also removed/absence verified; retained result in
+  clone-acceptance/result.json is NOT a pass. Fixed script reran in a separate fresh directory/VM.
+
+Exact remaining tasks — keep these open:
+1. Real final-source six-check certification plus actual parent/child app-server execution,
+   result transport, accounting replay, approvals/caps, overlap, cancellation and restart.
+   Current child execution tests use fake sandbox execution and fixture certificates.
+2. Real retained native thread/resume measurement after predecessor termination/transfer,
+   including old dynamic-tool registration and resumed usage baselines. Current thread identity
+   checks are offline; the zero-model clone measurement cannot establish Codex resume behavior.
+3. Clone-source children: child-clone-snapshot-required still refuses them. Produce a coherent
+   preserved snapshot from VM-local commits AND dirty/untracked data for read-only children;
+   the stale host checkout must never substitute. Existing clones without mailboxes still need
+   an explicit preservation/migration path; retaining newly provisioned VMs does not migrate them.
+4. Complete runtime acceptance of subtree Suspend/Cancel, ambiguous signal recovery and owned
+   child sandbox cleanup. Current cancellation plumbing retains ambiguous leases and files.
+5. Isolated writable children/integration, remaining project/run/console controls, fair shared
+   resource scheduling/saturation acceptance (four parents plus children/reviewers/certifiers).
+6. Shared-source merge and exact consumer sync/generation checks; full runtime package/template
+   pins; full-feature final-PR criteria and reviewable migration/deployment/rollback artifacts.
+   James owns merges, live schema5→6 approval, deployment and activation. No live activation.
+
+Main objective remains factory capability acceptance with synthetic work, not ticket/CRUD
+completion or hardening. No live services/settings/schema/templates, tickets or credentials
+changed. No model calls this turn. The full approved plan is still incomplete.
+
+Final verification for this checkpoint:
+- Factory: artifacts/runtime-child-execution/gates-final.json PASS. Ruff check exit0/70ms,
+  Ruff format exit0/41ms, mypy exit0/221ms, pytest exit0/146805ms. No skipped gates; all output
+  tails empty. Mypy covers165 source/test files, including the new child execution/collection.
+- Shared harness: python3 scripts/check.py exit0, all checks passed (29 own tests,149 shared
+  hook tests, composition, vendor freshness, generation, submodule/config/scaffold checks).
+  Factory result-schema fixture is byte-identical to shared source. Harness commit1213b16;
+  merge and consumer sync are still pending, not implied by local checks.
+- Both bounded review axes clear after transfer-lock and immutable-thread replay fixes.
+  The two-controller regression pauses before lock acquisition, lets the other controller
+  publish successor ownership and write a live request, then proves the delayed caller leaves
+  that request intact. The interrupted-rename regression proves intent is committed/recoverable.
+- Tracked implementation is ready for its checkpoint commit, not the full-feature final PR.
+  User scope remains unfinished as enumerated above. No push, merge, migration or deployment.
+
+## Real child acceptance — Code Mode helper continuation
+
+Baseline: factory ad14a93 and shared harness1213b16. Continued in the isolated implementation
+worktree with a fresh synthetic target/store at artifacts/runtime-child-real/run-1. No live
+services, settings, schema, templates, credentials, tracker or forge writes.
+
+Real certification exposed a production adapter omission on the installed Codex0.153.4:
+its sealed /mnt/codex executable resolves codex-code-mode-host beside itself, but the worker
+previously copied only Codex and Bubblewrap. The package contains the helper, but it was absent
+from the protected mount. The interruption probe exited early rather than exercising durability.
+
+Implemented: fresh helper digest in the complete fingerprint and every certified worker/probe
+binding; checked/sealed helper bytes copied beside Codex into the same read-only mount. Missing,
+malformed, changed or older identities refuse; no PATH fallback or weaker sandbox configuration.
+No new live DDL is needed for the identity field; old certificates require fresh evidence.
+
+Zero-model differential: uv run python artifacts/runtime-child-real/helper-check.py.
+artifacts/runtime-child-real/helper-check.json records old launcher exit1 (helper ENOENT),
+corrected launcher exit0 with actual helper --help output. This checks reopening using the
+production sealed mount, not a paid child turn. Focused regression RED then GREEN includes
+immutable worker/helper launch, changed helper refusal, fresh fingerprint changes and retirement
+of old identities without a paid launch. Both bounded code-review axes are clear.
+
+Real final-worker certification and actual parent/child results: IN PROGRESS at this writing.
+Use artifacts/runtime-child-real/acceptance.py and drive.py; each tick reconstructs Context and
+reopens the isolated store. Never run setup twice in the same directory. The initially created
+owned VM is factory-build-delegation-9a3c0bd8abd361521a06ae52. Later child names are recorded in
+child-execution prepare effects. Stop/remove only those owned VMs after collecting terminals.
+
+Retained failures: initial job95450a0181cd451eb6dd4e19d8e21b08 became stale after an observed
+spec fingerprint change; job2a38361e61be46608f55c6e16b80f71c failed the interruption probe with
+missing-helper warning. Neither is a pass. Their raw evidence/accounting remains retained.
+Corrected-worker job4ab411b4859b41a7bacffb2cb10e3042 is a separate certificate, not an override.
+
+Remaining work stays open:
+1. Finish exact final-worker six-check and actual parent/two-read-only-child execution, result
+   transport, accounting replay, approval/capacity/overlap and cancellation/restart measurements.
+2. Prove retained native thread resume after mailbox ownership transfer, including dynamic tools
+   and usage baselines; the earlier zero-model clone retention was not this measurement.
+3. Implement coherent clone-source child snapshots including private commits and dirty/untracked
+   files. child-clone-snapshot-required still refuses; never substitute the stale host checkout.
+   Existing clones without protected mailboxes still need an explicit preservation/migration path.
+4. Complete subtree Suspend/Cancel, ambiguous signal recovery and owned child sandbox cleanup.
+5. Isolated writable children and safe serialized integration; project/run/console controls;
+   fair shared resource scheduling and full four-parent/child/reviewer/certifier saturation.
+6. Shared-source merge/exact consumer sync/generation; matching full runtime package/template;
+   final feature review/PR criteria and reviewable migration/deployment/rollback artifacts.
+James owns merges, live schema5→6 approval, deployment and activation. Synthetic factory feature
+acceptance is the objective; ticket/CRUD completion or hardening is not required.
+
+Continuation observations (final outcome below):
+- Corrected parent job4ab411b4859b41a7bacffb2cb10e3042 passed all six checks. Real parent
+  attempt1 requested two children through factory dynamic tools. Child VM write checks in
+  readonly-result.json both returned EROFS with the target unchanged, independently of hooks.
+- Acceptance fixture errors: missing run lease at initial implement.start (before any application
+  invocation); copied four-role fixture omitted documenter (live/source models.toml already has
+  that role). Fixed only the isolated runner. The first error advanced an unlaunched guard
+  sequence; fixture-lease-repair.json records the checked reset with zero application records.
+- Missing fixture route stopped the observer. Parent attempt1 then exited with retained-request
+  timeout and incomplete usage. Production reconciliation cancelled both unlaunched child
+  requests and released the terminal parent; no child application had been launched.
+- retry-parent.py invoked production implement.start(resume_session=recorded_thread), retaining
+  the original VM generation, transferring mailbox ownership and using the exact native thread
+  01a07f20-d195-73e0-901f-061fa46b05fe. Attempt2 actually issued new child requests and received
+  owned pending status responses. This is real native thread/tool continuity, not simulated
+  filesystem retention. Final child results and replay evidence are recorded below.
+- Fixture documenter routing is explicitly gpt-5.6-luna/medium. Live routing is unchanged.
+
+Final source gates: artifacts/runtime-child-real/gates-final.json PASS. Ruff check89ms,
+Ruff format42ms, mypy212ms (165 source/test files), pytest147826ms. Every exit0; no skips;
+empty output tails. Mypy includes every changed module. Fake suite results do not establish
+runtime compatibility; real helper/certification/child measurements are separately recorded.
+
+### Child semantics correction and fresh authority
+
+Run1 executed both Luna children and returned bounded schema-valid results to the resumed
+parent, but both children interpreted the parent delegation.md as instructions to spawn another
+child. Neither inspected protected.txt. audit.py failed the actual-content assertion. This is
+NOT a successful task acceptance, even though broker execution/result transport worked.
+
+Shared layer A now supplies docs/agents/delegation-child.md specifically to the admitted child:
+perform the assigned inspection directly, no delegation tools expected, no recursive spawn,
+read-only source/authority, concise evidence-backed results and no independent-review authority.
+Factory loads that contract instead of the parent delegation instructions. Missing/empty contract
+returns child-contract-unavailable before provisioning/certification; no silent prompt fallback.
+Focused RED/GREEN tests cover the loader and non-crashing missing-contract refusal. Shared
+scripts/check.py passed; new bounded reviews/final factory gates are recorded below.
+
+Run1 cleanup: artifacts/runtime-child-real/run-1/cleanup-result.json. All five owned VMs stopped,
+removed and verified absent; target clean; zero active leases.51 invocation records remain,
+known API-equivalent lower bound USD1.4018672;11 incomplete estimates remain visibly incomplete
+(interruptions, compactions and the failed parent). Three collection replays kept totals stable.
+Do not restore or reuse removed VM identities. Two originally pending child certification jobs
+may remain checking in the isolated historical database without active leases; they are not passes.
+
+Fresh final-contract acceptance uses artifacts/runtime-child-real/run-2, new target/store and
+new authority snapshot. The archived run1 scripts are under run-1/runner-source for evidence
+only (their relative paths are not runnable from that archive location). The active runner now
+selects run2; setup refuses an existing directory. New parent is
+factory-build-delegation-ccd18e20cd64b56ab5fff10c. Child tasks include a bounded sleep60 before
+inspection to measure actual overlapping execution. Final outcome is still pending here.
+
+## Final acceptance checkpoint — real read-only children and native resume
+
+Final source: this factory checkpoint; shared harness5d2ac1a (on the approved feature branch
+based on v2). Both repository code-review axes clear. Shared merge and consumer sync remain
+pending; no vendor hand edits or live deployment occurred.
+
+Real final-contract evidence at artifacts/runtime-child-real/run-2:
+- Parent job96144c3dc0ff47fe87136d794b4f2d73 and child jobs
+  7f21d22d46c84c17a6c5101fa4850a94 / c4db7a0bfe6e4c2fbcbf8e36d3874cad passed all six checks.
+  These identities include the current worker and native Code Mode helper digest.
+- child-result.json PASS: actual parent requested two fresh read-only documenter children;
+  each executed gpt-5.6-luna/medium, ran the assigned bounded command, read protected.txt and
+  returned its correct contents. Actual successful command-output events support the results;
+  schema-valid but unperformed inspections are explicitly rejected by this acceptance script.
+- Child model turns overlapped43.176 seconds. overlap-observation.json independently records
+  parent plus two active owned child leases and real sleep processes in both VMs. This proves
+  three concurrent agents under an isolated project cap4, not the full four-parent/cap8 matrix.
+- readonly-all-result.json: both final child VMs refused a direct source write with EROFS;
+  no target file appeared. Child results informed the parent, never independent review.
+- Each child has a distinct native thread and an accounted parent link. Three production
+  collector/reconciliation replays preserved all telemetry, known costs and raw event hashes.
+  Successful child/parent usage agrees with each invocation's captured connection-scoped usage.
+- resume-result.json PASS: production implement.start resumed parent attempt2 in the same VM
+  generation and native thread01a07f32-ca92-7752-bc2e-8ed1a4acab32. The retained dynamic tool
+  executed a status call on an old owner's handle and returned a durable refusal. No new child
+  was launched. Both parent invocations exited0 and retained separate usage matching raw events.
+  This validates final-contract thread/tool ownership transfer and accounting, beyond run1's
+  earlier failed-controller recovery observation.
+- cleanup-result.json:32 invocation records retained, known API-equivalent lower bound
+  USD0.65425132 after resume;6 interrupted/compaction estimates remain explicitly incomplete.
+  Three further collection replays left totals stable. No claim of exact account charges or
+  complete pricing for those probes. Target clean; zero active leases.
+- All three run2 VMs stopped, removed and verified absent. Run1's five VMs were already removed.
+  Final sbx ls --json returned {"sandboxes":[]}. No experiment VM is left running.
+
+Commands retained under artifacts/runtime-child-real: acceptance.py setup (exclusive fresh
+run2 only), drive.py (bounded independent controllers), audit.py, readonly-check.py,
+resume.py start/check, cleanup.py run-1/run-2. Do not re-run setup over retained evidence or
+try to resume removed identities. These are local disposable acceptance runners, not live
+service entrypoints. Raw failed/intermediate evidence remains under run1; it is not a pass.
+
+Final verification: artifacts/runtime-child-real/gates-final.json PASS. Ruff check75ms,
+Ruff format41ms, mypy325ms (165 source/test files), pytest147781ms; all exit0, no skips, empty
+tails. Relevant new regressions are covered. Shared scripts/check.py passed; output retained
+in artifacts/runtime-child-real/shared-check.log. Bounded helper and child-contract reviews clear.
+No production source changed after these final gates; subsequent edits are handoff/plan records.
+
+### Exact next work — full plan remains incomplete
+
+1. Implement coherent clone-source read-only child snapshots. child-clone-snapshot-required
+   still refuses. Export the private VM's actual commits and dirty/untracked source, preserve
+   the original clone/environment, validate source consistency and trusted authority, and give
+   children their own read-only host-readable snapshot. Never substitute stale host checkout
+   contents. Existing clones without protected mailboxes still require an explicit preservation/
+   migration path. The earlier same-VM retention does not implement this source export.
+2. Complete the real Approval/capacity/draining and live-child Suspend/Cancel/ambiguous-signal
+   recovery matrix, with targeted owned cleanup. Run1 proves cancellation of UNLAUNCHED children
+   after controller loss; it does not prove live-child subtree cancellation. Offline coverage
+   remains useful but is not a substitute for that measurement.
+3. Implement isolated writable children and safe serialized integration: disjoint scopes,
+   private worktrees/dependencies/temp/databases/ports, parent writer coordination, preservation
+   of dirty work, conflict/stale-base holds, no double integration, fresh gates and review.
+4. Finish project/run/console delegation/certification controls and child/cost/queue visibility;
+   fair shared resource scheduling; full four-parent plus child/reviewer/certifier contention at
+   the proposed agent cap. Only the isolated cap4/three-active-agent overlap is newly measured.
+5. Finish exact shared-source/consumer merge+sync/generation and runtime package/template pins;
+   full-feature final-PR review and concrete migration/deployment/rollback artifacts. James owns
+   merges, live schema5→6 approval, deployment and activation. Do not reuse old4→5 approval.
+6. Investigate cold-parent initial spec fingerprint drift: both fresh parent experiments retired
+   an initial certificate after the spec digest changed, then a successor passed. The exact
+   component is not yet attributed; retain component-level fresh observations in reproduction.
+   Do not weaken identity checks or hide the extra accounted probe to optimize this away.
+
+Shared dependency: factory now requires the source-owned delegation-child.md for NEW child
+preparations; old retained requests keep their immutable old instructions. Missing contract is
+visible before paid certification. Merge/sync the shared commit before enabling new delegation.
+Live services/settings/schema/templates, credentials, tickets and customer work remain unchanged.
+Factory/harness changes are local commits only; no push, PR, merge or deployment was performed.
+
+## Completion continuation — in progress after 0a91ccb
+
+Objective: finish the approved certification/Astra/delegation plan to reviewable production
+readiness using synthetic factory workflows. Live migration, deployment and activation remain
+operator-owned; no product ticket completion is required. Current changes are UNCOMMITTED.
+Do not interpret the earlier checkpoint's gates as verification of this continuation.
+
+Implemented so far (final review/gates and remaining real acceptance pending):
+- Coherent bounded clone export with committed Git history, staged patch, working/untracked
+  source and stable before/after inventory. Ignored dependencies stay private. Source snapshots
+  have durable publication/replay, generation/base/tamper checks and separate read-only mounts.
+  Unsupported symlinks/submodules/oversized or changing trees refuse explicitly, preserving work.
+- Project/run delegation and capacity controls, inherited limits, truthful status/accounting;
+  shared agent admission reserves progress for each delegating parent's first child/certifier.
+- Writable child preparation, host-derived scoped artifacts and serialized integration are
+  being implemented and tested. Integration commit finalization is still being completed.
+
+Real snapshot evidence: artifacts/runtime-child-source/run-4/result.json PASS, zero model calls.
+VM-private committed/staged/unstaged/untracked source reached the child snapshot; direct child
+write returned EROFS; original VM dependency bytes and stale host checkout were unchanged.
+Both owned VMs stopped/removed/verified absent. Earlier run1/2 export failures preserved;
+run2 captured the atime false-positive, fixed by excluding read-only access timestamp changes.
+Run3 exported successfully but its fixture lacked the required writable primary workspace;
+corrected only the fixture before run4. All earlier owned snapshot VMs also removed.
+
+Current independent work:
+- capacity_fairness: artifacts/runtime-capacity-lifecycle/run-1, four parents + four children,
+  isolated shared cap8 / USD5 per run, real cancellation/Suspend/draining/reviewer contention.
+  This experiment owns its recorded VMs; do not touch them without coordinating that agent.
+- delegation_controls: cold fingerprint drift diagnosed without model calls. Native0.153.4
+  thread/start persists projects.<cwd>.trust_level in the VM config. Both request/process
+  overrides still persisted it. Zero-model preparation before fingerprinting is being designed;
+  full configuration hashing must remain. No host trust store edits.
+- writable_children: isolated-write end-to-end and commit/integration replay; then actual model
+  acceptance including target-declared gates and independent review.
+
+Still required before full-plan completion: finish these implementations/real acceptances,
+final source gates and reviews, shared/consumer dependency and generation checks, and concrete
+reviewable migration/runtime deployment/configuration/rollback artifacts. No live action has
+been performed. Re-read the newest section below if later progress supersedes this checkpoint.
+
+
+### Completion acceptance continuation — source stable, models still running
+
+Current implementations include safe canonical in-tree aliases, because the actual frontend and
+Python stack repositories track `.claude` aliases. Whole-repository blanket symlink refusal would
+block supported stacks. Exact relative link bytes/Git120000 are preserved; external/missing/cyclic/
+noncanonical/Git-metadata targets refuse. Added/changed/deleted symlink artifacts still refuse.
+The real full frontend consumer8429ecf clone acceptance passed in
+artifacts/runtime-child-source/run-5/result.json; source/dirty/index/aliases replayed, EROFS in child,
+original private dependencies and host checkout unchanged. Both VMs removed, no model calls.
+
+Owned GC now passes32 regressions plus real zero-model publicsweep against a recorded generation:
+artifacts/runtime-capacity-lifecycle/gc-real-2/result.json. Wrong generation refused, dry-run did
+nothing, exact generation stopped/removed, host source retained. Final parent-hold tightening
+also preserves source for an unreconciled certification lease before child_id exists.
+
+Fresh parent preparation passed six checks on first fingerprint. Resume exposed another measured
+spec-only drift: sbx remaps its internal clone Git loopback host port when restarting the same VM.
+All4 historical hashes reconstructed from that single component; normalize only exact clone
+127.0.0.1:<validport>→9418/tcp. Exposure/target/protocol/otherports/generation remain bound.
+Real explicit stop/start now has equal FULLidentity despite49250→49251, in writable run1
+port-stability.json. New parent resume certificatef8c397131c6949be8eed99c2c2a8a659 passed allsix.
+Sol resumed original native thread01a0816e-93f4-7191-9406-76e49fcabc1d and generation
+bd62876d-d5d7-4eb1-8f3d-01e0fec17409. It now requests and checks both new child handles.
+The first Terra parent ended prematurely after timed waits without any status calls; its two
+unlaunched requests were correctly cancelled, all usage retained. Do not erase that intervention.
+The source unchanged shared Stop hook still enforces a target's full child gates. Do not add a
+bypass merely because a synthetic fixture starts with sibling-dependent failing assertions.
+
+Current writable owner: writable_acceptance, artifacts/runtime-writable-acceptance/run-1,
+run07c0a47670f64eb9; parentfactory-build-delegation-b9f9e26bbcc37de838a04e75; two new child
+requests2e8dce5ec5754075b5c92cbfb6728241 and a41fb5fddfb74ed5884d44f69b294abd. Model budgetUSD8,
+separate store, Solparent and Terramedium children. Exact Approval holds, livecapdraining,
+actual artifacts/conflict/integration/gates/reviewer and zero-model liveprocess cancellation/
+sibling/ambiguous-signal assertions remain running. Do not touch owned VMs without coordinating.
+All previous12capacityVMs, old2unlaunched writableVMs,6diagnosticVMs and snapshotVMs removed.
+
+Reviews: current Standards/Spec/security clear after lowerboundcost displayfix, GC, portnormalization
+and aliascheck.35 source/integration tests independently passed. Final combined canonical report
+is RUNNING at artifacts/runtime-rollout-readiness/factory-gates-release.json. Prior working and
+completion reports include caught fixtureformat/type failures while agents edited; those are not
+finalPASS evidence. Their fullpytest passes do not override earlier gate failures. New source
+mypy181 files passes. Finalreport must be read after completion and no source changed silently.
+
+Rollout proposals are concrete in docs/runtime-certification-rollout.md and
+ docs/runtime-certification/{package-manifest,factory-crud-certification,settings-proposal}.json.
+Measured codex-pnpm:v1 image already has fullnative0.153.4+CodeMode+bwrap resources; no blind
+package/image rebuild needed if freshly verified exactbytesmatch. No live templates/settings/
+services/store migration changed. Stopwriters+backup+reviewed schema5→6 application and deployment
+remain James-owned. FactoryPR body draft is retained locally in artifacts/runtime-rollout-readiness;
+no PR created, as the implementation skill reserves PR creation for an explicit request.
+
+Still before full-plan completion: finish writable/lifecycle actual assertions and cleanup; read
+finalallfourgates; update acceptance report/plan/handoff to final honest scope; commit factory.
+Sharedcada9f200/Pythonf66c81b/frontend8429ecf are clean local commits with checks/generation/integrity.
+No new ticket completion or application hardening is required. Continue until these named items
+are settled, rather than treating this in-progress update as the requested finished handoff.
+
+
+### Final gate pass and writable fixture correction
+
+Final factory report artifacts/runtime-rollout-readiness/factory-gates-release.json PASS:
+Ruffcheck53ms, format41ms, mypy560ms, pytest202401ms; all exit0/emptytails. Current source/trusted
+input hashes retained in source-freeze.json and subsequently compared unchanged (178 files).
+No production code changed for the following fixture correction.
+
+The second writable child certificate pair failed closed at isolation evaluation: target contents
+changed. Exact cause was the synthetic fixture's absolute PreToolUse hook command pointing to the
+original parent checkout, absent after child source relocation. Native hook reportedfailed/exit1;
+canary protected.txt received '// runtime compatibility check'. Bothcertificates refused and ZERO
+child application models launched. Preservebefore/rawevents/modifiedcanary evidence; do not restore
+that fixture and call it certified. This is recorded test setup failure, not passing enforcement.
+
+Ownerwritable_acceptance is preparing a fresh bounded syntheticcohort with portable relativehooks,
+matching the realstacks, and deterministichookpreflight BEFOREpaidchecks. FullStopis retained:
+GREENbase alpha/beta return0, separateunittestfiles assert0; each child ownsits function+test,
+changesownexpectation1/provesRED/implements1, leavingthesiblingbaselinesuitegreen. Combinedcandidate
+has both1 afterintegration. This avoids an artificial prefailedsiblinggate requiringaStopbypass.
+Solparent/Terramediumchildren, dirtyparentnotepreservation, realApproval/drain/integration/reviewer
+andzero-modelcancellation/sibling/ambiguoussignals remain the namedacceptance targets. Modelspend
+remains bounded acrossold/newisolatedstores by the existingUSD8 testbudget. Oldparentmustbedrained,
+allusage/evidencepreserved, andonlyownedVMscleaned. Coordinateowner forcurrentnames/runnerbefore
+anyVMaction; earlierrun1namesabovearehistoricaloncetheircleanupcompletes.
+
+
+### Fresh writable acceptance run 2
+
+Run 1 is drained and all five lifetime VMs are verified absent. Its private parent clone,
+failed isolation canaries, raw evidence and accounting remain retained. Three accounting
+replays preserve the known API-equivalent estimate of USD 1.3116868.
+
+Fresh run `5d685f0c773443e6` writes to `artifacts/runtime-writable-acceptance/run-2`.
+The parent uses Sol low; implementation children use Terra medium. The USD 6.68 run limit
+keeps the two runs' combined known estimates below USD 8. Portable real consumer hooks and
+a passing baseline replace the failed fixture. Before any model launch, the real parent VM's
+Write hook returned exit 2 and preserved the protected bytes. Each relocated child's hook
+must pass the same deterministic protection check before its paid certification probes.
+Parent certificate `f5b0c8011d8b428aa71ffb7b5617aa43` is in progress.
+
+The writable_acceptance agent owns the live driver; writable_children is adapting the audit,
+reviewer and lifecycle artifacts. Remaining assertions: two actual child implementations
+with native Stop gates, exact approval holds, live capacity draining, conflict preservation,
+serialized integration, independent review, cancellation isolation and accounting replay.
+Finish and clean only these owned VMs before claiming full acceptance. Final production source
+remains unchanged from `factory-gates-release.json`; no live services/settings changed.
+
+
+### Final audit corrections and updated gates
+
+The plan-to-evidence audit found two remaining gaps and both are corrected: settings validation
+errors now preserve editable values with escaped, labeled, focusable recovery; integration
+observes a concurrent human stop after a surviving synchronous command settles and before the
+next write/commit. The latter preserves receipts/artifacts and the operator's state without
+tracker actions. Cancelled remains terminal; Suspended resumes only through explicit recovery.
+See docs/runtime-integration-cancellation-acceptance.md. Both incremental reviews are clear.
+
+Updated complete-source gates PASS in artifacts/runtime-rollout-readiness/factory-gates-complete.json:
+Ruff check132ms, format73ms, mypy544ms (182files), pytest291784ms. All ran, exit0, empty tails.
+source-freeze-complete.json binds current inputs. Previous release report remains historical
+evidence before these three production files changed: console/app.py, child_integration.py, driver.py.
+
+Writable run2: all three parent/child sandboxes passed all six compatibility checks. Exact-ID
+child approvals held across two advances; real live cap4→2 draining preserved all three leases
+and PGIDs, refused an additional approved reviewer admission, then restored4. Both actual
+Terra children are executing. Final artifact/integration/reviewer/lifecycle/cleanup acceptance
+remains in progress. Artifact audit also corrected generation ownership before cleanup and
+tightened RED proof to the actual child's test, not any failed AssertionError command.
+
+
+### Completion result
+
+Final writable run2 integration, reviewer, lifecycle and cleanup all passed. Exact evidence:
+- `artifacts/runtime-writable-acceptance/run-2/integration-result.json`: real two-child RED/GREEN,
+  native Stop markers, private note preservation, intentional conflict refusal and one commit
+  `052bceb349e62f50c85713cbb28d92ba96e07962` from base `c7e73ef03033af047325d0d94137c881c539d965`.
+- `independent-review/result.json`: distinct Sol thread, unchanged readonly snapshot, zero findings,
+  actual two-test success. Trailing macOS stat command failed on Linux; overall exit1 retained.
+- `cancel-processes/result.json`: zero-model targeted cancellation and ambiguous signal replay;
+  parent/sibling preservation, no repeated signal, release only after natural exit/accounting.
+- `cleanup-result.json`: four recorded generations removed/absence verified, final clone retained,
+  zero active leases, three stable accounting replays.44 records;12 incomplete explicitly split
+  into8interrupted/compacted,1unpaidcanary,3zero-modelprocess records.
+
+Final source gates and reviews pass. All remaining actions are the publication and separately
+approved production rollout listed at the top; no ticket completion work is needed.
+
+
+### Publication and schema authorization
+
+James requested publishing/merging the completed work and updating README.md for main, and
+explicitly approved the schema5→6 change. This supersedes earlier pending-schema-approval
+statements in the historical log. It does not waive stop-writers, verified online backup,
+fresh rehearsal, identity validation or controlled activation. No live migration applied yet.
+Dependency merges are complete. The stated publication scope leaves factory PR #90 open
+for James's review unless he confirms he also wants it merged.
+
+
+### Publication checkpoint: PR #90 and safe hook tests
+
+Shared runtime contracts merged in harness #39 at d8db76f. Its CI first caught JSON formatting;
+source formatting was corrected, checked and canonically synced before merge. Managed consumer
+PRs Python #79/frontend #57 (and existing Go consumer #2) merged through their normal automation.
+
+The manual frontend pre-push exposed an existing shared-test defect: fixture Git inherited
+Git-hook GIT_DIR and created base/addfoo commits in the invoking publication branch, also
+changing its shared Git configuration. No affected branch merged. Root preserved the complete
+refs bundle, dirty patch and private config under artifacts/runtime-publication-repair, restored
+core.bare=false and removed only the injected test identity overrides. The original frontend
+checkout is clean. The corrupted local worktree/branch remains quarantined for evidence; its
+remote branch was deleted, without force-pushing or rewriting unrelated history.
+
+Shared #40 fixes fixture Git and gate subprocess environments. A disposable outer-repo RED
+reproduced HEAD mutation; GREEN preserves HEAD, staged index, config and source while executing
+the actual fixture gates. All 150 hook tests, shared checks, format and GitHub cross-stack/
+generation checks pass. Patch release 0.13.1 merged at be33f31ca4358a6700e480ba00571eb281a5e62b.
+Factory and clean consumers are canonically pinned to this source. A real frontend pre-push
+dry run executed its tests/build with no remote write and identical HEAD/index/config/content:
+artifacts/runtime-publication-repair/prepush-dry-run.json.
+
+Use /Users/james/frontend-harness-runtime-publication for clean frontend inspection, not the
+quarantined /Users/james/frontend-harness-runtime-certification. No manual consumer PR is needed:
+managed sync creates and merges checked consumer updates, then updates shared read-only pins.
+Factory #90 remains open for James's review; README updates target main through this PR.
+Schema 5→6 is approved but unapplied pending release and writer-stop/backup steps.
+
+
+Final consumer publication: managed Python#80 merged at3ade70fed0062657a321a9652f371f2af9407a13;
+frontend#58 merged ate39f63b18a285731f3ddc4d304784d898cbd8b3d. Both include sourcebe33f31ca
+and pass required Linux/Windows, generation and freshness checks; applicable integration,
+e2e and Lighthouse CI also pass. The existing Go consumer's managed#3 update merged normally.
+Manual duplicate publication branches were removed from GitHub; local evidence remains.
+The shared read-only mount reconciliation merged as harness #41 at61a509f975dd921aa249b929199a80620701a5d3 after all required checks passed.
+
+Final factory PR90 gates pass after the merged shared fixes: Ruff122ms, format42ms, mypy295ms,
+pytest176302ms, all exits0. README factual review resolved the distinction between readonly bind
+mounts and frozen clone snapshots; CLI/default/link checks pass. The final PR includes the merged
+shared pin and schema authorization record. No live service or database changes were made.
+
+Publication complete: harness #39/#40/#41 and managed Python #80/frontend #58 are merged.
+The existing Go managed #3 merge completes the shared mount loop. Factory PR #90 is open,
+non-draft and mergeable, with README updated for main. Source publication commit18eeccd passed
+all four gates; this final status update is documentation only. No live migration or restart.

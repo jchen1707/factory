@@ -35,7 +35,12 @@ class Workspace:
 
 
 def detached_shell_script(
-    *, heartbeat_path: Path, exit_path: Path, body: str, pgid_path: Path | None = None
+    *,
+    heartbeat_path: Path,
+    exit_path: Path,
+    body: str,
+    pgid_path: Path | None = None,
+    immutable: bool = False,
 ) -> str:
     """The `/bin/sh -lc` envelope for a detached run inside a sandbox.
 
@@ -83,7 +88,8 @@ def detached_shell_script(
     body died, `exit` read `143`, and no process outside the group was touched.
 
     `pgid_path` absent keeps the original foreground envelope, so a caller that has not
-    opted in behaves exactly as before.
+    opted in behaves exactly as before. ``immutable=True`` retains the body in
+    shell argv and uses a marker as $0; no candidate-writable body file is executed.
     """
     import shlex
 
@@ -101,6 +107,22 @@ def detached_shell_script(
         )
     pg = shlex.quote(str(pgid_path))
     script = shlex.quote(f"{pgid_path}-body.sh")
+    if immutable:
+        # The body remains in controller-supplied argv throughout launch. The
+        # final argument is the shell's $0 identity marker, never a file to read.
+        inner = f'printf %s "$$" > {pg}.tmp && mv {pg}.tmp {pg}\n{body}\n'
+        return (
+            "set -u\n"
+            f"( while :; do date -u +%s > {hb}; sleep 20; done ) &\n"
+            "HB=$!\n"
+            f"setsid --wait /bin/sh -c {shlex.quote(inner)} {script} &\n"
+            "BODY=$!\n"
+            "wait $BODY\n"
+            "code=$?\n"
+            "kill $HB 2>/dev/null\n"
+            f"rm -f {pg}\n"
+            f'printf %s "$code" > {ex}.tmp && mv {ex}.tmp {ex}\n'
+        )
     return (
         "set -u\n"
         f"( while :; do date -u +%s > {hb}; sleep 20; done ) &\n"

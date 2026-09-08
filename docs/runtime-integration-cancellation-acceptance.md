@@ -1,0 +1,11 @@
+# Cancellation during child integration — 2026-09-08
+
+A deterministic lost-controller test exposed a missing integration fence: after an operator recorded Cancelled or Suspended through another SQLite connection, a surviving synchronous integration continued applying the next child file and committing. Both regressions failed before correction.
+
+Normal CLI/console cancellation shares the run lease and refuses while another controller owns it. The measured edge deliberately expires that lease while the old synchronous apply is settling, permits the operator to acquire a new lease, and records the human transition through the production Store. Actual source-owned file application and Git plumbing run in a temporary host repository; only VM transport is replaced. No model or live sandbox is involved.
+
+The correction rereads durable run state before each subsequent file mutation and commit. The already-running file operation may finish: its confirmed file receipt is retained first. A named `child-integration-held` observation then preserves the intended integration effect, complete child artifact, applied first file, untouched second file, original HEAD, and unrelated parent notes. Repeating the call while cancelled/suspended performs no more integration. Explicit human recovery from Suspended allows idempotent completion to exactly one commit; Cancelled remains terminal and never automatically resumes.
+
+`driver.step` handles this observation without converting the human state into a new block or announcing a tracker action. A regression exercises the surviving driver's cached active state and confirms the durable Cancelled state remains unchanged. This is a boundary between synchronous operations, not an assertion that an already-running syscall or commit can be aborted instantly.
+
+Source: `src/factory/child_integration.py` and the narrow observation handler in `src/factory/driver.py`. Tests: `tests/integration/test_child_integration_cancellation.py`, alongside existing real Git/file integration and workflow-child checks. Retained evidence: `artifacts/runtime-integration-cancellation/red.txt` and `green.txt`. Root owns final canonical repository gates and final live workload acceptance; this report does not claim either complete.

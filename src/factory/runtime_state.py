@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -32,13 +33,18 @@ class RuntimeState:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        self.db.execute("BEGIN IMMEDIATE")
+        # Nested reservations belong to the outer launch-intent transaction. A
+        # savepoint may roll back its work, but must never commit the outer intent.
+        savepoint = f"runtime_{uuid.uuid4().hex}" if self.db.in_transaction else None
+        self.db.execute(f"SAVEPOINT {savepoint}" if savepoint else "BEGIN IMMEDIATE")
         try:
             yield
         except BaseException:
-            self.db.execute("ROLLBACK")
+            self.db.execute(f"ROLLBACK TO {savepoint}" if savepoint else "ROLLBACK")
+            if savepoint:
+                self.db.execute(f"RELEASE {savepoint}")
             raise
-        self.db.execute("COMMIT")
+        self.db.execute(f"RELEASE {savepoint}" if savepoint else "COMMIT")
 
     def settings(self, scope: str, owner: str) -> dict[str, Any]:
         row = self.db.execute(
@@ -52,6 +58,14 @@ class RuntimeState:
         with self.transaction():
             settings = self.settings(scope, owner)
             settings.update(changes)
+            for field in (
+                "delegation_mode",
+                "max_active_agents",
+                "max_children_per_parent",
+                "max_delegation_depth",
+            ):
+                if field in changes and changes[field] is None:
+                    settings.pop(field, None)
             self.db.execute(
                 "INSERT INTO operator_settings VALUES (?,?,?,1) "
                 "ON CONFLICT(scope,owner) DO UPDATE SET settings=excluded.settings, "
@@ -61,7 +75,38 @@ class RuntimeState:
             self.audit(scope, owner, "configure", changes)
 
     def effective(self, project: str, run: str) -> dict[str, Any]:
-        return self.settings("project", project) | self.settings("run", run)
+        project_settings = self.settings("project", project)
+        settings = project_settings | self.settings("run", run)
+        # Project reductions drain already admitted work; subsequent admissions use
+        # the lower ceiling without rewriting the operator's retained run choices.
+        for field, default in (
+            ("max_active_agents", 8),
+            ("max_children_per_parent", 2),
+            ("max_delegation_depth", 1),
+        ):
+            ceiling = project_settings.get(field, default)
+            value = settings.get(field, ceiling)
+            if (
+                type(ceiling) is int
+                and ceiling > 0
+                and type(value) is int
+                and value > 0
+                and field in settings
+                and (field != "max_delegation_depth" or value == ceiling == 1)
+            ):
+                settings[field] = min(value, ceiling)
+        modes = {"disabled": 0, "read-only": 1, "isolated-write": 2}
+        ceiling = project_settings.get("delegation_mode", "disabled")
+        value = settings.get("delegation_mode", ceiling)
+        if (
+            isinstance(ceiling, str)
+            and isinstance(value, str)
+            and ceiling in modes
+            and value in modes
+            and modes[value] > modes[ceiling]
+        ):
+            settings["delegation_mode"] = ceiling
+        return settings
 
     def audit(self, scope: str, owner: str, action: str, payload: dict[str, Any]) -> None:
         self.db.execute(
@@ -89,7 +134,12 @@ class RuntimeState:
     ) -> None:
         old = self.invocation(invocation_id)
         if old:
-            if old["metadata"] != metadata:
+            if (old["run_id"], old["attempt"], old["role"], old["metadata"]) != (
+                run_id,
+                attempt,
+                role,
+                metadata,
+            ):
                 raise ValueError("an invocation's execution snapshot is immutable")
             return
         now = time.time()
@@ -108,6 +158,24 @@ class RuntimeState:
             ).rowcount
             == 1
         )
+
+    def refresh_pricing(self, invocation_id: str, sequence: int, telemetry: dict[str, Any]) -> None:
+        """Reprice identical retained observations without advancing their event sequence."""
+        pricing_keys = {"estimate", "parent_estimate"}
+        with self.transaction():
+            current = self.invocation(invocation_id)
+            if current is None or current["sequence"] != sequence or not current["telemetry"]:
+                return
+            retained = current["telemetry"]
+            if {k: v for k, v in retained.items() if k not in pricing_keys} != {
+                k: v for k, v in telemetry.items() if k not in pricing_keys
+            }:
+                return
+            if retained != telemetry:
+                self.db.execute(
+                    "UPDATE invocations SET telemetry=?,updated_at=? WHERE id=? AND sequence=?",
+                    (json.dumps(telemetry), time.time(), invocation_id, sequence),
+                )
 
     def policy(self, run_id: str) -> dict[str, Any] | None:
         row = self.db.execute(

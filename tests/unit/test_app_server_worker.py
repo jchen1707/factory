@@ -1,7 +1,9 @@
 """Protocol fixtures test the client; they are not real runtime compatibility evidence."""
 
+import hashlib
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -41,13 +43,58 @@ def run_client(
     *,
     model: str = "gpt-5.6-sol",
     baseline: dict[str, int] | None = None,
+    usage_scope: str = "thread",
     resume: bool = False,
     readonly: bool = False,
     hook_report: dict[str, Any] | None = None,
     fallback: bool = False,
     initial_hook_report: dict[str, Any] | None = None,
     launches: list[list[str]] | None = None,
+    runtime: dict[str, str] | None = None,
+    replace_before_exec: bool = False,
+    delegation: dict[str, Any] | None = None,
 ) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]]]:
+    native_root = tmp_path.parent / "native-mounts"
+    native_root.mkdir(exist_ok=True)
+    monkeypatch.setattr(worker, "native_mountpoint", lambda: native_root)
+    launcher_bytes = b"\x7fELFlauncher fixture"
+    launcher_path = tmp_path / "launcher"
+    launcher_path.write_bytes(launcher_bytes)
+    code_host_bytes = b"\x7fELFcode mode host fixture"
+    code_host_path = tmp_path / "codex-code-mode-host"
+    code_host_path.write_bytes(code_host_bytes)
+    real_open = os.open
+
+    def open_binary(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        return real_open(
+            launcher_path if str(path).endswith("/codex-resources/bwrap") else path,
+            flags,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(worker.os, "open", open_binary)
+    if runtime is not None:
+        runtime = {
+            "launcher_sha256": hashlib.sha256(launcher_bytes).hexdigest(),
+            "code_host_sha256": hashlib.sha256(code_host_bytes).hexdigest(),
+            **runtime,
+        }
+
+    # Linux-specific syscalls are the boundary fake; real sealing/exec acceptance
+    # runs separately in the owned Linux VM.
+    def memfd(name: str, flags: int) -> int:
+        path = tmp_path / "executable-snapshot"
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        path.unlink()
+        return descriptor
+
+    monkeypatch.setattr(worker.os, "memfd_create", memfd, raising=False)
+    monkeypatch.setattr(worker.os, "MFD_ALLOW_SEALING", 2, raising=False)
+    for name in ("F_ADD_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW", "F_SEAL_SHRINK", "F_SEAL_SEAL"):
+        monkeypatch.setattr(worker.fcntl, name, 1, raising=False)
+    monkeypatch.setattr(worker.fcntl, "fcntl", lambda *args: 0)
+
     class Input(io.StringIO):
         def close(self) -> None:
             pass
@@ -127,6 +174,27 @@ def run_client(
     )
 
     def spawn(argv: list[str], **kwargs: Any) -> Any:
+        if runtime is not None:
+            descriptor, launcher, code_host = kwargs["pass_fds"]
+            assert str(native_root / "codex-code-mode-host") in argv
+            assert os.pread(code_host, 1024, 0) == code_host_bytes
+            assert argv[0] == f"/proc/self/fd/{launcher}"
+            path_option = argv.index("--setenv")
+            assert argv[path_option + 1] == "PATH"
+            helper_directory = Path(argv[path_option + 2].split(":")[0])
+            assert not helper_directory.is_relative_to(tmp_path)
+            assert str(helper_directory / "bwrap") in argv
+            assert os.pread(launcher, 1024, 0) == launcher_bytes
+            assert os.lseek(descriptor, 0, os.SEEK_CUR) == 0
+            assert os.lseek(launcher, 0, os.SEEK_CUR) == 0
+            if replace_before_exec:
+                launcher_path.write_bytes(b"\x7fELFreplaced launcher")
+                assert os.pread(launcher, 1024, 0) == launcher_bytes
+                Path(runtime["runtime_path"]).write_bytes(b"\x7fELFreplaced after validation")
+            assert (
+                hashlib.sha256(os.pread(descriptor, 1024, 0)).hexdigest()
+                == runtime["runtime_sha256"]
+            )
         if launches is not None:
             launches.append(list(argv))
         return process
@@ -152,7 +220,10 @@ def run_client(
             "context_semantics_verified": True,
             "resume_session": "thread" if resume else None,
             "usage_baseline": baseline,
+            "usage_scope": usage_scope,
             "readonly": readonly,
+            **({"runtime_identity": runtime} if runtime is not None else {}),
+            **({"delegation": delegation} if delegation is not None else {}),
         }
     )
     return result, emitted, [json.loads(line) for line in sent.getvalue().splitlines()]
@@ -559,3 +630,153 @@ def test_request_context_band_uses_per_request_input_for_supported_models(
     assert len(observed["requests"]) == 2
     expected = None if model == "unknown-model" else input_tokens > 272000
     assert [r["long_context"] for r in observed["requests"]] == [expected, expected]
+
+
+def test_certified_connection_counters_do_not_subtract_prior_process_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, emitted, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), usage_event(counts(100), counts(100)), turn_end()],
+        baseline=counts(1000),
+        resume=True,
+        usage_scope="connection",
+    )
+    assert code == 0
+    usage = [event for event in emitted if event["type"] == "factory.usage"][-1]
+    assert usage["complete"] is True
+    assert usage["usage"]["input_tokens"] == 100
+
+
+def test_changed_certified_binary_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFchanged")
+    launches: list[list[str]] = []
+    code, emitted, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), turn_end()],
+        launches=launches,
+        runtime={"runtime_path": str(binary), "runtime_sha256": "a" * 64},
+    )
+    assert code == 1
+    assert launches == []
+    assert emitted[0]["error"]["message"] == "certified runtime binary changed"
+
+
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("fallback", [False, True])
+def test_certified_start_and_hook_restart_use_open_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resume: bool,
+    fallback: bool,
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), turn_end()],
+        resume=resume,
+        fallback=fallback,
+        launches=launches,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        },
+    )
+    assert code == 0
+    assert len(launches) == (2 if fallback else 1)
+
+
+@pytest.mark.parametrize("binary_kind", ["wrapper", "fifo", "symlink", "missing"])
+def test_unusable_certified_binary_never_falls_back_to_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binary_kind: str,
+) -> None:
+    binary = tmp_path / "native"
+    if binary_kind == "wrapper":
+        binary.write_text("#!/bin/sh\nexit 0\n")
+    elif binary_kind == "fifo":
+        os.mkfifo(binary)
+    elif binary_kind == "symlink":
+        binary.symlink_to(tmp_path / "elsewhere")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [],
+        launches=launches,
+        runtime={"runtime_path": str(binary), "runtime_sha256": "a" * 64},
+    )
+    assert code == 1
+    assert launches == []
+
+
+def test_in_place_replacement_cannot_change_verified_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [turn_response(), turn_end()],
+        replace_before_exec=True,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        },
+    )
+    assert code == 0
+    assert binary.read_bytes() == b"\x7fELFreplaced after validation"
+
+
+def test_changed_certified_launcher_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [],
+        launches=launches,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "launcher_sha256": "0" * 64,
+        },
+    )
+    assert code == 1
+    assert launches == []
+
+
+@pytest.mark.parametrize("digest", ["0" * 64, "", None])
+def test_changed_or_missing_code_mode_host_binding_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, digest: Any
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [],
+        launches=launches,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "code_host_sha256": digest,
+        },
+    )
+    assert code == 1
+    assert launches == []

@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
+from factory.agent import runtime_identity
 from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
     Completed,
@@ -48,6 +51,34 @@ SBX_EXEC_PID = "sbx-exec.pid"
 #: The port `sbx`'s in-sandbox git daemon listens on. Its *host* port is reassigned on
 #: every start, so it is looked up rather than remembered; this is the stable half.
 GIT_DAEMON_PORT = 9418
+
+
+def _certification_configuration(info: dict[str, Any], *, clone: bool) -> dict[str, Any]:
+    """Keep exposure identity while allowing sbx's internal clone Git forwarding to move.
+
+    Docker reassigns this loopback host port whenever the same clone VM starts. It
+    is a transport locator, like the URL resolved by git_daemon_url, not a sandbox
+    capability. Preserve every endpoint, interface, protocol and other port mapping.
+    """
+    volatile = {"state", "sessions", "uptime", "daemon_uptime"}
+    configuration = {k: v for k, v in info.items() if k not in volatile}
+    ports = configuration.get("ports")
+    if clone and isinstance(ports, list):
+        normalized = []
+        for port in ports:
+            match = (
+                re.fullmatch(rf"127\.0\.0\.1:([0-9]{{1,5}})->{GIT_DAEMON_PORT}/tcp", port)
+                if isinstance(port, str)
+                else None
+            )
+            normalized.append(
+                f"127.0.0.1:<dynamic-clone-git>->{GIT_DAEMON_PORT}/tcp"
+                if match and 1 <= int(match[1]) <= 65535
+                else port
+            )
+        configuration["ports"] = normalized
+    return configuration
+
 
 #: The prefix `sbx secret set-custom` gives its substitution placeholders. Not a
 #: credential: the real value stays on the host and the proxy swaps this string into the
@@ -194,6 +225,176 @@ class SbxAdapter:
 
     # -- lifecycle ----------------------------------------------------------------
 
+    def generation(self, name: str) -> str:
+        """Fresh creation UUID from `sbx ls`, never the reusable sandbox name.
+
+        `inspect` omits this field on v0.38.0. Missing or ambiguous listing data
+        cannot authorize reuse of certification evidence.
+        """
+        assert_factory_sandbox(name)
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        try:
+            if not result.ok:
+                raise ValueError
+            rows = json.loads(result.stdout)["sandboxes"]
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError
+            matches = [row for row in rows if row.get("name") == name]
+            if len(matches) != 1:
+                raise ValueError
+            value = matches[0]["id"]
+            if not isinstance(value, str) or str(UUID(value)) != value:
+                raise ValueError
+            return value
+        except (ValueError, KeyError, TypeError):
+            raise SbxError(f"sandbox generation unavailable: {name}") from None
+
+    def observe_runtime(
+        self,
+        name: str,
+        *,
+        binary: str,
+        workdir: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Fresh native binary/image/generation evidence, without a model turn.
+
+        This is not a certificate or the full spec/mount/hook preflight. The
+        certifier must supply the same explicit binary and environment at launch.
+        Capability credentials refuse even metadata execution on this path.
+        """
+        assert_factory_sandbox(name)
+        if not Path(binary).is_absolute():
+            raise SbxError("runtime binary path must be absolute")
+        generation = self.generation(name)
+        info = self.inspect(name)
+        image = info.get("image_digest")
+        if not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+            raise SbxError(f"sandbox image identity unavailable: {name}")
+        if not isinstance(info.get("secrets"), list) or capability_secrets(info["secrets"]):
+            raise SbxError(f"sandbox capability preflight failed: {name}")
+        result = self.exec_sync(
+            name,
+            # Candidate cwd/PYTHONPATH/site imports must not replace probe modules.
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                "-c",
+                Path(runtime_identity.__file__).read_text(),
+                binary,
+            ],
+            workdir=workdir,
+            env=env,
+            timeout=60,
+        )
+        try:
+            observed = json.loads(result.stdout)
+            if (
+                not result.ok
+                or not isinstance(observed, dict)
+                or set(observed) != {"runtime_path", "runtime_version", "runtime_sha256"}
+            ):
+                raise ValueError
+            if not all(isinstance(value, str) for value in observed.values()):
+                raise ValueError
+            if (
+                not Path(observed["runtime_path"]).is_absolute()
+                or not re.fullmatch(r"[0-9a-f]{64}", observed["runtime_sha256"])
+                or not re.fullmatch(r"codex-cli [0-9][A-Za-z0-9.+-]*", observed["runtime_version"])
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise SbxError(f"native runtime identity unavailable: {name}") from None
+        current = self.inspect(name)
+        if (
+            self.generation(name) != generation
+            or current.get("image_digest") != image
+            or current.get("secrets") != info["secrets"]
+        ):
+            raise SbxError(f"sandbox changed during runtime observation: {name}")
+        return {"generation": generation, "image_digest": image, **observed}
+
+    def observe_certification(
+        self,
+        spec: SandboxSpec,
+        *,
+        binary: str,
+        workdir: str,
+        env: Mapping[str, str],
+        hook_files: Mapping[str, str],
+        credential_names: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Fresh complete observation; metadata checks never create or modify a sandbox."""
+        from factory.certification_fingerprint import digest
+        from factory.sandbox import certification_observer
+
+        before = self.observe_runtime(spec.name, binary=binary, workdir=workdir, env=env)
+        info = self.inspect(spec.name)
+        if info.get("kits") != list(spec.kits) or (
+            spec.template and info.get("image") != spec.template
+        ):
+            raise SbxError("sandbox template or kits differ from requested specification")
+        request = {
+            "binary": binary,
+            "workspaces": [{"path": str(w.path), "readonly": w.readonly} for w in spec.workspaces],
+            "clone": spec.clone,
+            "env_names": sorted(env),
+            "env_sha256": digest(dict(env)),
+            "hook_files": dict(hook_files),
+            "credential_names": list(credential_names),
+        }
+        result = self.exec_sync(
+            spec.name,
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                "-c",
+                Path(certification_observer.__file__).read_text(),
+                json.dumps(request),
+            ],
+            workdir=workdir,
+            env=env,
+            timeout=60,
+        )
+        try:
+            actual = json.loads(result.stdout)
+            if (
+                not result.ok
+                or not isinstance(actual, dict)
+                or set(actual)
+                != {
+                    "mounts",
+                    "environment_sha256",
+                    "configurations",
+                    "hooks",
+                    "credential_names",
+                    "launcher_sha256",
+                    "code_host_sha256",
+                    "native_mount",
+                }
+            ):
+                raise ValueError("sandbox observation unavailable")
+        except (ValueError, TypeError) as exc:
+            raise SbxError("sandbox certification observation failed") from exc
+        # Stable inspect properties only: session counts, uptime and state are liveness,
+        # not identity. Include all remaining properties so unknown configuration drifts.
+        configuration = _certification_configuration(info, clone=spec.clone)
+        current = _certification_configuration(self.inspect(spec.name), clone=spec.clone)
+        after = self.observe_runtime(spec.name, binary=binary, workdir=workdir, env=env)
+        if before != after or current != configuration:
+            changed = sorted(
+                k
+                for k in set(configuration) | set(current)
+                if configuration.get(k) != current.get(k)
+            )
+            changed += sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+            raise SbxError(
+                "sandbox changed during certification observation: " + ", ".join(changed)
+            )
+        return {**after, "actual": {**actual, "configuration": configuration}}
+
     def exists(self, name: str) -> bool:
         """`sbx inspect` is non-zero when the sandbox is absent.
 
@@ -317,11 +518,17 @@ class SbxAdapter:
 
     def stop(self, name: str) -> None:
         assert_factory_sandbox(name)
-        self._run(["sbx", "stop", name], timeout=120)
+        result = self._run(["sbx", "stop", name], timeout=120)
+        if not result.ok:
+            raise SbxError(f"sbx stop {name} failed (exit {result.returncode})")
 
     def remove(self, name: str) -> None:
         assert_factory_sandbox(name)
-        self._run(["sbx", "rm", name], timeout=120)
+        if self.inspect(name).get("state") != "stopped":
+            raise SbxError(f"sbx remove {name} refused: sandbox must be stopped")
+        result = self._run(["sbx", "rm", "--force", name], timeout=120)
+        if not result.ok:
+            raise SbxError(f"sbx remove {name} failed (exit {result.returncode})")
 
     # -- execution ----------------------------------------------------------------
 
@@ -339,7 +546,14 @@ class SbxAdapter:
             exec_argv(name, argv, workdir=workdir, env=env), timeout=timeout, stdin=stdin
         )
 
-    def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
+    def exec_detached(
+        self,
+        handle: RunHandle,
+        script: str,
+        env: Mapping[str, str],
+        *,
+        stdout_path: Path | None = None,
+    ) -> None:
         """The single most important command in the factory (§4.2).
 
         Long work runs inside the sandbox and reports through the filesystem: the caller
@@ -401,10 +615,18 @@ class SbxAdapter:
         # is meant to be diagnosing.
         handle.attempt_dir.mkdir(parents=True, exist_ok=True)
         stderr_path = handle.attempt_dir / SBX_EXEC_STDERR
-        with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        from contextlib import ExitStack
+
+        with ExitStack() as files:
+            stderr_file = files.enter_context(stderr_path.open("w", encoding="utf-8"))
+            stdout_file = (
+                files.enter_context(stdout_path.open("x", encoding="utf-8"))
+                if stdout_path is not None
+                else subprocess.DEVNULL
+            )
             process = subprocess.Popen(
                 list(argv),
-                stdout=subprocess.DEVNULL,
+                stdout=stdout_file,
                 stderr=stderr_file,
                 text=True,
                 start_new_session=True,

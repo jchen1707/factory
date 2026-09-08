@@ -24,11 +24,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import artifacts, policy, repo
+from factory import artifacts, gc_children, policy, repo
 from factory.delivery import forge as forge_dispatch
 from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
 from factory.sandbox.base import SandboxAdapter
+from factory.sandbox.sbx import SbxError
 from factory.store import Run, Store
 
 __all__ = ["Action", "sweep"]
@@ -74,6 +75,7 @@ def sweep(
         if run.state not in COLLECTABLE:
             continue
         actions += _collect_run(home, registry, store, run, dry_run=dry_run, now=clock)
+    actions += gc_children.sweep_children(registry, store, sandbox, dry_run=dry_run, now=clock)
     actions += _sweep_sandboxes(registry, store, sandbox, dry_run=dry_run, now=clock)
     actions += _distil(registry, dry_run=dry_run)
     actions += _trim_artifacts(home, registry, dry_run=dry_run, now=clock)
@@ -122,6 +124,8 @@ def _collect_run(
     dry_run: bool,
     now: float,
 ) -> list[Action]:
+    if hold := gc_children.parent_hold(store, run.id):
+        return [Action("worktree-remove", run.linear_id, f"retained: {hold}", False)]
     age_days = (now - _resting_since(store, run)) / DAY_SECONDS
     floor = registry.defaults.gc.worktree_days
     if age_days < floor:
@@ -255,7 +259,7 @@ def _sweep_sandboxes(
                     project_for_run(project, run, store).review_sandbox,
                 )
             ]
-            busy = [run for run in users if run in active]
+            busy = [run for run in users if run in active or gc_children.parent_hold(store, run.id)]
             if busy:
                 actions.append(
                     Action("sandbox-stop", name, f"{len(busy)} run(s) still using it", False)
@@ -292,7 +296,7 @@ def _act_on_sandbox(
             sandbox.remove(name)
         else:
             sandbox.stop(name)
-    except (PermissionError, OSError) as exc:
+    except (PermissionError, OSError, SbxError) as exc:
         return [Action(kind, name, f"refused: {exc}", False)]
     return [Action(kind, name, why, True)]
 

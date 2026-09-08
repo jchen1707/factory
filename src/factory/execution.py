@@ -71,15 +71,29 @@ def attempt_key(attempt: int, step: str, launch: int = 1) -> str:
     return f"{attempt}:{step}:{launch}"
 
 
-def guard(ctx: Context, attempt: int, step: str) -> str:
+def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None = None) -> str:
+    from factory import workflow_launches
+    from factory.runtime_jobs import RuntimeJobs
+
+    workflow_launches.reconcile(ctx)
+    if any(
+        row["run_id"] == ctx.run.id
+        for row in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
+    ):
+        raise ProjectQueued("waiting for prior agent terminal reconciliation")
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     previous = settings.get(f"launch:{attempt}:{step}", 0)
     wanted = attempt_key(attempt, step, previous + 1)
-    if (
-        settings.get("mode", "automatic") == "approval"
-        and settings.get("approved_invocation") != wanted
-    ):
-        raise AgentApprovalRequired(wanted)
+    exact = wanted
+    if invocation_role is not None:
+        from factory.accounting import key
+
+        exact = key(ctx, attempt, invocation_role, launch=previous + 1)
+    if settings.get("mode", "automatic") == "approval" and settings.get(
+        "approved_invocation"
+    ) not in {wanted, exact}:
+        ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": exact})
+        raise AgentApprovalRequired(exact)
     limit = settings.get("concurrency") or ctx.registry.concurrency_for(ctx.project)
     if not ctx.store.runtime.admit(ctx.run.id, ctx.project.name, limit):
         raise ProjectQueued("waiting for a project slot")
@@ -89,6 +103,8 @@ def guard(ctx: Context, attempt: int, step: str) -> str:
         )
     if attempt > ctx.registry.defaults.max_total_attempts:
         raise Blocked("attempts-exhausted", "The lifetime attempt limit is exhausted")
+    if invocation_role is not None and settings.get("approved_invocation") == wanted:
+        ctx.store.runtime.configure("run", ctx.run.id, {"approved_invocation": exact})
     ctx.store.runtime.configure("run", ctx.run.id, {f"launch:{attempt}:{step}": previous + 1})
     ctx.store.runtime.audit("run", ctx.run.id, "agent-launch", {"invocation": wanted})
     return wanted

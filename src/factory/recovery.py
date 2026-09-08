@@ -647,14 +647,16 @@ def suspend(ctx: Context, *, reason: str) -> State:
     transition is `actor="human"` under `suspend-is-james`. Returns the state the run was
     in when parked, which `resume` reads back from the transition's `from_state`.
     """
+    from factory import workflow_launches
     from factory.steps import reap as reap_step
 
     origin = ctx.run.state
+    retired = workflow_launches.retire_pending(ctx.store, ctx.run.id, ctx.run.attempt, origin)
     if origin in reap_step.DETACHED_STATES:
         row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, origin)
         if row and not row["artifact_dir"]:
             raise Blocked("suspend-stop-unverified", "The active attempt has no artifact directory")
-        if row and row["artifact_dir"]:
+        if row and row["artifact_dir"] and not retired:
             attempt_dir = Path(str(row["artifact_dir"]))
             # Before the kill, because after it the stream stops and nothing else on this
             # path reads it. The announcement promises the Codex session is kept, and a
@@ -690,6 +692,7 @@ def suspend(ctx: Context, *, reason: str) -> State:
         # No attempt row: nothing is running (the run was left mid-state by a crash).
         # Parking it is still the right call; there is no agent to kill.
 
+    workflow_launches.reconcile(ctx)
     _stop_sandbox_if_idle(ctx)
 
     # Through `advance`, not `record_transition`. This wrote its own row until

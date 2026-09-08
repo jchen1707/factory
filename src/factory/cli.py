@@ -1089,6 +1089,14 @@ def _cancel_run(
 
     busy = other_run_sandboxes(registry, store, run)
     active_sandbox = _cancel_attempt(store, project, run, sbx, busy)
+    from factory import workflow_launches
+    from factory.runtime_jobs import RuntimeJobs
+
+    workflow_launches.reconcile_run(store, home, sbx, run.id, project.name)
+    if any(row["run_id"] == run.id for row in RuntimeJobs(store).active_agents(project.name)):
+        raise Blocked(
+            "cancellation-stop-unverified", "Owned agents still need terminal reconciliation"
+        )
 
     for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
@@ -1152,7 +1160,11 @@ def _cancel_attempt(
     store: Store, project: Project, run: Run, sbx: SbxAdapter, busy: set[str]
 ) -> str | None:
     """Require the writer's terminal record before touching its worktree or clone."""
+    from factory import workflow_launches
     from factory.steps import plan, reap, signal_run_attempt
+
+    if workflow_launches.retire_pending(store, run.id, run.attempt, run.state):
+        return None
 
     if run.state not in reap.DETACHED_STATES:
         return None
