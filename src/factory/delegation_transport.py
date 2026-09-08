@@ -30,7 +30,11 @@ def refusal() -> dict[str, Any]:
         "contentItems": [
             {
                 "type": "inputText",
-                "text": "Delegation request refused; use a new call for an intentional retry.",
+                "text": (
+                    "Delegation request refused; use a new call for an intentional retry. "
+                    "Paths must be canonical repository-relative paths (use . for the "
+                    "repository root), never absolute paths or host context directories."
+                ),
             }
         ],
     }

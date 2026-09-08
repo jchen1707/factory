@@ -256,7 +256,7 @@ def test_controller_timeout_leaves_request_recoverable_and_usage_incomplete(
     inbox.mkdir()
     outbox.mkdir()
     mailbox = DelegationMailbox(DelegationBroker(store, "parent", source), inbox, outbox)
-    clock = iter([0, 61])
+    clock = iter([0, 301])
     monkeypatch.setattr(worker.time, "monotonic", lambda: next(clock))
     event = {
         "id": "server-call",
@@ -305,4 +305,53 @@ def test_refused_call_stays_refused_when_capacity_changes(tmp_path: Path) -> Non
     (inbox / "request.json").write_text(json.dumps(call | {"call_id": "new-call"}))
     assert mailbox.service()
     assert json.loads((outbox / "response.json").read_bytes())["result"]["success"] is True
+    store.close()
+
+
+@pytest.mark.parametrize("poll_delay", [61, 125])
+@pytest.mark.parametrize("corrected", [False, True])
+def test_back_to_back_requests_survive_normal_controller_cadence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, poll_delay: int, corrected: bool
+) -> None:
+    """Replay FRO-12: absolute-path refusal, then a call just after a poll."""
+    from factory.agent import app_server_worker as worker
+
+    store, source = setup(tmp_path)
+    inbox, outbox = tmp_path / "inbox", tmp_path / "outbox"
+    inbox.mkdir()
+    outbox.mkdir()
+    mailbox = DelegationMailbox(DelegationBroker(store, "parent", source), inbox, outbox)
+    now = 28.0
+    next_poll = 60.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal now, next_poll
+        now += seconds
+        if now >= next_poll:
+            mailbox.service()
+            # Timer plus controller work, optionally missing one tick.
+            next_poll = now + poll_delay
+
+    monkeypatch.setattr(worker.time, "monotonic", lambda: now)
+    monkeypatch.setattr(worker.time, "sleep", sleep)
+    params = {
+        "threadId": "thread",
+        "callId": "first",
+        "tool": "factory_request_child",
+        "arguments": task() | {"paths": [str(source)]},
+    }
+    first = worker.delegation_call(mailbox.configuration(), params, "thread")
+    assert first["success"] is False
+    assert "repository-relative" in first["contentItems"][0]["text"]
+    result = worker.delegation_call(
+        mailbox.configuration(),
+        params
+        | {
+            "callId": "second",
+            "arguments": task() | {"paths": ["."]} if corrected else params["arguments"],
+        },
+        "thread",
+    )
+    assert result["success"] is corrected
+    assert len(mailbox.broker.requests()) == int(corrected)
     store.close()
