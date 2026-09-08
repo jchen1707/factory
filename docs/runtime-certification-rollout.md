@@ -9,7 +9,8 @@ Writable rollout found a lifecycle defect: a parent mistyped its child handle an
 the child request cancelled but its paid certifier remained active. The certifier was stopped
 with exact generation/process ownership checked, all accounting retained, and cohort VMs
 stopped. The correction is on `fix/cancel-child-certification` in
-`/Users/james/factory-child-certification-cancel`; see the
+`/Users/james/factory-child-certification-cancel`, published as
+[factory PR91](https://github.com/jchen1707/factory/pull/91); see the
 [diagnosis and acceptance](runtime-child-certification-cancellation.md).
 
 Automatic certification remains selected in Approval mode, read-only delegation, concurrency4,

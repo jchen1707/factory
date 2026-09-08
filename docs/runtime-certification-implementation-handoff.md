@@ -24,7 +24,8 @@ pass. Both independent reviews are clear after fixing signal-contract persistenc
 interrupt/timeout/cancellation fencing. Final four gates PASS (`artifacts/child-certification-cancel/gates-final.json`): Ruff86ms,
 format70ms, mypy311ms, pytest202449ms; exit0 and empty output tails throughout. Mypy covers
 185 source/test files. Fake-sandbox test limits are supplemented by the real process checks.
-Publication is next; no live source deployment.
+Published as [factory PR91](https://github.com/jchen1707/factory/pull/91). James owns the merge;
+no live source deployment.
 The real test's two VMs were removed and verified absent. No model was called by that test.
 
 Live state: schema6; console HTTP200; writer UNLOADED AND DISABLED. Project automatic
