@@ -1,8 +1,9 @@
 # Runtime certification and delegation implementation handoff
 
 Status: approved plan implemented; synthetic acceptance, final gates and reviews complete.
-Publication is in progress. James approved schema 5→6 in the subsequent session; live
-services/settings and the live database remain unchanged.
+Factory PR [#90](https://github.com/jchen1707/factory/pull/90) is open for review, including the
+README refresh. Shared PRs #39/#40 and final Python #80/frontend #58 are merged.
+James approved schema5→6; live services/settings and the database remain unchanged.
 
 ## Current completion checkpoint
 
@@ -20,12 +21,13 @@ Main objective: factory capability acceptance using synthetic work. No product/L
 completion or application hardening is needed. Do not resume parked FRO or nemoclaw work.
 
 Final evidence: [acceptance report](runtime-certification-completion-acceptance.md).
-All four factory gates PASS in `artifacts/runtime-rollout-readiness/factory-gates-complete.json`;
-source inputs match `source-freeze-complete.json`. Both independent reviews are clear, including
+All four final publication gates PASS in `artifacts/runtime-rollout-readiness/factory-gates-pr90.json`.
+The earlier `factory-gates-complete.json` and source-freeze record remain implementation evidence;
+publication updates generated formatting, fixture tests and the shared source pin. Both independent reviews are clear, including
 the final settings error-preservation and integration-cancellation corrections.
-Shared `cada9f200`, Python `f66c81b` and frontend `8429ecf` are clean local commits with shared
-checks, applicable consumer gates, exact pin integrity and three generation checks passing.
-These are not remote publication or merge claims.
+Published shared source is `be33f31ca` (PRs #39/#40); final generated consumer merges are
+Python `3ade70f` (#80) and frontend `e39f63b` (#58). Their required GitHub checks pass.
+The original local preparation refs below remain historical evidence, not deployment refs.
 
 Final writable run `5d685f0c773443e6` passed four fresh sandbox certificates, two actual Terra
 children with 123.146s overlap and native RED/GREEN/Stop evidence, exact approvals, live cap
@@ -39,8 +41,9 @@ exact model-versus-process evidence; do not erase those limitations.
 
 ## Remaining operator-owned next steps
 
-1. Publish/review shared source, then reconcile normal generated consumer sync and factory pins
-   against the final merged SHA. James merges. Recheck changed pins/generation after publication.
+1. Review factory PR #90, which includes the README update for main and pins merged shared
+   source `be33f31ca`. Shared and consumer dependencies are merged. Factory remains open for
+   James's review; do not assume it has merged or that the live checkout has advanced.
 2. Review [the concrete rollout](runtime-certification-rollout.md) and JSON package/settings
    proposals. Copy-only schema5→6 rehearsal preserved all1,892 existing rows; this does not
    itself authorize deployment. James has now approved schema5→6; retain the required writer
@@ -2121,3 +2124,45 @@ statements in the historical log. It does not waive stop-writers, verified onlin
 fresh rehearsal, identity validation or controlled activation. No live migration applied yet.
 The factory-PR merge scope is being clarified while dependency publication and README work
 proceed. Keep the final factory PR open unless its merge is explicitly confirmed.
+
+
+### Publication checkpoint: PR #90 and safe hook tests
+
+Shared runtime contracts merged in harness #39 at d8db76f. Its CI first caught JSON formatting;
+source formatting was corrected, checked and canonically synced before merge. Managed consumer
+PRs Python #79/frontend #57 (and existing Go consumer #2) merged through their normal automation.
+
+The manual frontend pre-push exposed an existing shared-test defect: fixture Git inherited
+Git-hook GIT_DIR and created base/addfoo commits in the invoking publication branch, also
+changing its shared Git configuration. No affected branch merged. Root preserved the complete
+refs bundle, dirty patch and private config under artifacts/runtime-publication-repair, restored
+core.bare=false and removed only the injected test identity overrides. The original frontend
+checkout is clean. The corrupted local worktree/branch remains quarantined for evidence; its
+remote branch was deleted, without force-pushing or rewriting unrelated history.
+
+Shared #40 fixes fixture Git and gate subprocess environments. A disposable outer-repo RED
+reproduced HEAD mutation; GREEN preserves HEAD, staged index, config and source while executing
+the actual fixture gates. All 150 hook tests, shared checks, format and GitHub cross-stack/
+generation checks pass. Patch release 0.13.1 merged at be33f31ca4358a6700e480ba00571eb281a5e62b.
+Factory and clean consumers are canonically pinned to this source. A real frontend pre-push
+dry run executed its tests/build with no remote write and identical HEAD/index/config/content:
+artifacts/runtime-publication-repair/prepush-dry-run.json.
+
+Use /Users/james/frontend-harness-runtime-publication for clean frontend inspection, not the
+quarantined /Users/james/frontend-harness-runtime-certification. No manual consumer PR is needed:
+managed sync creates and merges checked consumer updates, then updates shared read-only pins.
+Factory #90 remains open for James's review; README updates target main through this PR.
+Schema 5→6 is approved but unapplied pending release and writer-stop/backup steps.
+
+
+Final consumer publication: managed Python#80 merged at3ade70fed0062657a321a9652f371f2af9407a13;
+frontend#58 merged ate39f63b18a285731f3ddc4d304784d898cbd8b3d. Both include sourcebe33f31ca
+and pass required Linux/Windows, generation and freshness checks; applicable integration,
+e2e and Lighthouse CI also pass. The existing Go consumer's managed#3 update merged normally.
+Manual duplicate publication branches were removed from GitHub; local evidence remains.
+The shared read-only mount reconciliation is being finished through its normal checked workflow.
+
+Final factory PR90 gates pass after the merged shared fixes: Ruff122ms, format42ms, mypy295ms,
+pytest176302ms, all exits0. README factual review resolved the distinction between readonly bind
+mounts and frozen clone snapshots; CLI/default/link checks pass. The final PR includes the merged
+shared pin and schema authorization record. No live service or database changes were made.

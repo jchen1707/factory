@@ -11,14 +11,14 @@ parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
 
 | Owner | Reviewed source to publish/merge | Deployment dependency |
 | --- | --- | --- |
-| Shared `harness@v2` | `cada9f200` (includes upstream `f1511d8`) | Shared certification/delegation contracts and consumer generation |
-| `python-harness@v2` | `f66c81b`, based on `9b1cc5b` | Exact shared pin and regenerated content |
-| `frontend-harness@v2` | `8429ecf`, based on `188233e` | Exact shared pin and regenerated content |
+| Shared `harness@v2` | `be33f31ca` (merged PRs #39/#40; plugin 0.13.1) | Shared certification/delegation contracts and consumer generation |
+| `python-harness@v2` | `3ade70f` (merged managed Python PR #80) | Exact shared pin and regenerated content |
+| `frontend-harness@v2` | `e39f63b` (merged managed frontend PR #58) | Exact shared pin and regenerated content |
 | Factory | `c37b6e9` (final source; subsequent handoff update is documentation only) | Schema 6, controller, workers, and synchronized shared content |
 | Sandbox package | [Package manifest](runtime-certification/package-manifest.json) | Full native Codex 0.153.4 package, matching helpers and protected mount anchor |
 
-These are local preparation refs, not a claim they were pushed or merged. Publish shared
-source first, then the exact consumer pins and factory change. Managed sync PRs may appear
+Shared and consumer sources above are published and merged; factory PR #90 remains open
+for review. Record its final merged release commit before deployment. Managed sync PRs may appear
 after the shared merge; reconcile those with the prepared consumer branches rather than
 racing their automation. If merging changes a required source SHA, regenerate and recheck
 all pins against the final source. Never edit generated `main` or vendored content by hand.

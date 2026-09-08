@@ -135,3 +135,19 @@ from real VM/model cancellation acceptance.
 
 The rollout document supplies merge order, migration preparation, runtime packaging,
 activation and rollback. James owns merges, schema 5→6 approval and live deployment.
+
+
+## Publication verification
+
+The README refresh and release dependencies are published through factory PR #90 and shared
+PRs #39/#40. Shared #40 corrects a pre-push test-fixture Git environment leak; it changes test
+isolation, not production hooks. Disposable reproduction and an actual frontend pre-push
+dry run preserve the invoking repository. The JSON formatting correction in #39 preserves
+parsed contract semantics. Final shared source is be33f31ca; no runtime/model calls were repeated
+for these publication-only corrections. Production activation still certifies each fresh
+identity against its actual installed source. See the handoff for final consumer/PR status.
+
+Factory publication gates after JSON formatting pass in factory-gates-publication.json:
+Ruff85ms, format47ms, mypy261ms, pytest178369ms, all exits0. The final PR90 gate report includes
+the shared test isolation update and passes in factory-gates-pr90.json: Ruff122ms,
+format42ms, mypy295ms, pytest176302ms, all exits0 and empty tails.

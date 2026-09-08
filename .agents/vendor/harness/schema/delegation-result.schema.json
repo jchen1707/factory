@@ -1,11 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "summary",
-    "observations",
-    "limitations"
-  ],
+  "required": ["summary", "observations", "limitations"],
   "properties": {
     "summary": {
       "type": "string",
