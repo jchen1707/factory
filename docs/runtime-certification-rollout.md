@@ -13,7 +13,7 @@ parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
 | Shared `harness@v2` | `cada9f200` (includes upstream `f1511d8`) | Shared certification/delegation contracts and consumer generation |
 | `python-harness@v2` | `f66c81b`, based on `9b1cc5b` | Exact shared pin and regenerated content |
 | `frontend-harness@v2` | `8429ecf`, based on `188233e` | Exact shared pin and regenerated content |
-| Factory | Final feature-branch commit recorded in the implementation handoff | Schema 6, controller, workers, and synchronized shared content |
+| Factory | `c37b6e9` (final source; subsequent handoff update is documentation only) | Schema 6, controller, workers, and synchronized shared content |
 | Sandbox package | [Package manifest](runtime-certification/package-manifest.json) | Full native Codex 0.153.4 package, matching helpers and protected mount anchor |
 
 These are local preparation refs, not a claim they were pushed or merged. Publish shared

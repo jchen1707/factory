@@ -6,8 +6,8 @@ Ready for publication and James-owned rollout. Live services/settings remain unc
 ## Current completion checkpoint
 
 Workspace: `/Users/james/factory-runtime-certification`, branch
-`feat/runtime-certification-and-delegation`. Factory completion is being committed with this
-entry; the next short record pins the resulting source commit. Approved plan/test-plan files
+`feat/runtime-certification-and-delegation`. Factory implementation and final acceptance:
+`c37b6e9` (the current handoff update is documentation only). Approved plan/test-plan files
 remain intentionally untracked. Earlier checkpoint sections below are historical, not pending work.
 
 The three requested capabilities are validated on the supported runtime: exact Astra high/xhigh,
@@ -30,7 +30,8 @@ Final writable run `5d685f0c773443e6` passed four fresh sandbox certificates, tw
 children with 123.146s overlap and native RED/GREEN/Stop evidence, exact approvals, live cap
 draining, conflict preservation, one scoped integration commit, independent Sol review,
 accounting replay and zero-model targeted/uncertain-signal cancellation. All four original
-VM generations were removed and individually verified absent. Private clone/history/dirty note
+VM generations were removed and individually verified absent. A subsequent fresh inventory
+confirms all nine lifetime writable-cohort VMs absent. Private clone/history/dirty note
 and full logs remain preserved. Run-2 known estimate USD1.2639784; combined run1/run2 USD2.5756652,
 with incomplete records explicitly retained. See the report for failed fixture attempts and
 exact model-versus-process evidence; do not erase those limitations.
