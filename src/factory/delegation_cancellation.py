@@ -31,6 +31,9 @@ def reconcile(store: Store, sandbox: DetachedExecution, run_id: str) -> None:
             DelegationBroker(
                 store, request["parent_id"], Path(json.loads(request["request"])["source_root"])
             ).cancel(request["id"])
+    from factory import child_certifications
+
+    child_certifications.reconcile(store, sandbox, run_id)
     launches = AgentLaunches(store, sandbox)
     requests = store.runtime.db.execute(
         "SELECT id,parent_id,child_id,request FROM delegation_requests "

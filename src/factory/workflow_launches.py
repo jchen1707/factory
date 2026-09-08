@@ -166,7 +166,7 @@ def reconcile_run(
 
     controller = DelegationController(store, home)
     controller.service_run(run_id)
-    from factory import delegation_cancellation, delegation_results
+    from factory import child_certifications, delegation_cancellation, delegation_results
 
     delegation_cancellation.reconcile(store, sandbox, run_id)
     delegation_results.collect(store, run_id, sandbox)
@@ -190,7 +190,9 @@ def reconcile_run(
             controller.cancel_requests(invocation["id"])
             # A paid child still requires owned signalling and terminal collection.
             # Retain parent usage now, but never finalize it over an active subtree.
-            if any(child["parent_id"] == invocation["id"] for child in active):
+            if any(
+                child["parent_id"] == invocation["id"] for child in active
+            ) or child_certifications.active_for_parent(store, run_id, invocation["id"]):
                 accounting.collect_invocation(
                     store, home, invocation["id"], Path(invocation["metadata"]["events"])
                 )
