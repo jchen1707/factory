@@ -376,7 +376,10 @@ def delegation_call(config: dict[str, Any], params: dict[str, Any], thread: str)
     ).encode()
     digest = hashlib.sha256(raw).hexdigest()
     write_mailbox(Path(config["inbox"]), "request.json", raw)
-    deadline = time.monotonic() + 60
+    # The default controller polls every 60 seconds, in addition to time spent
+    # reconciling other runs. Allow several polls, including a missed tick, while
+    # retaining a finite failure bound when the controller is unavailable.
+    deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
         try:
             response = json.loads(
