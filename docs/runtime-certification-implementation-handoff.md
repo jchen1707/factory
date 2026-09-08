@@ -1,6 +1,168 @@
 # Runtime certification and delegation implementation handoff
 
+## FRO-12 child transport fix ready for review (2026-09-08)
+
+Implementation commit `623f99a` on `fix/child-mailbox-response`, checkout
+`/Users/james/factory-child-transport`, fixes the reproduced controller-cadence
+failure. The old60-second worker timeout raced the normal60-second poll plus
+controller work. Worker now allows300 seconds, still fails finitely and retains
+unanswered requests. Refusals explain canonical repository-relative paths (`.`
+for the root), without echoing host data. Frozen tool registrations are unchanged,
+so the existing native thread/mailbox configuration remains compatible.
+
+Validation:
+- Regression failed before the fix with the exact production timeout. Tests now
+  cover corrected/repeated-invalid requests with61/125-second poll delays, durable
+  replay and eventual controller-unavailable failure. All21 transport tests pass.
+- Separate real host processes, SQLite, files and elapsed time: first absolute-path
+  request refused; second valid request returned one pending handle after62.057s.
+  Controller exit0; zero model calls. This is host transport evidence, not fresh
+  Linux/native-Codex compatibility acceptance.
+- Four declared gates pass; Standards and Spec reviews have no blocking findings.
+  See `docs/runtime-child-transport-polling.md` for diagnosis and limitations.
+- Private evidence `/Users/james/factory/artifacts/runtime-child-transport-20260908/`
+  contains the real-time transport script/result, gate outputs and PR publication
+  script. GitHub publication is recorded through host effects for the original run
+  under `operator:child-transport-fix`; it does not transition the synthetic ticket.
+
+Live deployment remains `1805657`. No model approvals, VM changes, service changes,
+project settings changes or tracker writes. Read-only check confirms existing run
+`c8d569fcd49a4094` remains resumable, attempt1, ten invocations. Preserve its VM,
+clone, local commit and native thread; queued recovery remains attempt2.
+
+Next, in order:
+1. James merges the fix PR, then deploy through the normal maintenance procedure.
+2. Fresh certification is required because worker bytes changed. Preserve the
+   actual parent sandbox generation and frozen mailbox registration; do not reuse
+   an old compatibility report or erase source/thread ownership to bypass checks.
+3. Only after fresh certification, approve the exact preserved recovery
+   `c8d569fcd49a4094:2:implement` and observe child transport/admission. Approval mode
+   still holds child/probe/application attempts separately; do not enable blanket
+   autoapproval. Reconcile new launches/accounting separately from attempt1.
+4. CLI cached-token display remains unresolved; incomplete usage stays incomplete.
+   Factory reliability is the objective, not hardening or completing all CRUD
+   tickets. James owns merges/Done; no new ticket work is needed for this fix.
+
+
+## FRO-12 observation: child transport failure; accounting reconciled (2026-09-08)
+
+Observed existing run `c8d569fcd49a4094` through its next natural stop; no new
+approval, model launch, ticket write, service change or project-setting change by
+this session. Deployed revision remains `1805657`. The objective remains factory
+workflow reliability and accounting, not hardening the synthetic CRUD product.
+
+Attempt1 ran from 19:12:09 to 19:29:07 America/Toronto (1,018 seconds), then
+`implementing -> resumable`, `agent-failed`, exit1. Its real gate dispatcher
+returned exit0; builder reported ten passing target gates and local commit
+`e05436b`. This is not independent review or delivery acceptance. No final
+`last-message.json` was produced. Existing source/work and VM are retained;
+this session did not stop or remove the sandbox.
+
+Failure evidence: builder requested two read-only `diagnoser` children for its
+Spec and Standards reviews. First call `exec-1f79673d-5a4a-46e4-9620-1496cc2228c0`
+received the generic refusal after about32 seconds. Second call
+`exec-1310a992-1af1-410b-b532-f19bcb1582ed` ended with
+`delegation controller response unavailable; request retained` after about60
+seconds. Zero child request rows/child launches were recorded at reconciliation.
+Both requests used absolute paths; first also requested the host context directory.
+Root cause has NOT been established. Do not mistake the earlier rejected `rm -rf`
+cache-cleanup command for the terminal failure: the builder recovered from that
+and continued through gates and commit.
+
+Normal writer has already prepared recovery ownership for
+`c8d569fcd49a4094:2:implement`, retaining native thread
+`01a0834b-1f05-7720-9ff2-0ce5019359ab`. Approval mode correctly holds that exact
+`waiting_invocation`; no attempt2 invocation or paid launch exists. Mailbox was
+archived by normal recovery, not deleted by this observation. Do not start a
+fresh run, modify the archived request, or approve recovery before diagnosing
+this transport failure.
+
+Accounting for the stopped attempt is reconciled, with three identical replays:
+- Ten launch effects match exactly ten invocation IDs and ten cost rows: nine
+  certification probes plus one builder. No duplicates or missing invocation rows.
+- Builder: 2,505,382 input tokens, including 2,419,968 cached input; 23,181 output
+  tokens. Known API-equivalent estimate USD1.7732632 from57 priced requests.
+- Certification known subtotal USD0.1997068; combined known subtotal USD1.97297.
+- Seven records fully priced; three explicitly incomplete: interrupted probe,
+  compaction probe, and failed builder. Builder's terminal usage event says
+  `invocation completion unavailable`. These are lower bounds, not final charges
+  or complete totals. Cost per accepted change remains unmeasured.
+- CLI status still says `cached 0` although invocation telemetry and reconciled
+  cost rows contain cached tokens. Record this as a separate display discrepancy.
+
+Private evidence: `/Users/james/factory/artifacts/runtime-fro12-accounting-20260908/`
+contains baseline.json, final.json, summary.json, replay.json, reconciliation
+script, copied terminal events/exit/stderr, archived request/response and health
+snapshots. Writer/console loaded, consoleHTTP200, daemon stderr unchanged from
+baseline; project settings unchanged. No new source change or gate run is claimed.
+
+Next:
+1. Reproduce the real request refusal and second-call timeout with the retained
+   two-call sequence, normal60-second writer cadence, clone paths and recovery
+   archive timing. Inspect child path contract and controller servicing/error
+   handling before choosing a fix. Preserve evidence and parent work/thread.
+2. Fix verified factory/shared-contract defects with regression and real transport
+   validation; use the normal reviewed deployment path. Address misleading cached
+   token display separately. Do not make up missing completion/pricing evidence.
+3. Only then retry the exact preserved recovery under Approval mode and reconcile
+   new invocation accounting separately. James owns merge/Done decisions; no need
+   to drive all FRO tickets to completion just to claim factory validation.
+
+
+## PR92 deployed; real fresh startup passed (2026-09-08)
+
+James merged PR92 and explicitly authorized deployment and startup retry. Live
+`/Users/james/factory` is now `180565718126b9c75788593b478bb77ac568f89f`,
+with an identical tree to tested PR head `5807998`. Writer was disabled/unloaded
+and console unloaded before a verified consistent SQLite backup and fast-forward.
+No schema, target source, runtime package or project settings changed. The deployed
+clone integration suite passed; the four-gate PR result remains applicable to the
+identical deployed tree. No new full four-gate run is claimed for this deployment.
+
+Retired blocked attempt-zero run `d2349875047e4b30` through Store API after checking
+no branch/worktree existed. Its stopped VM and evidence remain retained. Restored
+only its factory-created In Progress state and needs-info label through host Linear
+writes with intended/confirmed ledger entries. Existing ready-for-agent authorization
+was preserved. FRO-12 passed all eleven intake checks again.
+
+Fresh run `c8d569fcd49a4094` PASSED the previously failing startup path:
+- Created/recorded branch `chore/FRO-12-create-and-list-sqlite-notes-in-the-api`
+  and clone worktree, progressed through `worktree_ready` to `implementing`, attempt1.
+- New parent `factory-build-delegation-41871635b70fafe0aa124011`, generation
+  `facb1d56-925d-4c56-98b4-dbfd7eb449ba`, passed all six automatic checks under
+  certificate `d88964fb533b45e5848ab1e4865bb37f`.
+- Exact probe and first-builder approvals recorded under James's startup authorization.
+  Approval mode, concurrency4, agent cap8 and isolated-write children remain unchanged.
+- Actual builder invocation `c8d569fcd49a4094:1:implement` launched and emitted live
+  usage/context telemetry. The bounded startup monitor exited after confirming launch.
+- Ten launches match ten invocation records: nine certification probes and one active
+  builder. Three certification accounting replays stable. Certification known
+  API-equivalent subtotal USD0.1997068; interrupt and compaction records explicitly
+  incomplete. Builder accounting is provisional while running; do not claim a final
+  total or cost per accepted change.
+- Writer enabled/restored on original60-second timer; console restored and HTTP200.
+  All project settings compare exactly to pre-deployment backup. Active run/VM remain
+  owned by normal writer; do not stop them as disposable test cleanup.
+
+Evidence: `/Users/james/factory/artifacts/runtime-pr92-deploy-20260908/` contains
+private `before.db` (integrity_check=ok), deployment.json, startup.jsonl,
+startup-result.json, certification-replay.json and service snapshots. Source-owned
+certificate events/report remain under `state/certifications/d88964fb533b45e5848ab1e4865bb37f/`.
+
+Next: observe this existing run through its next natural stop, reconcile final builder
+usage and record failures/interventions. Inspect exact pending approvals before any
+subsequent model attempt; do not change Approval mode or automatically approve unrelated
+work. No duplicate fresh run or direct resume is needed. FRO-13/14 depend on FRO-12 Done;
+FRO-15 depends on13/14, so this cohort is not four-way delivery concurrency. James owns
+merges and dependency completion. The objective remains factory workflow/capability
+validation, not unnecessary hardening/completion of synthetic product tickets. Full
+startup retry is complete; delivery outcome and sustained throughput remain unmeasured.
+
+
 ## Fresh eligible FRO-12 startup failure (2026-09-08)
+
+Fix committed as `5807998`, PR92: https://github.com/jchen1707/factory/pull/92.
+Implementation checkout: `/Users/james/factory-child-startup`.
 
 James moved FRO-12–15 to Todo and cleared FRO-12's blocking label. FRO-12
 passed all eleven intake checks. Closed obsolete intake-only run
