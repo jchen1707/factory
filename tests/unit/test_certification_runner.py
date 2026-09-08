@@ -392,14 +392,15 @@ def test_changed_identity_preserves_ambiguous_old_probe_ownership(tmp_path: Path
     store.close()
 
 
-def test_pre_launcher_identity_is_retired_without_launch(tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing", ["launcher_sha256", "code_host_sha256"])
+def test_old_helper_identity_is_retired_without_launch(tmp_path: Path, missing: str) -> None:
     store = Store(tmp_path / "db")
     try:
         run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
         sandbox, driver = Sandbox(), Driver(tmp_path)
         service = runner(store, tmp_path, sandbox, driver)
         old = asdict(identity())
-        del old["launcher_sha256"]
+        del old[missing]
         previous = RuntimeJobs(store).request_certification(run.id, old)
         current = service.ensure(run.id, automatic=True)
         assert current["id"] != previous["id"]

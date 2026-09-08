@@ -15,6 +15,7 @@ class Observations:
         self.generation = "generation-one"
         self.environment = "e" * 64
         self.launcher = "c" * 64
+        self.code_host = "e" * 64
 
     def observe_certification(self, spec: SandboxSpec, **kwargs: object) -> dict:
         return {
@@ -27,6 +28,7 @@ class Observations:
                 "environment_sha256": self.environment,
                 "mounts": [],
                 "launcher_sha256": self.launcher,
+                "code_host_sha256": self.code_host,
             },
         }
 
@@ -117,3 +119,14 @@ def test_changed_launcher_invalidates_fingerprint(tmp_path: Path) -> None:
     assert original.launcher_sha256 == "c" * 64
     adapter.launcher = "d" * 64
     assert observe(adapter, request) != original
+
+
+def test_code_mode_host_change_invalidates_the_full_identity(tmp_path: Path) -> None:
+    observer = Observations()
+    request = inputs(tmp_path)
+    original = observe(observer, request)
+    observer.code_host = "f" * 64
+    changed = observe(observer, request)
+    assert original.code_host_sha256 == "e" * 64
+    assert changed.code_host_sha256 == "f" * 64
+    assert changed != original

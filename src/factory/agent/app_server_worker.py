@@ -198,12 +198,13 @@ def start_server(
         "runtime_path",
         "runtime_sha256",
         "launcher_sha256",
+        "code_host_sha256",
     }:
         raise RuntimeError("invalid certified runtime binding")
     path = identity["runtime_path"]
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise RuntimeError("invalid certified runtime binding")
-    for key in ("runtime_sha256", "launcher_sha256"):
+    for key in ("runtime_sha256", "launcher_sha256", "code_host_sha256"):
         value = identity[key]
         if (
             not isinstance(value, str)
@@ -219,6 +220,9 @@ def start_server(
         sealed_binary(
             str(Path(path).parent.parent / "codex-resources/bwrap"), identity["launcher_sha256"]
         ) as launcher,
+        sealed_binary(
+            str(Path(path).parent / "codex-code-mode-host"), identity["code_host_sha256"]
+        ) as code_host,
     ):
         executable = str(mountpoint / "codex")
         # Execute the checked launcher snapshot too. No PATH or mutable-binary fallback.
@@ -246,6 +250,11 @@ def start_server(
                 "--file",
                 str(launcher),
                 str(mountpoint / "codex-resources/bwrap"),
+                "--perms",
+                "0555",
+                "--file",
+                str(code_host),
+                str(mountpoint / "codex-code-mode-host"),
                 "--remount-ro",
                 str(mountpoint),
                 "--setenv",
@@ -255,7 +264,7 @@ def start_server(
                 executable,
                 *argv[1:],
             ],
-            pass_fds=(descriptor, launcher),
+            pass_fds=(descriptor, launcher, code_host),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE if capture_stderr else None,

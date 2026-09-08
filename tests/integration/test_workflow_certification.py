@@ -112,6 +112,7 @@ def test_prepared_launch_rechecks_its_certificate_without_starting_new_probes(
             "actual": {
                 "environment_sha256": "c" * 64,
                 "launcher_sha256": launcher_digest,
+                "code_host_sha256": "e" * 64,
                 "mounts": mount,
             },
         }

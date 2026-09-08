@@ -20,7 +20,7 @@ def test_child_service_leaves_disabled_projects_unchanged(ctx: Context) -> None:
     assert not (ctx.home / "state/children").exists()
 
 
-def prepared(ctx: Context) -> None:
+def prepared(ctx: Context, *, child_contract: bool = True) -> None:
     source_root = Path(__file__).parents[2]
     for name in ("hooks/delivery_policy.mjs", "docs/agents/delivery-review.md"):
         target = ctx.project.path / ".agents/vendor/harness" / name
@@ -42,10 +42,12 @@ def prepared(ctx: Context) -> None:
     shutil.copyfile(source_root / "tests/fixtures/delegation/request.schema.json", schema)
     target = ctx.project.path / ".agents/vendor/harness/schema/delegation-result.schema.json"
     shutil.copyfile(Path(__file__).parents[1] / "fixtures/delegation/result.schema.json", target)
-    target = ctx.project.path / ".agents/vendor/harness/docs/agents/delegation.md"
+    target = ctx.project.path / ".agents/vendor/harness/docs/agents/delegation-child.md"
     target.write_text(
         "Read only. Return observations and limitations. Child assistance is not review."
     )
+    if not child_contract:
+        target.unlink()
     claim.run(ctx)
     context.run(ctx)
     sandbox.run(ctx)
@@ -92,6 +94,7 @@ def prepared(ctx: Context) -> None:
     "case",
     [
         "valid",
+        "contract",
         "invalid",
         "missing",
         "symlink",
@@ -115,7 +118,7 @@ def test_child_request_prepares_private_readonly_sandbox_before_paid_certificati
     from factory.workflow_delegation import parent_configuration
     from tests.unit.test_delegation import task
 
-    prepared(ctx)
+    prepared(ctx, child_contract=case != "contract")
     from tests.integration.test_pipeline import _fake
 
     _fake(ctx).detach_without_finishing = True
@@ -141,6 +144,11 @@ def test_child_request_prepares_private_readonly_sandbox_before_paid_certificati
     request = broker.request("child-call", task() | {"paths": ["harness.config.json"]})
     advance(ctx)
     retained = ctx.store.find_effect(ctx.run.id, 1, request["id"], "child-execution", "prepare")
+    if case == "contract":
+        assert retained is None
+        assert broker.inspect(request["id"])["waiting"]["reason"] == "child-contract-unavailable"
+        assert len(_fake(ctx).created) == 2  # ordinary build and mailbox parent only
+        return
     assert retained is not None
     assert retained.status == "confirmed"
     payload = json.loads(retained.external_id or "{}")
@@ -166,7 +174,11 @@ def test_child_request_prepares_private_readonly_sandbox_before_paid_certificati
             "runtime_path": "/opt/codex",
             "runtime_version": "fixture",
             "runtime_sha256": "b" * 64,
-            "actual": {"environment_sha256": "c" * 64, "launcher_sha256": "d" * 64},
+            "actual": {
+                "environment_sha256": "c" * 64,
+                "launcher_sha256": "d" * 64,
+                "code_host_sha256": "e" * 64,
+            },
         }
 
     monkeypatch.setattr(type(ctx.sandbox), "observe_certification", observe_runtime, raising=False)

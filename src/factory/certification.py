@@ -34,6 +34,7 @@ class CertificationIdentity:
     probe_sha256: str
     usage_scope: str
     launcher_sha256: str
+    code_host_sha256: str
 
     def __post_init__(self) -> None:
         assert_factory_sandbox(self.sandbox)

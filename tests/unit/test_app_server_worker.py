@@ -60,6 +60,9 @@ def run_client(
     launcher_bytes = b"\x7fELFlauncher fixture"
     launcher_path = tmp_path / "launcher"
     launcher_path.write_bytes(launcher_bytes)
+    code_host_bytes = b"\x7fELFcode mode host fixture"
+    code_host_path = tmp_path / "codex-code-mode-host"
+    code_host_path.write_bytes(code_host_bytes)
     real_open = os.open
 
     def open_binary(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
@@ -72,7 +75,11 @@ def run_client(
 
     monkeypatch.setattr(worker.os, "open", open_binary)
     if runtime is not None:
-        runtime = {"launcher_sha256": hashlib.sha256(launcher_bytes).hexdigest(), **runtime}
+        runtime = {
+            "launcher_sha256": hashlib.sha256(launcher_bytes).hexdigest(),
+            "code_host_sha256": hashlib.sha256(code_host_bytes).hexdigest(),
+            **runtime,
+        }
 
     # Linux-specific syscalls are the boundary fake; real sealing/exec acceptance
     # runs separately in the owned Linux VM.
@@ -168,7 +175,9 @@ def run_client(
 
     def spawn(argv: list[str], **kwargs: Any) -> Any:
         if runtime is not None:
-            descriptor, launcher = kwargs["pass_fds"]
+            descriptor, launcher, code_host = kwargs["pass_fds"]
+            assert str(native_root / "codex-code-mode-host") in argv
+            assert os.pread(code_host, 1024, 0) == code_host_bytes
             assert argv[0] == f"/proc/self/fd/{launcher}"
             path_option = argv.index("--setenv")
             assert argv[path_option + 1] == "PATH"
@@ -745,6 +754,28 @@ def test_changed_certified_launcher_starts_no_server(
             "runtime_path": str(binary),
             "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
             "launcher_sha256": "0" * 64,
+        },
+    )
+    assert code == 1
+    assert launches == []
+
+
+@pytest.mark.parametrize("digest", ["0" * 64, "", None])
+def test_changed_or_missing_code_mode_host_binding_starts_no_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, digest: Any
+) -> None:
+    binary = tmp_path / "native"
+    binary.write_bytes(b"\x7fELFcertified fixture")
+    launches: list[list[str]] = []
+    code, _, _ = run_client(
+        tmp_path,
+        monkeypatch,
+        [],
+        launches=launches,
+        runtime={
+            "runtime_path": str(binary),
+            "runtime_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "code_host_sha256": digest,
         },
     )
     assert code == 1

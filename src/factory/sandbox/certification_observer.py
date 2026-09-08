@@ -98,6 +98,7 @@ def observe(request: dict[str, Any]) -> dict[str, Any]:
         "launcher_sha256": file_digest(
             Path(request["binary"]).parent.parent / "codex-resources/bwrap"
         ),
+        "code_host_sha256": file_digest(Path(request["binary"]).parent / "codex-code-mode-host"),
         "mounts": sorted(mounts, key=lambda row: row["path"]),
         "environment_sha256": digest(dict(os.environ)),
         "configurations": configs,

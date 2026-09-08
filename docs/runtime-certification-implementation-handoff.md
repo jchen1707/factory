@@ -2,16 +2,20 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: child execution/results and retained-runtime transfer (see final section).
-The full feature plan remains incomplete and is not ready for the final feature PR.
+Latest checkpoint: real read-only child execution/results, overlapping child turns, accounting
+replay and same-VM/native-thread ownership-transfer resume validated. Fixed the omitted sealed
+Code Mode helper and separated child execution instructions from parent delegation instructions.
+See the final acceptance section for exact evidence and still-open work. Full feature PR is
+not ready; live services/settings remain unchanged.
 
-Bind-mounted builders now provision their invocation-owned mailbox VM before automatic
-certification/accounting, freeze the child-tool configuration, and revalidate retained
-specifications and permissions on queued launch after restart. This is parent wiring,
-not actual child execution. Clone replacement and runtime-thread transfer refuse explicitly
-pending preservation support. Worker bytes remain unchanged since192cc71 and require
-fresh real six-check acceptance. The following audit is the historical898c0c5 baseline;
-the newer checkpoints at the end supersede its parent-wiring and cancellation status.
+Main objective: validate factory capabilities with synthetic work, not ticket/CRUD completion
+or hardening. Next implementation focus is coherent clone-source child snapshots; keep the
+remaining lifecycle, integration, control and rollout requirements open.
+
+The audit below is the historical898c0c5 baseline. Later checkpoint sections supersede its
+implementation status: read-only child wiring/results and retained parent VM ownership are
+implemented; real child/thread acceptance, clone-source snapshots and the other listed gaps
+must be checked against the newest evidence rather than this historical table.
 
 ## Audited remaining work and final-PR readiness
 
@@ -1698,3 +1702,184 @@ Final verification for this checkpoint:
   that request intact. The interrupted-rename regression proves intent is committed/recoverable.
 - Tracked implementation is ready for its checkpoint commit, not the full-feature final PR.
   User scope remains unfinished as enumerated above. No push, merge, migration or deployment.
+
+## Real child acceptance — Code Mode helper continuation
+
+Baseline: factory ad14a93 and shared harness1213b16. Continued in the isolated implementation
+worktree with a fresh synthetic target/store at artifacts/runtime-child-real/run-1. No live
+services, settings, schema, templates, credentials, tracker or forge writes.
+
+Real certification exposed a production adapter omission on the installed Codex0.153.4:
+its sealed /mnt/codex executable resolves codex-code-mode-host beside itself, but the worker
+previously copied only Codex and Bubblewrap. The package contains the helper, but it was absent
+from the protected mount. The interruption probe exited early rather than exercising durability.
+
+Implemented: fresh helper digest in the complete fingerprint and every certified worker/probe
+binding; checked/sealed helper bytes copied beside Codex into the same read-only mount. Missing,
+malformed, changed or older identities refuse; no PATH fallback or weaker sandbox configuration.
+No new live DDL is needed for the identity field; old certificates require fresh evidence.
+
+Zero-model differential: uv run python artifacts/runtime-child-real/helper-check.py.
+artifacts/runtime-child-real/helper-check.json records old launcher exit1 (helper ENOENT),
+corrected launcher exit0 with actual helper --help output. This checks reopening using the
+production sealed mount, not a paid child turn. Focused regression RED then GREEN includes
+immutable worker/helper launch, changed helper refusal, fresh fingerprint changes and retirement
+of old identities without a paid launch. Both bounded code-review axes are clear.
+
+Real final-worker certification and actual parent/child results: IN PROGRESS at this writing.
+Use artifacts/runtime-child-real/acceptance.py and drive.py; each tick reconstructs Context and
+reopens the isolated store. Never run setup twice in the same directory. The initially created
+owned VM is factory-build-delegation-9a3c0bd8abd361521a06ae52. Later child names are recorded in
+child-execution prepare effects. Stop/remove only those owned VMs after collecting terminals.
+
+Retained failures: initial job95450a0181cd451eb6dd4e19d8e21b08 became stale after an observed
+spec fingerprint change; job2a38361e61be46608f55c6e16b80f71c failed the interruption probe with
+missing-helper warning. Neither is a pass. Their raw evidence/accounting remains retained.
+Corrected-worker job4ab411b4859b41a7bacffb2cb10e3042 is a separate certificate, not an override.
+
+Remaining work stays open:
+1. Finish exact final-worker six-check and actual parent/two-read-only-child execution, result
+   transport, accounting replay, approval/capacity/overlap and cancellation/restart measurements.
+2. Prove retained native thread resume after mailbox ownership transfer, including dynamic tools
+   and usage baselines; the earlier zero-model clone retention was not this measurement.
+3. Implement coherent clone-source child snapshots including private commits and dirty/untracked
+   files. child-clone-snapshot-required still refuses; never substitute the stale host checkout.
+   Existing clones without protected mailboxes still need an explicit preservation/migration path.
+4. Complete subtree Suspend/Cancel, ambiguous signal recovery and owned child sandbox cleanup.
+5. Isolated writable children and safe serialized integration; project/run/console controls;
+   fair shared resource scheduling and full four-parent/child/reviewer/certifier saturation.
+6. Shared-source merge/exact consumer sync/generation; matching full runtime package/template;
+   final feature review/PR criteria and reviewable migration/deployment/rollback artifacts.
+James owns merges, live schema5→6 approval, deployment and activation. Synthetic factory feature
+acceptance is the objective; ticket/CRUD completion or hardening is not required.
+
+Continuation observations (final outcome below):
+- Corrected parent job4ab411b4859b41a7bacffb2cb10e3042 passed all six checks. Real parent
+  attempt1 requested two children through factory dynamic tools. Child VM write checks in
+  readonly-result.json both returned EROFS with the target unchanged, independently of hooks.
+- Acceptance fixture errors: missing run lease at initial implement.start (before any application
+  invocation); copied four-role fixture omitted documenter (live/source models.toml already has
+  that role). Fixed only the isolated runner. The first error advanced an unlaunched guard
+  sequence; fixture-lease-repair.json records the checked reset with zero application records.
+- Missing fixture route stopped the observer. Parent attempt1 then exited with retained-request
+  timeout and incomplete usage. Production reconciliation cancelled both unlaunched child
+  requests and released the terminal parent; no child application had been launched.
+- retry-parent.py invoked production implement.start(resume_session=recorded_thread), retaining
+  the original VM generation, transferring mailbox ownership and using the exact native thread
+  01a07f20-d195-73e0-901f-061fa46b05fe. Attempt2 actually issued new child requests and received
+  owned pending status responses. This is real native thread/tool continuity, not simulated
+  filesystem retention. Final child results and replay evidence are recorded below.
+- Fixture documenter routing is explicitly gpt-5.6-luna/medium. Live routing is unchanged.
+
+Final source gates: artifacts/runtime-child-real/gates-final.json PASS. Ruff check89ms,
+Ruff format42ms, mypy212ms (165 source/test files), pytest147826ms. Every exit0; no skips;
+empty output tails. Mypy includes every changed module. Fake suite results do not establish
+runtime compatibility; real helper/certification/child measurements are separately recorded.
+
+### Child semantics correction and fresh authority
+
+Run1 executed both Luna children and returned bounded schema-valid results to the resumed
+parent, but both children interpreted the parent delegation.md as instructions to spawn another
+child. Neither inspected protected.txt. audit.py failed the actual-content assertion. This is
+NOT a successful task acceptance, even though broker execution/result transport worked.
+
+Shared layer A now supplies docs/agents/delegation-child.md specifically to the admitted child:
+perform the assigned inspection directly, no delegation tools expected, no recursive spawn,
+read-only source/authority, concise evidence-backed results and no independent-review authority.
+Factory loads that contract instead of the parent delegation instructions. Missing/empty contract
+returns child-contract-unavailable before provisioning/certification; no silent prompt fallback.
+Focused RED/GREEN tests cover the loader and non-crashing missing-contract refusal. Shared
+scripts/check.py passed; new bounded reviews/final factory gates are recorded below.
+
+Run1 cleanup: artifacts/runtime-child-real/run-1/cleanup-result.json. All five owned VMs stopped,
+removed and verified absent; target clean; zero active leases.51 invocation records remain,
+known API-equivalent lower bound USD1.4018672;11 incomplete estimates remain visibly incomplete
+(interruptions, compactions and the failed parent). Three collection replays kept totals stable.
+Do not restore or reuse removed VM identities. Two originally pending child certification jobs
+may remain checking in the isolated historical database without active leases; they are not passes.
+
+Fresh final-contract acceptance uses artifacts/runtime-child-real/run-2, new target/store and
+new authority snapshot. The archived run1 scripts are under run-1/runner-source for evidence
+only (their relative paths are not runnable from that archive location). The active runner now
+selects run2; setup refuses an existing directory. New parent is
+factory-build-delegation-ccd18e20cd64b56ab5fff10c. Child tasks include a bounded sleep60 before
+inspection to measure actual overlapping execution. Final outcome is still pending here.
+
+## Final acceptance checkpoint — real read-only children and native resume
+
+Final source: this factory checkpoint; shared harness5d2ac1a (on the approved feature branch
+based on v2). Both repository code-review axes clear. Shared merge and consumer sync remain
+pending; no vendor hand edits or live deployment occurred.
+
+Real final-contract evidence at artifacts/runtime-child-real/run-2:
+- Parent job96144c3dc0ff47fe87136d794b4f2d73 and child jobs
+  7f21d22d46c84c17a6c5101fa4850a94 / c4db7a0bfe6e4c2fbcbf8e36d3874cad passed all six checks.
+  These identities include the current worker and native Code Mode helper digest.
+- child-result.json PASS: actual parent requested two fresh read-only documenter children;
+  each executed gpt-5.6-luna/medium, ran the assigned bounded command, read protected.txt and
+  returned its correct contents. Actual successful command-output events support the results;
+  schema-valid but unperformed inspections are explicitly rejected by this acceptance script.
+- Child model turns overlapped43.176 seconds. overlap-observation.json independently records
+  parent plus two active owned child leases and real sleep processes in both VMs. This proves
+  three concurrent agents under an isolated project cap4, not the full four-parent/cap8 matrix.
+- readonly-all-result.json: both final child VMs refused a direct source write with EROFS;
+  no target file appeared. Child results informed the parent, never independent review.
+- Each child has a distinct native thread and an accounted parent link. Three production
+  collector/reconciliation replays preserved all telemetry, known costs and raw event hashes.
+  Successful child/parent usage agrees with each invocation's captured connection-scoped usage.
+- resume-result.json PASS: production implement.start resumed parent attempt2 in the same VM
+  generation and native thread01a07f32-ca92-7752-bc2e-8ed1a4acab32. The retained dynamic tool
+  executed a status call on an old owner's handle and returned a durable refusal. No new child
+  was launched. Both parent invocations exited0 and retained separate usage matching raw events.
+  This validates final-contract thread/tool ownership transfer and accounting, beyond run1's
+  earlier failed-controller recovery observation.
+- cleanup-result.json:32 invocation records retained, known API-equivalent lower bound
+  USD0.65425132 after resume;6 interrupted/compaction estimates remain explicitly incomplete.
+  Three further collection replays left totals stable. No claim of exact account charges or
+  complete pricing for those probes. Target clean; zero active leases.
+- All three run2 VMs stopped, removed and verified absent. Run1's five VMs were already removed.
+  Final sbx ls --json returned {"sandboxes":[]}. No experiment VM is left running.
+
+Commands retained under artifacts/runtime-child-real: acceptance.py setup (exclusive fresh
+run2 only), drive.py (bounded independent controllers), audit.py, readonly-check.py,
+resume.py start/check, cleanup.py run-1/run-2. Do not re-run setup over retained evidence or
+try to resume removed identities. These are local disposable acceptance runners, not live
+service entrypoints. Raw failed/intermediate evidence remains under run1; it is not a pass.
+
+Final verification: artifacts/runtime-child-real/gates-final.json PASS. Ruff check75ms,
+Ruff format41ms, mypy325ms (165 source/test files), pytest147781ms; all exit0, no skips, empty
+tails. Relevant new regressions are covered. Shared scripts/check.py passed; output retained
+in artifacts/runtime-child-real/shared-check.log. Bounded helper and child-contract reviews clear.
+No production source changed after these final gates; subsequent edits are handoff/plan records.
+
+### Exact next work — full plan remains incomplete
+
+1. Implement coherent clone-source read-only child snapshots. child-clone-snapshot-required
+   still refuses. Export the private VM's actual commits and dirty/untracked source, preserve
+   the original clone/environment, validate source consistency and trusted authority, and give
+   children their own read-only host-readable snapshot. Never substitute stale host checkout
+   contents. Existing clones without protected mailboxes still require an explicit preservation/
+   migration path. The earlier same-VM retention does not implement this source export.
+2. Complete the real Approval/capacity/draining and live-child Suspend/Cancel/ambiguous-signal
+   recovery matrix, with targeted owned cleanup. Run1 proves cancellation of UNLAUNCHED children
+   after controller loss; it does not prove live-child subtree cancellation. Offline coverage
+   remains useful but is not a substitute for that measurement.
+3. Implement isolated writable children and safe serialized integration: disjoint scopes,
+   private worktrees/dependencies/temp/databases/ports, parent writer coordination, preservation
+   of dirty work, conflict/stale-base holds, no double integration, fresh gates and review.
+4. Finish project/run/console delegation/certification controls and child/cost/queue visibility;
+   fair shared resource scheduling; full four-parent plus child/reviewer/certifier contention at
+   the proposed agent cap. Only the isolated cap4/three-active-agent overlap is newly measured.
+5. Finish exact shared-source/consumer merge+sync/generation and runtime package/template pins;
+   full-feature final-PR review and concrete migration/deployment/rollback artifacts. James owns
+   merges, live schema5→6 approval, deployment and activation. Do not reuse old4→5 approval.
+6. Investigate cold-parent initial spec fingerprint drift: both fresh parent experiments retired
+   an initial certificate after the spec digest changed, then a successor passed. The exact
+   component is not yet attributed; retain component-level fresh observations in reproduction.
+   Do not weaken identity checks or hide the extra accounted probe to optimize this away.
+
+Shared dependency: factory now requires the source-owned delegation-child.md for NEW child
+preparations; old retained requests keep their immutable old instructions. Missing contract is
+visible before paid certification. Merge/sync the shared commit before enabling new delegation.
+Live services/settings/schema/templates, credentials, tickets and customer work remain unchanged.
+Factory/harness changes are local commits only; no push, PR, merge or deployment was performed.

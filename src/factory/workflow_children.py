@@ -230,6 +230,19 @@ def _retain_request(
     with ctx.store.runtime.transaction():
         previous = ctx.store.find_effect(*owner)
         if previous is None:
+            try:
+                schema = json.loads(
+                    (
+                        trusted / ".agents/vendor/harness/schema/delegation-result.schema.json"
+                    ).read_text()
+                )
+                instructions = (
+                    trusted / ".agents/vendor/harness/docs/agents/delegation-child.md"
+                ).read_text()
+                if not instructions.strip():
+                    raise ValueError("empty child contract")
+            except (OSError, ValueError) as exc:
+                raise Blocked("child-contract-unavailable", request["id"]) from exc
             for directory in (root, scratch, scratch / "tmp"):
                 _mkdir(directory)
             payload = {
@@ -241,14 +254,8 @@ def _retain_request(
                 "directories": {
                     str(p): [p.stat().st_dev, p.stat().st_ino] for p in (root, scratch)
                 },
-                "schema": json.loads(
-                    (
-                        trusted / ".agents/vendor/harness/schema/delegation-result.schema.json"
-                    ).read_text()
-                ),
-                "instructions": (
-                    trusted / ".agents/vendor/harness/docs/agents/delegation.md"
-                ).read_text(),
+                "schema": schema,
+                "instructions": instructions,
             }
             ctx.store.intend_effect(*owner)
             ctx.store.confirm_effect(*owner, json.dumps(payload, sort_keys=True))

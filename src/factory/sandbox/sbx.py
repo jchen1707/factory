@@ -343,6 +343,7 @@ class SbxAdapter:
                     "hooks",
                     "credential_names",
                     "launcher_sha256",
+                    "code_host_sha256",
                     "native_mount",
                 }
             ):
