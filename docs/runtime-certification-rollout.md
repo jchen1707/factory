@@ -1,8 +1,9 @@
 # Runtime certification and delegation rollout
 
 This is a reviewable deployment procedure, not an applied rollout. James owns the schema
-5→6 approval, merges, deployment and activation. Earlier schema 4→5 and service-restart
-approvals do not authorize this migration. The objective is factory capability acceptance;
+5→6 approval, merges, deployment and activation. James explicitly approved schema 5→6
+in the publication session after reviewing the completed work. The migration remains unapplied;
+writer shutdown and backup requirements below still apply. The objective is factory capability acceptance;
 synthetic workloads suffice. Do not finish test tickets, change Backend tickets, resume
 parked FRO work, or involve `nemoclaw-dev` to establish acceptance.
 

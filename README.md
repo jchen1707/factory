@@ -1,406 +1,254 @@
 # factory
 
-Layer D — the control plane.
+Layer D — the control plane for approved software work.
 
-The factory takes one Linear ticket a human approved, drives it through a sandboxed agent
-under this system's own gates, and stops at the boundary a human owns. It is not clever. It
-is a machine that survives a crash, resumes the ticket it was on, never repeats a side
-effect, and produces evidence you can audit without re-running anything.
+Factory takes a human-approved Linear ticket through isolated implementation,
+verification and independent review, then opens a pull request for James to merge.
+It owns scheduling, recovery and external effects; the target repository owns its
+requirements, gate commands and review instructions.
 
-`SOFTWARE-FACTORY-PLAN.md` is the specification and it is complete. `AGENTS.md` is the
-instruction file for anyone — human or agent — working in this repo. `docs/discovery/` is
-Phase 0's measured evidence, and where a measurement contradicts the plan, the discovery
-file wins. `docs/runbook.md` is the operator's "it is stuck, what do I type" reference.
+The implementation includes delivery/model profiles, fresh diagnosis, normalized
+telemetry and accounting, isolated concurrency, automatic runtime certification and
+controlled child agents. These features are configurable; merging code does not
+activate them for existing projects or runs. See the [acceptance report](docs/runtime-certification-completion-acceptance.md)
+for measured synthetic coverage and the [rollout procedure](docs/runtime-certification-rollout.md)
+for deployment, migration and rollback. Production activation is a separate operator action.
 
 ## Where this sits
 
-| Layer | Repository | What it owns |
+| Layer | Repository | Responsibility |
 | --- | --- | --- |
-| A | [`harness`](https://github.com/jchen1707/harness) | stack-neutral gates, review frames, hooks |
-| B | `python-harness`, `frontend-harness` | one stack's config and checklists |
-| C | a product repository | the product |
-| **D** | **this repository** | **what runs, when, in what order, and what happens when it dies** |
+| A | [harness](https://github.com/jchen1707/harness) | Shared policy, hooks, workflow contracts and review instructions |
+| B | python-harness, frontend-harness | Stack presets, applicable guidance and tooling |
+| C | Product repository | Product requirements, dependencies and declared gates |
+| **D** | **factory** | **What runs, when, and what happens when it fails or dies** |
 
-This repository consumes all three and is consumed by none of them. It holds **no gate
-command and no review prompt**: it reads them from the target repo's `harness.config.json`
-and the vendored layer-A tree at `.agents/vendor/harness/`. A gate name appearing anywhere in
-`src/` is a review failure.
+Factory reads gate commands from the target's `harness.config.json` and shared
+contracts from `.agents/vendor/harness/`. It does not maintain a second review
+prompt or choose an application's framework. Shared changes originate in `harness@v2`
+and reach consumers through the pinned sync process. Stack repositories provide minimal
+and existing framework presets with optional components; existing products keep their
+architecture until explicitly migrated.
 
-## Status
+[AGENTS.md](AGENTS.md) contains contributor boundaries. The original
+[software factory specification](SOFTWARE-FACTORY-PLAN.md), measured
+[discovery evidence](docs/discovery/), [runtime rollout history](docs/runtime-rollout.md)
+and [operator runbook](docs/runbook.md) provide the detailed contracts and history.
 
-Phases 1–6 are complete. The factory runs the full lifecycle unattended — from a
-`ready-for-agent` Linear ticket to an open pull request that waits for James to merge — and
-survives crashes, reboots, and killed processes along the way. Phase 7 (durable/remote
-execution) is **trigger-gated and has not fired**: it stays a paragraph until a lost sandbox
-costs a ticket, concurrency outgrows the laptop, or passthrough I/O dominates wall-clock. See
-§19 Phase 7 of the plan for the verdict and the re-check conditions.
+## Start here
 
 ```sh
 uv sync
-uv run factory doctor                    # is this machine able to run the factory
-uv run factory status --all              # every run, its state, attempt, lease, cost
-uv run factory run BAC-6 --check          # evaluate the intake conditions, write nothing
-uv run factory run BAC-6                 # drive one ticket in the foreground
-```
-
-## The lifecycle of one ticket
-
-Each ticket is a row in `state/factory.db` and a fixed workflow — a state machine, not a
-negotiation. Python decides control flow; the model decides only what to write inside one
-step. The states:
-
-| State | Who moves it | What happens |
-| --- | --- | --- |
-| `approved` | intake | a `ready-for-agent` ticket that passed the eligibility contract gets a row |
-| `claimed` | factory | lease acquired; Linear moved to In Progress; one comment, through the effects ledger |
-| `context_loaded` | factory | ticket + parent spec + comments written to `.factory/context/`; project resolved |
-| `sandbox_creating` | factory | `sbx inspect` → create the `factory-build-<project>` sandbox if absent |
-| `sandbox_ready` | factory | preflight: toolchain, `HARNESS_SKIP_VERIFY` unset, vendored tree intact, **no secret in the VM**, enforcement canary attached |
-| `worktree_ready` | factory | `git worktree add` on the host, on `origin/<base>`, branch `<type>/<TEAM>-<n>-<slug>` |
-| `planning` | factory | only when the ticket is large/ambiguous, or `--plan`, or attempt 3 of the rewind ladder |
-| `implementing` | factory | detached `codex exec` with the implement prompt + `--output-schema`; runs as a session the factory does not hold |
-| `verifying` | factory | `gate_report.mjs --json` in the build sandbox; advances on the report, cross-checked against the agent's claim |
-| `reviewing` | factory | Tier 1 (Standards + Spec) read-only in `factory-review-<project>`; Tier 2 full fan-out when the change warrants it |
-| `pr_ready` | factory | host-execution guard; push branch; open/update the PR with the evidence body |
-| `awaiting_human` | **James** | PR open, Linear In Review, evidence attached — the factory stops here |
-| `completed` | factory (observed) | James merged the PR; `factory complete` records it; `gc` reclaims the run |
-| `blocked` | **James** | a judgement call (missing spec, env-gate, schema touch, budget). PR does not open. Carries `needs-info` |
-| `resumable` | factory | a step died or the sandbox stopped; resume by session id, or restart with backoff. `failed` after the attempt budget |
-| `suspended` | **James** | `factory suspend` parks a run; keeps worktree, branch, session |
-| `failed` | **James** | attempt budget exhausted; `factory resume --authorise` re-authorises spend |
-| `cancelled` | **James** | `factory cancel` abandons a run and cleans up after it |
-
-Terminal states are `completed` and `cancelled`. The factory physically stops at every
-transition `policy.requires_human()` names: `awaiting_human → completed` (merge), `blocked →
-implementing` (unblock), `failed → resumable` (re-authorise spend), and any `→ cancelled` /
-`→ suspended`. Everything else is automatic.
-
-## Commands
-
-All commands are `uv run factory <command>`. `run` drives one ticket in the foreground and is
-typed by a human; `tick` is the same pipeline without the human — one pass that reaps,
-recovers, advances, and only then claims new work. They share every step; what differs is
-who waits.
-
-### `run <ticket>` — drive one approved ticket
-
-```sh
-uv run factory run BAC-6
-uv run factory run BAC-6 --check          # evaluate the intake conditions, write nothing
-uv run factory run BAC-6 --plan          # force the planning step first
-uv run factory run BAC-6 --full-review   # force Tier 2's full fan-out regardless of trigger
-uv run factory run BAC-6 --no-follow     # start it and return; `tick` carries it from there
-```
-
-Stops at `awaiting_human` (PR open) or at a `blocked`/`failed` state. `run` and `tick` are the
-same loop — `factory run` is `driver.drive(follow=True)`, a tick is one `driver.step` per run —
-so a foreground run killed at the terminal leaves exactly the orphan the next tick reaps, and
-resuming it needs nothing but `factory tick`. `--no-follow` returns as soon as an agent is
-detached, which is the shape to use from a script.
-
-### `tick` — one unattended pass
-
-```sh
-uv run factory tick --once               # one pass and exit (what the daemon calls)
-uv run factory tick --once --verbose    # also report what it skipped
-uv run factory tick --once --no-claim   # advance existing runs, start no new ones
-```
-
-A tick reaps whatever a previous pass started, recovers whatever died, moves every run that
-can move, and only then looks for new `ready-for-agent` work. It never blocks on a model run
-— a tick that blocked could not reap anything else while it did.
-
-### `daemon` — tick in a loop
-
-```sh
-uv run factory daemon                   # default 60 s between passes
-uv run factory daemon --interval 30
-```
-
-The launchd unit `ops/com.jchen.factory.plist` runs `tick --once` every 60 s instead of
-holding a long-lived `daemon` process. Load it with `launchctl load
-ops/com.jchen.factory.plist`; unload to stop the poller.
-
-### `status` — what the factory is doing
-
-```sh
-uv run factory status                    # the active run, or the ticket you name
-uv run factory status BAC-6
-uv run factory status --all              # every run (the default with no ticket)
-uv run factory status BAC-6 --evidence   # transitions, gates, review, artifacts
-```
-
-One line per run shows state, attempt, liveness, tokens, and spend against the $20 ceiling;
-`--evidence` expands to the full audit trail.
-
-### `logs` — tail a run's event stream
-
-```sh
-uv run factory logs BAC-6
-uv run factory logs BAC-6 --follow        # keep tailing as the stream grows
-```
-
-### `runtimes` — sandboxes joined to runs
-
-```sh
-uv run factory runtimes
-```
-
-Lists every `sbx` sandbox on the machine and the run using it — so you can see which
-`factory-*` sandboxes are live and confirm none is a `codex-*` (James's interactive `csbx`).
-
-### `config` — render routing
-
-```sh
-uv run factory config models             # roles, efforts, budget, projects
-```
-
-Read-only. Model routing lives in `config/models.toml`, hot-reloaded on every tick and
-validated on every read — a failing validation refuses to start rather than falling back to
-a default.
-
-### `serve` — the operator console
-
-```sh
-uv run factory serve
-```
-
-The §18.5 console: loopback-only, read-mostly, holds no credential of its own. Renders every
-non-terminal run with state, attempt, ladder rung, tokens, spend, and liveness, and refreshes
-without a reload. Model/effort edits are validated in the form before they are written (a
-reviewer on the builder's model is rejected). It has no Merge button; every control writes an
-`actor = "human"` transition.
-
-### `doctor` — is this machine able to run the factory
-
-```sh
 uv run factory doctor
-uv run factory doctor --deep             # also a live codex canary against a protected path (costs a model call)
+uv run factory status --all
+uv run factory run BAC-6 --check          # evaluate eligibility without claiming work
+uv run factory serve                    # loopback operator console
 ```
 
-Checks the registry, routing table, state machine, model cache freshness, git/gh/codex/sbx,
-the sbx-stored OpenAI credential, the global gitignore, the Linear keychain credential, the
-mattpocock execution set, the database, disk, vendored layer A in both consumers, sensitive
-paths, and the plan copy. Reports green on a clean machine and names the exact missing thing
-on a broken one.
+A registered project, working sandbox runtime, approved target authority and configured
+host credentials are prerequisites. `doctor --deep` includes a paid model canary;
+ordinary inspection is not a substitute for compatibility certification.
 
-### `cancel` — abandon a run
+## Workflow and delivery policy
+
+The normal path is approved specification → approved vertical ticket → readiness →
+implementation → deterministic verification → independent review → PR awaiting James.
+Readiness checks acceptance criteria, testing seams, dependencies and current authority.
+Missing product decisions return to a human; technical gaps can receive a short execution
+brief. `/plan` remains optional. Unattended diagnosis uses a noninteractive contract.
+
+Prototype, Core and Hardening profiles belong to the target's `harness.config.json`.
+Deferrals retain the requirement, rationale and revisit condition. Every profile preserves
+credentials, human-owned decisions, review isolation and effects accounting. A run freezes
+its policy and source authority; candidate changes cannot weaken their own review.
+Replacing an existing run's policy is an explicit action that invalidates affected evidence.
+
+Model presets are independent of delivery profiles. Volume and high-confidence presets
+route execution briefs/test design, implementation, review, diagnosis and documentation
+separately. A configurable test-design role defines scenarios; builders retain vertical
+red/green implementation. Verification commands do not need a model. Each invocation
+records the actual model, effort and preset, checked against its executing runtime.
+Existing routing remains available and is not silently replaced.
+
+Diagnosis distinguishes reproducible code defects, environment failures, stale authority,
+ambiguous requirements and disputed findings. Automatic code repair needs a reproducible
+failure and allows two attempts per failure episode within lifetime/spend limits. Repeated
+failure without new evidence pauses. Scope changes and review disputes remain human decisions.
+
+Automatic/Approval controls apply to projects and runs. Approval holds the next agent
+attempt; deterministic observation, verification and accounting can continue. Suspend
+separately stops current work while preserving recoverable state.
 
 ```sh
-uv run factory cancel BAC-6
-uv run factory cancel BAC-6 --reason "duplicate"
+uv run factory configure --project PROJECT --delivery-profile prototype --model-preset volume
+uv run factory configure --project PROJECT --workflow diagnosis --mode approval
+uv run factory configure --ticket BAC-6 --approve-attempt INVOCATION_KEY
+uv run factory configure --ticket BAC-6 --replace-policy core
 ```
 
-Kills the run, removes its worktree (only when it holds nothing but `.factory/`), deletes
-its branch only when unpushed and carrying no commits beyond the base ref, and releases the
-lease. Whatever it refuses to remove, it names.
+These commands change settings. Use the invocation key shown by the console; policy
+replacement requires a paused run. Project changes do not rewrite existing run snapshots.
 
-### `complete` — the PR was merged
+## Runtimes, certification and child agents
+
+Legacy `codex exec` and Codex app-server are separate adapters. Existing runs retain their
+selected adapter. Automatic certification is opt-in; absent configuration uses manual
+compatibility, and child delegation defaults to disabled.
+
+Astra availability is determined inside the executing sandbox, not inferred from the host
+Codex session. Disposable testing found Codex 0.146.0 omitted Astra; 0.153.4 advertised the
+exact `gpt-6-astra` model and completed high/xhigh schema-valid turns with unchanged provider
+context. This does not authorize an arbitrary runtime/account combination or a model alias.
+
+Automatic certification binds the actual sandbox generation, image, complete runtime/helper
+package, mounts, environment, trusted authority/hooks and probe implementation. Six compatibility
+checks establish hook enforcement, schema output, isolation, durability, recovery and usage
+semantics before application launch. Fresh validation also runs immediately before builder,
+reviewer, recovery and child launches. Changed identities or tampered evidence refuse launch.
+Controller restart reconciles durable paid intent rather than duplicating probes.
+
+The supported native package includes Codex, `codex-code-mode-host` and its packaged `bwrap`
+resource. Copying a standalone executable is insufficient. Zero-turn preparation settles native
+initialization in the VM's private Codex home before its first fingerprint, preserves full
+configuration identity and refuses explicit distrust. It never writes the host trust store.
+See [certification service](docs/runtime-certification-service.md) for the exact host configuration
+and [rollout prerequisites](docs/runtime-certification-rollout.md) before selecting it.
+
+Factory-owned child tools pass requests through protected mailboxes to the host broker.
+Every child has durable ownership, an invocation, approval/admission, accounting and validated
+results. Read-only children receive read-only source mounts; clone children use retained
+snapshots, while a bind-mounted source may still change through its parent writer.
+Isolated writable children receive private
+source and dependency environments; scoped artifacts are checked and integrated with preserved
+originals, conflicts and cancellation fences. Children cannot directly write the parent's tree,
+expand their authority, or silently dismiss review findings. Independent review still follows
+integration; a child result does not constitute delivery approval.
 
 ```sh
-uv run factory complete BAC-6
+uv run factory configure --project PROJECT --delegation-mode read-only \
+  --max-active-agents 8 --max-children-per-parent 2 --max-delegation-depth 1
+uv run factory configure --ticket BAC-6 --delegation-mode inherit --max-active-agents inherit
 ```
 
-Records that James merged the PR; lets `gc` reclaim the run's worktree, branch and sandbox.
-`factory status` surfaces "PR merged — ready to complete" for runs whose PR has merged but
-whose row is not yet completed.
+These are explicit configuration examples, not activation recommendations. Only depth one is
+supported. Run settings may restrict project permissions/capacity, never expand them. Writable
+mode is a separate opt-in after its prerequisites pass.
 
-### `accept` — clear a review escalation
+## Concurrency and source isolation
 
-```sh
-uv run factory accept BAC-6
-uv run factory accept BAC-6 --note "assertion weakened intentionally; see thread"
-```
+Project run slots and agent slots are separate limits. Atomic admission coordinates CLI and
+daemon processes; agent accounting includes parents, children, reviewers and certification.
+The console shows inherited/explicit limits, active work, queues and waiting reasons. Lowering
+limits drains admitted work without killing it. Extremely restrictive changes can require an
+operator to drain/suspend parents or restore capacity before queued children progress.
 
-Clears a §15.3 escalation (a test-weakening finding that routed the run to `awaiting_human`
-for a human decision) and lets the interrupted review run. The note is carried into the PR
-body's cleared-escalations section.
+Per-run isolation separates worktrees, writable dependencies, temporary files, databases and
+ports. Clone layouts keep Linux dependencies in the VM. Shared Git maintenance/integration is
+serialized, and diverged branches require verification against the updated integration base.
+Use retained isolation evidence before raising concurrency; a larger configured number does
+not itself prove safe execution.
 
-If the escalation is rejected instead, preserve the existing worktree and start a fresh
-implementation attempt. The continuation names the escalation and tells the new attempt to
-preserve or strengthen the existing test guarantees:
+Clone snapshots come from the actual VM, preserving commits, index, dirty and untracked source;
+the host checkout is not a fallback authority. Supported relative aliases are retained, including
+the stacks' `.claude` aliases. External, cyclic or noncanonical links, submodules, unmerged
+indexes and oversized snapshots refuse with work preserved. Export is bounded to 100,000 files
+and 64 MiB serialized data. Existing clones without protected mailboxes follow an explicit
+preservation/drain transition rather than being silently rebuilt.
 
-```sh
-uv run factory resume BAC-6 --from implementing
-```
+## Telemetry and costs
 
-### `suspend` / `resume` — park and resume a run
+Current context, cumulative usage and estimated spend are separate measurements. The console
+shows intermediate context occupancy and freshness; absent/stale measurements are labeled.
+Cumulative billed tokens are never used as context occupancy. Context policy warns at 70% and
+requests safe-boundary compaction at 80%, subject to earlier runtime compaction. Changed authority
+and repeated failures require fresh handoffs, not just compaction.
 
-```sh
-uv run factory suspend BAC-6             # stop the sandbox; keep worktree, branch, session
-uv run factory resume BAC-6              # resume into the state it left
-uv run factory resume BAC-6 --from planning     # rewind to a fresh plan without resetting the worktree
-uv run factory resume BAC-6 --authorise         # re-authorise spend for a `failed` run (§16.4)
-```
+Costs are **API-equivalent estimated USD**, not Codex account charges. Dated pricing accounts
+for supported cache, output, long-context and service-tier details; every model invocation is
+tracked, including failed attempts, review, diagnosis, certification and children. Replayed
+events reconcile idempotently. Missing usage or pricing remains visibly incomplete, with known
+cost retained as a lower bound. Historical usage is estimated only where evidence supports it.
+Budgets are checked before subsequent attempts, not by killing a writer midway through a change.
+The checked-in routing currently declares a $50 run ceiling and $30 warning; inspect effective
+configuration rather than assuming those defaults govern every run.
 
-Resume restarts the Codex session **by id** (read from the event stream; never `--last`), so
-no work is lost and no Linear comment is repeated. `--from` rewinds to a specific state
-(`implementing`, `planning`, `verifying`, `reviewing`); `--authorise` is the human edge that
-moves `failed → resumable`.
+## Commands and observation
 
-### `gc` — reclaim what finished runs left behind
+All commands below use `uv run factory`:
 
-```sh
-uv run factory gc
-uv run factory gc --dry-run              # name everything it would touch, touch none
-```
+| Command | Purpose |
+| --- | --- |
+| `run BAC-6 [--check] [--plan] [--full-review] [--no-follow]` | Check or drive one approved ticket; optional planning/review controls |
+| `tick --once [--verbose] [--no-claim]` | Reap, recover and advance runs, then claim eligible work; `--no-claim` still advances existing work |
+| `daemon [--interval 30]` | Repeat ticks; the supplied launchd writer instead schedules `tick --once` |
+| `status [BAC-6] [--all] [--evidence]` | States, liveness and retained evidence |
+| `logs BAC-6 --follow` | Follow a run's event stream |
+| `runtimes` | Join sandbox inventory to factory runs |
+| `config models` | Inspect validated routing |
+| `serve` | Console: policy, models, approvals, telemetry, certification, child and capacity status |
+| `suspend BAC-6` / `resume BAC-6` | Stop current work or resume preserved work |
+| `resume BAC-6 --authorise` | Explicitly re-authorize an exhausted run |
+| `accept BAC-6 --note "decision"` | Record a human review-escalation decision |
+| `cancel BAC-6 --reason "duplicate"` | Cancel owned work and retain anything unsafe to clean |
+| `complete BAC-6` | Record the human-merged PR as complete |
+| `gc --dry-run` | Preview ownership-aware cleanup |
+| `metrics --database PATH [--project PROJECT]` | Evaluate interventions, failure episodes, completion and estimated cost |
+| `migrate --database PATH` | Read-only migration preview; application is a separate approved operation |
 
-Sweep driven by the floors in `config/projects.toml` `[defaults.gc]`: worktrees after
-`worktree_days`, idle sandboxes after `sandbox_idle_hours`, removed after `sandbox_rm_days`,
-artifacts after `artifact_days`. A pushed branch, an open PR, and a sandbox the factory did
-not create are untouchable at any age.
+Eligibility requires the human-owned `ready-for-agent` label, an allowed workflow state and
+team, sufficient parent specification and acceptance criteria, no blocking labels or existing
+PR, and matching repository tracker configuration. `run --check` reports current conditions.
+Read [the runbook](docs/runbook.md) before rewinding, cancelling or cleaning a stuck run.
 
-## What the factory will not do
+## State, recovery and boundaries
 
-These hold in every phase and are enforced in code, not just stated here.
+`state/factory.db` stores runs, snapshots, effects, approvals, invocation accounting,
+certification, child requests and capacity ownership. Artifacts retain attempt outputs,
+fingerprinted evidence and handoffs; logs remain outside model context. **The database is
+not trivially rebuildable from Linear and Git.** Back it up consistently before migration
+and preserve evidence alongside it. Use the [rollout procedure](docs/runtime-certification-rollout.md)
+for writer shutdown, SQLite backup, schema preview/application and rollback without losing
+newly recorded effects.
 
-- **Merge the pull request.** No code path to `gh pr merge`, `gh pr review`, `git push
-  --force`, or a Linear transition to Done — a unit test proves it. James merges.
-- **Create a ticket.** No create-issue code path — a grep test proves it. Tickets come only
-  from the `mattpocock-skills` intake system James runs.
-- **Attach to a `codex-*` sandbox.** That is James's live `csbx` session. Factory sandboxes
-  are `factory-build-*` and `factory-review-*`, asserted by name and unit-tested.
-- **Write to `~/.codex/config.toml`.** Not to add project trust, not to install a plugin.
-  Writing to a user's agent-trust store from an automated process defeats the trust store.
-- **Edit anything under `.agents/vendor/`.** It is generated by `vendor_sync.py` and pinned
-  by sha. Edit it in `harness@v2` and re-sync.
-- **Edit `SOFTWARE-FACTORY-PLAN.md` or `docs/discovery/**`.** Protected paths; re-planning and
-  rewriting dated evidence are James's decisions.
-- **Create `~/.factory/`.** `sbx skills import` scans that path and it belongs to
-  Factory.ai's Droid. This factory lives at `~/factory`.
+Detached execution survives controller exit through an independent session holder. It does
+not survive every machine failure: reboot, logout, Docker shutdown or stopping the VM ends
+execution. Recovery reconciles the recorded process/thread and effects; uncertain ownership
+holds rather than authorizing duplicate work. Parent VM/native-thread transfer retains source,
+private dependencies and owner checks. Cancel, Suspend and GC target owned child/parent resources
+and preserve work they cannot safely remove.
 
-## How a ticket becomes eligible
+The host records external writes before calling adapters, then reconciles their outcome.
+Ambiguous acknowledgements are not permission to retry blindly. Uncertain zero-turn preparation
+also retains evidence for operator reconciliation.
 
-A ticket is picked up only when **all** of these hold. The factory verifies each and refuses
-with a named reason when any fails (`blocked: <reason>` or not eligible at all).
+James owns ticket/spec approval, the readiness label, merges, deployments, schema migrations,
+credential rotation and disputed review decisions. Factory has no merge, force-push or
+create-ticket path. It never attaches to `codex-*` sandboxes, writes the host
+`~/.codex/config.toml`, hand-edits generated vendor content or creates `~/.factory/`.
+Factory-owned sandboxes use `factory-build-*` and `factory-review-*` names. Capability checks
+inspect sbx-managed secrets; the narrowly approved project-specific delivery exception and
+its proxy boundary are documented in [AGENTS.md](AGENTS.md).
 
-1. labelled `ready-for-agent` — the signature that starts the factory and nothing else does
-2. workflow state `Todo` (not Backlog, not In Progress)
-3. team key is `BAC` or `FRO` (or a key in `config/projects.toml`)
-4. has a parent issue
-5. the parent's description is non-empty and ≥ 200 chars
-6. the ticket description has an acceptance-criteria section
-7. no `needs-info`, `needs-triage`, `ready-for-human` or `wontfix` label
-8. no open PR already references the identifier
-9. the resolved repo's `harness.config.json` `tracker.team` equals the identifier prefix
+## Configuration and development
 
-`ready-for-agent` is James's to apply and James's to remove. A ticket that reaches `Done`
-but keeps the label re-appears as `blocked: state-not-todo` every tick — remove the label (or
-unload the daemon) to quiet the board.
-
-## Configuration
-
-Everything the factory reads is in `config/`; nothing there is written by the factory.
-
-- **`config/projects.toml`** — the project registry. The single place a stack fact lives in
-  layer D. `[vault]` (path, write-allowlist, snapshot-exclude), `[defaults]`
-  (worktree/attempt/disk/concurrency floors, `deny_network`, planning thresholds, redphase,
-  gc floors, per-state timeouts), and one `[projects.<name>]` block per target repo:
-  `team`, `path`, `remote`, `base_branch` (always `v2` for the harness repos — never `main`),
-  `stack`, `template`, `build_sandbox` / `review_sandbox` names, `vault_mount`,
-  `network_allow`, `sensitive_paths`, and per-project `env`. Adding a project is adding a
-  block; the factory resolves the team from the ticket's identifier prefix.
-
-- **`config/models.toml`** — model and effort routing. `[roles.*]` (planner, builder,
-  reviewer, synthesiser, documenter), `[budget]` (`usd_per_run = 20.0`, `usd_warn_at =
-  12.0`), and `[models.<slug>]` catalogue entries. Validation refuses to start if the
-  reviewer shares the builder's model, if a role names a model that is not in the catalogue,
-  or if the budget is invalid. `ultra` is never routable for the builder (it spawns work the
-  control plane did not schedule).
-
-- **`config/prices.toml`** — token→USD. A missing model records `usd = NULL`, never `0`.
-
-- **`harness.config.json`** — this repo's own gates (`ruff check`, `ruff format --check`,
-  `mypy`, `pytest`), so the factory is verified by the same layer-A Stop hook it drives.
-
-## Sandboxes
-
-- **`factory-build-<project>`** — the writer sandbox. Workspace bind-mounted at its real
-  host path (host and VM address the same files), vault mounted `rw` (layer A's hooks write
-  to `Project Learnings/**` and `_VAULT_INDEX.md` — the only writes a run may make; anything
-  else is `blocked: vault-write-outside-allowlist`, with before/after snapshots kept).
-- **`factory-review-<project>`** — the reviewer sandbox. Workspace mounted `:ro`, no vault,
-  no skills store; `sandbox_mode="read-only"` set per invocation. The single-writer rule is
-  enforced by the mount, not by a prompt.
-- **Never `codex-*`.** That namespace is James's interactive `csbx`; the factory attaching to
-  it would put an unattended writer inside a live human session.
-- **`deny_network`** is applied to every factory sandbox at creation, including the model
-  gateway's endpoint (`mcp.linear.app`) — the compensating control for the one secret `sbx`
-  uploads unconditionally.
-- **The python-harness build sandbox is `factory-build-python-harness-2`.** The unsuffixed
-  name carries an invisible `github` credential binding (`sbx secret ls` cannot see it, `sbx
-  secret rm` cannot clear it); the suffixed name comes up clean. Do not "tidy" it back —
-  `preflight:no-secrets-in-vm` blocks every run under the old name, correctly.
-- **`frontend-harness` carries `requires_clone = true`.** A bind-mounted `node_modules` is
-  not loadable in the Linux VM and a sandbox `pnpm install` would overwrite the host's; the
-  factory clones the repo into the sandbox VM-side instead.
-
-## Crash safety and recovery
-
-Long work runs **detached inside the sandbox** and reports through the filesystem, so the
-control plane can die at any moment and nothing is lost:
-
-- `exec_detached` starts `sbx exec -d` with `start_new_session=True`, so the holder is
-  reparented to pid 1 and survives the factory exiting, crashing, or taking a Ctrl-C. **The
-  factory process is not in the run's TCB; the machine is.** A reboot, logout, Docker
-  Desktop quitting, or `sbx stop` ends the run — and the attempt directory says so.
-- The attempt directory is the protocol: `heartbeat` (liveness), `exit` (terminal, written
-  by `mv` from a temp file so its appearance is atomic), `events.jsonl`, `last-message.json`,
-  `gates.json`, `review-*.json`.
-- Every external write goes through the **effects ledger** in `store.py`, committed *before*
-  the call and reconciled rather than retried on resume — so a crash between the ledger
-  insert and the Linear comment writes the comment exactly once, never twice.
-- Recovery has three cases: an `orphaned` attempt (sandbox stopped, heartbeat stale, no
-  `exit`) resumes by session id; a `failed` agent run restarts with backoff; the attempt
-  budget exhausted goes to `failed` for James to re-authorise. A third consecutive gate/review
-  failure rewinds to `planning` and writes a fresh plan rather than re-running the same prompt.
-
-## Artifacts and state
-
-`state/`, `artifacts/` and `logs/` live under this directory and are gitignored. The database
-is rebuildable from Linear, git, and the artifacts, which is why losing it is an
-inconvenience rather than an incident.
-
-```
-state/factory.db                          SQLite, WAL — runs, transitions, effects, attempts, checks, costs
-artifacts/<TEAM-NUM>/<attempt>/            copied out of the worktree at each terminal transition
-logs/factory-<date>.jsonl                  structured control-plane log
-```
-
-Each artifact directory carries a `manifest.json` recording every file with its sha256, so a
-run is auditable without re-running anything. Planted secrets (`ghp_…`, `sk-…`,
-`-----BEGIN`) quarantine the artifact and fail the run.
-
-## Operating the factory
-
-```sh
-uv run factory doctor                       # green before you trust a run
-uv run factory status --all                 # the board
-uv run factory runtimes                     # which sandboxes are live
-uv run factory logs BAC-6 --follow          # watch a run
-launchctl load ops/com.jchen.factory.plist   # start the poller (every 60 s)
-launchctl unload ops/com.jchen.factory.plist# stop it
-uv run factory gc --dry-run                 # what cleanup would touch
-```
-
-When a run is `blocked`, read `factory status <ticket> --evidence` for the reason and the
-evidence path, fix the cause, then `factory resume <ticket>` (or unblock in Linear and let
-the next tick claim it). When a PR is bad, `factory cancel <ticket>`. When it merged,
-`factory complete <ticket>`. `docs/runbook.md` answers the three operator questions: it is
-stuck, what do I do; it opened a bad PR, what do I do; I want it to stop right now, what do
-I type.
-
-## Working in this repository
+- `config/projects.toml`: project registry, layout, environment, isolation and retention defaults.
+- `config/models.toml`: validated role routing, model catalogue and budgets.
+- `config/prices.toml`: dated estimate inputs; missing prices remain unknown.
+- Target `harness.config.json`: delivery policy, components, capabilities and gate commands.
+- Runtime database settings: explicit project/run operator controls and frozen run selections.
 
 ```sh
 uv sync
-uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+uv run pytest
 ```
 
-Those four are this repo's Definition of Done, declared in `harness.config.json` and enforced
-by the same layer-A Stop hook the factory drives. The repo has no CI — the Stop hook is the
-only enforcer — so a green local run is the bar, not a green PR check.
+These four gates are declared in this repository's `harness.config.json` and enforced by its
+layer-A workflow. Run them and satisfy any required PR checks before merging. Fake-adapter tests
+validate control-plane logic; real disposable measurements validate runtime effects. Neither
+replaces the other.
 
-Branches are `<type>/<slug>`; there is no `v2`/`main` split here, because nothing in this
-repository is generated except the vendored tree. `AGENTS.md` is canonical and `CLAUDE.md`
-is a one-line pointer to it.
+Branches are `<type>/<slug>`. Factory's release branch is `main`; shared/stack harness work
+originates on `v2` and generated content is synced. Do not edit `.agents/vendor/` directly.

@@ -1,7 +1,8 @@
 # Runtime certification and delegation implementation handoff
 
 Status: approved plan implemented; synthetic acceptance, final gates and reviews complete.
-Ready for publication and James-owned rollout. Live services/settings remain unchanged.
+Publication is in progress. James approved schema 5→6 in the subsequent session; live
+services/settings and the live database remain unchanged.
 
 ## Current completion checkpoint
 
@@ -42,7 +43,9 @@ exact model-versus-process evidence; do not erase those limitations.
    against the final merged SHA. James merges. Recheck changed pins/generation after publication.
 2. Review [the concrete rollout](runtime-certification-rollout.md) and JSON package/settings
    proposals. Copy-only schema5→6 rehearsal preserved all1,892 existing rows; this does not
-   authorize applying it live. James approves the exact migration and deployment.
+   itself authorize deployment. James has now approved schema5→6; retain the required writer
+   stop, verified backup and fresh rehearsal before applying it. Deployment/activation remains
+   a separate step after the release is published.
 3. At the approved window, refresh host/runtime identity, drain work, stop all writers and
    console, take and verify the exclusive online backup, apply reviewed migration, and restart
    using the documented checks. Certify each actual production generation before activation.
@@ -2108,3 +2111,13 @@ Final writable run2 integration, reviewer, lifecycle and cleanup all passed. Exa
 
 Final source gates and reviews pass. All remaining actions are the publication and separately
 approved production rollout listed at the top; no ticket completion work is needed.
+
+
+### Publication and schema authorization
+
+James requested publishing/merging the completed work and updating README.md for main, and
+explicitly approved the schema5→6 change. This supersedes earlier pending-schema-approval
+statements in the historical log. It does not waive stop-writers, verified online backup,
+fresh rehearsal, identity validation or controlled activation. No live migration applied yet.
+The factory-PR merge scope is being clarified while dependency publication and README work
+proceed. Keep the final factory PR open unless its merge is explicitly confirmed.
