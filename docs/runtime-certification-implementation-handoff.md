@@ -2,7 +2,7 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: parent launch wiring (see final section for verification).
+Latest checkpoint: child cancellation wiring (see final section for verification).
 The full feature plan remains incomplete and is not ready for the final feature PR.
 
 Bind-mounted builders now provision their invocation-owned mailbox VM before automatic
@@ -11,7 +11,7 @@ specifications and permissions on queued launch after restart. This is parent wi
 not actual child execution. Clone replacement and runtime-thread transfer refuse explicitly
 pending preservation support. Worker bytes remain unchanged since192cc71 and require
 fresh real six-check acceptance. The following audit is the historical898c0c5 baseline;
-the newest checkpoint at the end supersedes its parent-wiring status.
+the newer checkpoints at the end supersede its parent-wiring and cancellation status.
 
 ## Audited remaining work and final-PR readiness
 
@@ -1537,3 +1537,55 @@ Main objective: factory feature/workflow acceptance using synthetic work. No tic
 review substitution or CRUD hardening is required. This checkpoint does not complete the plan.
 
 Final gate evidence: artifacts/runtime-parent-delegation/gates-final.json PASS. All four configured gates exited0, no skips, empty tails. Mypy covers160 source/test files including this change; fake sandbox tests do not establish real runtime compatibility. Both bounded reviews clear.
+
+## Child cancellation checkpoint (after 8dd5eac)
+
+Implemented the next owned-subtree lifecycle seam:
+- Production workflow reconciliation now advances cancelled child requests through their
+  recorded launch handles. It signals only the selected sandbox/process group, with a durable
+  effects-ledger intent committed before the adapter call. No process-name or sandbox-wide kill.
+- Missing, nonpositive, oversized, nonregular or symlinked process-group evidence cannot signal.
+  Active leases remain reserved until terminal accounting; a signal is not terminal evidence.
+- Confirmed or ambiguous signal intents are never automatically repeated after restart. A lost
+  acknowledgement or a controller crash before signal requires terminal observation or explicit
+  owned recovery; this deliberately does not claim automatic resolution of ambiguous signals.
+- Terminal cancelled children publish an immutable null result through the broker after lease
+  reconciliation. Publication resumes even when a controller died after releasing the child lease.
+  Ordinary successful child output collection/schema validation remains unfinished.
+- Human-held and terminal runs fence pending child requests during reconciliation. Exited
+  mailbox parents cancel/drain children and retain their own lease until the subtree reconciles.
+  Cancellation preserves files and does not remove sandboxes or modify source worktrees.
+
+Nine new offline cases exercise production reconciliation, broker/admission, isolated SQLite
+reopen and fake sandbox signalling: selected-child/sibling isolation; repeat reconciliation;
+lost acknowledgement; missing/zero/symlink PGID refusal; Suspend/Cancel/failure pending fences;
+parent exit and crash between terminal child reconciliation and cancellation publication.
+Usage fixture retains 12 input/3 output tokens with unpriced usage explicitly incomplete.
+RED observed no signal, followed symlink signal, and stopped-run pending requests; GREEN after
+fixes. These are control-plane tests, not a real paid child or sandbox cancellation measurement.
+
+Remaining work, in priority order:
+1. Prepare and execute read-only children: freeze task/base/authority and routed model/effort,
+   private scratch with read-only source/authority, fresh exact certification, accounted child
+   binding, durable admission/queue/restart and fresh app-server thread. No production child
+   preparation/launch caller exists yet; parent tools still return pending handles.
+2. Collect schema-validated bounded successful/failed child results and expose them to parents.
+   Add owned recovery for ambiguous cancellation and prove end-to-end Suspend/Cancel cleanup.
+   Cancellation wiring above does not make the complete child lifecycle operational.
+3. Preserve clone dirty/untracked/private environment state and native thread state across parent
+   attempts. Current clone/session-transfer refusals remain; queued prepared restart is distinct.
+4. Isolated writable children and serialized integration, controls and fair shared-capacity
+   scheduling/visibility, final real six-check and parent/two-child/resource/accounting acceptance.
+5. Shared-source merge/sync, consumer checks, exact runtime packaging and reviewable rollout.
+   James owns merges, live schema 5→6 approval, deployment and activation. Full feature PR
+   readiness is still not achieved. No push or PR opened in this checkpoint.
+
+Main objective remains factory feature/workflow acceptance with synthetic work, not ticket or
+CRUD completion/hardening. No live services/settings/schema/templates, tickets or credentials
+changed; no model calls or sandbox operations occurred during this checkpoint.
+
+Final canonical verification: artifacts/runtime-child-cancellation/gates-final.json PASS.
+Ruff check exit 0 (86 ms), Ruff format exit 0 (52 ms), mypy exit 0 (288 ms), pytest exit 0
+(133475 ms). No skips; all output tails empty. Mypy covers 162 source/test files, including
+the new modules. Bounded Standards and Spec reviews clear; final parent-exit regression passes.
+These gates establish offline control-plane behavior, not real sandbox compatibility.
