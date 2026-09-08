@@ -326,3 +326,127 @@ def test_poisoned_mailbox_does_not_prevent_terminal_accounting(
         assert repeated["telemetry"] == invocation["telemetry"]
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_drained_parent_transfers_mailbox_without_replacing_private_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interrupt: bool
+) -> None:
+    from factory.runtime_jobs import RuntimeJobs
+
+    store, source = setup(tmp_path)
+    parent = store.runtime.invocation("parent")
+    assert parent is not None
+    controller = DelegationController(store, tmp_path / "home")
+    base = SandboxSpec(
+        project="synthetic",
+        role="build",
+        name="factory-build-original",
+        workspaces=(Workspace(source),),
+        clone=True,
+    )
+    spec = controller.prepare(parent["run_id"], 1, "old", source, base)
+    store.runtime.start_invocation("old", parent["run_id"], 1, "implement:old", parent["metadata"])
+    config = controller.configuration("old", spec)
+    inbox = Path(config["inbox"]) / "request.json"
+    inbox.write_text("old request evidence")
+    assert RuntimeJobs(store).schedule_agent("old", usd_limit=10, max_attempts=2)
+    with pytest.raises(ValueError, match="drain"):
+        controller.transfer("old", "new", 2, source, base)
+    assert inbox.read_text() == "old request evidence"
+    RuntimeJobs(store).finish_agent("old", status="completed")
+    if interrupt:
+        rename = Path.rename
+
+        def interrupted_rename(path: Path, target: Path) -> Path:
+            rename(path, target)
+            raise OSError("controller died after archive move")
+
+        monkeypatch.setattr(Path, "rename", interrupted_rename)
+        with pytest.raises(OSError, match="died"):
+            controller.transfer("old", "new", 2, source, base)
+        store.close()
+        store = Store(tmp_path / "factory.db")
+        controller = DelegationController(store, tmp_path / "home")
+        intent = store.find_effect(parent["run_id"], 2, "new", "delegation-transfer", "archive")
+        assert intent is not None
+        assert intent.status == "intended"
+        monkeypatch.setattr(Path, "rename", rename)
+    transferred = controller.transfer("old", "new", 2, source, base)
+    assert transferred == spec
+    with pytest.raises(ValueError, match="successor"):
+        controller.transfer("old", "competing", 2, source, base)
+    assert not inbox.exists()
+    assert (
+        next((tmp_path / "home/state/delegation-mailboxes").rglob("request.json")).read_text()
+        == "old request evidence"
+    )
+    assert controller.prepare(parent["run_id"], 2, "new", source, base) == spec
+    store.close()
+    store = Store(tmp_path / "factory.db")
+    assert (
+        DelegationController(store, tmp_path / "home").transfer("old", "new", 2, source, base)
+        == spec
+    )
+    store.close()
+
+
+def test_late_transfer_controller_cannot_archive_successor_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fcntl
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from typing import IO
+
+    from factory.runtime_jobs import RuntimeJobs
+
+    store, source = setup(tmp_path)
+    parent = store.runtime.invocation("parent")
+    assert parent is not None
+    controller = DelegationController(store, tmp_path / "home")
+    base = SandboxSpec(
+        project="synthetic",
+        role="build",
+        name="factory-build-original",
+        workspaces=(Workspace(source),),
+    )
+    spec = controller.prepare(parent["run_id"], 1, "old", source, base)
+    store.runtime.start_invocation("old", parent["run_id"], 1, "implement:old", parent["metadata"])
+    config = controller.configuration("old", spec)
+    assert RuntimeJobs(store).schedule_agent("old", usd_limit=10, max_attempts=3)
+    RuntimeJobs(store).finish_agent("old", status="completed")
+    paused, release = threading.Event(), threading.Event()
+    flock = fcntl.flock
+    main = threading.get_ident()
+
+    def delayed_lock(file: IO[str], operation: int) -> None:
+        if threading.get_ident() != main and operation == fcntl.LOCK_EX:
+            paused.set()
+            assert release.wait(5)
+        flock(file, operation)
+
+    monkeypatch.setattr(fcntl, "flock", delayed_lock)
+
+    def other_controller() -> SandboxSpec:
+        other = Store(tmp_path / "factory.db")
+        try:
+            return DelegationController(other, tmp_path / "home").transfer(
+                "old", "new", 2, source, base
+            )
+        finally:
+            other.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(other_controller)
+        try:
+            assert paused.wait(5)
+            assert controller.transfer("old", "new", 2, source, base) == spec
+            inbox = Path(config["inbox"]) / "request.json"
+            inbox.write_text("successor live request")
+        finally:
+            release.set()
+        assert future.result(timeout=5) == spec
+    assert inbox.read_text() == "successor live request"
+    store.close()

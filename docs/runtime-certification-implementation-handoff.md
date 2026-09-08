@@ -2,7 +2,7 @@
 
 Status: implementation in progress; feature is not complete.
 
-Latest checkpoint: child cancellation wiring (see final section for verification).
+Latest checkpoint: child execution/results and retained-runtime transfer (see final section).
 The full feature plan remains incomplete and is not ready for the final feature PR.
 
 Bind-mounted builders now provision their invocation-owned mailbox VM before automatic
@@ -1589,3 +1589,112 @@ Ruff check exit 0 (86 ms), Ruff format exit 0 (52 ms), mypy exit 0 (288 ms), pyt
 (133475 ms). No skips; all output tails empty. Mypy covers 162 source/test files, including
 the new modules. Bounded Standards and Spec reviews clear; final parent-exit regression passes.
 These gates establish offline control-plane behavior, not real sandbox compatibility.
+
+## Continuation baseline after aafb933 (superseded by the checkpoint below)
+
+User scope: actual child preparation/execution/results plus clone/thread preservation now;
+keep all other remaining tasks recorded. Current tracked/untracked diff adds workflow_children,
+delegation_results, child-specific certification spec/scratch inputs, workflow observation-loop
+servicing, and a shared layer-A result schema/doc in harness-runtime-certification. Offline
+child tests cover exact certification fixtures, fresh read-only request, accounted/bound launch,
+approval, stale environment/generation, reopen/no duplicate spawn and bounded validated results.
+These are fake sandbox tests; no real child or new sandbox compatibility claim. Review fixes
+for canonical JSON expansion overflow and hidden waiting reasons have passing regressions.
+Full final gates/re-review and commits still pending for this continuation.
+
+Still to do in current scope:
+- Complete child refusal/status visibility and final review/real execution acceptance.
+- Clone/thread preservation: retain the exact original VM/private clone/runtime state across
+  drained parent invocations, validate generation and authority, and rotate mailbox ownership
+  without replaying the previous owner's inbox. Provision clone mailboxes before initial clone
+  creation. Existing clone/thread refusals are still present at this writing.
+- Cloned-source child snapshots remain refused: child-clone-snapshot-required. Build a preserved
+  host-readable read-only snapshot of the private clone before child launch; host checkout must
+  never silently substitute for VM-local commits/dirty files.
+Other unchanged remaining tasks: writable children/integration; operator controls; fair shared
+resource acceptance; final real model/parent-child/cancellation/accounting tests; shared merge/
+consumer sync and exact runtime packaging; reviewable migration/rollout. James owns merges,
+live schema 5→6 approval and deployment. Live services/settings remain unchanged.
+
+
+## Child execution/results and retained-runtime transfer checkpoint
+
+Implemented in the continuation after aafb933:
+- workflow_children.advance runs from the common driver observation path while a parent is
+  active. It services/reconciles mailboxes, authorizes owned pending requests, and provisions
+  per-child scratch plus read-only project/authority mounts. No static MCP or shared skills.
+- Each bind-layout child waits for its own exact automatic certificate using the production
+  certification runner. Its fresh read-only app-server request, source-owned instructions/schema,
+  model/effort/preset, parent link, evidence paths and launch script are frozen/accounted before
+  common approval/resource/budget admission. Child opinions never enter independent review.
+- Queued launch revalidates generation, environment, authority and base. A durable existing paid
+  intent never respawns. Child waiting/refusal reasons now travel through owned status handles.
+- Host result collection uses the recorded path/schema, bounded no-follow file reads and bounded
+  canonical JSON. Valid output is published only after terminal accounting; invalid/missing/
+  oversized/symlinked output yields a failed null result, rather than poisoning observation.
+- Parent transfer retains the SAME VM, private clone/environment and native runtime state. It
+  requires drained predecessor/children, exact original generation/spec/authority, and a matching
+  recorded thread for resume. Requested thread identity (including fresh=None) is immutable on
+  every replay. It does not export a Codex home or credentials to another VM.
+- Clone mailboxes are provisioned before initial clone creation. Old clones created without the
+  required mailbox still refuse replacement; no silent conversion or loss of private work.
+- Mailbox transfer has a dedicated committed intent, archived old request/response evidence,
+  single-successor ownership and a host lock across archive/recheck/publication. Interrupted
+  archiving resumes; a delayed controller cannot archive a successor's live request.
+
+Review findings resolved: canonical JSON expansion overflow; hidden child waiting reasons;
+thread identity changes on preparation replay; archive operations before committed intent;
+concurrent archive/controller race. Focused tests cover the failing behaviors and fixes.
+Factory's four gates and shared scripts/check.py results are recorded below when final.
+Shared instructions/result schema are authored in harness-runtime-certification under
+plugins/harness; only a disposable test fixture copy exists in factory. No vendor hand edits.
+
+Real zero-model acceptance:
+- Command: uv run python artifacts/runtime-child-execution/clone-preservation.py
+- Evidence: artifacts/runtime-child-execution/clone-acceptance-2/result.json, PASS.
+- Sandbox factory-build-delegation-00cf7c05c32499f878a14e21; generation
+  60da0dc1-62af-4669-83e8-7ae3985ceb97 preserved across production controller transfer/ensure.
+- Private commit 0a928d626ae1ca4de47623c61430df4e3918868c, VM-only untracked work and writable
+  environment marker preserved; host checkout unchanged. Owned VM stopped/removed; absence
+  verified. No paid calls. This proves filesystem/clone retention, NOT native thread resume.
+- First experiment stopped at an acceptance-script AttributeError (Completed.returncode was
+  incorrectly named exit_code). Its VM was also removed/absence verified; retained result in
+  clone-acceptance/result.json is NOT a pass. Fixed script reran in a separate fresh directory/VM.
+
+Exact remaining tasks — keep these open:
+1. Real final-source six-check certification plus actual parent/child app-server execution,
+   result transport, accounting replay, approvals/caps, overlap, cancellation and restart.
+   Current child execution tests use fake sandbox execution and fixture certificates.
+2. Real retained native thread/resume measurement after predecessor termination/transfer,
+   including old dynamic-tool registration and resumed usage baselines. Current thread identity
+   checks are offline; the zero-model clone measurement cannot establish Codex resume behavior.
+3. Clone-source children: child-clone-snapshot-required still refuses them. Produce a coherent
+   preserved snapshot from VM-local commits AND dirty/untracked data for read-only children;
+   the stale host checkout must never substitute. Existing clones without mailboxes still need
+   an explicit preservation/migration path; retaining newly provisioned VMs does not migrate them.
+4. Complete runtime acceptance of subtree Suspend/Cancel, ambiguous signal recovery and owned
+   child sandbox cleanup. Current cancellation plumbing retains ambiguous leases and files.
+5. Isolated writable children/integration, remaining project/run/console controls, fair shared
+   resource scheduling/saturation acceptance (four parents plus children/reviewers/certifiers).
+6. Shared-source merge and exact consumer sync/generation checks; full runtime package/template
+   pins; full-feature final-PR criteria and reviewable migration/deployment/rollback artifacts.
+   James owns merges, live schema5→6 approval, deployment and activation. No live activation.
+
+Main objective remains factory capability acceptance with synthetic work, not ticket/CRUD
+completion or hardening. No live services/settings/schema/templates, tickets or credentials
+changed. No model calls this turn. The full approved plan is still incomplete.
+
+Final verification for this checkpoint:
+- Factory: artifacts/runtime-child-execution/gates-final.json PASS. Ruff check exit0/70ms,
+  Ruff format exit0/41ms, mypy exit0/221ms, pytest exit0/146805ms. No skipped gates; all output
+  tails empty. Mypy covers165 source/test files, including the new child execution/collection.
+- Shared harness: python3 scripts/check.py exit0, all checks passed (29 own tests,149 shared
+  hook tests, composition, vendor freshness, generation, submodule/config/scaffold checks).
+  Factory result-schema fixture is byte-identical to shared source. Harness commit1213b16;
+  merge and consumer sync are still pending, not implied by local checks.
+- Both bounded review axes clear after transfer-lock and immutable-thread replay fixes.
+  The two-controller regression pauses before lock acquisition, lets the other controller
+  publish successor ownership and write a live request, then proves the delayed caller leaves
+  that request intact. The interrupted-rename regression proves intent is committed/recoverable.
+- Tracked implementation is ready for its checkpoint commit, not the full-feature final PR.
+  User scope remains unfinished as enumerated above. No push, merge, migration or deployment.

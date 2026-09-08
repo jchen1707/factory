@@ -76,18 +76,7 @@ def start(
     from factory.agent.selection import select
     from factory.workflow_delegation import prepare_parent
 
-    if (
-        resume_session is not None
-        and ctx.store.runtime.effective(ctx.project.name, ctx.run.id).get(
-            "delegation_mode", "disabled"
-        )
-        != "disabled"
-    ):
-        raise Blocked(
-            "delegation-session-transfer-required",
-            "Retain the previous runtime thread before moving recovery to a new mailbox sandbox",
-        )
-    prepare_parent(ctx, attempt)
+    prepare_parent(ctx, attempt, resume_session=resume_session)
     select(ctx)
     execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree

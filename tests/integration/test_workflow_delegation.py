@@ -97,3 +97,67 @@ def test_thread_recovery_refuses_before_replacing_its_runtime(ctx: Context) -> N
     assert ctx.project.build_sandbox == original
     assert _fake(ctx).created == created
     assert ctx.store.runtime.invocations(ctx.run.id) == []
+
+
+@pytest.mark.parametrize("change", ["none", "generation", "thread", "clone"])
+def test_thread_recovery_keeps_exact_vm_and_archives_previous_mailbox(
+    ctx: Context,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from factory.runtime_jobs import RuntimeJobs
+    from factory.workflow_delegation import prepare_parent
+
+    ready(ctx)
+    generation = "retained"
+    monkeypatch.setattr(type(ctx.sandbox), "generation", lambda *_: generation, raising=False)
+    if change == "clone":
+        _fake(ctx).clone_root = ctx.home / "fake-vms"
+        (ctx.home / "fake-vms").mkdir()
+        ctx.store.update_run(ctx.run.id, worktree=None)
+        ctx.refresh()
+        ctx.project = replace(ctx.project, requires_clone=True)
+    prepare_parent(ctx, 1)
+    if change == "clone":
+        ctx.store.update_run(ctx.run.id, worktree=str(ctx.project.path))
+        ctx.refresh()
+    original = ctx.project.build_sandbox
+    identifier = accounting.key(ctx, 1, "implement")
+    ctx.store.runtime.start_invocation(
+        identifier,
+        ctx.run.id,
+        1,
+        "implement",
+        {
+            "semantic_role": "builder",
+            "policy_revision": 1,
+            "runtime_compatibility": {
+                "certification": {"identity": {"generation": "retained", "sandbox": original}}
+            },
+        },
+    )
+    ctx.store.runtime.observe(identifier, 1, {"thread_id": "thread-one"})
+    assert RuntimeJobs(ctx.store).schedule_agent(identifier, usd_limit=10, max_attempts=3)
+    RuntimeJobs(ctx.store).finish_agent(identifier, status="completed")
+    note = ctx.worktree / "dirty-note"
+    note.write_text("keep")
+    if change == "generation":
+        generation = "recreated"
+        with pytest.raises(Blocked, match="delegation-runtime-stale"):
+            prepare_parent(ctx, 2, resume_session="thread-one")
+        generation = "retained"
+    elif change == "thread":
+        with pytest.raises(Blocked, match="delegation-thread-mismatch"):
+            prepare_parent(ctx, 2, resume_session="foreign-thread")
+    private = _fake(ctx).clone_dir(original) if change == "clone" else None
+    if private:
+        (private / "private-dirty").write_text("VM-only work")
+    prepare_parent(ctx, 2, resume_session="thread-one")
+    if private:
+        assert (private / "private-dirty").read_text() == "VM-only work"
+    with pytest.raises(Blocked, match="delegation-thread-mismatch"):
+        prepare_parent(ctx, 2, resume_session="foreign-thread")
+    assert ctx.project.build_sandbox == original
+    assert note.read_text() == "keep"
+    assert len([spec for spec in _fake(ctx).created if spec.name == original]) == 1
+    assert ctx.store.runtime.settings("run", ctx.run.id)["delegation_parent"]["attempt"] == 2

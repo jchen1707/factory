@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from factory.steps import Context
 
 
-def prepare_parent(ctx: Context, attempt: int) -> None:
+def prepare_parent(ctx: Context, attempt: int, *, resume_session: str | None = None) -> None:
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     mode = settings.get("delegation_mode", "disabled")
     if mode == "disabled":
@@ -33,39 +33,106 @@ def prepare_parent(ctx: Context, attempt: int) -> None:
         or settings.get("certification_mode") != "automatic"
     ):
         raise Blocked("delegation-runtime-required", "Delegation requires automatic certification")
-    if ctx.project.requires_clone:
+    retained = ctx.store.runtime.settings("run", ctx.run.id).get("delegation_parent")
+    if resume_session is not None and retained is None:
+        raise Blocked(
+            "delegation-session-transfer-required", "No retained runtime owns this thread"
+        )
+    if ctx.project.requires_clone and retained is None and ctx.run.worktree is not None:
         raise Blocked(
             "delegation-clone-transfer-required",
             "Preserve and transfer the private clone before selecting a replacement sandbox",
+        )
+    expected_generation = settings.get("delegation_generation")
+    generation_reader = getattr(ctx.sandbox, "generation", None)
+    if expected_generation is not None and (
+        not callable(generation_reader)
+        or generation_reader(ctx.project.build_sandbox) != expected_generation
+    ):
+        raise Blocked("delegation-runtime-stale", "The retained sandbox generation is required")
+    if ctx.project.requires_clone and not callable(generation_reader):
+        raise Blocked(
+            "delegation-generation-required", "Clone preservation needs creation identity"
         )
     launch = settings.get(f"launch:{attempt}:implement", 0) + 1
     identifier = accounting.key(ctx, attempt, "implement", launch=launch)
     from factory.steps.sandbox import base_build_spec
 
     controller = DelegationController(ctx.store, ctx.home)
-    with ctx.store.runtime.transaction():
-        retained = ctx.store.runtime.settings("run", ctx.run.id).get("delegation_parent")
-        if retained != {"id": identifier, "attempt": attempt} and any(
-            lease["run_id"] == ctx.run.id
-            for lease in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
+    retained = ctx.store.runtime.settings("run", ctx.run.id).get("delegation_parent")
+    if (
+        retained is not None
+        and retained["id"] == identifier
+        and retained.get("resume_session") != resume_session
+    ):
+        raise Blocked("delegation-thread-mismatch", "Prepared thread identity is immutable")
+    if (retained is None or retained["id"] != identifier) and any(
+        lease["run_id"] == ctx.run.id
+        for lease in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
+    ):
+        raise Blocked("delegation-parent-still-active", "Reconcile the previous subtree first")
+    source = ctx.project.path if ctx.project.requires_clone else ctx.worktree
+    if retained is not None and retained["id"] != identifier:
+        previous = ctx.store.runtime.invocation(retained["id"])
+        identity = (
+            ((previous or {}).get("metadata", {}).get("runtime_compatibility") or {})
+            .get("certification", {})
+            .get("identity", {})
+        )
+        generation = getattr(ctx.sandbox, "generation", None)
+        if (
+            not callable(generation)
+            or identity.get("sandbox") != ctx.project.build_sandbox
+            or not identity.get("generation")
+            or generation(ctx.project.build_sandbox) != identity["generation"]
         ):
-            raise Blocked("delegation-parent-still-active", "Reconcile the previous subtree first")
-        spec = controller.prepare(
-            ctx.run.id, attempt, identifier, ctx.worktree, base_build_spec(ctx)
-        )
-        ctx.store.runtime.configure(
-            "run",
-            ctx.run.id,
-            {
-                "delegation_mode": mode,
-                "delegation_parent": {"id": identifier, "attempt": attempt},
-                "build_sandbox": spec.name,
+            raise Blocked("delegation-runtime-stale", "The original runtime generation is required")
+        expected_generation = identity["generation"]
+        if (
+            resume_session is not None
+            and (previous or {}).get("telemetry", {}).get("thread_id") != resume_session
+        ):
+            raise Blocked(
+                "delegation-thread-mismatch",
+                "Thread does not belong to the previous invocation",
+            )
+        try:
+            spec = controller.transfer(
+                retained["id"],
+                identifier,
+                attempt,
+                source,
+                base_build_spec(ctx),
+                resume_session=resume_session,
+            )
+        except (OSError, ValueError) as exc:
+            raise Blocked("delegation-transfer-refused", str(exc)) from exc
+    else:
+        spec = controller.prepare(ctx.run.id, attempt, identifier, source, base_build_spec(ctx))
+    ctx.store.runtime.configure(
+        "run",
+        ctx.run.id,
+        {
+            "delegation_mode": mode,
+            "delegation_parent": {
+                "id": identifier,
+                "attempt": attempt,
+                "resume_session": resume_session,
             },
-        )
+            "build_sandbox": spec.name,
+            "delegation_generation": expected_generation,
+        },
+    )
     ctx.project = replace(ctx.project, build_sandbox=spec.name)
     # Creation can be retried after a controller crash; ensure validates existing
     # specifications and subsequent certification observes the actual generation.
     ctx.sandbox.ensure(spec)
+    if ctx.project.requires_clone and expected_generation is None:
+        if not callable(generation_reader):
+            raise Blocked("delegation-generation-required", "Creation identity unavailable")
+        ctx.store.runtime.configure(
+            "run", ctx.run.id, {"delegation_generation": generation_reader(spec.name)}
+        )
 
 
 def parent_spec(ctx: Context, base: SandboxSpec) -> SandboxSpec:
@@ -75,7 +142,11 @@ def parent_spec(ctx: Context, base: SandboxSpec) -> SandboxSpec:
         return base
     try:
         return DelegationController(ctx.store, ctx.home).prepare(
-            ctx.run.id, retained["attempt"], retained["id"], ctx.worktree, base
+            ctx.run.id,
+            retained["attempt"],
+            retained["id"],
+            ctx.project.path if ctx.project.requires_clone else ctx.worktree,
+            base,
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Blocked("delegation-preparation-stale", str(exc)) from exc

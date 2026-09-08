@@ -50,10 +50,16 @@ class DelegationBroker:
         ).fetchone()
         if row is None:
             raise ValueError("unknown owned delegation request")
-        return dict(row) | {
-            "request": json.loads(row["request"]),
-            "result": json.loads(row["result"]) if row["result"] else None,
-        }
+        status = self.store.runtime.settings("run", row["run_id"]).get("child-status:" + request_id)
+        detail = {"waiting": status} if status and row["status"] in {"pending", "prepared"} else {}
+        return (
+            dict(row)
+            | detail
+            | {
+                "request": json.loads(row["request"]),
+                "result": json.loads(row["result"]) if row["result"] else None,
+            }
+        )
 
     def request(self, call_id: str, arguments: object) -> dict[str, Any]:
         if not isinstance(call_id, str) or not call_id.strip() or len(call_id) > 128:
@@ -168,6 +174,18 @@ class DelegationBroker:
             )
         return self.inspect(request_id)
 
+    def authorize_preparation(self, request_id: str) -> None:
+        """Recheck a queued request before provisioning or spending on certification."""
+        request = self.inspect(request_id)
+        if request["status"] not in {"pending", "prepared"}:
+            raise ValueError("delegation request is " + request["status"])
+        _, snapshot = self._admissible_parent()
+        if request["request"]["policy_revision"] != snapshot["revision"]:
+            raise ValueError("delegation authority is stale")
+        if request["request"]["source_root"] != str(self.source_root):
+            raise ValueError("delegation source root changed")
+        self._paths(request["request"]["task"]["paths"])
+
     def authorize_launch(self, request_id: str, child_id: str) -> None:
         """Called inside the common launch transaction, before slot/approval consumption."""
         request = self.inspect(request_id)
@@ -180,7 +198,9 @@ class DelegationBroker:
             raise ValueError("delegation source root changed")
         self._paths(request["request"]["task"]["paths"])
 
-    def publish_result(self, request_id: str, result: object) -> dict[str, Any]:
+    def publish_result(
+        self, request_id: str, result: object, *, failed: bool = False
+    ) -> dict[str, Any]:
         """Host collector publishes a bounded result after terminal accounting/reconciliation.
 
         This is not a worker tool. Child output remains untrusted builder assistance
@@ -201,7 +221,13 @@ class DelegationBroker:
             ).fetchone()
             if lease is None or lease["status"] == "active":
                 raise ValueError("child must be terminal and reconciled before publishing")
-            status = "cancelled" if request["status"] == "cancelling" else lease["status"]
+            status = (
+                "cancelled"
+                if request["status"] == "cancelling"
+                else "failed"
+                if failed
+                else lease["status"]
+            )
             if status not in {"completed", "failed", "cancelled"}:
                 raise ValueError("child requires terminal reconciliation")
             self.store.runtime.db.execute(

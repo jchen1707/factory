@@ -173,6 +173,7 @@ class DelegationMailbox:
                             "handle": record["id"],
                             "status": record["status"],
                             "result": record["result"],
+                            **({"waiting": record["waiting"]} if "waiting" in record else {}),
                         },
                         allow_nan=False,
                     ),

@@ -18,6 +18,7 @@ from factory.execution import ProjectQueued
 from factory.machine import Blocked
 
 if TYPE_CHECKING:
+    from factory.sandbox.base import SandboxSpec
     from factory.steps import Context
 
 
@@ -55,7 +56,13 @@ def configuration(path: Path, *, writable_roots: tuple[Path, ...]) -> dict[str, 
         raise Blocked("certification-configuration-invalid", str(exc)) from exc
 
 
-def service(ctx: Context, *, review: bool) -> tuple[CertificationRunner, FingerprintInputs]:
+def service(
+    ctx: Context,
+    *,
+    review: bool,
+    spec: SandboxSpec | None = None,
+    scratch: Path | None = None,
+) -> tuple[CertificationRunner, FingerprintInputs]:
     from factory.agent.certification_probes import (
         CertificationProbeDriver,
         CertificationSandboxExecution,
@@ -71,14 +78,14 @@ def service(ctx: Context, *, review: bool) -> tuple[CertificationRunner, Fingerp
             "certification-authority-required",
             "Snapshot trusted runtime wiring before automatic certification",
         )
-    scratch = (
+    scratch = scratch or (
         _review_scratch(ctx)
         if review
         else ctx.clone_mount
         if ctx.project.requires_clone
         else ctx.project.path / ".factory/certification"
     )
-    spec = _review_spec(ctx, scratch) if review else build_spec(ctx)
+    spec = spec or (_review_spec(ctx, scratch) if review else build_spec(ctx))
     writable = tuple(w.path for w in spec.workspaces if not w.readonly)
     settings = ctx.store.runtime.settings("run", ctx.run.id)
     config = configuration(Path(settings.get("certification_config", "")), writable_roots=writable)

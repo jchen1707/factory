@@ -7,6 +7,7 @@ This module does not grant launch permission or start children.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -59,7 +60,15 @@ class DelegationController:
             path = workspace.path.resolve()
             if self.root.is_relative_to(path) or path.is_relative_to(self.root):
                 raise ValueError("mailbox state must be outside all existing mounts")
-        name = hashlib.sha256(parent_id.encode()).hexdigest()
+        retained = self.store.find_effect(
+            run_id, attempt, parent_id, "delegation-mailbox", "mounts"
+        )
+        mailbox_owner = (
+            json.loads(retained.external_id or "{}").get("mailbox_owner", parent_id)
+            if retained
+            else parent_id
+        )
+        name = hashlib.sha256(mailbox_owner.encode()).hexdigest()
         directory = self.root / name
         inbox, outbox = directory / "inbox", directory / "outbox"
         spec = replace(
@@ -100,6 +109,7 @@ class DelegationController:
             for path in (self.root, directory, inbox, outbox):
                 _mkdir(path)
             record = {
+                "mailbox_owner": mailbox_owner,
                 "spec": _spec(spec),
                 "source": str(source),
                 "configuration": configuration(schema, inbox, outbox),
@@ -112,6 +122,146 @@ class DelegationController:
             self.store.intend_effect(*owner)
             self.store.confirm_effect(*owner, json.dumps(record, sort_keys=True))
         return spec
+
+    def transfer(
+        self,
+        previous_id: str,
+        parent_id: str,
+        attempt: int,
+        source: Path,
+        base: SandboxSpec,
+        *,
+        resume_session: str | None = None,
+    ) -> SandboxSpec:
+        """Serialize archive completion and ownership publication across controllers."""
+        if self.store.runtime.db.in_transaction:
+            raise ValueError("mailbox transfer cannot run inside an outer transaction")
+        record = self._record(previous_id)
+        if record is None:
+            raise ValueError("previous mailbox missing")
+        self._validate_paths(record)
+        lock = Path(record["configuration"]["inbox"]).parent / "transfer.lock"
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            try:
+                return self._transfer(
+                    previous_id, parent_id, attempt, source, base, resume_session=resume_session
+                )
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+    def _transfer(
+        self,
+        previous_id: str,
+        parent_id: str,
+        attempt: int,
+        source: Path,
+        base: SandboxSpec,
+        *,
+        resume_session: str | None = None,
+    ) -> SandboxSpec:
+        """Transfer a drained mailbox in the same VM through a committed archive intent."""
+        if self.store.runtime.db.in_transaction:
+            raise ValueError("mailbox transfer cannot run inside an outer transaction")
+        if not parent_id or parent_id == previous_id or type(attempt) is not int or attempt < 1:
+            raise ValueError("invalid transfer owner")
+        previous = self._parent(previous_id)
+        run_id = previous["run_id"]
+        owner = (run_id, attempt, parent_id, "delegation-mailbox", "mounts")
+        transfer = (run_id, attempt, parent_id, "delegation-transfer", "archive")
+        with self.store.runtime.transaction():
+            existing = self.store.find_effect(*owner)
+            if existing is not None:
+                record = json.loads(existing.external_id or "{}")
+                if (
+                    record.get("predecessor") != previous_id
+                    or record.get("resume_session") != resume_session
+                ):
+                    raise ValueError("mailbox transfer ownership changed")
+                return self.prepare(run_id, attempt, parent_id, source, base)
+            for binding in self.store.effects(run_id):
+                if (
+                    binding.system == "delegation-transfer"
+                    and binding.external_id
+                    and binding.step != parent_id
+                    and json.loads(binding.external_id)["record"]["predecessor"] == previous_id
+                ):
+                    raise ValueError("previous mailbox already has a successor")
+            lease = self.store.runtime.db.execute(
+                "SELECT status FROM agent_leases WHERE invocation_id=?", (previous_id,)
+            ).fetchone()
+            if (
+                lease is None
+                or lease["status"] == "active"
+                or self.store.runtime.db.execute(
+                    "SELECT 1 FROM delegation_requests WHERE parent_id=? "
+                    "AND status NOT IN ('completed','failed','cancelled')",
+                    (previous_id,),
+                ).fetchone()
+            ):
+                raise ValueError("drain the previous parent and children before transfer")
+            record = self._record(previous_id)
+            if record is None:
+                raise ValueError("previous mailbox missing")
+            self._validate_paths(record)
+            if self.store.find_effect(
+                run_id, previous["attempt"], previous_id, "delegation-mailbox", "failure"
+            ):
+                raise ValueError("failed mailbox cannot transfer")
+            snapshot = self.store.runtime.policy(run_id)
+            if snapshot is None or snapshot["revision"] != record["policy_revision"]:
+                raise ValueError("mailbox authority changed")
+            config = record["configuration"]
+            spec = replace(
+                base,
+                name=record["spec"]["name"],
+                workspaces=(
+                    *base.workspaces,
+                    Workspace(Path(config["inbox"])),
+                    Workspace(Path(config["outbox"]), readonly=True),
+                ),
+            )
+            if _spec(spec) != record["spec"] or str(source.resolve()) != record["source"]:
+                raise ValueError("mailbox transfer specification changed")
+            if self.store.runtime.invocation(parent_id) is not None:
+                raise ValueError("transfer must precede invocation accounting")
+            record = dict(record) | {
+                "predecessor": previous_id,
+                "resume_session": resume_session,
+                "mailbox_owner": record.get("mailbox_owner", previous_id),
+            }
+            archive = Path(config["inbox"]).parent / (
+                "archive-" + hashlib.sha256(previous_id.encode()).hexdigest()
+            )
+            contract = json.dumps({"record": record, "archive": str(archive)}, sort_keys=True)
+            intended = self.store.find_effect(*transfer)
+            if intended is not None:
+                if intended.external_id != contract:
+                    raise ValueError("mailbox transfer intent is immutable")
+            else:
+                self.store.intend_effect(*transfer)
+                self.store.runtime.db.execute(
+                    "UPDATE effects SET external_id=? WHERE run_id=? AND attempt=? AND step=? "
+                    "AND system='delegation-transfer' AND key='archive'",
+                    (contract, run_id, attempt, parent_id),
+                )
+        # No database transaction spans filesystem effects. Each move is recoverable
+        # from its unique archive destination; ambiguous duplicate files are preserved.
+        _mkdir(archive)
+        for directory, filename in (("inbox", "request.json"), ("outbox", "response.json")):
+            old = Path(config[directory]) / filename
+            saved = archive / filename
+            if old.exists() or old.is_symlink():
+                if saved.exists() or saved.is_symlink():
+                    raise ValueError("mailbox archive requires reconciliation")
+                old.rename(saved)
+        with self.store.runtime.transaction():
+            if self.store.find_effect(*owner) is None:
+                self.store.intend_effect(*owner)
+                self.store.confirm_effect(*owner, json.dumps(record, sort_keys=True))
+            self.store.confirm_effect(*transfer, contract)
+            return self.prepare(run_id, attempt, parent_id, source, base)
 
     def configuration(self, parent_id: str, spec: SandboxSpec) -> dict[str, Any]:
         """Read retained registration for the exact spec; not a compatibility attestation."""

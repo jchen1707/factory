@@ -112,6 +112,9 @@ def step(ctx: Context) -> Result:
         return Result(Outcome.NEEDS_HUMAN, f"{before} is held for a human")
 
     try:
+        from factory.workflow_children import advance as advance_children
+
+        advance_children(ctx)
         result = _perform(ctx, action, before)
     except AgentApprovalRequired as exc:
         return Result(Outcome.NEEDS_HUMAN, f"agent attempt waiting: {exc}", "approval-required")

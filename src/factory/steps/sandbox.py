@@ -27,6 +27,10 @@ _BLOCKING_EXIT = 2
 
 
 def run(ctx: Context) -> None:
+    if ctx.project.requires_clone:
+        from factory.workflow_delegation import prepare_parent
+
+        prepare_parent(ctx, ctx.run.attempt + 1)
     spec = build_spec(ctx)
 
     advance(ctx, State.SANDBOX_CREATING)
