@@ -169,3 +169,20 @@ def test_board_attention_does_not_invent_missing_reason(ctx: Context) -> None:
     assert 'class="chip warn">Awaiting human</span>' in attention[1]
     assert "No reason recorded." in attention[1]
     assert "Inspect run →" in attention[1]
+
+
+def test_active_invocation_preserves_known_partial_estimate(ctx: Context) -> None:
+    ctx.store.runtime.start_invocation("active-partial", ctx.run.id, 1, "implement", {})
+    ctx.store.runtime.observe(
+        "active-partial", 1, {"estimate": {"usd": None, "known_usd": 0.05, "complete": False}}
+    )
+    ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "active-partial"})
+    page = _client(ctx).get("/settings/runs/BAC-4").text
+    invocation = re.search(
+        r'<details data-key="invocation-active-partial">(.*?)</summary>', page, re.DOTALL
+    )
+    assert invocation is not None
+    assert "≥ $0.0500 · incomplete" in invocation[1]
+    assert page.index('data-key="invocation-active-partial"') < page.index(
+        'id="effective-settings"'
+    )

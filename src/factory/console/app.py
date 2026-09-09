@@ -330,7 +330,10 @@ def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
         )
         estimate = telemetry.get("estimate", {})
         usd = estimate.get("usd")
-        spend = f"${usd:.4f}" if usd is not None else "unknown"
+        if usd is None:
+            usd = estimate.get("known_usd")
+        prefix = "" if estimate.get("complete") else "≥ "
+        spend = f"{prefix}${usd:.4f}" if usd is not None else "unknown"
         if not estimate.get("complete"):
             spend += " · incomplete"
         model = telemetry.get("current_model", metadata.get("model", "unknown"))
@@ -970,7 +973,7 @@ def create_app(
         policy = st.runtime.policy(run.id)
         if policy:
             settings["delivery_profile"] = policy["profile"]
-        body = f"<h1>{_e(run.linear_id)} · Run settings</h1>"
+        body = f'<h1>Run settings</h1><p class="sub">{_e(run.linear_id)} · Effective policy and the next agent attempt.</p>'
         waiting = settings.get("waiting_invocation") or ""
         approved = st.runtime.settings("run", run.id).get("approved_invocation")
         requires_approval = (
@@ -992,6 +995,28 @@ def create_app(
             body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><input type="hidden" name="invocation" value="{_e(waiting)}"><button>Approve next attempt</button></form>'
         elif not waiting:
             body += '<p class="muted">An approval action appears here when an invocation needs your decision.</p>'
+        body += "</section>"
+        invocations = st.runtime.invocations(run.id)
+        observed = operator_controls.status(st, run.project, run.id)
+        current_ids = {
+            agent["invocation_id"] for agent in observed["agents"] if agent["status"] == "active"
+        }
+        if waiting:
+            current_ids.add(waiting)
+        current = [item for item in invocations if item["id"] in current_ids]
+        history = [item for item in invocations if item["id"] not in current_ids]
+        body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p class="muted">API-equivalent estimated USD, not account charges.</p>'
+        body += "<h3>Active and waiting</h3>" + (
+            _invocation_cards(current)
+            if current
+            else "<p>No active or waiting invocation evidence recorded.</p>"
+        )
+        if history:
+            body += (
+                f'<details data-key="invocation-history"><summary>Invocation history ({len(history)})</summary>'
+                + _invocation_cards(list(reversed(history)))
+                + "</details>"
+            )
         body += "</section>"
         body += '<section class="panel" id="effective-settings"><h2>Effective settings</h2>'
         form_settings = settings | {
@@ -1019,29 +1044,8 @@ def create_app(
             body += "<p>Replacement requires new verification and review. Run ownership and profile availability are checked when you submit.</p>"
             body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button class="secondary">Replace paused run policy</button></form>'
         body += f'<p><a href="/runs/{_e(run.linear_id)}">Run controls</a></p></section>'
-        invocations = st.runtime.invocations(run.id)
-        observed = operator_controls.status(st, run.project, run.id)
-        current_ids = {
-            agent["invocation_id"] for agent in observed["agents"] if agent["status"] == "active"
-        }
-        if waiting:
-            current_ids.add(waiting)
-        current = [item for item in invocations if item["id"] in current_ids]
-        history = [item for item in invocations if item["id"] not in current_ids]
-        body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p class="muted">API-equivalent estimated USD, not account charges.</p>'
-        body += "<h3>Active and waiting</h3>" + (
-            _invocation_cards(current)
-            if current
-            else "<p>No active or waiting invocation evidence recorded.</p>"
-        )
-        if history:
-            body += (
-                f'<details data-key="invocation-history"><summary>Invocation history ({len(history)})</summary>'
-                + _invocation_cards(list(reversed(history)))
-                + "</details>"
-            )
         body += (
-            '</section><section class="panel"><details><summary>Runtime and certification history</summary>'
+            '<section class="panel"><details><summary>Runtime and certification history</summary>'
             + _runtime_status(st, run.project, run.id)
             + "</details></section>"
         )
@@ -1254,7 +1258,11 @@ def create_app(
             head=head,
             controls=_controls(run),
             metrics='<div class="stats">'
-            + _metric("State / attempt", _e(r.state), f"Attempt {r.attempt} · {r.rung}")
+            + _metric(
+                "State / attempt",
+                f'<span class="state-value">{_e(r.state.replace("_", " ").capitalize())}</span>',
+                f"Attempt {r.attempt} · {r.rung}",
+            )
             + _metric(
                 "Current context",
                 _pct_cell(r.context_pct, r.context_reason)
@@ -1277,8 +1285,8 @@ def create_app(
                 f"<h2>Attempt {r.attempt} · {_e(r.state.replace('_', ' ').capitalize())}</h2>"
                 f'<p class="attempt-activity">{_e(r.activity or "No activity recorded")}</p>'
                 + (
-                    f'<progress class="attempt-context" value="{r.context_pct:.1f}" max="100" aria-label="Current context occupancy {r.context_pct:.0f} percent"></progress>'
-                    f'<p class="muted">{r.context_pct:.0f}% current context · observed {_duration(r.context_age_seconds)} ago. Cumulative usage includes earlier attempts.</p>'
+                    f'<progress class="attempt-context" value="{r.context_pct * 100:.1f}" max="100" aria-label="Current context occupancy {r.context_pct * 100:.0f} percent"></progress>'
+                    f'<p class="muted">{r.context_pct * 100:.0f}% current context · observed {_duration(r.context_age_seconds)} ago. Cumulative usage includes earlier attempts.</p>'
                     if r.context_pct is not None
                     else '<p class="muted">Current context occupancy is unavailable.</p>'
                 )

@@ -52,5 +52,6 @@ function revealProject() {
   node.querySelector('summary').focus({preventScroll: true});
   node.scrollIntoView({block: 'start'});
 }
-addEventListener('hashchange', revealProject); revealProject();
+addEventListener('hashchange', revealProject);
+addEventListener('pageshow', () => requestAnimationFrame(revealProject));
 </script></body></html>
