@@ -35,6 +35,71 @@ class RuntimePreparation:
     def __init__(self, store: Store, sandbox: PreparationSandbox, home: Path) -> None:
         self.store, self.sandbox, self.home = store, sandbox, home
 
+    def authorize_replacement(
+        self,
+        run_id: str,
+        key: str,
+        *,
+        receipt_sha256: str,
+        evidence_sha256: str,
+        observe: Callable[[], CertificationIdentity],
+    ) -> None:
+        """Explicit host operator action, never called by automatic recovery.
+
+        Preserve the unknown receipt; authorize a new preparation after diagnosing
+        it after a preparation-source fix. Unchanged-source retries are refused before
+        authorization. This is not confirmation that the old thread succeeded.
+        """
+        for value in (receipt_sha256, evidence_sha256):
+            if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise Blocked("runtime-preparation-resolution-invalid", "Invalid evidence digest")
+        current = asdict(observe())
+        with self.store.runtime.transaction():
+            effect = self.store.find_effect(run_id, 0, key, "runtime-preparation", "thread-start")
+            if effect is None or effect.status != "intended" or effect.external_id is None:
+                raise Blocked("runtime-preparation-resolution-invalid", "No uncertain preparation")
+            if hashlib.sha256(effect.external_id.encode()).hexdigest() != receipt_sha256:
+                raise Blocked("runtime-preparation-resolution-invalid", "Receipt changed")
+            receipt = json.loads(effect.external_id)
+            previous_source = receipt.get("owner", {}).get("preparation")
+            corrected_source = hashlib.sha256(
+                Path(runtime_preparation_worker.__file__).read_bytes()
+            ).hexdigest()
+            if previous_source == corrected_source:
+                raise Blocked(
+                    "runtime-preparation-resolution-invalid",
+                    "Replacement requires corrected preparation source",
+                )
+            before = receipt.get("before", {})
+            # Configuration may have changed during thread start; probe identity includes
+            # the corrected preparation source. Neither authorizes reuse of a paid
+            # certificate. VM, native binaries and authority must still match.
+            if {k: v for k, v in before.items() if k not in {"spec_sha256", "probe_sha256"}} != {
+                k: v for k, v in current.items() if k not in {"spec_sha256", "probe_sha256"}
+            }:
+                raise Blocked("runtime-preparation-resolution-invalid", "Identity changed")
+            resolution = json.dumps(
+                {
+                    "actor": "operator",
+                    "disposition": "replace-unacknowledged",
+                    "receipt_sha256": receipt_sha256,
+                    "evidence_sha256": evidence_sha256,
+                    "observed": current,
+                },
+                sort_keys=True,
+            )
+            old = self.store.find_effect(
+                run_id, 0, key, "runtime-preparation-resolution", "replace"
+            )
+            if old is not None:
+                if old.status != "confirmed" or old.external_id != resolution:
+                    raise Blocked("runtime-preparation-resolution-invalid", "Resolution changed")
+                return
+            self.store.intend_effect(run_id, 0, key, "runtime-preparation-resolution", "replace")
+            self.store.confirm_effect(
+                run_id, 0, key, "runtime-preparation-resolution", "replace", resolution
+            )
+
     def ensure(
         self,
         run_id: str,
@@ -44,6 +109,7 @@ class RuntimePreparation:
         env: Mapping[str, str],
         model: str,
         observe: Callable[[], CertificationIdentity],
+        trust_root: str | None = None,
     ) -> None:
         assert_factory_sandbox(spec.name)
         current = observe()
@@ -58,6 +124,7 @@ class RuntimePreparation:
             "sandbox": spec.name,
             "generation": current.generation,
             "workdir": workdir,
+            "trust_root": trust_root or workdir,
             "environment": digest(dict(env)),
             "runtime": current.runtime_sha256,
             "worker": current.worker_sha256,
@@ -81,15 +148,41 @@ class RuntimePreparation:
                 try:
                     receipt = json.loads(completed.external_id or "{}")
                 except ValueError:
-                    continue
-                if isinstance(receipt, dict) and receipt.get("owner") == owner:
                     if completed.status != "confirmed":
+                        raise Blocked(
+                            "runtime-preparation-uncertain", "Preparation receipt unreadable"
+                        ) from None
+                    continue
+                previous_owner = receipt.get("owner", {}) if isinstance(receipt, dict) else {}
+                if completed.status != "confirmed" and (
+                    not isinstance(previous_owner, dict)
+                    or not all(previous_owner.get(k) for k in ("sandbox", "generation"))
+                ):
+                    raise Blocked("runtime-preparation-uncertain", "Preparation owner unavailable")
+                same_vm = all(previous_owner.get(k) == owner[k] for k in ("sandbox", "generation"))
+                if completed.status != "confirmed" and same_vm:
+                    resolution = self.store.find_effect(
+                        run_id, 0, completed.step, "runtime-preparation-resolution", "replace"
+                    )
+                    replacement = json.loads(resolution.external_id or "{}") if resolution else {}
+                    resolved = (
+                        resolution is not None
+                        and resolution.status == "confirmed"
+                        and replacement.get("disposition") == "replace-unacknowledged"
+                        and replacement.get("receipt_sha256")
+                        == hashlib.sha256((completed.external_id or "").encode()).hexdigest()
+                    )
+                    if not resolved:
                         raise Blocked(
                             "runtime-preparation-uncertain",
                             "Reconcile the retained zero-model preparation before retrying",
                         )
-                    if receipt.get("after") == asdict(current):
-                        matched = True
+                if (
+                    previous_owner == owner
+                    and completed.status == "confirmed"
+                    and receipt.get("after") == asdict(current)
+                ):
+                    matched = True
             if matched:
                 return
             previous = self.store.find_effect(run_id, 0, key, "runtime-preparation", "thread-start")
@@ -119,6 +212,7 @@ class RuntimePreparation:
         (directory / "before.json").write_text(json.dumps(asdict(current), sort_keys=True))
         request = {
             "workdir": workdir,
+            "trust_root": trust_root or workdir,
             "model": model,
             "runtime_identity": {
                 field: getattr(current, field)
@@ -133,7 +227,8 @@ class RuntimePreparation:
         # Compose trusted source in memory; no import or helper comes from the candidate.
         code = worker.rsplit('if __name__ == "__main__":', 1)[0]
         code += "\n" + preparation.replace("from __future__ import annotations\n", "")
-        code += "\ntry:\n print(json.dumps(prepare_runtime(json.loads(sys.argv[1]), start_server)))\nexcept Exception:\n print('runtime preparation refused', file=sys.stderr)\n raise SystemExit(1)\n"
+        code += "\ntry:\n print(json.dumps(prepare_runtime(json.loads(sys.argv[1]), start_server)))\nexcept Exception as exc:\n print(json.dumps({'failure': exc.code if isinstance(exc, PreparationFailure) else 'worker-failed'}))\n raise SystemExit(1)\n"
+        failure_code = "transport-failed"
         try:
             result = self.sandbox.exec_sync(
                 spec.name,
@@ -142,8 +237,21 @@ class RuntimePreparation:
                 env=env,
                 timeout=70,
             )
+            failure_code = "worker-failed"
             if not result.ok or len(result.stdout) > 16384:
+                if len(result.stdout) <= 16384:
+                    try:
+                        refusal = json.loads(result.stdout)
+                        category = refusal.get("failure") if isinstance(refusal, dict) else None
+                        if (
+                            isinstance(category, str)
+                            and category in runtime_preparation_worker.PREPARATION_FAILURE_CODES
+                        ):
+                            failure_code = category
+                    except ValueError:
+                        pass
                 raise ValueError("runtime preparation did not complete")
+            failure_code = "evidence-invalid"
             evidence = json.loads(result.stdout)
             if not isinstance(evidence, dict) or set(evidence) != {
                 "thread_id",
@@ -168,6 +276,7 @@ class RuntimePreparation:
                     or any(c not in "0123456789abcdef" for c in value)
                 ):
                     raise ValueError("runtime configuration digest unavailable")
+            failure_code = "identity-changed"
             after = observe()
             before_identity, after_identity = asdict(current), asdict(after)
             before_identity.pop("spec_sha256")
@@ -195,8 +304,15 @@ class RuntimePreparation:
                 )
         except (OSError, ValueError, RuntimeError) as exc:
             (directory / "failure.json").write_text(
-                json.dumps({"reason": type(exc).__name__, "model_turns_admitted": 0})
+                json.dumps(
+                    {
+                        "reason": type(exc).__name__,
+                        "failure_code": failure_code,
+                        "model_turns_admitted": 0,
+                    }
+                )
             )
             raise Blocked(
-                "runtime-preparation-failed", "Retained evidence: " + str(directory)
+                "runtime-preparation-failed",
+                failure_code + "; retained evidence: " + str(directory),
             ) from exc

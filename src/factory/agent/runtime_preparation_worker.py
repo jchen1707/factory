@@ -15,6 +15,56 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+PREPARATION_FAILURE_CODES = frozenset(
+    {
+        "trust-root-invalid",
+        "project-distrusted",
+        "configuration-invalid",
+        "configuration-changed",
+        "worker-failed",
+    }
+)
+
+
+class PreparationFailure(RuntimeError):
+    """Source-owned category; never carry raw runtime diagnostics across the boundary."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in PREPARATION_FAILURE_CODES else "worker-failed"
+        super().__init__(self.code)
+
+
+def expected_configurations(
+    original: dict[str, Any], workdir: Path, trust_root: Path
+) -> list[dict[str, Any]]:
+    """Allow one trust addition at the declared repository or execution directory.
+
+    Codex uses the main repository for Git worktrees, but the execution directory
+    for a standalone clone. No other configuration change is authorized.
+    """
+    if (
+        not workdir.is_absolute()
+        or not trust_root.is_absolute()
+        or workdir.resolve() != workdir
+        or trust_root.resolve() != trust_root
+        or not workdir.is_relative_to(trust_root)
+    ):
+        raise PreparationFailure("trust-root-invalid")
+    projects = original.get("projects", {})
+    if not isinstance(projects, dict):
+        raise PreparationFailure("configuration-invalid")
+    for name, value in projects.items():
+        if not isinstance(value, dict):
+            raise PreparationFailure("configuration-invalid")
+        if workdir.is_relative_to(Path(name)) and value.get("trust_level") not in {None, "trusted"}:
+            raise PreparationFailure("project-distrusted")
+    accepted = [original]
+    for root in {str(workdir), str(trust_root)}:
+        expected = copy.deepcopy(original)
+        expected.setdefault("projects", {}).setdefault(root, {})["trust_level"] = "trusted"
+        accepted.append(expected)
+    return accepted
+
 
 def configuration(path: Path) -> tuple[str, dict[str, Any]]:
     if any(part.is_symlink() for part in (path, *path.parents)):
@@ -47,11 +97,9 @@ def prepare_runtime(
         raise ValueError("runtime preparation requires a private VM Codex home")
     path = codex_home / "config.toml"
     before, original = configuration(path)
-    expected = copy.deepcopy(original)
-    project = expected.setdefault("projects", {}).setdefault(request["workdir"], {})
-    if project.get("trust_level") not in {None, "trusted"}:
-        raise ValueError("runtime preparation cannot override explicit project distrust")
-    project["trust_level"] = "trusted"
+    expected = expected_configurations(
+        original, Path(request["workdir"]), Path(request.get("trust_root", request["workdir"]))
+    )
     process = launch(["codex", "app-server", "--stdio"], request, capture_stderr=True)
     if process.stdin is None or process.stdout is None or process.stderr is None:
         raise RuntimeError("runtime preparation pipes unavailable")
@@ -107,8 +155,8 @@ def prepare_runtime(
         if not isinstance(thread, str) or not thread or len(thread) > 128:
             raise RuntimeError("runtime preparation thread identity unavailable")
         after, observed = configuration(path)
-        if observed not in (original, expected):
-            raise RuntimeError("runtime preparation changed unexpected configuration")
+        if observed not in expected:
+            raise PreparationFailure("configuration-changed")
         return {
             "thread_id": thread,
             "configuration_before": before,
