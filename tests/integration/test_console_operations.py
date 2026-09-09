@@ -26,7 +26,7 @@ def test_blocked_work_precedes_queue_and_keeps_its_reason(ctx: Context) -> None:
     assert attention is not None
     assert "missing measured runtime certificate" in attention[1]
     assert 'href="/runs/BAC-4"' in attention[1]
-    assert page.index(attention[0]) < page.index("<th>ticket</th>")
+    assert page.index(attention[0]) < page.index("<th>Ticket</th>")
 
 
 @pytest.mark.parametrize("route", ["/runs/BAC-4", "/runs/BAC-4/timeline", "/settings/runs/BAC-4"])
@@ -108,3 +108,51 @@ def test_failed_run_remains_visible_in_attention(ctx: Context) -> None:
     assert attention is not None
     assert "failed" in attention[1]
     assert 'href="/runs/BAC-4"' in attention[1]
+
+
+def test_board_exposes_five_scan_columns_and_secondary_signals(ctx: Context) -> None:
+    _to_implementing(ctx)
+    page = _client(ctx).get("/").text
+    table = re.search(r'<table class="board-table">(.*?)</table>', page, re.DOTALL)
+    assert table is not None
+    assert re.findall(r"<th(?:\s[^>]*)?>(.*?)</th>", table[1]) == [
+        "Ticket",
+        "Project",
+        "State",
+        "Context",
+        "Estimate",
+    ]
+    for signal in ("Run signals", "Branch", "Attempt", "Heartbeat", "Activity", "Tokens"):
+        assert signal in table[1]
+
+
+def test_detail_has_current_evidence_before_history(ctx: Context) -> None:
+    page = _client(ctx).get("/runs/BAC-4").text
+    assert page.index('id="current-attempt"') < page.index('id="run-history"')
+    assert "Verification" in page
+    assert "Review" in page
+    assert "No gate report recorded" in page
+
+
+def test_project_inventory_and_configuration_sources(ctx: Context) -> None:
+    client = _client(ctx)
+    page = client.get("/projects").text
+    assert page.index('id="project-inventory"') < page.index('id="project-defaults"')
+    assert 'id="configuration-sources"' in client.get("/config").text
+
+
+@pytest.mark.parametrize("route", ["/", "/runs/BAC-4/timeline"])
+def test_estimates_keep_known_partial_cost_visible(ctx: Context, route: str) -> None:
+    _to_implementing(ctx)
+    ctx.store.runtime.start_invocation("partial-estimate", ctx.run.id, 1, "implement", {})
+    ctx.store.runtime.observe(
+        "partial-estimate", 1, {"estimate": {"usd": None, "known_usd": 0.25, "complete": False}}
+    )
+    page = _client(ctx).get(route).text
+    if route == "/":
+        cell = re.search(r'<td data-label="Estimate">(.*?)</td>', page, re.DOTALL)
+        assert cell is not None
+        page = cell[1]
+    assert "≥ $0.25" in page
+    assert "$50 ceiling" in page
+    assert "partial" in page

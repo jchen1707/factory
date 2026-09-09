@@ -1,0 +1,70 @@
+{
+  "source": "isolated sanitized fixture baseline before UI implementation",
+  "pages": 14,
+  "failures": [
+    {
+      "viewport": "desktop",
+      "primary": {
+        "headings": [
+          "ticket",
+          "project",
+          "state",
+          "attempt",
+          "in state",
+          "context",
+          "tokens in / out",
+          "spend \u00b7 API-equivalent estimated USD",
+          "activity",
+          "live"
+        ],
+        "clipped": true,
+        "rows": 10
+      }
+    },
+    {
+      "viewport": "narrow",
+      "primary": {
+        "headings": [
+          "ticket",
+          "project",
+          "state",
+          "attempt",
+          "in state",
+          "context",
+          "tokens in / out",
+          "spend \u00b7 API-equivalent estimated USD",
+          "activity",
+          "live"
+        ],
+        "clipped": true,
+        "rows": 10
+      }
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": true,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": true,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    }
+  ]
+}

@@ -1,0 +1,364 @@
+{
+  "scenario": "populated",
+  "pages": [
+    {
+      "name": "runs",
+      "route": "/",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "detail",
+      "route": "/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "timeline",
+      "route": "/runs/BAC-4/timeline",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "runtimes",
+      "route": "/runtimes",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "config",
+      "route": "/config",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "runs",
+      "route": "/",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "detail",
+      "route": "/runs/BAC-4",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "timeline",
+      "route": "/runs/BAC-4/timeline",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "runtimes",
+      "route": "/runtimes",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    },
+    {
+      "name": "config",
+      "route": "/config",
+      "viewport": "narrow",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": []
+    }
+  ],
+  "failures": [],
+  "interactions": [
+    {
+      "viewport": "desktop",
+      "name": "runs",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "primary": {
+        "headings": [
+          "Ticket",
+          "Project",
+          "State",
+          "Context",
+          "Estimate"
+        ],
+        "clipped": false,
+        "rows": 10
+      }
+    },
+    {
+      "viewport": "desktop",
+      "name": "timeline",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "navigation": [
+        "/",
+        "/projects",
+        "/runtimes",
+        "/config"
+      ]
+    },
+    {
+      "viewport": "desktop",
+      "projectAnchor": "#project-python-harness",
+      "opened": true
+    },
+    {
+      "viewport": "desktop",
+      "continuity": {
+        "open": true,
+        "focused": true
+      }
+    },
+    {
+      "viewport": "desktop",
+      "attentionFocused": true,
+      "scrollBefore": 0,
+      "timelineContinuity": {
+        "focused": true,
+        "scrollLeft": 0
+      }
+    },
+    {
+      "viewport": "desktop",
+      "tailBounds": {
+        "height": 358,
+        "scrollHeight": 776
+      },
+      "retainedScroll": 40,
+      "following": true
+    },
+    {
+      "viewport": "desktop",
+      "savedMode": "approval"
+    },
+    {
+      "stressRoute": "/projects",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/settings/runs/BAC-4",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "viewport": "narrow",
+      "name": "runs",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "narrow",
+      "primary": {
+        "headings": [
+          "Ticket",
+          "Project",
+          "State",
+          "Context",
+          "Estimate"
+        ],
+        "clipped": false,
+        "rows": 10
+      }
+    },
+    {
+      "viewport": "narrow",
+      "name": "projects",
+      "unreadableCells": []
+    },
+    {
+      "viewport": "narrow",
+      "name": "timeline",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "narrow",
+      "name": "runtimes",
+      "unreadableCells": []
+    },
+    {
+      "viewport": "narrow",
+      "navigation": [
+        "/",
+        "/projects",
+        "/runtimes",
+        "/config"
+      ]
+    },
+    {
+      "viewport": "narrow",
+      "projectAnchor": "#project-python-harness",
+      "opened": true
+    },
+    {
+      "viewport": "narrow",
+      "continuity": {
+        "open": true,
+        "focused": true
+      }
+    },
+    {
+      "viewport": "narrow",
+      "attentionFocused": true,
+      "scrollBefore": 120,
+      "timelineContinuity": {
+        "focused": true,
+        "scrollLeft": 120
+      }
+    },
+    {
+      "viewport": "narrow",
+      "tailBounds": {
+        "height": 358,
+        "scrollHeight": 776
+      },
+      "retainedScroll": 40,
+      "following": true
+    },
+    {
+      "viewport": "narrow",
+      "savedMode": "approval"
+    },
+    {
+      "stressRoute": "/projects",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/settings/runs/BAC-4",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/",
+      "width": 320,
+      "overflow": false
+    }
+  ]
+}

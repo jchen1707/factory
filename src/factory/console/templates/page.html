@@ -1,6 +1,34 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>$title — factory</title>
-<style>$style</style></head><body>
+<style>$style</style><script>
+function continuityKey(node) {
+  if (node.dataset.focusKey) return 'focus:' + node.dataset.focusKey;
+  if (node.dataset.scrollKey) return 'scroll:' + node.dataset.scrollKey;
+  if (node.tagName === 'SUMMARY' && node.parentElement.dataset.key) return 'summary:' + node.parentElement.dataset.key;
+  const scope = node.closest('[data-key]');
+  const prefix = scope ? scope.dataset.key + ':' : '';
+  if (node.tagName === 'A') return prefix + 'href:' + node.getAttribute('href');
+  if (node.id) return 'id:' + node.id;
+  return prefix + 'region:' + node.getAttribute('aria-label');
+}
+function preserveUpdate(root, markup) {
+  const states = new Map(Array.from(root.querySelectorAll('details[data-key]'), node => [node.dataset.key, node.open]));
+  const scrolls = new Map(Array.from(root.querySelectorAll('[data-scroll-key], [role="region"]'), node => [continuityKey(node), [node.scrollLeft, node.scrollTop]]));
+  const active = root.contains(document.activeElement) ? document.activeElement : null;
+  const focus = active && continuityKey(active);
+  root.innerHTML = markup;
+  root.querySelectorAll('details[data-key]').forEach(node => { if (states.has(node.dataset.key)) node.open = states.get(node.dataset.key); });
+  if (focus) {
+    const next = Array.from(root.querySelectorAll('a, summary, [tabindex], button, input, select')).find(node => continuityKey(node) === focus);
+    if (next) next.focus({preventScroll: true});
+    else { root.tabIndex = -1; root.focus({preventScroll: true}); }
+  }
+  root.querySelectorAll('[data-scroll-key], [role="region"]').forEach(node => {
+    const position = scrolls.get(continuityKey(node));
+    if (position) { node.scrollLeft = position[0]; node.scrollTop = position[1]; }
+  });
+}
+</script></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <div class="console-shell"><aside class="sidebar"><a class="brand" href="/">▦ FACTORY</a>
 <nav aria-label="Main">$navigation</nav>
@@ -8,5 +36,9 @@
 <main id="main" tabindex="-1"><div class="workspace-label">FACTORY / OPERATIONS CONSOLE</div>
 $run_navigation
 $body
+<footer class="build-marker"><span>$build_identity</span><span>Console started $started_at</span></footer>
 </main></div>
-</body></html>
+<script>
+function revealProject() { const node = document.getElementById(decodeURIComponent(location.hash.slice(1))); if (node && node.matches('details.project-default')) { node.open = true; node.scrollIntoView(); } }
+addEventListener('hashchange', revealProject); revealProject();
+</script></body></html>

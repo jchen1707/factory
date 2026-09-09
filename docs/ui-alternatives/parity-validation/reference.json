@@ -1,0 +1,89 @@
+{
+  "kind": "hand-authored matched primary fields; remaining reference content is illustrative, not a pixel baseline",
+  "pages": [
+    {
+      "name": "runs",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "projects",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "detail",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "timeline",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "settings",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "runtimes",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "config",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "runs",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "projects",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "detail",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "timeline",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "settings",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "runtimes",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "config",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    }
+  ]
+}
