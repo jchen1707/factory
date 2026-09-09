@@ -194,7 +194,18 @@ def test_operator_replacement_preserves_unknown_receipt_and_replays(tmp_path: Pa
     old = store.effects(run.id)[0]
     import hashlib
 
-    receipt = hashlib.sha256(old.external_id.encode()).hexdigest()  # type: ignore[union-attr]
+    import json
+
+    assert old.external_id is not None
+    previous = json.loads(old.external_id)
+    previous["owner"]["preparation"] = "0" * 64  # receipt from the diagnosed older source
+    store.runtime.db.execute(
+        "UPDATE effects SET external_id=? WHERE run_id=? AND step=?",
+        (json.dumps(previous), run.id, old.step),
+    )
+    old = store.effects(run.id)[0]
+    assert old.external_id is not None
+    receipt = hashlib.sha256(old.external_id.encode()).hexdigest()
     for _ in range(2):
         prep.authorize_replacement(
             run.id,
@@ -282,6 +293,37 @@ def test_replacement_rejects_changed_evidence(tmp_path: Path, changed: str) -> N
                 if changed == "generation"
                 else identity()
             ),
+        )
+    assert len(store.effects(run.id)) == 1
+    store.close()
+
+
+def test_operator_replacement_requires_corrected_source(tmp_path: Path) -> None:
+    import hashlib
+
+    store = Store(tmp_path / "state.db")
+    run = store.insert_run(linear_id="TEST-1", project="test", team="TEST")
+    sandbox = Sandbox()
+    sandbox.fail = True
+    prep = RuntimePreparation(store, sandbox, tmp_path)
+    with pytest.raises(Blocked):
+        prep.ensure(
+            run.id,
+            spec=SandboxSpec("test", "review", identity().sandbox, ()),
+            workdir="/work",
+            env={},
+            model="gpt-5.6-sol",
+            observe=identity,
+        )
+    old = store.effects(run.id)[0]
+    assert old.external_id is not None
+    with pytest.raises(Blocked, match="corrected preparation source"):
+        prep.authorize_replacement(
+            run.id,
+            old.step,
+            receipt_sha256=hashlib.sha256(old.external_id.encode()).hexdigest(),
+            evidence_sha256="a" * 64,
+            observe=identity,
         )
     assert len(store.effects(run.id)) == 1
     store.close()

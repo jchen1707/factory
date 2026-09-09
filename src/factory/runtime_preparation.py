@@ -47,7 +47,8 @@ class RuntimePreparation:
         """Explicit host operator action, never called by automatic recovery.
 
         Preserve the unknown receipt; authorize a new preparation after diagnosing
-        it. This is not confirmation that the old thread completed successfully.
+        it after a preparation-source fix. Unchanged-source retries are refused before
+        authorization. This is not confirmation that the old thread succeeded.
         """
         for value in (receipt_sha256, evidence_sha256):
             if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
@@ -60,6 +61,15 @@ class RuntimePreparation:
             if hashlib.sha256(effect.external_id.encode()).hexdigest() != receipt_sha256:
                 raise Blocked("runtime-preparation-resolution-invalid", "Receipt changed")
             receipt = json.loads(effect.external_id)
+            previous_source = receipt.get("owner", {}).get("preparation")
+            corrected_source = hashlib.sha256(
+                Path(runtime_preparation_worker.__file__).read_bytes()
+            ).hexdigest()
+            if previous_source == corrected_source:
+                raise Blocked(
+                    "runtime-preparation-resolution-invalid",
+                    "Replacement requires corrected preparation source",
+                )
             before = receipt.get("before", {})
             # Configuration may have changed during the unacknowledged thread start.
             # Every other observed identity field must still match the diagnosed VM.
@@ -137,8 +147,17 @@ class RuntimePreparation:
                 try:
                     receipt = json.loads(completed.external_id or "{}")
                 except ValueError:
+                    if completed.status != "confirmed":
+                        raise Blocked(
+                            "runtime-preparation-uncertain", "Preparation receipt unreadable"
+                        ) from None
                     continue
                 previous_owner = receipt.get("owner", {}) if isinstance(receipt, dict) else {}
+                if completed.status != "confirmed" and (
+                    not isinstance(previous_owner, dict)
+                    or not all(previous_owner.get(k) for k in ("sandbox", "generation"))
+                ):
+                    raise Blocked("runtime-preparation-uncertain", "Preparation owner unavailable")
                 same_vm = all(previous_owner.get(k) == owner[k] for k in ("sandbox", "generation"))
                 if completed.status != "confirmed" and same_vm:
                     resolution = self.store.find_effect(
