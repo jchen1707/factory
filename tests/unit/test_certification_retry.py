@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from factory.certification import Certifications
+from factory.certification import CertificationIdentity, Certifications
+from factory.certification_runner import CertificationRunner
 from factory.machine import State
 from factory.runtime_jobs import RuntimeJobs
 from factory.store import Store
@@ -199,7 +200,7 @@ def test_retry_still_requires_resume_and_exact_probe_approval(tmp_path: Path) ->
 
 @pytest.mark.parametrize("lease_loss", [None, "expired", "new-owner"])
 def test_operator_command_observes_and_queues_without_launching(
-    tmp_path: Path, monkeypatch, lease_loss
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lease_loss: str | None
 ) -> None:
     import argparse
 
@@ -218,11 +219,11 @@ def test_operator_command_observes_and_queues_without_launching(
     monkeypatch.setattr(cli, "_context_for", lambda home, reg, routes, db, client, run: db)
     observations = []
 
-    def service(ctx, **kwargs):
+    def service(ctx: Store, **kwargs: bool) -> tuple[CertificationRunner, None]:
         assert kwargs == {"review": True, "prepare_runtime": False}
         result = runner(ctx, tmp_path, sandbox, driver)
 
-        def observe():
+        def observe() -> CertificationIdentity:
             observations.append(True)
             if lease_loss == "expired":
                 ctx.runtime.db.execute("UPDATE runs SET lease_expires_at=1 WHERE id=?", (run_id,))
@@ -245,7 +246,9 @@ def test_operator_command_observes_and_queues_without_launching(
         reopened = Store(tmp_path / "state/factory.db")
         assert len(list(reopened.runtime.db.execute("SELECT * FROM runtime_certifications"))) == 1
         if lease_loss == "new-owner":
-            assert reopened.run_by_id(run_id).lease_owner == "new-owner"
+            retained_run = reopened.run_by_id(run_id)
+            assert retained_run is not None
+            assert retained_run.lease_owner == "new-owner"
         assert sandbox.handles == []
         reopened.close()
         return
@@ -256,5 +259,7 @@ def test_operator_command_observes_and_queues_without_launching(
     assert sandbox.handles == []
     assert reopened.runtime.invocations(run_id) == []
     assert len(list(reopened.runtime.db.execute("SELECT * FROM runtime_certifications"))) == 2
-    assert reopened.run_by_id(run_id).state == State.BLOCKED
+    retained_run = reopened.run_by_id(run_id)
+    assert retained_run is not None
+    assert retained_run.state == State.BLOCKED
     reopened.close()
