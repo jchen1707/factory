@@ -360,18 +360,23 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
     )
 
 
-def _board_overview(rows: list[console_views.RunRow], waiting: dict[str, str]) -> str:
+def _board_overview(
+    rows: list[console_views.RunRow], waiting: dict[str, str], pending: dict[str, str]
+) -> str:
     """Render observed holds before the queue; never infer activity or aggregate context."""
     attention = [
         r
         for r in rows
-        if r.state in {"blocked", "suspended", "awaiting_human"} or r.run_id in waiting
+        if r.state in {"blocked", "suspended", "awaiting_human", "failed"}
+        or r.run_id in waiting
+        or r.run_id in pending
     ]
     counts = [
         ("Open runs", len(rows)),
         ("Blocked", sum(r.state == "blocked" for r in rows)),
         ("Awaiting invocation approval", len(waiting)),
-        ("Queued", sum(r.state == "approved" for r in rows)),
+        ("Pending agent launch", len(pending)),
+        ("Approved, unclaimed", sum(r.state == "approved" for r in rows)),
     ]
     summary = (
         '<div class="ops-strip" aria-label="Observed run counts">'
@@ -382,16 +387,28 @@ def _board_overview(rows: list[console_views.RunRow], waiting: dict[str, str]) -
     )
     holds = ""
     for row in attention:
-        reason = waiting.get(row.run_id) or row.blocked_reason or row.state.replace("_", " ")
+        reason = (
+            row.blocked_reason
+            or waiting.get(row.run_id)
+            or pending.get(row.run_id)
+            or row.state.replace("_", " ")
+        )
+        launch_status = (
+            "Approval required"
+            if row.run_id in waiting
+            else "Pending agent launch"
+            if row.run_id in pending
+            else ""
+        )
         destination = (
             f"/settings/runs/{row.ticket}" if row.run_id in waiting else f"/runs/{row.ticket}"
         )
         holds += (
             f'<article class="attention-item"><a href="{_e(destination)}">{_e(row.ticket)}</a>'
-            f'<span class="chip warn">{_e(row.state)}</span><p>{_e(reason)}</p></article>'
+            f'<span class="chip warn">{_e(row.state)}</span><p>{_e(launch_status)}</p><p>{_e(reason)}</p></article>'
         )
     if not holds:
-        holds = '<p class="muted">No blocked, suspended or approval-waiting runs.</p>'
+        holds = '<p class="muted">No blocked, suspended, failed or pending agent runs.</p>'
     return (
         summary
         + f'<div class="operations-grid{"" if attention else " no-attention"}"><section class="panel attention" '
@@ -651,11 +668,20 @@ def create_app(
     def _board_content(reg: Registry, rt: Routing, st: Store) -> str:
         rows = console_views.runs_board(home, reg, rt, st)
         waiting = {}
+        pending = {}
         for row in rows:
-            invocation = st.runtime.effective(row.project, row.run_id).get("waiting_invocation")
-            if invocation:
+            effective = st.runtime.effective(row.project, row.run_id)
+            invocation = effective.get("waiting_invocation")
+            approved = st.runtime.settings("run", row.run_id).get("approved_invocation")
+            if (
+                invocation
+                and effective.get("mode", "automatic") == "approval"
+                and approved != invocation
+            ):
                 waiting[row.run_id] = str(invocation)
-        return _board_overview(rows, waiting)
+            elif invocation:
+                pending[row.run_id] = str(invocation)
+        return _board_overview(rows, waiting, pending)
 
     @app.get("/", response_class=HTMLResponse)
     def board() -> HTMLResponse:

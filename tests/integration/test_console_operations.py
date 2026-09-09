@@ -79,3 +79,32 @@ def test_incomplete_runtime_cost_is_labeled_as_known_lower_bound(ctx: Context) -
     page = _client(ctx).get("/settings/runs/BAC-4").text
     assert "API-equivalent estimated USD: $0.5000 · complete" in page
     assert "known lower bound" not in page
+
+
+@pytest.mark.parametrize("mode", ["automatic", "approval"])
+def test_prepared_invocation_without_outstanding_approval_is_pending(
+    ctx: Context, mode: str
+) -> None:
+    _to_implementing(ctx)
+    settings = {"mode": mode, "waiting_invocation": "prepared-builder"}
+    if mode == "approval":
+        settings["approved_invocation"] = "prepared-builder"
+    ctx.store.runtime.configure("run", ctx.run.id, settings)
+    page = _client(ctx).get("/").text
+    assert "<span>Awaiting invocation approval</span><strong>0</strong>" in page
+    assert "<span>Pending agent launch</span><strong>1</strong>" in page
+    attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
+    assert attention is not None
+    assert "Pending agent launch" in attention[1]
+    assert "Approval required" not in attention[1]
+    assert 'href="/runs/BAC-4"' in attention[1]
+
+
+def test_failed_run_remains_visible_in_attention(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.store.record_transition(ctx.run.id, from_state=None, to_state=State.FAILED, actor="fixture")
+    page = _client(ctx).get("/").text
+    attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
+    assert attention is not None
+    assert "failed" in attention[1]
+    assert 'href="/runs/BAC-4"' in attention[1]

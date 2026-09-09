@@ -39,7 +39,9 @@ def test_console_in_real_browser(
         ctx.store.runtime.start_invocation(
             "fixture-approval", ctx.run.id, 1, "implement", {"model": "fixture"}
         )
-        ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "fixture-approval"})
+        ctx.store.runtime.configure(
+            "run", ctx.run.id, {"mode": "approval", "waiting_invocation": "fixture-approval"}
+        )
     target = {
         "empty": State.CANCELLED,
         "blocked": State.BLOCKED,
