@@ -21,3 +21,7 @@ Full raw rollouts are intentionally not archived here: their system/tool schemas
 needed to establish the synthetic message-preservation assertions. Reproduction invokes
 real models and incurs normal model usage. These scripts are measurement records, not a
 replacement for factory adapters or lifecycle commands.
+
+`after-precision-fix-*` repeats the identical real session query using source `54c5c9` after
+vendor sync. Both actual callback contexts exclude the unrelated note, while the model
+returns the original worker note identity and path. The before-fix failure remains intact.

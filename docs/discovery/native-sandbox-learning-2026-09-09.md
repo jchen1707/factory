@@ -111,3 +111,9 @@ model exited 0 and returned the worker note's full session identifier
 `01a0846a-051f-7420-ad91-f59d571a49e8` and exact note path, neither present in the task prompt.
 This closes the actual native model → retain → sandbox removal → host worker → indexed note
 → later worktree session chain. Capture was disabled in this recall probe.
+
+The precision defect was repaired in layer A (`54c5c9`), then synced into the registered host
+vendor. Repeating the **identical prompt**, note, unrelated fixture and real Codex invocation
+passed: both actual hook contexts excluded the unrelated note path and marker; the model
+again returned the correct original session identifier and worker-produced note path.
+Before/after callback evidence is retained. No query tuning was used to make exclusion pass.
