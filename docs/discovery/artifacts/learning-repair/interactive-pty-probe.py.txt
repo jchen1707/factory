@@ -1,0 +1,115 @@
+"""Owned host PTY frontend probe. No real vault writes or credential output.
+
+Usage: python3 interactive-pty-probe.py.txt codex|claude clean|kill
+Raw terminal output stays in the temporary fixture. Stdout is sanitized evidence.
+"""
+import datetime
+import fcntl
+import json
+import os
+import pathlib
+import pty
+import re
+import select
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import time
+
+runtime, mode = sys.argv[1:]
+assert runtime in ("codex", "claude") and mode in ("clean", "kill")
+root = pathlib.Path(tempfile.mkdtemp(prefix="factory-interactive-learning-"))
+(root / "vault").mkdir()
+(root / ".codex").mkdir()
+(root / ".claude").mkdir()
+subprocess.run(["git", "init", "-q", str(root)], check=True)
+logger = root / "observe.py"
+logger.write_text('''import json, pathlib, sys, os
+p=json.load(sys.stdin)
+t=pathlib.Path(p.get("transcript_path", "__missing__"))
+row={k:p.get(k) for k in ("hook_event_name","session_id","transcript_path","reason")}
+row["transcript_exists_at_hook"]=t.is_file()
+row["vault_matches"]=os.environ.get("OBSIDIAN_VAULT_DIRECTORY")==str(pathlib.Path(__file__).parent/"vault")
+with pathlib.Path(__file__).with_name("hooks.jsonl").open("a") as f:f.write(json.dumps(row)+"\\n")
+''')
+hooks = {event: [{"hooks": [{"type": "command", "command": f"python3 {logger}", "timeout": 3}]}] for event in ("SessionStart", "SessionEnd")}
+(root / ".codex/hooks.json").write_text(json.dumps({"hooks": hooks}))
+(root / ".claude/settings.json").write_text(json.dumps({"hooks": hooks}))
+def toml(value):
+    if isinstance(value, dict):
+        return "{" + ",".join(json.dumps(k) + "=" + toml(v) for k, v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(map(toml, value)) + "]"
+    return json.dumps(value)
+prompt = "Respond with exactly INTERACTIVE_PROBE_OK. Do not use tools."
+if runtime == "codex":
+    cmd = ["codex", "--dangerously-bypass-hook-trust", "--enable", "hooks", "-c", "hooks=" + toml(hooks), "-c", "projects." + json.dumps(str(root.resolve())) + '.trust_level="trusted"', "--no-alt-screen", "-C", str(root), "-s", "read-only", "-a", "never", prompt]
+else:
+    cmd = ["claude", "--settings", str(root / ".claude/settings.json"), "--setting-sources", "project", "--tools", "", "--model", "sonnet", prompt]
+env = dict(os.environ, TERM="xterm-256color", OBSIDIAN_VAULT_DIRECTORY=str(root / "vault"), CLAUDE_LEARNINGS_OFF="1")
+env.pop("CLAUDECODE", None)
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(root)
+    os.execvpe(cmd[0], cmd, env)
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 160, 0, 0))
+start = time.monotonic()
+output = b""
+actions = []
+status = None
+try:
+    while time.monotonic() - start < 100:
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if ready:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            output += chunk
+            if b"\x1b[6n" in chunk:
+                os.write(fd, b"\x1b[1;1R")
+        elapsed = time.monotonic() - start
+        # Never send keys to a trust screen: even an exit command can accept trust.
+        plain = b" ".join(re.sub(rb"\x1b\[[0-9;?]*[a-zA-Z]", b" ", output).lower().split())
+        if b"trust this folder" in plain or b"trust the contents of this directory" in plain:
+            os.killpg(pid, signal.SIGKILL)
+            actions.append("trust-screen-abort")
+            break
+        if mode == "kill" and elapsed > 20:
+            os.killpg(pid, signal.SIGKILL)
+            actions.append("owned-group-sigkill")
+            break
+        if mode == "clean" and elapsed > 35 and (root / "hooks.jsonl").exists() and "exit-command" not in actions:
+            os.write(fd, b"/exit")
+            time.sleep(0.3)
+            os.write(fd, b"\r")
+            actions.append("exit-command")
+        ended, status = os.waitpid(pid, os.WNOHANG)
+        if ended:
+            break
+    else:
+        os.killpg(pid, signal.SIGKILL)
+        actions.append("timeout-sigkill")
+finally:
+    try:
+        _, status = os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
+    os.close(fd)
+time.sleep(2)
+(root / "terminal.private").write_bytes(output)
+rows = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()] if (root / "hooks.jsonl").exists() else []
+for row in rows:
+    transcript = pathlib.Path(row.pop("transcript_path") or "__missing__")
+    row["transcript_exists_after_exit"] = transcript.is_file()
+    row["transcript_bytes_after_exit"] = transcript.stat().st_size if transcript.is_file() else 0
+    row["session_id_present"] = bool(row.pop("session_id"))
+lower = output.lower()
+result = {"observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "runtime": runtime, "version": subprocess.check_output([runtime, "--version"], text=True).strip(), "mode": mode, "frontend": "automated-owned-pty-interactive", "exit_code": os.waitstatus_to_exitcode(status) if status is not None else None, "actions": actions, "hooks": rows, "oauth_expired": b"oauth token has expired" in lower, "refresh_failed": b"refresh" in lower and (b"failed" in lower or b"expired" in lower), "unexpected_argument": b"unexpected argument" in lower, "response_marker_occurrences": output.count(b"INTERACTIVE_PROBE_OK"), "temporary_vault_files": len(list((root / "vault").rglob("*"))), "fixture_root": str(root)}
+(root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+print(json.dumps(result, indent=2))
