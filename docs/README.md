@@ -83,6 +83,8 @@ because they are old. For current commands use the operator reference above.
 - [Discovery](discovery/): immutable, dated measurements, including later repair evidence.
 - [Architecture decisions](adr/): retained decisions; status is recorded within each ADR.
 - [Runtime certification artifacts](runtime-certification/): retained runtime evidence.
+- [Integrated UI and learning verification](acceptance/ui-learning-docs-2026-09-08.md):
+  final gates, browser checks, learning evidence and feature branch references.
 
 ## Learning repair evidence
 
