@@ -194,3 +194,35 @@ test('body fallback reports incomplete search budgets and refuses escaped notes'
   assert.equal(escaped.status, 'partial');
   assert.deepEqual(escaped.notes, []);
 });
+
+test('the shared Project Learnings directory does not make unrelated notes relevant', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'recall-directory-'));
+  t.after(() => rmSync(vault, { recursive: true, force: true }));
+  mkdirSync(join(vault, 'Project Learnings'));
+  writeFileSync(
+    join(vault, 'Project Learnings/_INDEX.md'),
+    [
+      '| 2026-09-09 | factory | Sandbox teardown must preserve native conversation messages because retained event streams provide incomplete history. | [[native]] |',
+      '| 2026-09-09 | kitchen-fixture | Sourdough hydration measurement | [[unrelated]] |',
+    ].join('\n'),
+  );
+  writeFileSync(join(vault, '_VAULT_INDEX.md'), '');
+  writeFileSync(
+    join(vault, 'Project Learnings/native.md'),
+    'Preserve native messages before sandbox removal.',
+  );
+  writeFileSync(
+    join(vault, 'Project Learnings/unrelated.md'),
+    'UNRELATED_SOURDOUGH_92: weigh flour before water.',
+  );
+  const result = recall({
+    cwd: vault,
+    environment: { OBSIDIAN_VAULT_DIRECTORY: vault },
+    query:
+      'What prior project lesson applies to native transcript preservation before sandbox removal? State the unique lesson identifier and cite the note path. Use only automatically supplied prior context; do not use tools.',
+  });
+  assert.deepEqual(
+    result.notes.map((note) => note.path),
+    ['Project Learnings/native.md'],
+  );
+});

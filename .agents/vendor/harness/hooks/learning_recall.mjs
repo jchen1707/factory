@@ -63,7 +63,9 @@ export function recall({ cwd = process.cwd(), query = '', environment = process.
   const words = terms(query);
   const candidates = [...rows.values()].map((row) => ({
     ...row,
-    score: words.filter((word) => terms(`${row.path} ${row.summary}`).includes(word)).length,
+    score: words.filter((word) =>
+      terms(`${row.path.replace(/^Project Learnings\//, '')} ${row.summary}`).includes(word),
+    ).length,
   }));
   if (!words.length) {
     result.index = candidates
