@@ -812,7 +812,8 @@ form.control button { margin-top:0; }
 @media (max-width: 700px) {
   .inventory-table, .inventory-table tbody, .inventory-table tr, .inventory-table td { display:block; width:100%; }
   .inventory-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-  .inventory-table tr { padding:14px; border-bottom:1px solid var(--line); }
+  .inventory-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; padding:14px; border-bottom:1px solid var(--line); }
+  .inventory-table td:first-child, .inventory-table td:last-child { grid-column:1 / -1; }
   .inventory-table td { border:0; padding:8px 0; }
   .inventory-table td::before { content:attr(data-label); display:block; color:var(--muted); font-size:11px; text-transform:uppercase; margin-bottom:4px; }
 }
@@ -886,4 +887,5 @@ button:disabled { cursor:not-allowed; opacity:0.6; }
  .model-routing td:nth-child(2)::before { content:"Model"; }
  .model-routing td:nth-child(3)::before { content:"Effort"; }
  .evidence-summary th, .evidence-summary td { padding:10px 6px; }
+ .evidence-summary th:first-child { width:22%; }
 }
