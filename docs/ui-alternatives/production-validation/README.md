@@ -80,3 +80,19 @@ screenshots blur the skip link so it does not cover the brand.
 
 The repository Definition of Done is separate from this browser measurement. Its gate
 report is recorded alongside this evidence by the implementation owner.
+
+Final repository gates on reviewed source `d17e2b4`:
+`node .agents/vendor/harness/hooks/gate_report.mjs --force --json` exited **0**, verdict
+**pass**. Ruff lint, Ruff format check, mypy and pytest all passed; the runner returned
+empty output tails. The exact [gate report](factory-gates.json) is retained here.
+Mypy's declared-path caveat means it does not check the browser JavaScript; the separate
+Chrome measurement covers that path. Pytest's fake-runtime caveat remains: no result here
+establishes real sandbox/tracker behavior. The five opt-in browser cases are skipped in
+the ordinary suite and were executed separately above. No declared gates were skipped.
+
+Independent review of `d17e2b4` closed all findings. The final regressions distinguish
+prepared automatic launches and already-approved launches from approval holds, include
+failed runs in attention, and label the approved/unclaimed census without presenting it
+as a count of all capacity queues. The browser screenshots were regenerated after those
+corrections. This change implements the selected design in the console code; it does not
+deploy a service or operate live runs.
