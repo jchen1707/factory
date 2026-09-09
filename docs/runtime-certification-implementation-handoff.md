@@ -1,5 +1,262 @@
 # Runtime certification and delegation implementation handoff
 
+## Explicit certification retry implemented; schema 7 approval needed (2026-09-08)
+
+Objective remains Factory workflow correctness on preserved FRO-12, not additional
+CRUD hardening. James asked to continue production recertification then independent
+review. Inspection found no supported retry: fingerprint-only uniqueness returned
+the same failed record forever. No production retry was attempted, and no failed
+record or fingerprint was altered to escape this blocker.
+
+Implemented PR #96: https://github.com/jchen1707/factory/pull/96
+Worktree /Users/james/factory-certification-retry, branch fix/certification-retry.
+Source commits 7a4d946, 3f30339, 5c964fb. Normal request/poll still returns failure.
+New retry-certification CLI takes exact failed job, ticket, build/review role and
+operator reason. Fresh observation/preflight and retained-launch reconciliation
+precede one audited successor with the unchanged identity. Paused owner/no active
+reservations required; concurrent/replayed requests reuse the same successor, even
+if it subsequently fails. Run lease is uniquely tokened and fenced transactionally;
+expired/stolen ownership cannot enqueue or clear a replacement controller's lease.
+This command never resumes, approves probes, launches models or changes tickets.
+
+Schema 6→7 is required: preserve all existing certification columns while replacing
+fingerprint-only uniqueness with (fingerprint,sequence), plus unique retry_of FK.
+Old rows get sequence0/retry_ofNULL. Source refuses schema6 absent explicit migration.
+James must approve this NEW migration before applying it. Earlier schema approvals
+do not cover7. AGENTS.md reserves schema application and deployment for James.
+Exact DDL/procedure: docs/certification-retry.md and factory migrate preview.
+
+Validation: all four gate_report --force --json gates PASS at source5c964fb (exit0
+ruff check, format, mypy, pytest); eight focused retry cases pass. Both independent
+reviews clear after resolving the lease expiry finding. Initial test exposed the
+missing retry operation. First full suite exposed positional schema fixture inserts;
+fixed with explicit original columns. Superseded gate runs are not final evidence.
+Mypy caveat is not applicable (no unchecked new top-level source); fake-runtime test
+caveat DOES apply: no claim of real production recertification from these tests.
+
+Private-copy rehearsal of live schema6: all3663 rows and original fields of15
+certification records preserved, all table counts equal, integrity and foreign keys
+pass. Retried actual failed64df... record on COPY only; original failure unchanged,
+same successor on request/replay, no new invocation or spend. This rehearsal used
+retained identity to test database behavior, not a fresh production attestation.
+Evidence in retry worktree artifacts/certification-retry/: before.json, result.json,
+retry-rehearsal.json, migration-preview.txt, gates.json, private rehearsal.db(mode0600).
+Live factory artifacts/runtime-certification-retry-20260908/: status.json, publish.py,
+pr-body.md. Host GitHub push/PR writes go through existing run's effects ledger.
+
+Live source remains655d48a, schema6, settings unchanged. FRO-12 run
+c8d569fcd49a4094 stays blocked certification-hook-failed, attempt2. Failed production
+job64df02bca42c45bb85bf1a50131a311b and uncertain preparation receipt remain intact.
+30 launches=30 launched invocation records;32 total rows include2 unlaunched children.
+Known API-equivalent USD3.4775616; prior7 incomplete records unchanged. Zero new model
+calls or approvals. Writer loaded, consoleHTTP200. No sandbox action this turn.
+Intermittent hook exit1/authority-read root cause STILL UNKNOWN; this fix only enables
+an explicit fresh certification attempt and does not claim to repair that cause.
+
+Next steps:
+1. James merges PR96 with CI green and approves schema6→7. No deployment/application
+   done yet. Disable and stop writer+console, verify absence, take a fresh checked
+   SQLite backup before deployment/migration. Apply exact reviewed DDL, verify rows,
+   integrity and FKs, then restore compatible services. Do not restore old DB over
+   new activity or use old code against schema7.
+2. Observe actual reviewer identity. For unchanged identity use:
+   factory retry-certification --ticket FRO-12 --role review \
+     --job 64df02bca42c45bb85bf1a50131a311b \
+     --reason 'James authorized full production recertification after diagnostic canary'
+   A naturally changed identity needs normal new certification, never artificial
+   generation/config changes. This command queues only; it does not launch.
+3. Resume same FRO-12 from reviewing through normal factory resume command. Approve
+   only exact successor probe invocations, respecting current approval/budget/capacity.
+   Preserve original failed certificate and diagnostic evidence. Stop for bounded
+   error capture if hooks fail again; no uncontrolled paid retry loop.
+4. Only after all six production compatibility assertions pass, launch independent
+   reviewers on preserved attempt2. Reconcile final accounting idempotently, retain
+   visibly incomplete usage, observe failures/interventions. No new builder, thread
+   overwrite, ticket hardening, policy weakening or diagnostic promotion.
+
+
+
+
+## Approved diagnostic canary succeeded; transient cause still unknown (2026-09-08)
+
+James approved one isolated, accounted canary with temporary hook error capture.
+Completed invocation `diagnosis:9c0ab0a5671a4297ad3942e95d4d011b:hook-canary` on the
+existing reviewer VM. FRO-12 stayed blocked, attempt2; no builder/reviewer workflow
+resume. Live source655d48a, services, project settings, tickets and schema unchanged.
+
+Preparation used freshly observed production identity matching failed job64df02...
+exactly, then a separately hashed diagnostic worker. Its session-flags hook wrappers
+preserve original command/stdin/stdout/stderr/exit and retain bounded error categories,
+module paths and hashes in the diagnostic protocol directory. Local fixture verified
+exit0/1/2 and byte-preserving forwarding. The original project hooks remained present
+and unchanged. No generated/vendor, host trust configuration or live hook file edits.
+Wrapper definitions were frozen inside this invocation's worker only; they are not
+installed for subsequent launches. Diagnostic identity/script/wrapper hashes retained
+in canary-plan.json and invocation metadata. Never publish this as certification.
+
+Launch used AgentLaunches with role diagnosis, explicit exact invocation approval,
+normal budget/attempt/capacity admission and durable launch intent. A diagnostic
+invocation is allowed on a blocked run; certification/workflow state was not changed
+to bypass its failed certificate. One paid launch only, no full nine-probe retry.
+
+Result: both original project and instrumented session-flags preToolUse events were
+BLOCKED with the correct protected-file refusal; both Stop hooks completed. Worker
+turn completed and exit0. Capture contains the expected exit2 refusal and successful
+other handlers, no exit1 failure. This does not reproduce or explain the original
+failure. No source fix is justified by current evidence. Retained Git head/status/diff
+and tracked/untracked file inventory match the original certification baseline.
+
+Accounting:30 launches=30 launched invocation records;32 total rows include the prior
+2 unlaunched children. Diagnostic usage/pricing complete at USD0.0456272. Total known
+API-equivalent estimate USD3.4775616, prior7 incomplete records unchanged. Three
+reconciliation replays identical. Failed production certification64df02... is preserved.
+Writer loaded, console HTTP200. No manual VM stop/removal; all diagnostic scripts done.
+
+Private evidence: artifacts/runtime-hook-diagnosis-20260908/ in live factory:
+canary.py, canary-plan.json, 9c0ab0a5671a4297ad3942e95d4d011b/canary-events.jsonl,
+canary-accounting-replay.json, canary-outcome.json, finish.py. VM-side capture is under
+state/review/factory-crud-verification/c8d569fcd49a4094/c8d569fcd49a4094/
+9c0ab0a5671a4297ad3942e95d4d011b/canary/hook-diagnostics/.
+No source changes, gates or reviews claimed for this diagnostic-only step.
+
+Next: an ordinary full certification retry needs a separately authorized fresh
+certification request through supported failed-job recovery, retaining the original
+failed record. First inspect that recovery contract; do not delete/rewrite failed
+records, change fingerprints artificially or count this diagnostic as six-check
+acceptance. Actual hooks now have fresh real success evidence, but the earlier
+intermittent exit1/file-read cause remains unknown. If failures recur, capture the
+same execution error context instead of weakening enforcement or repeated paid loops.
+After production certification passes, resume independent review on preserved FRO-12
+and reconcile final accounting. No remaining need to ask approval for the already
+completed diagnostic canary described above.
+
+
+
+## Hook diagnosis: zero-model tests do not reproduce failure (2026-09-08)
+
+Objective remains Factory workflow correctness on preserved FRO-12; no new builder
+or product hardening. Live source remains PR95 merge `655d48a`. No source fix,
+deployment, ticket/settings change, schema change, model turn or certification retry
+in this diagnosis. FRO-12 remains blocked, attempt2. Writer loaded; console HTTP200.
+29 launch effects still match29 launched invocation records (31 total,2 unlaunched);
+known API-equivalent estimate remains USD3.4319344, with prior7 incomplete records.
+Original failed certification/preparation records remain preserved.
+
+Measured zero-model results in the actual reviewer VM:
+- Direct hook execution from worktree and repository root:12/12 correct exit2
+  protected-path refusals.
+- Certified sealed native launcher, Codex read-only sandbox:1/1 correct refusal.
+- Same sealed launcher, exact login-shell hook command and current run environment:
+  12/12 correct refusals. Thus25 hook executions total,13 through sealed launcher
+  (correcting a progress update that called all25 sealed).
+- Fresh full observations:12/12 passed. Standalone copies of the actual Linux
+  observer:100 sequential and100 concurrent (four threads) passed, no missing files.
+  The stress wrapper subsequently reports SbxError because its diagnostic summary
+  deliberately differs from the adapter response schema; this is NOT a failed
+  individual observation. These tests did not invoke the full app-server hook
+  dispatcher, and cannot establish that the original hook failure is resolved.
+- Retained VM logs_2.sqlite confirms the canary apply_patch was rejected by the
+  read-only sandbox/approval policy after hook failure. Boundary held independently;
+  that is not successful hook enforcement and certification must stay failed.
+- Retained hook/completed events contain exit1 only. Queried runtime hook/error logs
+  did not reveal underlying stderr. Generated native protocol schema exposes hook
+  listing/notifications, no hook-test RPC. Temporary schema directory removed.
+
+Private diagnostic scripts/results:
+`/Users/james/factory/artifacts/runtime-hook-diagnosis-20260908/`:
+reproduce.py/reproduce-result.txt, root.py/root-result.txt, sealed.py, exact.py/
+exact-result.txt, observe.py/observe-result.txt, stress.py/stress-result.txt,
+stress-concurrent.py/stress-concurrent-result.txt, runtime-logs.py, schema.py,
+status.py/status.json. Scripts finished. No production instrumentation was installed;
+no manual VM stop/removal. No gate suite run because no source was changed.
+
+Next diagnostic step requires underlying stderr from the real dispatcher: prepare
+an isolated diagnostic hook wrapper (outside generated/vendor content and live
+configuration) that preserves exact argv/stdin/exit and captures bounded, redacted
+failure detail. Run one accounted, approval-controlled diagnostic canary with that
+explicitly different identity; do not publish its result as production certification.
+Capture failing command, cwd, errno/module path category, and immutable input digests,
+not environment/config/auth dumps. No retry of all nine probes before evidence.
+
+The diagnosing-bugs skill requires stopping before hypothesizing a fix when no
+red-capable reproduction can be constructed, and asking for captured evidence or
+temporary instrumentation permission. Approval for that diagnostic capture is pending.
+After a reproducible cause: scoped owning-repository correction, regression test,
+four gates and reviews; deploy with authorization, then recertify exact production
+identity and resume the same run from reviewing. Remaining original next steps below
+still apply; no assertion that either intermittent issue has been fixed.
+
+
+## PR95 deployed; reviewer certification rejected hook execution (2026-09-08)
+
+Objective: validate Factory runtime/workflow correctness using the preserved FRO-12
+workload. Do not add product hardening or start another builder to bypass blockers.
+
+PR95 was already merged when this session began. Deployed merge
+`655d48ab9f0b54609095886e983349349c1241a3`; its tree equals reviewed/tested PR head
+`95aad01`. No source edits or schema migration in this deployment. Both services
+were disabled/stopped and observed absent before a mode0600 SQLite backup; integrity
+passed before checkout changed. Writer and console restored; final console HTTP200.
+Project settings unchanged. Existing four-gate/review evidence applies to identical
+source; the suite was not rerun for this deployment-only operation.
+
+Normal `factory resume FRO-12 --from reviewing` resumed the original run
+`c8d569fcd49a4094`, attempt2. Corrected runtime preparation succeeded. The original
+uncertain preparation `0e1d6b24a19adc8a458eeb983b2b1cd54a4885cda9588b75d4ba4b533407e153`
+remains intended with its exact prior receipt digest; separate replacement resolution
+remains confirmed. No builder restart, original thread overwrite, manual needs-info
+removal, or policy/approval-mode change.
+
+Fresh reviewer certification job `64df02bca42c45bb85bf1a50131a311b` launched all nine
+probe invocations through exact approvals. Final evaluation FAILED:
+`certification-hook-failed: no observed hook refusal`. FRO-12 is now blocked at that
+reason, still attempt2. No independent reviewer launched. Do not call this six-check
+acceptance: evaluation stops at hook evidence, so later assertions were not accepted.
+
+Retained canary output is {"ok":true}, but model output is not enforcement evidence.
+Its real hook/completed events show both project and session-flags preToolUse hooks
+FAILED with exit code1, not status blocked. Stop hooks also failed with exit code1.
+The evaluator correctly refused this. The underlying hook execution error is not yet
+diagnosed; do not weaken evaluation to accept failed hooks or blindly buy another job.
+Canary native thread: `01a083aa-2792-70d0-b839-b72a5b13e897`.
+Events: `state/certifications/64df02bca42c45bb85bf1a50131a311b/canary-events.jsonl`.
+VM-side host-mounted probe artifacts:
+`state/review/factory-crud-verification/c8d569fcd49a4094/c8d569fcd49a4094/64df02bca42c45bb85bf1a50131a311b/`.
+
+A second observed issue: many fingerprint observations intermittently failed while
+subsequent attempts succeeded. Read-only diagnostic copies of the observer reported
+FileNotFoundError at file_digest/os.open (line24), with basenames cost-reviewer.md and
+MANIFEST.json. No observation check was bypassed and accepted identity did not change.
+Exact missing-path origin and relationship to hook failures remain unproven. Diagnostic
+reads stopped; no production source/configuration was modified by them. Investigate
+host/VM visibility of immutable authority files and hook dependencies without paid turns.
+
+Accounting:29 launch effects =29 launched invocation records;31 total rows include the
+same2 unlaunched child canaries. New certification has9 launches. Three accounting
+replays for this job are identical; all launched records were reconciled. Known total
+API-equivalent estimate USD3.4319344, a lower bound with7 incomplete records (prior5
+plus this job's interrupt and usage-compact). These are not Codex account charges.
+No child or reviewer application invocation launched during this session.
+
+Private deployment/observation/accounting evidence:
+`/Users/james/factory/artifacts/runtime-pr95-deploy-20260908/`:
+deploy.py, before.db, backup.json, deployment.json, recovery.jsonl,
+observation-repeated.txt, observation-filename.txt, accounting.json,
+certification-replay.json, outcome.json. Diagnostic/recovery scripts are finished.
+Writer remains enabled; console healthy; no manual VM stop/removal in this session.
+The ordinary writer retains blocked-ticket effects; no manual tracker workaround.
+
+Next:
+1. Diagnose hook exit1 from retained canary evidence and reproduce with zero-model
+   hook execution in the same sealed reviewer environment. Check trusted authority
+   and runtime dependencies; investigate the intermittent file-read failures too.
+2. Implement any evidenced scoped correction in its owning repository, test/review
+   it, and deploy only with authorization. Preserve the failed certification record.
+3. Recertify the corrected exact identity through normal admission/approval, then
+   resume this same run from reviewing. No new builder or lowered hook requirement.
+4. Validate independent reviewer launch/result and reconcile final accounting.
+
+
 ## Reviewer preparation correction and audited replacement: PR95 (2026-09-08)
 
 PR: https://github.com/jchen1707/factory/pull/95 (open, not deployed).

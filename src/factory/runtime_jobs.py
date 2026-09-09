@@ -26,6 +26,23 @@ SCHEMA = (
 )
 
 
+# Remove fingerprint-only uniqueness without rewriting any retained job fields.
+RETRY_SCHEMA = (
+    "CREATE TABLE runtime_certifications_v7 (id TEXT PRIMARY KEY, "
+    "run_id TEXT NOT NULL REFERENCES runs(id), fingerprint TEXT NOT NULL, "
+    "identity TEXT NOT NULL, status TEXT NOT NULL, owner TEXT, lease_until REAL, "
+    "evidence TEXT, failure TEXT, sequence INTEGER NOT NULL DEFAULT 0, "
+    "retry_of TEXT UNIQUE REFERENCES runtime_certifications_v7(id), "
+    "UNIQUE(fingerprint,sequence))",
+    "INSERT INTO runtime_certifications_v7 "
+    "(id,run_id,fingerprint,identity,status,owner,lease_until,evidence,failure) "
+    "SELECT id,run_id,fingerprint,identity,status,owner,lease_until,evidence,failure "
+    "FROM runtime_certifications",
+    "DROP TABLE runtime_certifications",
+    "ALTER TABLE runtime_certifications_v7 RENAME TO runtime_certifications",
+)
+
+
 class RuntimeJobs:
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -47,7 +64,8 @@ class RuntimeJobs:
         fingerprint = hashlib.sha256(payload.encode()).hexdigest()
         with self.runtime.transaction():
             row = self.runtime.db.execute(
-                "SELECT id FROM runtime_certifications WHERE fingerprint=?", (fingerprint,)
+                "SELECT id FROM runtime_certifications WHERE fingerprint=? ORDER BY sequence DESC LIMIT 1",
+                (fingerprint,),
             ).fetchone()
             job_id = row["id"] if row else uuid.uuid4().hex
             if row is None:
@@ -60,6 +78,71 @@ class RuntimeJobs:
         result = self.certification(job_id)
         if result is None:
             raise RuntimeError("certification record disappeared")
+        return result
+
+    def retry_certification(
+        self, run_id: str, job_id: str, identity: dict[str, Any], *, reason: str
+    ) -> dict[str, Any]:
+        """Explicit operator request, idempotent by failed predecessor; never launches.
+
+        Ordinary request/ensure keeps returning a failure until this operation creates
+        its successor. A repeated request for the same predecessor cannot buy another
+        attempt, even after that successor fails. Every further retry names that failure.
+        """
+        from factory.machine import Blocked
+
+        if not reason.strip() or len(reason) > 1000:
+            raise ValueError("retry requires a bounded operator reason")
+        with self.runtime.transaction():
+            previous = self.certification(job_id)
+            if previous is None or previous["run_id"] != run_id:
+                raise Blocked("certification-retry-owner", job_id)
+            if previous["identity"] != identity:
+                raise Blocked("certification-stale", job_id)
+            if previous["status"] != "failed":
+                raise Blocked("certification-retry-not-failed", job_id)
+            existing = self.runtime.db.execute(
+                "SELECT id FROM runtime_certifications WHERE retry_of=?", (job_id,)
+            ).fetchone()
+            if existing is not None:
+                result = self.certification(existing["id"])
+                if result is None:
+                    raise RuntimeError("certification retry disappeared")
+                return result
+            run = self.store.run_by_id(run_id)
+            if run is None or run.state not in {"blocked", "suspended", "awaiting_human"}:
+                raise Blocked("certification-retry-needs-paused-run", run_id)
+            if self.runtime.db.execute(
+                "SELECT 1 FROM agent_leases WHERE run_id=? AND status='active'", (run_id,)
+            ).fetchone():
+                raise Blocked("certification-retry-active-agent", run_id)
+            successor = uuid.uuid4().hex
+            self.runtime.db.execute(
+                "INSERT INTO runtime_certifications "
+                "(id,run_id,fingerprint,identity,status,sequence,retry_of) "
+                "VALUES (?,?,?,?, 'pending',?,?)",
+                (
+                    successor,
+                    run_id,
+                    previous["fingerprint"],
+                    json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False),
+                    previous["sequence"] + 1,
+                    job_id,
+                ),
+            )
+            self.runtime.audit(
+                "run",
+                run_id,
+                "certification-retry-requested",
+                {
+                    "previous": job_id,
+                    "job_id": successor,
+                    "reason": reason,
+                },
+            )
+        result = self.certification(successor)
+        if result is None:
+            raise RuntimeError("certification retry disappeared")
         return result
 
     def active_agents(self, project: str) -> list[dict[str, Any]]:

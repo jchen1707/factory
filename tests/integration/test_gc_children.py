@@ -60,7 +60,7 @@ def seed(ctx: Context, *, mode: str = "read-only") -> str:
     )
     db.execute("UPDATE effects SET at=?", (old,))
     db.execute(
-        "INSERT INTO runtime_certifications VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO runtime_certifications (id,run_id,fingerprint,identity,status,owner,lease_until,evidence,failure) VALUES (?,?,?,?,?,?,?,?,?)",
         (
             "cert",
             ctx.run.id,

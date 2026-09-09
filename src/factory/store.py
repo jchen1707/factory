@@ -23,13 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory.machine import TERMINAL, Blocked, State, can
+from factory.runtime_jobs import RETRY_SCHEMA
 from factory.runtime_jobs import SCHEMA as RUNTIME_JOBS_SCHEMA
 from factory.runtime_state import SCHEMA as RUNTIME_SCHEMA
 from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -104,6 +105,7 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     4: ("ALTER TABLE runs ADD COLUMN force_plan INTEGER NOT NULL DEFAULT 0",),
     5: RUNTIME_SCHEMA,
     6: RUNTIME_JOBS_SCHEMA,
+    7: RETRY_SCHEMA,
 }
 
 

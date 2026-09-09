@@ -16,7 +16,7 @@ def test_preview_does_not_create_a_database(
     path = tmp_path / "unused.db"
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
     assert not path.exists()
-    assert "Schema 5 -> 6" in capsys.readouterr().out
+    assert "Schema 6 -> 7" in capsys.readouterr().out
 
 
 def test_apply_refuses_unreviewed_older_migrations(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_preview_from_schema_five_includes_the_actual_six_migration(
     before = path.read_bytes()
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
     preview = capsys.readouterr().out
-    assert "Schema 5 -> 6" in preview
+    assert "Schema 5 -> 7" in preview
     assert "runtime_certifications" in preview
     assert "agent_leases" in preview
     assert "delegation_requests" in preview
