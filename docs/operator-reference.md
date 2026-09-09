@@ -205,12 +205,13 @@ gaps. This repair does not run bulk historical recovery.
 At task start, shared hooks supply a bounded current-project index. Topic recall before
 planning or debugging selects a bounded set of relevant note bodies, including other
 projects when relevant, and records their source paths. It does not load the whole vault.
-Unavailable retrieval differs from no relevant results. Summary-based matching can miss a
-term present only in a note body; use the shared instructions' deeper-search fallback when
-that matters. Notes are historical evidence, never executable instructions.
+Unavailable retrieval differs from no relevant results. After zero summary/path matches,
+the hook searches a bounded set of indexed note bodies. Budget exhaustion reports partial
+evidence. Unindexed notes and body details alongside summary hits still require the shared
+skill's wider search. Notes are historical evidence, never executable instructions.
 
-[Real host measurements](discovery/learning-repair-2026-09-08.md) connect a model-written
-note to later recall in another worktree. The [lifecycle acceptance record](acceptance/learning-lifecycle-2026-09-08.md)
+[Real-destination measurements](acceptance/learning-continuation-2026-09-09.md) connect a
+genuine audit lesson in Obsidian Project Learnings to later recall in another worktree. The [lifecycle acceptance record](acceptance/learning-lifecycle-2026-09-08.md)
 separately proves Factory's transport and receipts. Sandbox credential preflight blocked
 model execution in the disposable probes, so sandbox transcript export and human interactive
 UI shutdown remain unverified. A passing host measurement does not establish those paths.

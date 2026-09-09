@@ -247,7 +247,10 @@ flowchart TD
   V --> I
   I --> C[Relevant note bodies and source paths]
   I -->|unavailable| E[Report retrieval unavailable]
-  I -->|no summary matches| Z[No relevant results; deeper search when needed]
+  I -->|no summary matches| B[Bounded indexed body search]
+  B -->|matches| C
+  B -->|none or incomplete| Z[Report no match or partial; wider skill search]
+  C --> Q[Wider skill search for unindexed or additional evidence]
 ```
 
 </details>

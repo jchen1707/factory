@@ -24,6 +24,9 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 
 ## Historical evidence and decision records
 
+- [Learning continuation, September 9](acceptance/learning-continuation-2026-09-09.md):
+  real Obsidian capture/recall, body-only repair and remaining runtime boundaries.
+
 These retain their original content. Acceptance, discovery and dated runtime records prove
 only their named runtime, configuration and observation. Handoffs in this group may contain
 outstanding work or durable decisions; they have not been assumed complete or moved merely

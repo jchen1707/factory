@@ -1,215 +1,139 @@
 # UI, learning and documentation completion handoff
 
-Current continuation handoff, September 8, 2026. Retire this document after the remaining
-acceptance evidence is recorded and publication status is explicit. This carries forward
-the approved plan; it does not replace the factory specification.
+Current continuation handoff, September 9, 2026. The factory specification remains
+authoritative. This carries the approved work forward; do not re-plan.
 
 ## Resume here
 
-Read [AGENTS.md](../AGENTS.md), this handoff, the
-[integrated acceptance record](acceptance/ui-learning-docs-2026-09-08.md), and the
-[learning runtime measurements](discovery/learning-repair-2026-09-08.md). Inspect Git status
-and worktrees before changing anything. Implementation and local verification are done;
-the original plan's runtime acceptance is **not yet complete**.
+Read `AGENTS.md`, this handoff, the [latest acceptance](acceptance/learning-continuation-2026-09-09.md),
+the [transport audit](discovery/learning-transcript-transport-2026-09-09.md), and the
+[interactive probe record](discovery/interactive-learning-2026-09-09.md). Inspect Git status
+and worktrees first. James authorized separate worktrees and parallel agents, selected the
+**dark operations console**, and requires notes in Obsidian **Project Learnings**.
 
-James requested separate feature worktrees and parallel agents. He selected the **dark
-operations console**, so no further alternative selection is needed. He clarified that
-learning notes must land in the Obsidian Vault under **Project Learnings**. The configured
-host destination is `/Users/james/Documents/Obsidian Vault/Project Learnings`. Repository
-receipts are evidence, not a substitute destination.
-
-The integrated factory branch is `feat/ui-learning-docs` in `/Users/james/factory`.
-Before this handoff its HEAD was `f971947`. All implementation is committed locally;
-no branches were pushed, no PRs were opened, and nothing was merged or deployed.
-Previous agents completed their assignments; use the files rather than their memory.
-
-Preserve these original untracked artifacts exactly:
+The integrated branch is `feat/ui-learning-docs` at `/Users/james/factory`. All changes
+remain local; nothing was pushed, merged or deployed. Preserve the original untracked work:
 
 - `.agents/plans/feat-runtime-certification-and-delegation/`
 - `docs/runtime-frontend-acceptance-2026-09-06.md`
 - `docs/runtime-nemoclaw-acceptance-2026-09-06.md`
 
-## Completed work and evidence
+## Completed — do not repeat without a relevant change
 
-| Area | Completed | Acceptance still missing |
-| --- | --- | --- |
-| UI alternatives | All 21 fixture pages, five states, navigation/settings interactions, desktop/narrow layouts; 210 page checks and 43 axe audits | None requiring another design decision |
-| Selected production UI | Dark console across seven routes, accurate approval/pending distinctions, incomplete cost and unavailable data, keyboard/contrast/overflow checks; 70 browser checks and 22 screenshots | Deployment is a separate human-owned action |
-| Shared learning capture | Missing transcript/config outcomes, nonblocking wrappers, runtime-selected distiller, stable project identity, atomic notes/indexes, duplicate/concurrent processing protection | Actual interactive shutdown and safe sandbox runtime measurements |
-| Shared recall | Bounded startup project index, topical retrieval, cross-project selection, provenance and explicit unavailable/no-match outcomes | Body-only query fallback behavior in an actual later task |
-| Factory lifecycle | Host capture worker and receipts, recollection/retry, launch/child/recovery/cancellation integration, honest partial-event labeling | Complete sandbox transcript preservation/export and real lifecycle proof |
-| Documentation | Current README/operator guide, nine rendered workflow diagrams, classification and two superseded handoffs archived with preserved bodies | Update evidence and guidance as remaining measurements change behavior |
+- All 21 fixture UI drafts and the selected production dark console across seven routes.
+  Original browser acceptance: 210 draft page checks, 43 axe audits; production 70 page
+  checks, 22 screenshots and five passing scenario tests. Deployment remains separate.
+- Shared capture repairs, stable worktree/clone identity, atomic notes/indexes, duplicate
+  protection, nonblocking outcomes and explicit missing configuration/transcript handling.
+- Factory host lifecycle capture, retries on recollection and honest `retained-events-partial`
+  receipts. There is no independent durable capture queue.
+- README/operator guidance, document classification/archive and nine rendered workflows.
+- **Real destination proven:** a genuine code-audit session wrote
+  `/Users/james/Documents/Obsidian Vault/Project Learnings/2026-09-09 factory 01a08454.md`.
+  Both indexes reference it; existing lessons were unchanged. A later actual Codex session
+  in another factory worktree recalled only this relevant note and cited it. No historical
+  backlog was processed. Invocation-local hooks prove the path, not permanent installation.
+- **Body-only miss repaired:** harness `1231a1f` adds bounded indexed-body fallback after
+  zero summary/path hits. Actual later-session proof and 179 shared tests passed.
+  Unindexed notes and additional body evidence alongside hits still require wider skill search.
+- Latest source and consumer gates and independent review passed; see latest acceptance.
+  Factory fake adapters and host headless measurements do not establish sandbox behavior.
 
-The [integrated gate report](acceptance/ui-learning-docs-gates.json) records all four
-factory gates passing: Ruff lint, Ruff format, mypy and pytest. Output tails are empty;
-do not infer a pytest test count. The opt-in browser suite separately passed all five
-scenarios. See [production browser evidence](ui-alternatives/production-validation/README.md)
-and [lifecycle acceptance](acceptance/learning-lifecycle-2026-09-08.md).
+## Required next: safe runtime and full transcript retention
 
-Layer A passed 159 tests, formatting and source checks. Python, frontend and Go consumers
-passed applicable gates and vendor integrity. Nine Mermaid diagrams rendered and the
-integrated documentation links were checked. Fake adapters do not establish native hooks
-or sandbox behavior. No need to repeat the full baseline for handoff-only documentation.
+### Sandbox prerequisite
 
-## Required next: close the runtime evidence gaps
+The September 9 fresh `shell`-agent probe rules out the base image, shell startup and
+sanitized host environment: sandbox creation adds the declared credential variable to
+container configuration. No model executed and the owned sandbox was removed.
+[Sanitized source evidence](discovery/artifacts/learning-repair/sandbox-source-results.json)
+is authoritative; do not repeat the same creation with no new hypothesis.
 
-### 1. Diagnose the disposable sandbox credential discrepancy
+Earlier [live sandbox acceptance](runtime-live-sandbox-acceptance.md) located the same
+injection stage and records James's project-specific acknowledgement after an HTTP 401
+measurement. That exception does **not** transfer to new probes. The current source probe
+did not test authentication. Do not weaken policy or treat an old invalid token observation
+as a current absence of capability. A clean provisioning path, or a separately measured
+and explicitly approved project exception, is needed before sandbox model execution.
+Do not rotate credentials, remove global bindings, or touch any `codex-*` sandbox.
 
-This is the first dependency for real sandbox model execution. Three owned disposable
-`factory-build-learning-probe-*` sandboxes were created and removed. No model ran.
-Fresh sandboxes using both `codex-pnpm:v1` and the default Codex Docker template still
-contained a nonempty, non-placeholder GitHub credential environment variable, even with
-a sanitized host creation environment. `sbx inspect` exposed only the declared gateway;
-`policy.capability_secrets()` returned no capability secrets. Boolean-only in-VM checks
-found the discrepancy; no credential values were read or printed.
+### Transport implementation and actual acceptance
 
-Sandbox-scoped removal reported no GitHub binding and did not resolve it. Determine the
-provisioning source (image, daemon or another mechanism) with read-only inspection and
-safe disposable probes. Do not repeat the same failed probes without a new hypothesis.
-The [archived probe artifacts](discovery/artifacts/learning-repair/README.md) preserve
-sanitized scripts/results; temporary `/tmp` scripts are not durable dependencies.
+Factory currently retains events, not complete runtime rollouts. The transport audit names
+concrete seams; do not relabel partial evidence as full. The installed host schema exposes
+nullable/unstable `Thread.path`; actual sandbox versions and paths need measurement.
 
-Do not weaken policy, admit credentials to a model sandbox, touch `codex-*` sandboxes,
-rotate credentials, or remove global bindings. This new fresh-name observation does not
-invalidate the previously settled workaround for `factory-build-python-harness`.
-If remediation requires James's reserved credential action, report the measured action
-needed and continue independent work.
+With an approved safe disposable runtime:
 
-### 2. Measure both actual factory runtime paths safely
+1. Measure native transcript location and accessibility for both legacy and app-server
+   paths, clean completion and interruption, bind-mounted worktrees and clones.
+2. Implement session-specific export through the sandbox adapter at evidence collection,
+   before archive/removal. Cover interrupted collection without an `exit` file, cancellation,
+   recollection/resume and relevant child paths. Shared distillation/indexing stay in layer A;
+   factory owns lifecycle/export. Do not execute candidate worktree scripts on the host.
+3. Remove the disposable sandbox and prove recovery of known user/tool/assistant content
+   using only host-retained data. Prove capture, both indexes, replay deduplication and later
+   relevant recall. Measure native hook process environment independently of tool environment.
+4. Run owner gates and fresh certification if the certified worker changes. Keep abrupt
+   removal before export and terminal attempts never recollected explicit as recoverable gaps.
 
-After obtaining a clean disposable sandbox, test supported legacy and app-server paths
-with isolated transcripts, fixtures and a temporary vault:
+No new queue, vector store, schema migration or historical bulk recovery is assumed.
 
-- Clean completion and interruption, including actual recollection/resume behavior.
-- Worktree and clone project identity.
-- Native hook process environment and transcript availability at completion.
-- Transcript retention/export after sandbox exit and removal.
-- A known lesson producing one note and both index entries, replay without duplication,
-  and later relevant recall from another worktree without unrelated initial context.
-- Relevant child/cancellation recovery paths and observable failed or interrupted capture.
+## Required next: interactive shutdown
 
-Current factory fallback invokes the **registered host repository's** vendored layer A,
-not candidate worktree code. It retains complete JSON event lines but labels evidence
-`retained-events-partial`: app-server events especially omit full user/tool conversation.
-Do not promote this to full-transcript proof. If transport needs repair, factory owns
-lifecycle/export coordination; shared distillation, indexing and recall stay in harness.
-Changing a certified worker requires fresh certification evidence.
+Automated PTY probes did **not** establish interactive completion. They stopped at trust
+screens; two early exit keystrokes instead accepted trust and Codex persisted these entries:
 
-Capture receipts permit retries when an attempt is recollected. There is no independent
-durable capture queue: a terminal attempt never recollected can remain a recoverable gap.
-Measure and report that boundary; do not invent a new queue requirement or automatically
-bulk-recover the historical backlog.
-
-### 3. Complete interactive and real-destination evidence
-
-Host Codex CLI 0.153.4 headless exec and the actual factory app-server worker fired native
-Start/End hooks on clean completion. Killing their process groups fired Start but not End;
-transcripts survived host process exit. Actual Codex distillation into a temporary vault,
-duplicate replay, and actual later-session recall in another Git worktree passed.
-These measurements do **not** prove human interactive session shutdown or sandbox export.
-
-Measure real interactive Codex and Claude session completion/interruption independently.
-Claude 2.1.259 hook registration and transcript timing were measured, but its model call
-failed because OAuth expired and could not refresh. James must renew authentication;
-do not request or log secrets. Alternate distillation backends do not prove Claude's
-native authenticated runtime works.
-
-The actual configured vault was inspected read-only: 16 notes, both indexes, no `_hook.log`
-at the initial inspection. No historical notes were changed. All successful write probes
-used temporary vaults. After appropriate activation, capture a genuine new session lesson
-to the configured **Project Learnings** directory and verify its note, indexes, provenance
-and later recall. Do not pollute the real vault with synthetic probe notes or claim the
-read-only path comparison proves a live write.
-
-### 4. Verify the remaining recall edge case
-
-Initial recall deliberately searches bounded summary/path information. An actual
-body-only query (`zebra-reconcile-83 rollback`) missed a lesson while broader
-`queue delivery recovery` matched. Verify the documented deeper `search-second-brain`
-fallback occurs before planning/debugging when needed. If it does not, repair the minimal
-shared retrieval behavior and test a later session. Do not load the entire vault or
-introduce a vector store merely to close this case.
-
-## Load-bearing implementation facts
-
-- Process `OBSIDIAN_VAULT_DIRECTORY`, when present, is authoritative even if empty or
-  invalid. Otherwise layer A accepts process `OBSIDIAN_VAULT_DIR`. The host alias matched
-  the factory registry in a read-only comparison.
-- Codex `-c shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY=...` did **not** bind
-  native hook environment in either measured host runtime. Alias-only process binding
-  passed actual capture and later recall. Do not write `~/.codex/config.toml` to fix this.
-- The factory worker injects registry vault configuration into its host process environment.
-  Native sandbox vault binding still needs separate proof.
-- Distillation defaults to the originating runtime; `LEARNINGS_DISTILLER` overrides it.
-  Direct capture without runtime information defaults to Claude. Codex distillation is
-  read-only/ephemeral, disables hooks/tools as implemented, and guards recursion.
-- Shared note updates use atomic writes and a same-session lock across read/model/rename.
-  Stale-lock reclamation is serialized; foreign/unknown ownership is conservatively refused.
-  Partial evidence must not replace an existing same-session note.
-- Preserve note identities/content and historical evidence. Historical bulk recovery remains
-  outside this initial repair.
-
-## Worktrees and publication order
-
-All paths below are under `/Users/james/`; verify current heads before use.
-
-| Worktree | Branch | Last recorded head |
-| --- | --- | --- |
-| factory | feat/ui-learning-docs | f971947 before this handoff |
-| factory-ui-alternatives | feat/ui-alternatives | b8b1e5f |
-| factory-dark-console | feat/dark-operations-console | e804316 |
-| factory-learning-repair | fix/learning-lifecycle | ecf22fb |
-| factory-documentation | docs/workflow-reference | 3b2deb9 |
-| harness-learning-repair | fix/learning-capture-recall | a3478e0bd704a1fc5772a97f5f59bd6491c8a0cc |
-| python-harness-learning-repair | fix/learning-recall-sync | ef91d56 |
-| frontend-harness-learning-repair | fix/learning-recall-sync | 9213657 |
-| go-harness-learning-repair | fix/learning-recall-sync | 3b95d6f |
-
-Shared work was rebased onto fetched `origin/v2` at `61a509f`. The original local v2 was
-stale; do not resume from it or the unrelated original harness checkout branch. Source
-changes belong on harness v2. Never hand-edit generated main or `.agents/vendor/`.
-Use vendor sync from source and standalone consumer worktrees; avoid editing the user's
-stack submodules inside the harness checkout.
-
-Consumer pins currently reference the unmerged feature SHA. Integrity passed; upstream
-freshness is **not** established. Prepare reviewable source changes first, then update
-consumer pins to the landed source and follow the applicable stack/submodule workflow.
-James merges. The integrated factory branch already contains feature cherry-picks; avoid
-opening duplicate overlapping factory PRs from every worktree.
-
-Publication and deployment are separate from missing runtime acceptance. Dark theme
-selection authorizes the chosen implementation, not a live service restart or deployment.
-After James approves deployment, smoke-test the seven actual routes read-only. No schema
-migration is assumed or authorized. Do not change live settings merely to inspect the UI.
-
-## Verification after further changes
-
-Run each changed repository's declared gates. Factory requires:
-
-```sh
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy
-uv run pytest
+```text
+/private/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-interactive-learning-vexa753n
+/private/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-interactive-learning-t7uq5676
 ```
 
-For console changes, also run the opt-in browser suite using the setup in its
-[validation README](ui-alternatives/production-validation/README.md). Previous invocation:
+This violated the trust-store boundary. James was informed. No automated cleanup was done;
+removing these entries, if desired, belongs to James. All probes stopped. Do not repeat
+unattended trust-screen interaction. The archived script is evidence, not an approved recipe.
 
-```sh
-FACTORY_BROWSER_MODULES=/tmp/factory-ui-browser/node_modules \
-FACTORY_BROWSER_OUTPUT=/tmp/factory-integrated-console-browser \
-uv run pytest tests/integration/test_console_browser.py -q
-```
+A properly authorized interactive session still needs clean exit, interruption, callback and
+transcript timing, capture/index outcomes and recall. Claude's earlier OAuth expiry remains
+historical; trust prevented a current authentication check. James must handle authentication
+if still expired. Never request secrets or write `~/.codex/config.toml`.
 
-Temporary browser dependencies may need recreation; they are not production dependencies.
-For shared changes, run source checks, meaningful capture/recall regressions and consumer
-vendor checks. Repeat actual runtime probes when the affected behavior changes. Check
-local documentation links and render changed Mermaid diagrams. Add dated evidence with
-explicit passed/failed/unavailable statuses; preserve prior measurements.
+## Configuration and publication boundaries
 
-Close this handoff only when the remaining runtime capture/recall matrix is evidenced or
-its human/external blockers are explicitly accepted, the real Obsidian destination has
-been proven, and publication/activation status is unambiguous. Do not call fake tests,
-headless-only hooks, temporary-vault writes or partial event receipts proof of the missing
-behaviors.
+Process `OBSIDIAN_VAULT_DIRECTORY` is authoritative when present, including empty/invalid
+values; otherwise `OBSIDIAN_VAULT_DIR` is supported. The actual host alias matches the registry.
+Codex shell-tool policy `set` did not reach native hooks in measured exec/app-server paths.
+Factory host workers supply the registry vault in process environment. Do not repair this by
+editing user configuration. Distillation defaults to originating runtime; explicit override
+remains available. Partial evidence cannot replace an existing same-session note.
+
+Source worktree `/Users/james/harness-learning-repair`, branch `fix/learning-capture-recall`,
+head `1231a1f`, is based on harness v2. Never edit generated main or vendor files by hand.
+Consumer worktrees under `/Users/james/` remain on `fix/learning-recall-sync`:
+
+| Worktree | Head |
+| --- | --- |
+| python-harness-learning-repair | e95622c |
+| frontend-harness-learning-repair | 847b558 |
+| go-harness-learning-repair | f587d62 |
+
+Factory evidence worktrees: `factory-transcript-transport` (`5cfa2ed`) and
+`factory-interactive-evidence` (`9e273fe`); both were cherry-picked into the integrated
+branch. Earlier feature worktrees remain intact. Avoid duplicate overlapping factory PRs.
+Source lands on harness v2 first, James merges, then sync consumers to the landed SHA and
+follow stack/submodule publication. Current feature pins passed integrity, not remote
+freshness. Do not edit stack submodules in the user's original harness checkout.
+
+James owns deployment and live restart. Dark selection already authorizes implementation.
+After separately approved deployment, smoke-test all seven routes read-only.
+
+## Verification after changes
+
+Run the declared `gate_report.mjs --force --json` in each changed repository. Factory requires
+Ruff lint, Ruff format check, mypy and pytest. After console changes, use the opt-in browser
+suite in [its README](ui-alternatives/production-validation/README.md). Check local doc links
+and render changed Mermaid diagrams. Preserve old evidence and add dated observations.
+
+Do not mark runtime acceptance complete until the missing matrix is evidenced or its
+human/external blockers are explicitly accepted. Real Obsidian capture/recall is now proven;
+interactive shutdown and full sandbox transcript retention are not.

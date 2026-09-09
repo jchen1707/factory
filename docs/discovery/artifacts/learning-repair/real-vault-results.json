@@ -1,0 +1,49 @@
+{
+  "capture": {
+    "runtime_exit": 0,
+    "native_end_callback": true,
+    "new_notes": [
+      "Project Learnings/2026-09-09 factory 01a08454.md"
+    ],
+    "existing_note_changes": [
+      "Project Learnings/_INDEX.md"
+    ],
+    "project_index_exists": true,
+    "vault_index_exists": true,
+    "session_id": "01a08454-c46b-7082-932e-02bb70b49c83"
+  },
+  "recall": {
+    "note_exists": true,
+    "project_index_references_note": true,
+    "vault_index_references_note": true,
+    "note_sha256": "8bfa4a9c9a165e6e4265e99fb905ffc806defd4a951303faacc55355e421e84c",
+    "runtime_exit": 0,
+    "model_response": "The earlier audit **did not establish complete conversation recovery after sandbox removal**. It inspected host interfaces; no sandbox or model ran.\n\nThe retained evidence is partial:\n\n- `events.jsonl` is filtered to parseable JSON objects. Its digest and extracted thread ID cannot prove recovery of omitted content.\n- `.learning.jsonl` is explicitly labeled `retained-events-partial`. A successful learning receipt proves hook processing, not transcript completeness.\n- `SbxAdapter.collect()` returns existing host artifact paths\u2014`events.jsonl`, `stderr.log`, and `last-message.json`. Neither collection, stopping, nor removal exports native session history. Archives only preserve artifacts already retained.\n\nThe proposed lifecycle seam is **session-specific export through the sandbox adapter before archival and teardown**, leaving parsing and distillation in harness. Collection alone is insufficient because it requires an `exit` file; cancellation and recoverable interruption need access to the same retention operation.\n\nThe missing measurement is export after both clean completion and SIGKILL, followed by conversation recovery **using only retained data after sandbox removal**. Abrupt removal before export remains uncovered unless continuous retention is implemented and measured.\n\nSource: `Project Learnings/2026-09-09 factory 01a08454.md`.",
+    "native_hooks_recorded": true,
+    "hooks": [
+      {
+        "event": "SessionStart",
+        "status": "project_index",
+        "project": "factory",
+        "index_paths": [
+          "Project Learnings/2026-09-09 factory 01a08454.md"
+        ],
+        "note_paths": [],
+        "warnings": []
+      },
+      {
+        "event": "UserPromptSubmit",
+        "status": "recalled",
+        "project": "factory",
+        "index_paths": [],
+        "note_paths": [
+          "Project Learnings/2026-09-09 factory 01a08454.md",
+          "Getting Hired/Behavioral/Negotiating the offer.md",
+          "Upskilling/AI + ML/Building AI Agents.md",
+          "Upskilling/AI + ML/Claude Code Agent Files.md"
+        ],
+        "warnings": []
+      }
+    ]
+  }
+}

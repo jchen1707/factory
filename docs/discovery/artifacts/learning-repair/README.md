@@ -24,3 +24,12 @@ The distillation scenario and unique recall tokens are test fixtures. Their real
 `factory-learning-hook-env.py.txt exec` and `factory-learning-hook-env.py.txt appserver` measure whether native hooks receive a vault supplied only through the shell environment policy. `hook-environment-results.json` records boolean equality only; no environment values are emitted. Both callbacks missed the configured temporary vault in both measured host runtimes.
 
 `factory-learning-alias.py.txt` verifies native Codex capture and fresh worktree hook recall with only `OBSIDIAN_VAULT_DIR` in the process environment and no canonical variable or distiller override. `alias-results.json` preserves the successful real model outcomes.
+
+## September 9 continuation
+
+- [Real-vault method](real-vault-method.md) and [results](real-vault-results.json):
+  genuine session capture into operational Project Learnings and later worktree recall.
+- [Sandbox source results](sandbox-source-results.json) and
+  [probe](factory-learning-source-probe.py.txt): creation-time injection, no model run.
+- [Interactive attempt](../../interactive-learning-2026-09-09.md): incomplete acceptance
+  and unintended temporary trust entries; the archived PTY script is not an approved recipe.
