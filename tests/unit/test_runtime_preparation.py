@@ -280,7 +280,24 @@ def test_replacement_rejects_changed_evidence(tmp_path: Path, changed: str) -> N
         )
     old = store.effects(run.id)[0]
     assert old.external_id is not None
-    with pytest.raises(Blocked, match="runtime-preparation-resolution-invalid"):
+    import json
+
+    previous = json.loads(old.external_id)
+    previous["owner"]["preparation"] = "0" * 64
+    store.runtime.db.execute(
+        "UPDATE effects SET external_id=? WHERE run_id=? AND step=?",
+        (json.dumps(previous), run.id, old.step),
+    )
+    old = store.effects(run.id)[0]
+    assert old.external_id is not None
+    with pytest.raises(
+        Blocked,
+        match={
+            "generation": "Identity changed",
+            "receipt": "Receipt changed",
+            "evidence": "Invalid evidence digest",
+        }[changed],
+    ):
         prep.authorize_replacement(
             run.id,
             old.step,
