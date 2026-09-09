@@ -303,3 +303,44 @@ replaces the other.
 
 Branches are `<type>/<slug>`. Factory's release branch is `main`; shared/stack harness work
 originates on `v2` and generated content is synced. Do not edit `.agents/vendor/` directly.
+
+
+## Console operation and revision checks
+
+`uv run factory serve` serves the UI on `http://127.0.0.1:7717` in the foreground.
+`factory daemon` is the scheduling loop; it is not required just to inspect the UI.
+The console's template and CSS bundle is loaded when its app starts. Deploying code or
+editing the files does not reload the running Python service. Restart the console after
+an approved update, then reload the browser. Project/model configuration continues to be
+read through the existing per-request configuration path.
+
+The page footer shows console-code and asset fingerprints plus the app start time. These
+identify the loaded rendering version; they are not Git commit IDs or proof that the
+working tree is clean. `source revision unverified` is deliberate: reading a new Git HEAD
+from disk would misidentify an older Python process that still has old code loaded.
+
+Before starting a second process, identify the existing listener and service:
+
+```sh
+lsof -nP -iTCP:7717 -sTCP:LISTEN
+launchctl list | rg 'factory.*console'
+```
+
+On James's measured installation the console service is `com.jchen.factory.console`.
+After confirming that is still the actual console label, an approved console restart is:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/com.jchen.factory.console"
+open http://127.0.0.1:7717/
+```
+
+Verify that the app start time changes and the new layout appears. The scheduling service
+`com.jchen.factory` is separate: restarting it is not part of a UI rollout. Do not create a
+second launch agent over port 7717, alter run settings, or restart sandboxes to refresh the
+console. If no console service is installed, use foreground `uv run factory serve` first;
+service installation is a separate operator choice.
+
+For visual acceptance, compare all seven views with the selected dark prototype and the
+[sanitized parity evidence](ui-alternatives/parity-validation/README.md). Fixture measurements
+cover layout, labels and controls; a live, read-only smoke check additionally establishes
+that the deployed service is running the reviewed UI against actual operational data.

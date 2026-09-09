@@ -45,7 +45,7 @@ from factory.machine import Blocked, Resumable, State
 from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import Routing, RoutingError, load_routing
-from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
+from factory.sandbox.sbx import SbxAdapter, SbxError
 from factory.steps import Context, advance, factory_dir_for, record_stop, redphase
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
@@ -876,33 +876,31 @@ def cmd_runtimes(args: argparse.Namespace) -> int:
     return 0
 
 
-def _sbx_ls_json() -> list[dict[str, object]]:
-    """`sbx ls --json`, parsed into the sandbox list.
-
-    The document is an **object** with a `sandboxes` array, not a bare array — the shape
-    `SbxAdapter.git_daemon_url` already reads, and the one measured against v0.38.0. A
-    reader that expected a list would show an empty runtimes view on a healthy machine and
-    look like "no sandboxes" rather than "parsed the wrong thing".
-
-    Returns `[]` when `sbx` is missing or refuses (it needs a Docker login), so the console
-    degrades to an empty view instead of failing the page.
-    """
-    available, _ = sbx_available()
-    if not available:
-        return []
-    proc = subprocess.run(
-        ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
-    )
+def _sbx_inventory() -> console_views.InventoryResult:
+    """Read-only inventory with collection failures distinct from a successful empty list."""
+    try:
+        proc = subprocess.run(
+            ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
+        )
+    except subprocess.TimeoutExpired:
+        return console_views.InventoryResult([], "timeout", "sbx inventory timed out")
+    except OSError:
+        return console_views.InventoryResult([], "missing", "sbx executable unavailable")
     if proc.returncode != 0:
-        return []
+        return console_views.InventoryResult([], "failed", "sbx inventory command failed")
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return []
-    if isinstance(data, dict):
-        listing = data.get("sandboxes", [])
-        return [entry for entry in listing if isinstance(entry, dict)]
-    return [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+        return console_views.InventoryResult([], "invalid", "Invalid sbx inventory JSON")
+    listing = data.get("sandboxes") if isinstance(data, dict) else data
+    if not isinstance(listing, list) or any(not isinstance(item, dict) for item in listing):
+        return console_views.InventoryResult([], "invalid", "Invalid sbx inventory shape")
+    return console_views.InventoryResult(listing)
+
+
+def _sbx_ls_json() -> list[dict[str, object]]:
+    """Compatibility wrapper for callers expecting a list; UI uses the structured result."""
+    return _sbx_inventory().sandboxes
 
 
 # --------------------------------------------------------------------------------

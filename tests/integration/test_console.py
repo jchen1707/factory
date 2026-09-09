@@ -74,7 +74,7 @@ def _to_implementing(ctx: Context) -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_the_board_renders_a_live_run_with_every_column(ctx: Context) -> None:
+def test_the_board_renders_primary_columns_and_retains_every_run_signal(ctx: Context) -> None:
     _to_implementing(ctx)
 
     page = _client(ctx).get("/").text
@@ -83,9 +83,19 @@ def test_the_board_renders_a_live_run_with_every_column(ctx: Context) -> None:
     assert "implementing" in page
     # attempt and the §16.3a rung it occupies
     assert "restart" in page
-    # the column headers §18.5 names
-    for header in ("state", "attempt", "context", "tokens in / out", "spend", "activity"):
-        assert header in page, header
+    # Five scan columns; secondary §18.5 signals remain in the row disclosure.
+    for header in ("Ticket", "Project", "State", "Context", "Estimate"):
+        assert f"<th>{header}</th>" in page
+    assert "<summary>Run signals</summary>" in page
+    for label in (
+        "Branch",
+        "Attempt / rung",
+        "Elapsed / timeout",
+        "Tokens in / out",
+        "Heartbeat",
+        "Activity",
+    ):
+        assert f"<dt>{label}</dt>" in page
 
 
 def test_the_board_refreshes_without_a_reload(ctx: Context) -> None:
@@ -156,11 +166,11 @@ def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Con
     row = next(r for r in rows if r.ticket == "BAC-4")
     assert row.context_pct is None
     assert row.context_reason == reason
-    # And the page renders the em dash carrying the reason, never a figure.
     page = _client(ctx).get("/").text
-    assert f'title="{reason}"' in page
-    # The context cell is the em dash and the reason — no figure of any kind beside it.
-    context_cell = page.split(f'title="{reason}"')[1].split("</td>")[0]
+    signals = page.split("summary>Run signals</summary>", 1)[1].split("</details>", 1)[0]
+    assert f"<dt>Context evidence</dt><dd>{reason}" in signals
+    context_cell = page.split('<td data-label="Context">', 1)[1].split("</td>", 1)[0]
+    assert context_cell == "Unavailable"
     assert "%" not in context_cell
 
 
@@ -594,7 +604,7 @@ def test_the_run_timeline_page_renders_all_three_bands(ctx: Context) -> None:
     assert response.status_code == 200
     page = response.text
     # band 1 (head), band 2 (cards), band 3 (waterfall) are all present
-    assert "runtime · swim-lane waterfall" in page
+    assert "Runtime · swim-lane waterfall" in page
     for role in ("planner", "builder", "reviewer"):
         assert role in page
     assert "implementing" in page  # the live builder block
