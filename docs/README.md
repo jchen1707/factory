@@ -24,6 +24,9 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 
 ## Historical evidence and decision records
 
+- [Native learning implementation and acceptance](acceptance/native-learning-completion-2026-09-09.md):
+  sandbox export, Codex interactive capture/recall and the remaining Claude login check.
+
 - [Learning continuation, September 9](acceptance/learning-continuation-2026-09-09.md):
   real Obsidian capture/recall, body-only repair and remaining runtime boundaries.
 

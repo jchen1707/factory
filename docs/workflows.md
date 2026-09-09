@@ -213,16 +213,17 @@ flowchart TD
 
 Layer A owns note writing, indexing and recall; Factory owns lifecycle coordination and
 retained evidence. Native session-end hooks consume runtime transcripts when available.
-Factory independently schedules host recovery from partial retained events after collection
-or terminal reconciliation. Both target Markdown notes under the configured Obsidian vault's
+Factory exports native session records before teardown and independently schedules host
+recovery after collection or terminal reconciliation, falling back to partial retained events. Both target Markdown notes under the configured Obsidian vault's
 `Project Learnings/`, with stable session identity; partial evidence preserves an existing
 session note. Receipts distinguish unavailable, failed, unfinished and completed capture.
 
 The [operator learning reference](operator-reference.md#learning-capture-and-relevant-recall)
 explains configuration and recovery. [Host measurement](discovery/learning-repair-2026-09-08.md)
 proves capture and later worktree recall, while [lifecycle acceptance](acceptance/learning-lifecycle-2026-09-08.md)
-proves retained-event transport separately. Sandbox model execution and transcript export
-remain unverified because the credential preflight blocked the disposable probes.
+proves retained-event transport separately. Later interactive and native sandbox measurements
+are linked from the [current handoff](handoff-ui-learning-docs.md); do not infer those paths
+from the earlier host-only measurements.
 
 ![Learning capture and recall workflow](diagrams/learning.svg)
 
@@ -234,8 +235,13 @@ flowchart TD
   S[Runtime session] --> T{Native SessionEnd and transcript available?}
   T -->|yes| N[Layer A: native transcript capture]
   T -->|interrupted or unavailable| U[Retain recoverable gap]
-  H[Host: terminal collection or reconciliation] --> P[Snapshot complete event lines; label partial]
-  P --> W[Detached host worker: trusted shared capture]
+  H[Host: collect before teardown or archive] --> J{Exact native session export available?}
+  J -->|yes| K[Retain native bytes; flag incomplete final record]
+  J -->|no| P[Snapshot complete event lines; label partial]
+  K --> Q{Artifact secret scan passes?}
+  Q -->|yes| W[Detached host worker: trusted shared capture]
+  Q -->|no| ZQ[Quarantine and block; preserve result on replay]
+  P --> W
   W --> R[Host receipt: outcome, completion, retryability]
   R -->|failed or unfinished| X[Recollect selected attempt to retry]
   X --> P
@@ -250,7 +256,7 @@ flowchart TD
   I -->|no summary matches| B[Bounded indexed body search]
   B -->|matches| C
   B -->|none or incomplete| Z[Report no match or partial; wider skill search]
-  C --> Q[Wider skill search for unindexed or additional evidence]
+  C --> QS[Wider skill search for unindexed or additional evidence]
 ```
 
 </details>

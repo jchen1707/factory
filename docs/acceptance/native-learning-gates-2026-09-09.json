@@ -1,0 +1,369 @@
+{
+  "python": {
+    "schemaVersion": 1,
+    "root": "/Users/james/python-harness-learning-repair",
+    "targets": [
+      {
+        "name": "python-harness",
+        "dir": "."
+      }
+    ],
+    "missingApps": [],
+    "requestedKinds": [],
+    "gates": [
+      {
+        "name": "ruff check",
+        "app": "python-harness",
+        "kind": "lint",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 87,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "ruff format --check",
+        "app": "python-harness",
+        "kind": "format",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 24,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "mypy",
+        "app": "python-harness",
+        "kind": "types",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 190,
+        "caveat": "mypy checks only the paths in pyproject.toml's `files`, and skips dot-directories during its own discovery. A new top-level directory is silently unchecked while this stays green \u2014 add it to `files` in the same change that creates it.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "pytest",
+        "app": "python-harness",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 2884,
+        "caveat": "`addopts` excludes the integration marker, so the default run proves nothing about anything DB-backed.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "pytest -m integration",
+        "app": "python-harness",
+        "kind": "integration",
+        "status": "not_applicable",
+        "exit": null,
+        "durationMs": null,
+        "caveat": "needs Docker and the app extra. Without them it errors rather than passing, but it is also excluded from the default run \u2014 so a change with no integration coverage looks identical to one with it.",
+        "when": "the change touches a repository, a migration, or anything reaching Postgres or pgvector",
+        "outputTail": ""
+      }
+    ],
+    "verdict": "pass"
+  },
+  "frontend": {
+    "schemaVersion": 1,
+    "root": "/Users/james/frontend-harness-learning-repair",
+    "targets": [
+      {
+        "name": "frontend-harness",
+        "dir": "."
+      }
+    ],
+    "missingApps": [],
+    "requestedKinds": [],
+    "gates": [
+      {
+        "name": "eslint",
+        "app": "frontend-harness",
+        "kind": "lint",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 3086,
+        "caveat": "eslint-plugin-boundaries fails open. A file under src/ that no element pattern in eslint.config.js classifies is simply unchecked, so the architectural rule passes vacuously on any directory shape the config does not name.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "prettier --check",
+        "app": "frontend-harness",
+        "kind": "format",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 686,
+        "caveat": ".prettierignore excludes .agents/vendor/ deliberately \u2014 layer A owns its own formatting and reflowing it here would break the vendored copy's sha check on every sync.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "tsc --noEmit",
+        "app": "frontend-harness",
+        "kind": "types",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 854,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "vitest",
+        "app": "frontend-harness",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 2784,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "vite build",
+        "app": "frontend-harness",
+        "kind": "build",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 1994,
+        "caveat": "this is the only gate that checks the browser target. A top-level await passes typecheck and still fails the build against es2020 \u2014 which is why it is a gate and not a release step.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "playwright",
+        "app": "frontend-harness",
+        "kind": "e2e",
+        "status": "not_applicable",
+        "exit": null,
+        "durationMs": null,
+        "caveat": "needs browsers installed: pnpm exec playwright install chromium.",
+        "when": "the change alters user-visible behaviour, real navigation, focus across a page load, or anything depending on real layout",
+        "outputTail": ""
+      },
+      {
+        "name": "lighthouse",
+        "app": "frontend-harness",
+        "kind": "integration",
+        "status": "disabled",
+        "exit": null,
+        "durationMs": null,
+        "caveat": "exits 0 far more readily than it looks. Only the accessibility assertion is `error`; performance, best-practices and SEO are `warn`, and the performance category currently scores null because the pinned Lighthouse cannot trace against the installed Chrome. A category with no score is not a pass \u2014 read the assertion output, not the exit code.",
+        "when": "performance or accessibility budgets are in scope",
+        "outputTail": ""
+      }
+    ],
+    "verdict": "pass"
+  },
+  "go": {
+    "schemaVersion": 1,
+    "root": "/Users/james/go-harness-learning-repair",
+    "targets": [
+      {
+        "name": "go-harness",
+        "dir": "."
+      }
+    ],
+    "missingApps": [],
+    "requestedKinds": [],
+    "gates": [
+      {
+        "name": "gofmt",
+        "app": "go-harness",
+        "kind": "format",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 240,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "go vet",
+        "app": "go-harness",
+        "kind": "lint",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 97,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "go build",
+        "app": "go-harness",
+        "kind": "types",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 394,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "go test -race",
+        "app": "go-harness",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 76,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "harness infrastructure",
+        "app": "go-harness",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 3043,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      }
+    ],
+    "verdict": "pass"
+  },
+  "shared_validation": {
+    "commit": "54c5c9ade7b969042dd487f86660fa28c898eac5",
+    "structural_gate": {
+      "command": "python3 scripts/check.py --since=origin/v2",
+      "status": "pass",
+      "shared_tests_passed": 165
+    },
+    "all_hook_files": {
+      "command": "node --test plugins/harness/hooks/*.test.mjs",
+      "reported_executions_passed": 184,
+      "caveat": "The main suite imports two test files also selected by the wildcard; 184 is not a unique-test count."
+    },
+    "format": {
+      "command": "npx --yes prettier@3 --check .",
+      "status": "pass"
+    }
+  },
+  "factory_integration_before_relevance_fix": {
+    "schemaVersion": 1,
+    "root": "/Users/james/factory",
+    "targets": [
+      {
+        "name": "factory",
+        "dir": "."
+      }
+    ],
+    "missingApps": [],
+    "requestedKinds": [],
+    "gates": [
+      {
+        "name": "ruff check",
+        "app": "factory",
+        "kind": "lint",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 98,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "ruff format --check",
+        "app": "factory",
+        "kind": "format",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 47,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "mypy",
+        "app": "factory",
+        "kind": "types",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 596,
+        "caveat": "mypy reads only the paths in pyproject.toml's `files` and skips dot-directories during discovery. A new top-level directory is silently unchecked while this stays green \u2014 add it to `files` in the same change that creates it.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "pytest",
+        "app": "factory",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 172300,
+        "caveat": "Every test here runs against a fake sandbox and fixture transcripts. A green suite proves the control plane's logic, never that `sbx`, `codex`, `gh` or Linear behave the way the fakes say they do \u2014 that is what `factory doctor` and a real run are for.",
+        "when": null,
+        "outputTail": ""
+      }
+    ],
+    "verdict": "pass"
+  },
+  "factory_final": {
+    "schemaVersion": 1,
+    "root": "/Users/james/factory",
+    "targets": [
+      {
+        "name": "factory",
+        "dir": "."
+      }
+    ],
+    "missingApps": [],
+    "requestedKinds": [],
+    "gates": [
+      {
+        "name": "ruff check",
+        "app": "factory",
+        "kind": "lint",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 66,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "ruff format --check",
+        "app": "factory",
+        "kind": "format",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 37,
+        "caveat": null,
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "mypy",
+        "app": "factory",
+        "kind": "types",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 221,
+        "caveat": "mypy reads only the paths in pyproject.toml's `files` and skips dot-directories during discovery. A new top-level directory is silently unchecked while this stays green \u2014 add it to `files` in the same change that creates it.",
+        "when": null,
+        "outputTail": ""
+      },
+      {
+        "name": "pytest",
+        "app": "factory",
+        "kind": "test",
+        "status": "pass",
+        "exit": 0,
+        "durationMs": 175714,
+        "caveat": "Every test here runs against a fake sandbox and fixture transcripts. A green suite proves the control plane's logic, never that `sbx`, `codex`, `gh` or Linear behave the way the fakes say they do \u2014 that is what `factory doctor` and a real run are for.",
+        "when": null,
+        "outputTail": ""
+      }
+    ],
+    "verdict": "pass"
+  }
+}

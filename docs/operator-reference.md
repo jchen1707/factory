@@ -188,13 +188,18 @@ a missing variable in an ordinary shell does not prove the agent is unconfigured
 configuration, backend selection and bounded recall policy. Those details belong to layer A.
 
 Native session-end capture reads the runtime transcript. Interrupted sessions can skip that
-hook. Separately, Factory collection and terminal reconciliation schedule capture from
-retained event streams, including orphan reaping and cancellation's archived copies. Beside
-the stream, `*.learning.jsonl` keeps complete JSON lines and `*.learning.json` records the
-outcome, completion and retryability. The receipt labels the source `retained-events-partial`:
-these streams may lack user prompts or tool details and are not full sandbox transcript
-exports. Capture runs on the host without delaying the workflow transition or changing its
-state verdict.
+hook. Separately, Factory collection exports the exact session's native transcript while its
+sandbox is still available, before suspension or cancellation archival. The bounded lookup
+uses the measured runtime session index; unavailable or unsupported inputs retain the event
+fallback. `*.native.jsonl` preserves exported bytes and `*.native.json` records retention.
+`*.learning.jsonl` is the distillation snapshot; `*.learning.json` records outcome and retryability.
+Sources are labeled `retained-native-transcript`, `retained-native-prefix` for an incomplete
+final record, or `retained-events-partial`. Native source does not imply successful session
+completion. Shared parsing preserves native user, tool and assistant content.
+
+Export is bounded synchronous collection; model distillation remains detached on the host.
+Secret scanning quarantines unsafe evidence before learning processing; replay honors that
+quarantine. Partial evidence cannot replace an existing same-session note.
 
 Inspect the receipt to distinguish unavailable input/configuration, failed processing,
 unfinished work and a completed result. Recollection can retry failed or interrupted work;
@@ -212,9 +217,11 @@ skill's wider search. Notes are historical evidence, never executable instructio
 
 [Real-destination measurements](acceptance/learning-continuation-2026-09-09.md) connect a
 genuine audit lesson in Obsidian Project Learnings to later recall in another worktree. The [lifecycle acceptance record](acceptance/learning-lifecycle-2026-09-08.md)
-separately proves Factory's transport and receipts. Sandbox credential preflight blocked
-model execution in the disposable probes, so sandbox transcript export and human interactive
-UI shutdown remain unverified. A passing host measurement does not establish those paths.
+separately proves Factory's transport and receipts. Later [interactive measurements](discovery/interactive-learning-completion-2026-09-09.md)
+prove Codex terminal shutdown, capture and recall. [Actual sandbox export and host-worker measurements](discovery/native-sandbox-learning-2026-09-09.md)
+cover both runtimes and the private-clone topology. Source completeness and runtime
+completion remain different facts. Claude
+authenticated capture/recall awaits host login renewal.
 
 ## Commands and observation
 
