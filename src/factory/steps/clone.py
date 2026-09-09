@@ -352,10 +352,10 @@ def fetch_back(ctx: Context) -> Path:
     host-execution guard. Fetching once, early, means every one of them runs unchanged
     against an ordinary worktree, and only this function knows the run was ever a clone.
 
-    Idempotent by rebuilding: a re-entered tick fetches again and recreates the mirror
-    from scratch. That is cheap because the mirror is pure derived state, and it avoids
-    needing either of the two verbs this repository forbids on a tree the host does not
-    author.
+    Re-entered ticks fetch again, but retain an unchanged clean mirror. Review and
+    certification processes may hold its directory open across ticks. Replacing an
+    unchanged tree invalidates those directories even when the new bytes are identical.
+    Changed mirrors may be replaced only when clean and no run agent is active.
     """
     with repo.serialized_git(ctx.project.path):
         return _fetch_back_locked(ctx)
@@ -369,18 +369,28 @@ def _fetch_back_locked(ctx: Context) -> Path:
 
     _fetch_with_the_sandbox_running(ctx, branch)
 
-    # Torn down and rebuilt rather than updated in place. The mirror holds nothing: every
-    # byte of it comes from `FETCH_HEAD`, and the host never commits to it. So a
-    # re-entered tick gets a fresh copy for free, and this needs neither a hard reset nor
-    # a merge — both of which this repository forbids outright, and rightly: on a
-    # directory the host does not author, either one would be a way to lose evidence
-    # quietly. `delete_local_branch` is a no-op once the branch exists on `origin`, which
-    # is why the sha is checked below rather than assumed.
+    fetched = repo.head_sha(ctx.project.path, "FETCH_HEAD")
+    if repo.worktree_exists(ctx.project.path, path):
+        if not repo.is_clean(path) or repo.in_progress_operation(path):
+            raise Blocked("clone-mirror-dirty", "Preserve and reconcile host mirror changes")
+        if repo.head_sha(path) == fetched:
+            ctx.store.update_run(ctx.run.id, worktree=str(path))
+            ctx.refresh()
+            return path
+    if ctx.store.runtime.db.execute(
+        "SELECT 1 FROM agent_leases WHERE run_id=? AND status='active'", (ctx.run.id,)
+    ).fetchone():
+        raise Blocked(
+            "clone-mirror-in-use", "Reconcile active agents before replacing their mirror"
+        )
+
+    # A changed, clean, unused mirror is derived from FETCH_HEAD. Rebuild it without
+    # resetting or merging host work. A remote-tracking branch may survive deletion,
+    # so verify the resulting SHA rather than assuming replacement succeeded.
     repo.remove_worktree(ctx.project.path, path, force=True)
     repo.delete_local_branch(ctx.project.path, branch)
     repo.add_worktree_at_fetch_head(ctx.project.path, path, branch)
 
-    fetched = repo.head_sha(ctx.project.path, "FETCH_HEAD")
     if repo.head_sha(path) != fetched:
         raise Blocked(
             "clone-mirror-stale",
