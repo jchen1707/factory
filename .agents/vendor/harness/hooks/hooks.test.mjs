@@ -1061,7 +1061,8 @@ describe('the wiring covers the surface each guard needs', () => {
       'protect_paths.mjs',
       'format_edited.mjs',
       'verify.mjs',
-      'session_learnings.mjs',
+      'codex_session_learnings.mjs',
+      'learning_recall.mjs',
     ]) {
       assert.ok(
         commands.includes(`\${CLAUDE_PLUGIN_ROOT}/hooks/${script}`),
@@ -2179,3 +2180,7 @@ describe('gate report — --kinds narrows the run', () => {
     assert.deepEqual(parseArgs([]).kinds, []);
   });
 });
+
+// Keep the consumer-facing test entry point inclusive of learning regression suites.
+import './learning_repair.test.mjs';
+import './learning_recall.test.mjs';

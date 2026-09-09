@@ -1,0 +1,13 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+import sys
+mode=sys.argv[1]
+logger=root/'logger.mjs';logger.write_text('import {appendFileSync,readFileSync} from "node:fs"; const p=JSON.parse(readFileSync(0,"utf8")); appendFileSync('+json.dumps(str(root/'registered.jsonl'))+',JSON.stringify(p)+"\\n");')
+handler={'type':'command','command':'node','args':[str(logger)],'timeout':3} if mode=='args' else {'type':'command','command':f'node "{logger}"','timeout':3}
+hooks={e:[{'hooks':[handler]}] for e in ['SessionStart','SessionEnd']}
+(root/'.claude/settings.json').write_text(json.dumps({'hooks':hooks}));print(mode,root,flush=True)
+cmd=['claude','-p','--settings',str(root/'.claude/settings.json'),'--setting-sources','project','--tools','','--model','sonnet','--output-format','json','Respond OK. Do not use tools.']
+with (root/'stdout.json').open('w') as out,(root/'stderr.log').open('w') as err:
+ try:r=subprocess.run(cmd,cwd=root,env=env,stdout=out,stderr=err,timeout=30);print('exit',r.returncode)
+ except subprocess.TimeoutExpired:print('timeout')
+print((root/'registered.jsonl').read_text() if (root/'registered.jsonl').exists() else 'NO CALLBACKS')

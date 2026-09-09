@@ -1,0 +1,24 @@
+{
+  "first": {
+    "target": "2026-09-09 fixture-project fixturer.md",
+    "outcome": "wrote 2026-09-09 fixture-project fixturer.md",
+    "retryable": false
+  },
+  "repeat": {
+    "target": "2026-09-09 fixture-project fixturer.md",
+    "outcome": "rewrote 2026-09-09 fixture-project fixturer.md",
+    "retryable": false
+  },
+  "native_default": {
+    "target": "2026-09-09 fixture-project fixturen.md",
+    "outcome": "wrote 2026-09-09 fixture-project fixturen.md",
+    "retryable": false
+  },
+  "later_worktree_model_response": [
+    "- **Regression:** `zebra-reconcile-83`.\n- **Ordering fix:** Persist delivery intent in the ledger before the outbound call, then reconcile pending deliveries after restart. Advancing the queue cursor before recording delivery created a message-loss window.\n- **Note path:** `Project Learnings/2026-09-09 fixture-project fixturer.md`."
+  ],
+  "native_indexes_present": [
+    "_VAULT_INDEX.md",
+    "Project Learnings/_INDEX.md"
+  ]
+}

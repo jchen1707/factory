@@ -1,0 +1,25 @@
+{
+  "status": "blocked-before-runtime",
+  "experiments": [
+    {
+      "sandbox": "factory-build-learning-probe-ae1bfecf",
+      "template": "codex-pnpm:v1",
+      "host_sensitive_env_removed": true,
+      "proxy_capabilities": [],
+      "credential_env_nonempty": true,
+      "credential_env_placeholder": false,
+      "scoped_github_removal": "No secret found for service github in this sandbox scope; environment unchanged",
+      "removed": true
+    },
+    {
+      "sandbox": "factory-build-learning-probe-d4638e49",
+      "template": "docker/sandbox-templates:codex-docker",
+      "host_sensitive_env_removed": true,
+      "proxy_capabilities": [],
+      "credential_env_nonempty": true,
+      "credential_env_placeholder": false,
+      "removed": true
+    }
+  ],
+  "conclusion": "Nonempty non-placeholder GitHub credential environment persists across templates and with sanitized create environment. Not a removable scoped service secret. Exact source remains undetermined; daemon credential provisioning or shared image ancestry require separate investigation. No model executed; transcript export unverified."
+}

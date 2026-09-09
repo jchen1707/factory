@@ -187,6 +187,9 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     """Validate new structured handoffs; retain file-based collection for legacy attempts."""
     accounting.collect(ctx, ctx.run.attempt, STEP, attempt_dir.path("plan-events.jsonl"))
+    from factory import learning
+
+    learning.collect(ctx, attempt_dir.path("plan-events.jsonl"))
     request_path = attempt_dir.path("plan-request.json")
     recorded = ctx.store.runtime.invocation(accounting.key(ctx, ctx.run.attempt, STEP))
     retained_request = recorded["metadata"].get("handoff_contract") if recorded else None

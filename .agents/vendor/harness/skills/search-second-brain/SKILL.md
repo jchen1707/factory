@@ -45,7 +45,17 @@ them.
 
 ## Method
 
-1. **Read `_VAULT_INDEX.md` first. Always.** One row per note across the whole vault — path,
+1. **Run bounded recall first.** Run the shared `hooks/learning_recall.mjs --query "<topic>"`
+   with the task topic (plugin-relative or under `.agents/vendor/harness/`). It consults the
+   indexes locally and returns at most four matching note excerpts, without loading the vault
+   into context. SessionStart supplies at most eight project index rows; UserPromptSubmit
+   recalls matching notes automatically where registered. Project identity follows Git origin
+   across worktrees and clones. Record the note paths that informed the task.
+
+   Distinguish `configuration_missing`, `unavailable`, and `partial` from
+   `no_relevant_learnings`. Partial evidence never establishes absence. If excerpts are
+   truncated, read those selected notes before relying on them. For broader discovery, search
+   `_VAULT_INDEX.md` for the topic rather than loading its entire contents. It has path,
    tags, and a line on what it covers. It is the cheapest read available, and it tells you
    which notes are worth opening before you spend a token on any of them. Add
    `Project Learnings/_INDEX.md` when the question is about a past session specifically; it

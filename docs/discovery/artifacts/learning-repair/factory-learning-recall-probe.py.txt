@@ -1,0 +1,31 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+import sys
+mode=sys.argv[1]
+subprocess.run(['git','init','-q',str(root)],check=True);subprocess.run(['git','-C',str(root),'remote','add','origin','https://example.invalid/acme/fixture-project.git'],check=True)
+notes=root/'vault'/'Project Learnings';notes.mkdir()
+(notes/'lesson.md').write_text('Fixture lesson: The exact rollback token is RUNTIME_RECALL_ZEBRA_83. This is a test fixture, not a real captured lesson.')
+(notes/'_INDEX.md').write_text('| Date | Project | Summary | Note |\n| --- | --- | --- | --- |\n| 2026-09-08 | fixture-project | Fixture rollback lesson; startup token STARTUP_RECALL_OTTER_29 | [[lesson]] |\n')
+(root/'vault'/'_VAULT_INDEX.md').write_text('| Path | Summary | Tags |\n| --- | --- | --- |\n')
+recall=str(pathlib.Path(os.environ['HARNESS_ROOT'])/'plugins/harness/hooks/learning_recall.mjs')
+wrapper=root/'recall.py';wrapper.write_text('import sys,subprocess,json,pathlib\np=sys.stdin.read()\nr=subprocess.run(["node",'+repr(recall)+'],input=p,text=True,capture_output=True)\nwith open('+repr(str(root/'recall-log.jsonl'))+',"a") as f:f.write(json.dumps({"input":json.loads(p),"output":r.stdout,"stderr":r.stderr})+"\\n")\nprint(r.stdout,end="")\n')
+hooks={e:[{'hooks':[{'type':'command','command':f'python3 {wrapper}','timeout':3}]}] for e in ['SessionStart','UserPromptSubmit']}
+(root/'.codex/hooks.json').write_text(json.dumps({'hooks':hooks}))
+prompt='From the startup learning context, quote the exact startup token. Also quote the exact rollback token from the fixture rollback lesson, if available in hook context. Include the note path. Do not use tools or guess missing tokens.'
+print(root,flush=True)
+if mode=='exec':
+ cmd=['codex','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(root),'--sandbox','read-only','--json',prompt]
+else:
+ (root/'prompt.txt').write_text(prompt);(root/'schema.json').write_text(json.dumps({'type':'object','properties':{'result':{'type':'string'}},'required':['result'],'additionalProperties':False}))
+ req={'vault':str(root/'vault'),'workdir':str(root),'model':'gpt-6-astra','effort':'low','readonly':True,'schema':str(root/'schema.json'),'prompt':str(root/'prompt.txt'),'output':str(root/'answer.json'),'context_semantics_verified':False}
+ (root/'request.json').write_text(json.dumps(req));cmd=['python3',str(pathlib.Path(os.environ['FACTORY_ROOT'])/'src/factory/agent/app_server_worker.py'),str(root/'request.json')]
+with (root/'stdout.jsonl').open('w') as out,(root/'stderr.log').open('w') as err:
+ try:r=subprocess.run(cmd,cwd=root,env=env,stdout=out,stderr=err,timeout=90);print('exit',r.returncode,flush=True)
+ except subprocess.TimeoutExpired:print('timeout',flush=True)
+print((root/'recall-log.jsonl').read_text() if (root/'recall-log.jsonl').exists() else 'NO HOOKS')
+for l in (root/'stdout.jsonl').read_text().splitlines():
+ try:
+  x=json.loads(l)
+  if 'item' in x and x['item'].get('type')=='agent_message':print(x['item'])
+ except:pass
+if (root/'answer.json').exists():print((root/'answer.json').read_text())

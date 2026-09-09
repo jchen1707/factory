@@ -1111,9 +1111,21 @@ def _cancel_run(
                         home / "artifacts" / run.linear_id / directory.name,
                         extra_names=harness.secret_vars,
                     )
+                    from factory import learning
+
+                    for events in kept.rglob("*events.jsonl"):
+                        learning.schedule(project.path, registry.vault.path, events)
                     lines.append(f"archived {directory.name} to {kept}")
 
     lines += _release_local_debris(project, run, ticket, paths)
+    # Clone mounts and review artifacts survive worktree cleanup at their recorded
+    # host paths. Schedule them only after deletion, so detached readers cannot race it.
+    from factory import learning
+
+    for invocation in store.runtime.invocations(run.id):
+        events = invocation.get("metadata", {}).get("events")
+        if isinstance(events, str) and Path(events).is_file():
+            learning.schedule(project.path, registry.vault.path, Path(events))
     # The clone's copy of the branch, for a `--clone` project. Before the sandbox is
     # stopped below, because releasing it needs the sandbox running — and the host call
     # above cannot reach it: that branch lives in the VM. See `clone.release_branch`.

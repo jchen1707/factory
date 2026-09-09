@@ -26,9 +26,9 @@ def advance(ctx: Context) -> None:
     retained = ctx.store.runtime.settings("run", ctx.run.id).get("delegation_parent")
     if retained is None:
         return
-    from factory.workflow_launches import reconcile_run
+    from factory.workflow_launches import reconcile
 
-    reconcile_run(ctx.store, ctx.home, ctx.sandbox, ctx.run.id, ctx.project.name)
+    reconcile(ctx)
     # Clone mailboxes are prepared before worktree creation. Until the parent
     # invocation exists there is no launched owner whose children can execute.
     if ctx.store.runtime.invocation(retained["id"]) is None:

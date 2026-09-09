@@ -529,6 +529,9 @@ def _collect_axis(ctx: Context, axis: dict[str, Any], attempt: int) -> list[dict
     accounting.collect(
         ctx, attempt, f"review:{label}", events_path, invocation_id=axis.get("invocation_id")
     )
+    from factory import learning
+
+    learning.collect(ctx, events_path)
     findings = _validated_findings(ctx, out_path, stderr_path, label)
     artifacts.scan_for_secrets(_read_text(events_path) + _read_text(stderr_path), f"review {label}")
     return findings

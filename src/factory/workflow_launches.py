@@ -153,6 +153,28 @@ def resume(ctx: Context) -> bool:
 
 def reconcile(ctx: Context) -> None:
     """Collect usage before freeing exited owned slots; leave ambiguous holders reserved."""
+    from factory import learning
+    from factory.runtime_jobs import RuntimeJobs
+
+    launches = AgentLaunches(ctx.store, ctx.sandbox)
+    for lease in RuntimeJobs(ctx.store).active_agents(ctx.project.name):
+        if lease["run_id"] != ctx.run.id:
+            continue
+        invocation = ctx.store.runtime.invocation(lease["invocation_id"])
+        if invocation is None:
+            continue
+        # Review collection moves its scratch events to the retained run directory.
+        # Its collector schedules capture after that move, never against the source.
+        if invocation["role"].startswith("review:"):
+            continue
+        effect = ctx.store.find_effect(
+            ctx.run.id, invocation["attempt"], invocation["id"], "agent-launch", "spawn"
+        )
+        if effect is None or effect.external_id is None:
+            continue
+        handle = launches.handle(invocation["id"])
+        if (handle.attempt_dir / handle.exit_name).exists():
+            learning.collect_invocation(ctx, invocation)
     reconcile_run(ctx.store, ctx.home, ctx.sandbox, ctx.run.id, ctx.project.name)
 
 

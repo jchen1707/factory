@@ -381,5 +381,10 @@ def _stopped(
         detail=detail[:2000],
     )
     ctx.refresh()
+    from factory import learning
+
+    for invocation in ctx.store.runtime.invocations(ctx.run.id):
+        if invocation["attempt"] == ctx.run.attempt:
+            learning.collect_invocation(ctx, invocation)
     ctx.log("reap.orphaned", level="warning", reason=reason, detail=detail[:500])
     return Verdict(Outcome.ORPHANED, detail)

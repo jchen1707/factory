@@ -23,7 +23,8 @@
  * them. One implementation in layer A cannot be installed in one repo and not the other.
  */
 
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync, statSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -259,21 +260,32 @@ export function vaultDir(environment = process.env) {
   }
 }
 
+/** Publish a complete index so concurrent readers never observe a truncated file. */
+export function writeAtomic(target, text) {
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, text, { encoding: 'utf8', mode: 0o600 });
+    renameSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
 /**
  * Rebuild the index. Returns the file written, or `''` if there was nothing to do.
  *
  * Never throws. This runs from a SessionEnd hook, and a vault that cannot be indexed is not
  * a reason to interfere with ending a session.
  */
-export function refresh() {
-  const vault = vaultDir();
+export function refresh(environment = process.env) {
+  const vault = vaultDir(environment);
   if (!vault) return '';
   const target = join(vault, INDEX_NAME);
   try {
     // The written text uses `\n` throughout and is not translated on the way out. Several
     // repos share one vault; if each writer used its platform's line ending the file would
     // be rewritten end to end every time the platform changed.
-    writeFileSync(target, build(vault), 'utf8');
+    writeAtomic(target, build(vault));
   } catch (error) {
     process.stderr.write(`vault_index: could not write ${target} (${error.message})\n`);
     return '';

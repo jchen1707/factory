@@ -1,0 +1,8 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+cmd=['claude','-p','--settings',str(root/'.claude/settings.json'),'--setting-sources','project','--tools','','--model','sonnet','--output-format','json','Respond with only LEARNING_RUNTIME_PROBE_OK. Do not use tools.']
+print(root,flush=True)
+with (root/'stdout.json').open('w') as out,(root/'stderr.log').open('w') as err:
+ try:r=subprocess.run(cmd,cwd=root,env=env,stdout=out,stderr=err,timeout=90);print('exit',r.returncode,flush=True)
+ except subprocess.TimeoutExpired:print('timeout',flush=True)
+print((root/'hooks.jsonl').read_text() if (root/'hooks.jsonl').exists() else 'NO HOOKS')
