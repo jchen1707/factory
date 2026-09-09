@@ -149,11 +149,51 @@ def _settings_form(
     *,
     concurrency: int | str | None = None,
     error: str | None = None,
+    effective: dict[str, Any] | None = None,
 ) -> str:
+    labels = {
+        "mode": "Launch mode",
+        "model_preset": "Model preset",
+        "delivery_profile": "Delivery profile",
+        "workflow": "Workflow",
+        "test_design": "Test design",
+        "max_active_agents": "Active agent limit",
+        "max_children_per_parent": "Children per parent",
+        "max_delegation_depth": "Delegation depth",
+    }
+    option_labels = {
+        "": "Repository default",
+        "false": "Disabled",
+        "true": "Enabled",
+        "inherit": "Inherit project default",
+        "existing": "Repository default",
+        "read-only": "Read only",
+        "isolated-write": "Isolated write",
+        "high-confidence": "High confidence",
+        "per-run": "Per run",
+    }
+
+    def effective_hint(key: str) -> str:
+        if effective is None:
+            return ""
+        value = effective.get(
+            key,
+            {
+                "delegation_mode": "disabled",
+                "max_active_agents": 8,
+                "max_children_per_parent": 2,
+                "max_delegation_depth": 1,
+            }.get(key, "repository default"),
+        )
+        source = "Run override" if settings.get(key) is not None else "Inherited"
+        return (
+            f"<small>{source} · effective: {_e(option_labels.get(str(value), str(value)))}</small>"
+        )
+
     def options_for(choices: tuple[str, ...], selected: object) -> str:
         value = str(selected)
         options = "".join(
-            f'<option value="{_e(choice)}"{" selected" if choice == value else ""}>{_e(choice or "repository default")}</option>'
+            f'<option value="{_e(choice)}"{" selected" if choice == value else ""}>{_e(option_labels.get(choice, choice.capitalize()))}</option>'
             for choice in choices
         )
         if error is not None and value not in choices:
@@ -177,16 +217,16 @@ def _settings_form(
         options = options_for(
             choices, str(selected).lower() if str(selected).lower() in choices else selected
         )
-        fields.append(
-            f'<label>{_e(key.replace("_", " "))} <select name="{key}">{options}</select></label> '
-        )
+        fields.append(f'<label>{_e(labels[key])} <select name="{key}">{options}</select></label> ')
     choices = ("inherit", "disabled", "read-only", "isolated-write")
     selected = settings.get("delegation_mode", "inherit")
     options = options_for(choices, selected)
-    fields.append(f'<label>Delegation <select name="delegation_mode">{options}</select></label> ')
+    fields.append(
+        f'<label>Delegation <select name="delegation_mode">{options}</select>{effective_hint("delegation_mode")}</label> '
+    )
     for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
         fields.append(
-            f'<label>{_e(key.replace("_", " "))} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="inherited"></label> '
+            f'<label>{_e(labels[key])} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="Inherited">{effective_hint(key)}</label> '
         )
     if "/projects/" in action:
         options = options_for(("manual", "automatic"), settings.get("certification_mode", "manual"))
@@ -876,6 +916,8 @@ def create_app(
         run = st.run_by_ticket(ticket.upper())
         if run is None:
             return HTMLResponse("Run not found", status_code=404)
+        from factory import operator_controls
+
         settings = st.runtime.effective(run.project, run.id)
         policy = st.runtime.policy(run.id)
         if policy:
@@ -883,15 +925,26 @@ def create_app(
         body = f"<h1>{_e(run.linear_id)} · Run settings</h1>"
         waiting = settings.get("waiting_invocation") or ""
         approved = st.runtime.settings("run", run.id).get("approved_invocation")
-        admission = (
-            "Approval required"
-            if waiting and settings.get("mode") == "approval" and approved != waiting
-            else "Pending agent launch"
-            if waiting
-            else "No invocation awaiting admission"
+        requires_approval = (
+            waiting and settings.get("mode", "automatic") == "approval" and approved != waiting
         )
-        body += f'<section class="panel" id="invocation-admission"><h2>Invocation admission</h2><p>{admission}</p>'
-        body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><label>Next invocation ID <input name="invocation" value="{_e(waiting)}" required></label><button>Approve next attempt</button></form></section>'
+        admission = (
+            "Awaiting approval"
+            if requires_approval
+            else "Already approved · waiting to launch"
+            if waiting and approved == waiting
+            else "Automatic launch pending"
+            if waiting
+            else "No pending invocation"
+        )
+        body += f'<section class="panel" id="invocation-admission"><h2>Next invocation</h2><p>{admission}</p>'
+        if waiting:
+            body += f"<details><summary>Pending invocation identity</summary><code>{_e(waiting)}</code></details>"
+        if requires_approval:
+            body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><input type="hidden" name="invocation" value="{_e(waiting)}"><button>Approve next attempt</button></form>'
+        elif not waiting:
+            body += '<p class="muted">An approval action appears here when an invocation needs your decision.</p>'
+        body += "</section>"
         body += '<section class="panel" id="effective-settings"><h2>Effective settings</h2>'
         form_settings = settings | {
             key: st.runtime.settings("run", run.id).get(key)
@@ -903,36 +956,40 @@ def create_app(
             )
         }
         form_settings = {key: value for key, value in form_settings.items() if value is not None}
-        body += (
-            '<h2>Effective limits</h2><dl class="effective-limits">'
-            + "".join(
-                f"<div><dt>{label}</dt><dd>{_e(settings.get(key, default))}</dd></div>"
-                for key, label, default in (
-                    ("delegation_mode", "Delegation", "disabled"),
-                    ("max_active_agents", "Active agent limit", 8),
-                    ("max_children_per_parent", "Children per parent", 2),
-                    ("max_delegation_depth", "Delegation depth", 1),
-                )
-            )
-            + "</dl>"
-        )
-        body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings)
+        body += '<p class="muted">Blank limits and inherited delegation use project defaults. Run overrides may lower project limits.</p>'
+        body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings, effective=settings)
         body += '</section><section class="panel"><h2>Effective delivery policy</h2>'
         if policy:
             body += f"<p>Frozen profile: {_e(policy.get('profile', 'not recorded'))}</p>"
             body += f"<details><summary>Frozen policy evidence</summary><pre>{_e(json.dumps(policy, indent=2))}</pre></details>"
         else:
             body += "<p>No frozen policy recorded.</p>"
-        body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
-        body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
-        body += f'<p><a href="/runs/{_e(run.linear_id)}">Run and Suspend controls</a></p></section>'
+        refusal = operator_controls.policy_replacement_refusal(run)
+        if refusal:
+            body += f"<p>{_e(refusal)}.</p>"
+        else:
+            body += "<p>Replacement requires new verification and review. Run ownership and profile availability are checked when you submit.</p>"
+            body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button class="secondary">Replace paused run policy</button></form>'
+        body += f'<p><a href="/runs/{_e(run.linear_id)}">Run controls</a></p></section>'
         invocations = st.runtime.invocations(run.id)
-        body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p>API-equivalent estimated USD. These are not Codex account charges.</p>'
-        body += _invocation_cards(invocations[-3:])
-        if len(invocations) > 3:
+        observed = operator_controls.status(st, run.project, run.id)
+        current_ids = {
+            agent["invocation_id"] for agent in observed["agents"] if agent["status"] == "active"
+        }
+        if waiting:
+            current_ids.add(waiting)
+        current = [item for item in invocations if item["id"] in current_ids]
+        history = [item for item in invocations if item["id"] not in current_ids]
+        body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p class="muted">API-equivalent estimated USD, not account charges.</p>'
+        body += "<h3>Active and waiting</h3>" + (
+            _invocation_cards(current)
+            if current
+            else "<p>No active or waiting invocation evidence recorded.</p>"
+        )
+        if history:
             body += (
-                f'<details data-key="invocation-history"><summary>Earlier invocations ({len(invocations) - 3})</summary>'
-                + _invocation_cards(invocations[:-3])
+                f'<details data-key="invocation-history"><summary>Invocation history ({len(history)})</summary>'
+                + _invocation_cards(list(reversed(history)))
                 + "</details>"
             )
         body += (
@@ -959,15 +1016,9 @@ def create_app(
                 from factory.harness import load_harness_config
                 from factory.isolation import project_for_run
 
-                if run is None or run.state not in {
-                    State.SUSPENDED,
-                    State.BLOCKED,
-                    State.AWAITING_HUMAN,
-                }:
-                    raise Blocked(
-                        "policy-replacement-needs-paused-run",
-                        "Suspend the run before replacing its policy",
-                    )
+                refusal = operator_controls.policy_replacement_refusal(run)
+                if refusal or run is None:
+                    raise Blocked("policy-replacement-needs-paused-run", refusal or "Run not found")
                 if not st.acquire_lease(run.id, ttl_seconds=300):
                     raise Blocked("run-leased", "The run is owned by another process")
                 try:
@@ -978,7 +1029,7 @@ def create_app(
                 finally:
                     st.release_lease(run.id)
             elif scope == "approve" and run:
-                st.runtime.approve(run.id, str(form["invocation"]))
+                operator_controls.approve_pending(st, run, str(form.get("invocation", "")))
             else:
                 target = run.id if run else owner
                 if (
@@ -1015,10 +1066,15 @@ def create_app(
             else:
                 body = f"<p>{_e(str(exc))}</p>"
             return HTMLResponse(_page("settings refused", body), status_code=409)
+        destination = (
+            f"/settings/runs/{_query(run.linear_id)}"
+            if run
+            else f"/projects?project={_query(owner)}#project-{_query(owner)}"
+        )
         return HTMLResponse(
             _page(
                 "settings saved",
-                '<p>Settings saved. Current work continues. <a href="/projects">Projects</a></p>',
+                f'<p>Settings saved. Current work continues. <a href="{_e(destination)}">Return to settings</a></p>',
             )
         )
 

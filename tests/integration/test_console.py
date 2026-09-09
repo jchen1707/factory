@@ -709,7 +709,8 @@ def test_invocation_controls_show_context_freshness_and_incomplete_cost(ctx: Con
     assert "gpt-5.6-sol" in page.text
     ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "observed"})
     page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
-    assert 'name="invocation" value="observed"' in page.text
+    assert "Automatic launch pending" in page.text
+    assert 'action="/settings/approve/' not in page.text
     assert "Invocation ID: <code>observed</code>" in page.text
     ctx.store.runtime.observe(
         "observed",
@@ -906,3 +907,96 @@ def test_runtime_scan_separates_ownership_historical_checks_and_current_identity
     assert "Current certification: Unverified" in page
     assert "Current identity unobserved" in page
     assert "<button" not in page
+
+
+@pytest.mark.parametrize(
+    ("settings", "message", "actionable"),
+    [
+        ({}, "No pending invocation", False),
+        ({"waiting_invocation": "next"}, "Automatic launch pending", False),
+        ({"waiting_invocation": "next", "mode": "approval"}, "Awaiting approval", True),
+        (
+            {"waiting_invocation": "next", "mode": "approval", "approved_invocation": "next"},
+            "Already approved",
+            False,
+        ),
+    ],
+)
+def test_admission_only_offers_the_current_pending_approval(
+    ctx: Context, settings: dict[str, str], message: str, actionable: bool
+) -> None:
+    ctx.store.runtime.configure("run", ctx.run.id, settings)
+    client = _client(ctx)
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
+    assert message in page
+    assert ('action="/settings/approve/' in page) is actionable
+    if actionable:
+        assert '<input type="hidden" name="invocation" value="next">' in page
+        result = client.post(f"/settings/approve/{ctx.run.linear_id}", data={"invocation": "next"})
+        assert result.status_code == 200
+        assert "Already approved" in client.get(f"/settings/runs/{ctx.run.linear_id}").text
+
+
+@pytest.mark.parametrize("submitted", ["stale", "", "not-an-invocation"])
+def test_console_refuses_stale_or_invalid_approval_without_recording_it(
+    ctx: Context, submitted: str
+) -> None:
+    ctx.store.runtime.configure(
+        "run", ctx.run.id, {"mode": "approval", "waiting_invocation": "current"}
+    )
+    before = ctx.store.runtime.events(ctx.run.id)
+    result = _client(ctx).post(
+        f"/settings/approve/{ctx.run.linear_id}", data={"invocation": submitted}
+    )
+    assert result.status_code == 409
+    assert "Reload run settings" in result.text
+    assert ctx.store.runtime.settings("run", ctx.run.id).get("approved_invocation") is None
+    assert ctx.store.runtime.events(ctx.run.id) == before
+
+
+@pytest.mark.parametrize(("mode", "approved"), [("automatic", None), ("approval", "current")])
+def test_console_refuses_unnecessary_approval(
+    ctx: Context, mode: str, approved: str | None
+) -> None:
+    ctx.store.runtime.configure(
+        "run",
+        ctx.run.id,
+        {"mode": mode, "waiting_invocation": "current", "approved_invocation": approved},
+    )
+    result = _client(ctx).post(
+        f"/settings/approve/{ctx.run.linear_id}", data={"invocation": "current"}
+    )
+    assert result.status_code == 409
+
+
+def test_policy_replacement_form_matches_paused_state_requirement(ctx: Context) -> None:
+    _to_implementing(ctx)
+    client = _client(ctx)
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
+    assert "Suspend the run before replacing its policy" in page
+    assert 'action="/settings/replace-policy/' not in page
+    response = client.post(
+        f"/settings/replace-policy/{ctx.run.linear_id}", data={"profile": "hardening"}
+    )
+    assert response.status_code == 409
+    assert ctx.store.runtime.policy(ctx.run.id) is None
+
+
+def test_current_invocations_remain_before_large_history(ctx: Context) -> None:
+    for index, role in enumerate(["implement", "review:spec", *(["child"] * 55)]):
+        identity = f"invocation-{index}"
+        ctx.store.runtime.start_invocation(identity, ctx.run.id, index + 1, role, {})
+        if index < 2:
+            ctx.store.runtime.db.execute(
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
+                (identity, ctx.run.id, ctx.run.project, "active", None),
+            )
+    ctx.store.runtime.configure(
+        "run", ctx.run.id, {"waiting_invocation": "invocation-56", "mode": "approval"}
+    )
+    page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}").text
+    visible, history = page.split('<details data-key="invocation-history">', 1)
+    for identity in ("invocation-0", "invocation-1", "invocation-56"):
+        assert f'data-key="invocation-{identity}"' in visible
+    assert 'data-key="invocation-invocation-55"' in history
+    assert "Invocation history (54)" in page

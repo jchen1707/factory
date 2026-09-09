@@ -7,9 +7,9 @@ from typing import Any
 
 from factory.execution import PRESETS
 from factory.isolation import validate_measurement
-from factory.machine import Blocked
+from factory.machine import Blocked, State
 from factory.registry import Registry
-from factory.store import Store
+from factory.store import Run, Store
 
 
 def _configure(
@@ -289,3 +289,26 @@ def status(store: Store, project: str, run_id: str | None = None) -> dict[str, A
     """Return one consistent observation of the owned invocation tree and its cost."""
     with store.runtime.transaction():
         return _status(store, project, run_id)
+
+
+def policy_replacement_refusal(run: Run | None) -> str | None:
+    """The shared state prerequisite; lease and source checks still run on submission."""
+    if run is None or run.state not in {State.SUSPENDED, State.BLOCKED, State.AWAITING_HUMAN}:
+        return "Suspend the run before replacing its policy"
+    return None
+
+
+def approve_pending(store: Store, run: Run, invocation: str) -> None:
+    """Approve the pending identity shown by the console, refusing stale forms."""
+    with store.runtime.transaction():
+        settings = store.runtime.effective(run.project, run.id)
+        waiting = settings.get("waiting_invocation")
+        if not invocation or invocation != waiting:
+            raise ValueError(
+                "The pending invocation changed. Reload run settings before approving."
+            )
+        if settings.get("mode", "automatic") != "approval":
+            raise ValueError("This run launches automatically; approval is not required.")
+        if settings.get("approved_invocation") == waiting:
+            raise ValueError("This invocation is already approved.")
+        store.runtime.approve(run.id, invocation)
