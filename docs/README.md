@@ -11,6 +11,9 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 
 ## Current guidance
 
+- [UI, learning and documentation completion handoff](handoff-ui-learning-docs.md):
+  remaining runtime evidence, worktrees and publication dependencies.
+
 - [certification-retry.md](certification-retry.md)
 - [operator-reference.md](operator-reference.md)
 - [runbook.md](runbook.md)
