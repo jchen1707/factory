@@ -1,5 +1,163 @@
 # Runtime certification and delegation implementation handoff
 
+## Reviewer preparation correction and audited replacement (2026-09-08)
+
+Objective: Factory runtime correctness and safe workflow validation, not extra
+hardening of the synthetic CRUD product.
+
+Implementation branch `fix/reviewer-preparation` in
+`/Users/james/factory-reviewer-preparation`, source commits through `00820fc`.
+The host passes its declared project root into zero-turn preparation; the worker
+accepts unchanged configuration or exactly one trust addition at that root or the
+execution directory. This covers linked Git worktrees and standalone clones.
+Canonical absolute path/containment checks and explicit ancestor distrust refusals
+remain enforced. No host trust-store edits or general config mutation allowance.
+
+Worker failures now emit only source-owned bounded categories; host failure.json
+and blocked detail retain the category without raw account/configuration output.
+Preparation uncertainty now survives source/input changes. Explicit host operator
+`RuntimePreparation.authorize_replacement` requires corrected preparation source,
+a matching old receipt digest, diagnosis-evidence digest and fresh identity.
+Only spec/config and source-dependent probe hashes may change; VM generation,
+native binaries, authority and other identity fields must match. It preserves the
+original intended effect and records a separate confirmed replacement resolution.
+Unchanged-source retries are refused before authorization; this is not a generic
+retry command, a success receipt or approval for paid certification/model calls.
+
+Validation:21 focused regression tests pass; real reviewer worktree and standalone
+Git repository first-start preparations both exit0 with model_turns0 using fresh
+temporary Codex homes inside the VM. Initial diagnostic cleanup raced final
+app-server writes; waiting for shutdown writes resolved the fixture cleanup.
+Standards and Spec reviews clear. All four final gates pass: ruff check, format,
+mypy and pytest. Mypy scope caveat does not apply (existing checked directories);
+the suite does not prove live reviewer launch, which remains pending deployment.
+
+Live reconciliation APPLIED under James's explicit instruction. Original effect
+`0e1d6b24a19adc8a458eeb983b2b1cd54a4885cda9588b75d4ba4b533407e153`
+remains intended and unchanged. Separate runtime-preparation-resolution/replace
+effect is confirmed, bound to receipt digest
+`07a78c487b6e529664a5e5e068911fe12216d5379c1e43ab61d1f75d9015c1c6`
+and diagnosis/acceptance evidence digest
+`cfeb0c1e285371ef384788fb1efb8a12c5e2247a732341975b19425ee0839d7c`.
+Two calls replayed idempotently;22 invocation rows unchanged. FRO-12 remains blocked
+on runtime-preparation-failed, attempt2. No recovery, thread launch, paid call or
+tracker edit in reconciliation. Evidence: reconciliation-live.json and
+resolution-evidence.json. Do not rewrite the old receipt as successful.
+
+Live services/source remain PR94 `6fedaec`; writer loaded, console HTTP200.
+Reviewer VM restored stopped, diagnostic home leftovers removed. No model calls,
+project settings changes or schema migration. New code is not deployed.
+
+Private evidence/scripts:
+`/Users/james/factory/artifacts/runtime-reviewer-preparation-fix-20260908/`.
+Reconciliation rehearsal on a SQLite copy passed twice, original intended receipt
+unchanged and22 invocation rows unchanged. Initial rehearsal correctly refused
+probe identity change; the scoped correction acknowledges that the changed
+preparation source itself changes the probe hash. Paid certification remains separate.
+
+Next after merge/deploy: preserve original run/clone/thread, use normal recovery
+and exact Approval controls to resume review and validate fresh certification and
+independent reviewer launch. Do not start a new builder/run, remove needs-info as a
+workaround, or restore the pre-reconciliation database over new evidence. The
+original uncertain thread is not claimed successful. No model turns were used in
+this repair/acceptance work; no schema migration.
+
+## Reviewer preparation diagnosis: worktree trust key mismatch (2026-09-08)
+
+Diagnosis complete; no implementation/deployment/recovery or approval changes.
+Live source remains PR94 `6fedaec`. Factory run remains blocked on
+`runtime-preparation-failed`, attempt2; preserve the original intended preparation
+effect `0e1d6b24a19adc8a458eeb983b2b1cd54a4885cda9588b75d4ba4b533407e153`.
+
+Root cause reproduced in the actual reviewer VM, using a fresh temporary Codex
+home inside the VM and zero model turns. `prepare_runtime` expects the only allowed
+trust addition at request.workdir:
+`/Users/james/factory-crud-verification/.factory/worktrees/FRO-12`.
+Codex0.153.4 instead writes trust for the parent repository:
+`/Users/james/factory-crud-verification`.
+The worker therefore raises `runtime preparation changed unexpected configuration`
+after thread/start. The host discards that detail and records a generic ValueError
+when the worker returns nonzero. The original failure lacks the inner exception;
+its current configuration/identity and the deterministic reproduction support this
+diagnosis, rather than a retained original traceback.
+
+Evidence and minimization:
+- Prelaunch guards passed with a launch sentinel (no process/thread created).
+- Sealed native app-server initialize passed without sending thread/start.
+- Fresh isolated home: unchanged preparation failed; observed sole project key
+  was the parent repository. No model turn was sent.
+- Changing ONLY the expected trust key to that parent repository made the same
+  fresh-home preparation pass, returning model_turns0.
+- Copying the already updated original VM config into an isolated home also passed,
+  explaining why a blind rerun could hide the first-preparation defect.
+- Fresh fingerprint matches original identity except spec_sha256; exact run
+  environment digest also matches. Original uncertain receipt was not altered.
+
+Private scripts/results: `/Users/james/factory/artifacts/runtime-reviewer-preparation-diagnosis-20260908/`.
+`fresh-home.py` is the failing loop; `root-expectation.py` is the diagnostic
+single-variable green comparison. The latter hardcodes this project's root only
+as an experiment, NOT as a proposed production implementation. Temporary homes
+were removed; original VM Codex config was only read. Reviewer VM was initially
+stopped and is restored stopped after diagnosis. Writer/console remain available.
+No model invocation records were added (22 retained rows), no paid calls or ticket
+edits. Diagnostic thread starts were isolated zero-turn tests, not retries of the
+original preparation.
+
+Next implementation:
+1. Carry/derive the trusted repository trust root explicitly and validate its
+   relationship to the requested workdir. Accept only the runtime's exact expected
+   trust addition; preserve refusal of unrelated config changes and explicit distrust.
+   Cover ordinary clones and nested Git worktrees with first-start regression tests.
+2. Preserve a safe, bounded failure category so configuration mismatch is not hidden
+   as a bare ValueError; never transport raw account/config/exception details.
+3. Run gates/reviews and real zero-turn acceptance before deployment. Reconcile or
+   explicitly replace the original uncertain preparation through an audited operator
+   path; do not delete its effect or blindly retry thread creation. Then resume the
+   existing run from review using normal approval controls; no new builder needed.
+
+## PR94 deployed; reviewer runtime preparation now blocked (2026-09-08)
+
+James merged PR94 and explicitly authorized deployment. Live checkout is
+`6fedaeccb2ac864e263ec5ac8aa7b71109c91850`, whose tree exactly matches tested
+PR head `f672e0f`. No new source changes or schema migration. Both writer and
+console were disabled/stopped and observed absent before a mode0600 SQLite backup;
+backup integrity passed before checkout changed. Both services were restored;
+writer loaded and console HTTP200. Project settings unchanged.
+
+The existing FRO-12 run `c8d569fcd49a4094`, attempt2, progressed past the Git
+pathspec failure into reviewer preparation, then transitioned `reviewing -> blocked`
+at epoch1788913894 with `runtime-preparation-failed`. No new invocation rows or
+model launch effects:22 rows remain (20 previously launched plus2 unlaunched child
+canaries). Previous known API-equivalent estimate USD3.2296624/five incomplete
+records remains the accounting checkpoint; no new usage replay was needed here.
+
+Failure evidence:
+`/Users/james/factory/state/runtime-preparation/0e1d6b24a19adc8a458eeb983b2b1cd54a4885cda9588b75d4ba4b533407e153/`.
+`failure.json` records ValueError and model_turns_admitted0, without the exception
+message. `before.json` identifies reviewer sandbox
+`factory-review-crud-live-20260907-c8d569fcd49a4094`, generation
+`95d9b046-0fb1-48df-bf95-d4929d5de5e4`, Codex0.153.4. No after/result evidence.
+Runtime-preparation thread-start effect remains intended. Do not blindly delete it
+or retry thread creation: preserve/reconcile uncertain preparation evidence.
+
+Normal writer recorded the block comment and needs-info label through the effects
+ledger. No manual tracker edits or model approvals by this deployment session.
+Red-phase replay is warn/inconclusive for both apps, not a new pass claim.
+Independent reviewer has not launched. Deployment succeeded; workflow acceptance
+remains blocked by this next failure.
+
+Next: reproduce/diagnose the reviewer preparation ValueError using the preserved
+identity and zero-model preparation path (`src/factory/runtime_preparation.py`).
+Improve failure evidence safely if needed; never log credentials. Fix and validate
+before resuming the existing attempt through normal recovery/approval controls.
+Do not start a new builder or harden the synthetic product to work around Factory.
+Do not restore the predeployment DB over new effects/evidence.
+
+Deployment evidence: `/Users/james/factory/artifacts/runtime-pr94-deploy-20260908/`
+contains checked deployment script, backup, before/deployment/outcome JSON and
+postdeployment writer log. Source, backup ordering, healthy console and unchanged
+invocation/project-setting checks are captured there.
+
 ## Baseline Git pathspec fix ready in PR94 (2026-09-08)
 
 PR: https://github.com/jchen1707/factory/pull/94 (open, not merged/deployed).
