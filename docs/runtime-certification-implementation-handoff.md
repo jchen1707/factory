@@ -1,6 +1,8 @@
 # Runtime certification and delegation implementation handoff
 
-## Reviewer preparation correction and audited replacement (2026-09-08)
+## Reviewer preparation correction and audited replacement: PR95 (2026-09-08)
+
+PR: https://github.com/jchen1707/factory/pull/95 (open, not deployed).
 
 Objective: Factory runtime correctness and safe workflow validation, not extra
 hardening of the synthetic CRUD product.
