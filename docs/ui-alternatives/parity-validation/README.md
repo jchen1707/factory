@@ -1,6 +1,12 @@
 # Dark console parity acceptance
 
-Status: implementation, fixture acceptance and independent review complete. Live rollout pending.
+Status: functional fixture checks passed; visual acceptance reopened on 2026-09-09.
+
+James identified substantial remaining differences after PR #99. The prior visual-completion
+conclusion below is superseded by the [revision handoff](../../handoff-console-visual-revisions.md).
+The original results are preserved: they establish their functional assertions, not design
+parity or user approval. PR #99 is merged; current live deployment was not verified in this
+follow-up audit.
 
 This record covers the seven-view design repair following the September 9 live/prototype
 audit. It supplements, rather than replaces, the earlier
