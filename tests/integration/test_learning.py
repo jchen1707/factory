@@ -1,5 +1,7 @@
 """Factory collection hands retained evidence to layer A without a model in tests."""
 
+from collections.abc import Mapping
+
 import pytest
 
 from factory.steps import Context
@@ -46,3 +48,50 @@ def test_cancellation_hands_off_archived_events(
     monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
     cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
     assert list((ctx.home / "artifacts").rglob("*.learning.json"))
+
+
+def test_orphan_retains_native_before_dispatch_without_exit(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from factory.sandbox import native_transcript
+    from factory.sandbox.base import RunStatus
+    from factory.steps import reap
+    from tests.integration.test_phase4 import _fake, _start_an_attempt
+
+    def capture(sandbox: object, name: str, session: str, *, env: Mapping[str, str]) -> str:
+        return json.dumps({"type": "session_meta", "payload": {"id": session}}) + "\n"
+
+    monkeypatch.setattr(native_transcript, "capture", capture)
+    _start_an_attempt(ctx, finish=False)
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+    assert reap.reap(ctx).outcome is reap.Outcome.ORPHANED
+    retained = list(ctx.factory_dir.rglob("*.native.jsonl"))
+    assert retained
+    receipt = json.loads(retained[0].with_suffix("").with_suffix(".native.json").read_text())
+    assert receipt["outcome"] == "retained"
+
+
+def test_cancellation_exports_native_before_archiving(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from factory import cli, driver
+    from factory.sandbox import native_transcript
+    from factory.steps import claim, context, sandbox, worktree
+    from tests.integration.test_pipeline import _fake
+
+    def capture(sandbox: object, name: str, session: str, *, env: Mapping[str, str]) -> str:
+        return json.dumps({"type": "session_meta", "payload": {"id": session}}) + "\n"
+
+    monkeypatch.setattr(native_transcript, "capture", capture)
+    claim.run(ctx)
+    context.run(ctx)
+    sandbox.run(ctx)
+    worktree.run(ctx)
+    driver.step(ctx)
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
+    assert list((ctx.home / "artifacts").rglob("*.native.jsonl"))

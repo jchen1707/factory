@@ -1098,6 +1098,25 @@ def _cancel_run(
             "cancellation-stop-unverified", "Owned agents still need terminal reconciliation"
         )
 
+    # Native rollouts live in the runtime home, outside every archive/worktree mount.
+    # Retain them before either archive or sandbox teardown, even without an exit file.
+    from factory import learning
+    from factory.agent_launches import AgentLaunches
+
+    harness = load_harness_config(project.path)
+    environment = {key: value.replace("{run}", run.id) for key, value in project.env.items()}
+    for invocation in store.runtime.invocations(run.id):
+        events = invocation.get("metadata", {}).get("events")
+        if not isinstance(events, str) or not Path(events).is_file():
+            continue
+        try:
+            handle = AgentLaunches(store, sbx).handle(invocation["id"])
+        except (ValueError, KeyError):
+            continue
+        learning.retain(
+            sbx, handle.sandbox, environment, Path(events), extra_names=harness.secret_vars
+        )
+
     for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
         # needed rolling back is not a rollback, it is a cover-up.

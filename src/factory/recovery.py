@@ -693,12 +693,12 @@ def suspend(ctx: Context, *, reason: str) -> State:
         # Parking it is still the right call; there is no agent to kill.
 
     workflow_launches.reconcile(ctx)
-    _stop_sandbox_if_idle(ctx)
     from factory import learning
 
     for invocation in ctx.store.runtime.invocations(ctx.run.id):
         if invocation["attempt"] == ctx.run.attempt:
             learning.collect_invocation(ctx, invocation)
+    _stop_sandbox_if_idle(ctx)
 
     # Through `advance`, not `record_transition`. This wrote its own row until
     # 2026-08-23, which put it around every §5.4 guard — and the console's Suspend

@@ -9,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from factory.learning import _write, evidence
+from factory.artifacts import SecretFound
+from factory.learning import _write, _write_text, evidence, native_prefix, native_session
 
 
 def run(script: Path, events: Path, project: Path, vault: Path) -> None:
@@ -21,17 +22,32 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
         except BlockingIOError:
             return
         try:
-            text, digest, session = evidence(events)
+            from factory.harness import load_harness_config
+
+            extra_names = (
+                load_harness_config(project).secret_vars
+                if (project / "harness.config.json").is_file()
+                else ()
+            )
+            text, digest, session = evidence(events, extra_names=extra_names)
+            evidence_kind = (
+                "retained-native-transcript" if native_session(text) else "retained-events-partial"
+            )
+            if native_session(text) and native_prefix(
+                events.with_suffix(".native.jsonl").read_text(errors="replace")
+            ):
+                evidence_kind = "retained-native-prefix"
             old = json.loads(receipt.read_text()) if receipt.exists() else {}
             if (
                 old.get("sha256") == digest
+                and old.get("evidence") == evidence_kind
                 and old.get("finished") is True
                 and old.get("retryable") is False
             ):
                 return
             record = {
                 "sha256": digest,
-                "evidence": "retained-events-partial",
+                "evidence": evidence_kind,
                 "session_id": session,
                 "finished": False,
                 "outcome": "started",
@@ -41,11 +57,11 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
                 _write(receipt, {**record, "outcome": "unavailable:session-id", "finished": True})
                 return
             snapshot = events.with_suffix(".learning.jsonl")
-            snapshot.write_text(text)
+            _write_text(snapshot, text)
             payload = {
                 "cwd": str(project),
                 "runtime": "codex",
-                "evidence": "retained-events-partial",
+                "evidence": evidence_kind,
                 "session_id": session,
                 "transcript_path": str(snapshot),
             }
@@ -63,6 +79,8 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
             if not isinstance(result, dict) or not isinstance(result.get("outcome"), str):
                 raise ValueError("invalid layer-A outcome")
             _write(receipt, {**record, **result, "finished": True, "exit_code": proc.returncode})
+        except SecretFound as exc:
+            _write(receipt, {"outcome": "quarantined:secret", "kind": exc.kind, "finished": True})
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             _write(receipt, {"outcome": f"failed:{type(exc).__name__}", "finished": False})
 
