@@ -36,7 +36,7 @@ from factory.intake.linear import LinearClient
 from factory.machine import Blocked, State
 from factory.registry import Registry, load_registry
 from factory.routing import Routing, RoutingError, load_routing
-from factory.store import Store
+from factory.store import Run, Store
 
 __all__ = ["create_app"]
 
@@ -547,13 +547,34 @@ _CONTROL_BUTTONS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _controls(ticket: str) -> str:
-    buttons = "".join(
-        f'<form class="control" method="post" action="/runs/{_e(ticket)}/{slug}">'
-        f"<button type=submit>{_e(label)}</button></form> "
-        for slug, label in _CONTROL_BUTTONS
-    )
-    return _render("controls.html", buttons=buttons)
+def _controls(run: Run) -> str:
+    from factory.cli import control_unavailable_reason
+
+    buttons: list[str] = []
+    unavailable: list[str] = []
+    for slug, label in _CONTROL_BUTTONS:
+        reason = control_unavailable_reason(slug, run)
+        if reason:
+            unavailable.append(f"<li><strong>{_e(label)}</strong>: {_e(reason)}</li>")
+            continue
+        style = (
+            "danger secondary"
+            if slug == "cancel"
+            else "secondary"
+            if slug == "resume-planning"
+            else ""
+        )
+        buttons.append(
+            f'<form class="control" method="post" action="/runs/{_e(run.linear_id)}/{slug}">'
+            f'<button class="{style}" type="submit">{_e(label)}</button></form>'
+        )
+    if unavailable:
+        buttons.append(
+            '<details class="control-unavailable"><summary>Unavailable actions</summary><ul>'
+            + "".join(unavailable)
+            + "</ul></details>"
+        )
+    return _render("controls.html", buttons="".join(buttons))
 
 
 # --------------------------------------------------------------------------------
@@ -571,11 +592,14 @@ def _timeline_head(r: console_views.RunRow, tl: console_views.RunTimeline) -> st
     the page's header and `/runs/{ticket}`'s header are one producer apart."""
     badge = f' <span class="chip">{_e(r.badge)}</span>' if r.badge and r.badge != r.state else ""
     head = (
-        f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
-        f'<p class="sub">{_e(r.state)}{badge} · attempt {r.attempt} · rung {_e(r.rung)} · '
-        f"elapsed {_duration(tl.elapsed_total_s)} · context "
-        f"{_pct_cell(r.context_pct, r.context_reason)} · "
-        f"spend {_estimate_cell(r)}</p>"
+        "<h1>Run timeline</h1>"
+        + f'<p class="sub">{_e(r.ticket)} · {_e(r.title or r.project)}</p>'
+        + '<dl class="timeline-meta">'
+        f"<div><dt>State</dt><dd>{_e(r.state.replace('_', ' ').capitalize())}{badge}</dd></div>"
+        f"<div><dt>Attempt / rung</dt><dd>{r.attempt} / {_e(r.rung)}</dd></div>"
+        f"<div><dt>Elapsed</dt><dd>{_duration(tl.elapsed_total_s)}</dd></div>"
+        f"<div><dt>Current context</dt><dd>{_pct_cell(r.context_pct, r.context_reason)}</dd></div>"
+        f"<div><dt>Estimated run cost</dt><dd>{_estimate_cell(r)}</dd></div></dl>"
     )
     if r.pr_url:
         head += (
@@ -726,24 +750,41 @@ def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
 
 def _timeline_html(tl: console_views.RunTimeline, ticket: str, transitions: str = "") -> str:
     """The full inner timeline, wrapped in `#timeline` so the SSE stream can swap it."""
+    tools = (
+        _tool_calls_html(tl.tool_calls)
+        if tl.tool_calls
+        else '<p class="muted">No completed tool calls recorded for this attempt.</p>'
+    )
     return (
         '<div id="timeline">'
         + _timeline_head(tl.row, tl)
-        + '<section class="panel"><h2>Agent activity</h2>'
-        + (_cards_html(tl.cards) or "<p>No agent activity recorded.</p>")
-        + '</section><section class="panel"><h2 class="wf-title">Runtime · swim-lane waterfall</h2>'
+        + '<section class="panel"><h2 class="wf-title">Runtime · swim-lane waterfall</h2>'
         + _waterfall_html(tl.blocks)
-        + '</section><section class="panel">'
-        + _tool_calls_html(tl.tool_calls)
-        + '</section><section class="panel"><h2>Execution transitions</h2>'
+        + tools
+        + '</section><div class="timeline-support-grid"><section class="panel"><h2>Execution history</h2>'
         + transitions
-        + "</section></div>"
+        + '</section><section class="panel"><h2>Agent activity</h2>'
+        + (_cards_html(tl.cards) or '<p class="muted">No agent activity recorded.</p>')
+        + "</section></div></div>"
     )
 
 
 def _transitions_html(store: Store, run_id: str) -> str:
     rows = store.transitions(run_id)
-    return _runtime_table(
+    preview = (
+        '<ol class="transition-preview">'
+        + "".join(
+            "<li><time>"
+            + time.strftime("%H:%M:%S UTC", time.gmtime(row["at"]))
+            + f" · {_e(row['actor'])}</time><strong>{_e(str(row['to_state']).replace('_', ' ').capitalize())}</strong>"
+            + f'<p class="muted">{_e(row["rule"] or "No rule recorded")}</p></li>'
+            for row in reversed(rows[-5:])
+        )
+        + "</ol>"
+        if rows
+        else '<p class="muted">No transitions recorded.</p>'
+    )
+    table = _runtime_table(
         "Transition history",
         ("At", "Transition", "Actor", "Rule"),
         [
@@ -755,6 +796,13 @@ def _transitions_html(store: Store, run_id: str) -> str:
             )
             for row in rows
         ],
+    )
+
+    return (
+        preview
+        + '<details data-key="timeline-transitions"><summary>Full transition evidence</summary>'
+        + table
+        + "</details>"
     )
 
 
@@ -1107,9 +1155,10 @@ def create_app(
         detail = console_views.run_detail(home, reg, rt, st, run)
         r = detail.row
 
-        head = f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
-        if r.title:
-            head += f'<p class="sub">{_e(r.title)}</p>'
+        head = (
+            "<h1>Run details</h1>"
+            + f'<p class="sub">{_e(r.ticket)} · {_e(r.title or r.project)}</p>'
+        )
         if detail.pr_url:
             head += (
                 f'<p>Pull request: <a href="{_e(detail.pr_url)}" target="_blank" '
@@ -1135,7 +1184,7 @@ def create_app(
             + "</tbody></table></div>"
         )
 
-        gates_html = "<h2>Verification</h2><p>No gate report recorded.</p>"
+        gates_html = '<div class="evidence-empty"><h3>Verification</h3><p class="muted">No gate report recorded.</p></div>'
         if detail.gates:
             gate_rows = "".join(
                 "<tr>"
@@ -1148,12 +1197,12 @@ def create_app(
             )
             verdict_cls = "pass" if detail.gate_verdict == "pass" else "fail"
             gates_html = (
-                f'<h2>Verification · gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h2>'
+                f'<h3>Verification · gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h3>'
                 '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>status</th><th>gate</th>'
                 "<th>caveat</th></tr></thead><tbody>" + gate_rows + "</tbody></table></div>"
             )
 
-        review_html = "<h2>Review</h2><p>No review evidence recorded.</p>"
+        review_html = '<div class="evidence-empty"><h3>Review</h3><p class="muted">No review evidence recorded.</p></div>'
         if detail.review_findings or detail.review_tier2:
             order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
             ranked = sorted(
@@ -1168,7 +1217,7 @@ def create_app(
                 for f in ranked
             )
             review_html = (
-                f"<h2>Review <span class='muted'>tier 2: {_e(detail.review_tier2)}</span></h2>"
+                f"<h3>Review <span class='muted'>tier 2: {_e(detail.review_tier2)}</span></h3>"
                 + (
                     '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>severity</th><th>where</th>'
                     "<th>finding</th></tr></thead><tbody>" + finding_rows + "</tbody></table></div>"
@@ -1203,7 +1252,7 @@ def create_app(
         body = _render(
             "run_detail.html",
             head=head,
-            controls=_controls(r.ticket),
+            controls=_controls(run),
             metrics='<div class="stats">'
             + _metric("State / attempt", _e(r.state), f"Attempt {r.attempt} · {r.rung}")
             + _metric(
@@ -1224,7 +1273,26 @@ def create_app(
                 f"API-equivalent USD · {r.spend_status} · ${r.spend_ceiling:.0f} ceiling",
             )
             + "</div>",
-            current=f"<h2>Current attempt</h2><dl><dt>Branch</dt><dd>{_e(r.branch or 'not recorded')}</dd><dt>Activity</dt><dd>{_e(r.activity or 'No activity recorded')}</dd><dt>Time in state / timeout</dt><dd>{_duration(r.elapsed_in_state)} / {_duration(r.timeout_seconds)}</dd><dt>Heartbeat age</dt><dd>{_duration(r.heartbeat_age)}</dd></dl>",
+            current=(
+                f"<h2>Attempt {r.attempt} · {_e(r.state.replace('_', ' ').capitalize())}</h2>"
+                f'<p class="attempt-activity">{_e(r.activity or "No activity recorded")}</p>'
+                + (
+                    f'<progress class="attempt-context" value="{r.context_pct:.1f}" max="100" aria-label="Current context occupancy {r.context_pct:.0f} percent"></progress>'
+                    f'<p class="muted">{r.context_pct:.0f}% current context · observed {_duration(r.context_age_seconds)} ago. Cumulative usage includes earlier attempts.</p>'
+                    if r.context_pct is not None
+                    else '<p class="muted">Current context occupancy is unavailable.</p>'
+                )
+                + '<dl class="attempt-meta">'
+                f"<div><dt>Time in state / timeout</dt><dd>{_duration(r.elapsed_in_state)} / {_duration(r.timeout_seconds)}</dd></div>"
+                f"<div><dt>Heartbeat age</dt><dd>{_duration(r.heartbeat_age)}</dd></div></dl>"
+                f'<p><a href="/runs/{_e(r.ticket)}/timeline">Open timeline →</a></p>'
+            ),
+            source=(
+                '<details data-key="run-source"><summary>Source and attempt</summary><dl>'
+                f"<dt>Branch</dt><dd>{_e(r.branch or 'not recorded')}</dd>"
+                f"<dt>Attempt / rung</dt><dd>{r.attempt} / {_e(r.rung)}</dd></dl></details>"
+                f'<p><a href="/settings/runs/{_e(r.ticket)}">Run settings and policy →</a></p>'
+            ),
             timeline=timeline_html,
             gates=gates_html,
             review=review_html,

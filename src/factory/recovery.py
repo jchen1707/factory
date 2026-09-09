@@ -355,6 +355,43 @@ def _rerun_detached(ctx: Context, died_in: State) -> Verdict:
     return Verdict(Disposition.RESTART, f"rerun-{died_in}", rung)
 
 
+def resume_state_refusal(
+    state: State, ticket: str, *, from_state: str | None = None
+) -> Blocked | None:
+    """Read-only state eligibility shared by recovery and the operator console.
+
+    Target evidence and budget are still checked by resume at execution time.
+    """
+    if state is State.FAILED:
+        return Blocked(
+            "resume-needs-authorise",
+            f"{ticket} is `failed`; pass --authorise to re-authorise spend "
+            "(§16.4: `failed -> resumable` is James's explicit act)",
+        )
+    if state is State.AWAITING_HUMAN and from_state != str(State.IMPLEMENTING):
+        return Blocked(
+            "awaiting-human-decision",
+            f"{ticket} is awaiting a decision; use `factory accept "
+            f"{ticket}` if the escalation is accepted, or `factory resume "
+            f"{ticket} --from implementing` if it is rejected.",
+        )
+
+    if state not in (
+        State.RESUMABLE,
+        State.SUSPENDED,
+        State.BLOCKED,
+        State.AWAITING_HUMAN,
+    ):
+        return Blocked(
+            "not-resumable",
+            f"{ticket} is at {state}; resume works on suspended, blocked, "
+            "resumable, or rejected awaiting-human runs. Use `factory tick` to advance "
+            "a run that is already going.",
+        )
+
+    return None
+
+
 def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = False) -> State:
     """§16.3b — James resumes a parked run. Re-enters the state it left, or a forced one.
 
@@ -383,11 +420,9 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
     state = ctx.run.state
     if state is State.FAILED:
         if not authorise:
-            raise Blocked(
-                "resume-needs-authorise",
-                f"{ctx.run.linear_id} is `failed`; pass --authorise to re-authorise spend "
-                "(§16.4: `failed -> resumable` is James's explicit act)",
-            )
+            refusal = resume_state_refusal(state, ctx.run.linear_id, from_state=from_state)
+            if refusal is not None:
+                raise refusal
         advance(ctx, State.RESUMABLE, actor="human", rule="reauthorise-spend")
         ctx.refresh()
         state = ctx.run.state
@@ -398,26 +433,9 @@ def resume(ctx: Context, *, from_state: str | None = None, authorise: bool = Fal
         resume_run(ctx, skip_backoff=True)
         return state_before(ctx, State.RESUMABLE)
 
-    if state is State.AWAITING_HUMAN and from_state != str(State.IMPLEMENTING):
-        raise Blocked(
-            "awaiting-human-decision",
-            f"{ctx.run.linear_id} is awaiting a decision; use `factory accept "
-            f"{ctx.run.linear_id}` if the escalation is accepted, or `factory resume "
-            f"{ctx.run.linear_id} --from implementing` if it is rejected.",
-        )
-
-    if state not in (
-        State.RESUMABLE,
-        State.SUSPENDED,
-        State.BLOCKED,
-        State.AWAITING_HUMAN,
-    ):
-        raise Blocked(
-            "not-resumable",
-            f"{ctx.run.linear_id} is at {state}; resume works on suspended, blocked, "
-            "resumable, or rejected awaiting-human runs. Use `factory tick` to advance "
-            "a run that is already going.",
-        )
+    refusal = resume_state_refusal(state, ctx.run.linear_id, from_state=from_state)
+    if refusal is not None:
+        raise refusal
 
     target = State(from_state) if from_state else state_before(ctx, state)
     if target not in (State.IMPLEMENTING, State.PLANNING, State.VERIFYING, State.REVIEWING):
