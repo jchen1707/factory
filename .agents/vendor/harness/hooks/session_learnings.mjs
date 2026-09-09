@@ -272,6 +272,19 @@ function messageOf(entry) {
   if (entry?.message && typeof entry.message === 'object') return entry.message;
   const payload = entry?.payload;
   if (payload && typeof payload === 'object' && 'role' in payload) return payload;
+  if (entry?.type === 'response_item') {
+    if (['function_call', 'custom_tool_call'].includes(payload?.type)) {
+      const input = payload.type === 'function_call' ? payload.arguments : payload.input;
+      return {
+        role: 'assistant',
+        content: `[tool: ${payload.name ?? '?'} ${payload.call_id ?? ''}] ${typeof input === 'string' ? input : ''}`,
+      };
+    }
+    if (['function_call_output', 'custom_tool_call_output'].includes(payload?.type)) {
+      const output = Array.isArray(payload.output) ? payload.output : [payload.output];
+      return { role: 'tool', content: [`[call: ${payload.call_id ?? '?'}]`, ...output] };
+    }
+  }
   if (entry?.type === 'item.completed' && entry.item?.type === 'agent_message') {
     return { role: 'assistant', content: entry.item.text };
   }
@@ -655,7 +668,10 @@ export function distilTranscript(options) {
   }
   try {
     // A sparse factory export cannot improve a note already distilled from a richer source.
-    if (evidence === 'retained-events-partial' && existingNote(readNotes(directory), sessionId)) {
+    if (
+      ['retained-events-partial', 'retained-native-prefix'].includes(evidence) &&
+      existingNote(readNotes(directory), sessionId)
+    ) {
       return { target: '', outcome: 'skipped: existing note retained for partial evidence' };
     }
     return distilUnlocked(options);

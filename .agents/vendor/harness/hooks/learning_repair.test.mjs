@@ -96,15 +96,17 @@ test('a partial factory export cannot overwrite a note from the full transcript'
       '---\nsession: full-session-42\nproject: product\n---\n\nFull original learning\n';
     const path = join(directory, 'historical-name.md');
     writeFileSync(path, original);
-    const result = distilTranscript({
-      directory,
-      sessionId: 'full-session-42',
-      evidence: 'retained-events-partial',
-      transcriptPath: '/missing',
-      cwd: directory,
-    });
-    assert.match(result.outcome, /existing note retained/);
-    assert.equal(readFileSync(path, 'utf8'), original);
+    for (const evidence of ['retained-events-partial', 'retained-native-prefix']) {
+      const result = distilTranscript({
+        directory,
+        sessionId: 'full-session-42',
+        evidence,
+        transcriptPath: '/missing',
+        cwd: directory,
+      });
+      assert.match(result.outcome, /existing note retained/, evidence);
+      assert.equal(readFileSync(path, 'utf8'), original);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
