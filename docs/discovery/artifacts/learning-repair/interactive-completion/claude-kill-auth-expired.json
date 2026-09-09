@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-09-09T04:20:04.071749+00:00",
+  "runtime": "claude",
+  "version": "2.1.266 (Claude Code)",
+  "mode": "kill",
+  "frontend": "automated-owned-pty-interactive",
+  "exit_code": -9,
+  "actions": [
+    "owned-group-sigkill"
+  ],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "transcript_exists_at_hook": false,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 8034,
+      "session_id_present": true
+    },
+    {
+      "event": "UserPromptSubmit",
+      "transcript_exists_at_hook": false,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 8034,
+      "session_id_present": true
+    }
+  ],
+  "config_hash_before": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_hash_after": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_unchanged": true,
+  "oauth_expired": true,
+  "authenticated_response": false,
+  "fixture_root": "temporary isolated vault, host cwd /Users/james/factory"
+}

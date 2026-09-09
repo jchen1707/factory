@@ -1,0 +1,20 @@
+{
+  "recovery_trigger": "explicit host adapter replay of retained native transcript; not automatic interactive restart",
+  "note_count_after_first_capture": 1,
+  "note_count_after_same_session_replay": 1,
+  "project_index_contains_note": true,
+  "vault_index_contains_note": true,
+  "terminal_outcomes": [
+    "2026-09-09 04:20 factory: queued: session 01a08464-2266-7a91-a0a5-5ef51a6d4ce5",
+    "2026-09-09 04:20 factory: started: session 01a08464",
+    "2026-09-09 04:20 factory: wrote 2026-09-09 factory 01a08464.md",
+    "2026-09-09 04:20 factory: started: session 01a08464",
+    "2026-09-09 04:20 factory: queued: session 01a08465-a080-7530-968f-32b628f16be3",
+    "2026-09-09 04:20 factory: queued: session 01a08465-a080-7530-968f-32b628f16be3",
+    "2026-09-09 04:20 factory: started: session 01a08465",
+    "2026-09-09 04:20 factory: started: session 01a08465",
+    "2026-09-09 04:20 factory: failed: session capture already running",
+    "2026-09-09 04:20 factory: skipped: unchanged: 2026-09-09 factory 01a08464.md"
+  ],
+  "index_check_note": "Project index uses extensionless wiki links; vault index includes .md."
+}

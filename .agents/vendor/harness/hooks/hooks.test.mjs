@@ -74,6 +74,7 @@ import {
   LEGACY_OPENINGS,
   existingNote,
   firstUserMessage,
+  flatten,
   isDistillerTranscript,
   learningsDirectory,
   noteBody,
@@ -662,8 +663,9 @@ it('keeps fixture Git and gate discovery isolated from the invoking hook reposit
       process.execPath,
       [
         '--test',
-        '--test-name-pattern=^gate report — base diff integration',
+        '--test-name-pattern=^(gate report — base diff integration|first capture creates both indexes|same project in another worktree|Stop and gate report enforce)',
         fileURLToPath(import.meta.url),
+        fileURLToPath(new URL('./delivery_policy.test.mjs', import.meta.url)),
       ],
       {
         cwd: outer,
@@ -696,6 +698,9 @@ it('keeps fixture Git and gate discovery isolated from the invoking hook reposit
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /runs the gate for a committed change/);
     assert.match(result.stdout, /skips the gate when no --base is given/);
+    assert.match(result.stdout, /first capture creates both indexes/);
+    assert.match(result.stdout, /same project in another worktree/);
+    assert.match(result.stdout, /Stop and gate report enforce/);
   } finally {
     rmSync(outer, { recursive: true, force: true });
   }
@@ -1061,7 +1066,8 @@ describe('the wiring covers the surface each guard needs', () => {
       'protect_paths.mjs',
       'format_edited.mjs',
       'verify.mjs',
-      'session_learnings.mjs',
+      'codex_session_learnings.mjs',
+      'learning_recall.mjs',
     ]) {
       assert.ok(
         commands.includes(`\${CLAUDE_PLUGIN_ROOT}/hooks/${script}`),
@@ -1174,6 +1180,77 @@ describe('session learnings — note identity', () => {
     assert.deepEqual(
       readNotes(directory).map((n) => n.key),
       ['abc12345'],
+    );
+  });
+});
+
+describe('session learnings — native Codex transcript', () => {
+  // Shapes measured from an owned Codex 0.153.4 session; content is synthetic.
+  const native = (payload) => JSON.stringify({ type: 'response_item', payload });
+
+  it('keeps native custom tool evidence and its call association', () => {
+    const raw = [
+      native({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'Debug retry delivery' }],
+      }),
+      native({
+        type: 'custom_tool_call',
+        call_id: 'call_1',
+        name: 'functions.exec',
+        input: 'read retry evidence',
+      }),
+      native({
+        type: 'custom_tool_call_output',
+        call_id: 'call_1',
+        output: [
+          { type: 'input_text', text: 'Failure: receipt was missing' },
+          { type: 'input_text', text: 'Fix: persist receipt before dispatch' },
+        ],
+      }),
+      native({
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'Verified the repair.' }],
+      }),
+    ].join('\n');
+    const text = flatten(raw);
+    assert.match(text, /functions\.exec.*call_1/);
+    assert.match(text, /read retry evidence/);
+    assert.match(text, /tool.*call_1/);
+    assert.match(text, /Failure: receipt was missing/);
+    assert.match(text, /Fix: persist receipt before dispatch/);
+    assert.match(text, /assistant: Verified the repair/);
+  });
+
+  it('keeps function tool calls and string outputs', () => {
+    const raw = [
+      native({
+        type: 'function_call',
+        call_id: 'call_2',
+        name: 'exec_command',
+        arguments: '{"cmd":"read evidence"}',
+      }),
+      native({ type: 'function_call_output', call_id: 'call_2', output: 'Observed retry failure' }),
+    ].join('\n');
+    assert.match(flatten(raw), /assistant: \[tool: exec_command call_2\] .*read evidence/);
+    assert.match(flatten(raw), /tool: \[call: call_2\] Observed retry failure/);
+  });
+
+  it('bases recursion on the native first user prompt, never tool evidence', () => {
+    const tool = native({
+      type: 'custom_tool_call_output',
+      call_id: 'call_1',
+      output: [{ type: 'input_text', text: DISTILLER_MARKER }],
+    });
+    const user = (text) =>
+      native({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+    assert.equal(firstUserMessage([tool, user('Debug capture')].join('\n')), 'Debug capture');
+    assert.equal(isDistillerTranscript([tool, user('Debug capture')].join('\n')), false);
+    assert.equal(
+      isDistillerTranscript([tool, user(`${DISTILLER_MARKER}\nlesson`)].join('\n')),
+      true,
     );
   });
 });
@@ -2179,3 +2256,7 @@ describe('gate report — --kinds narrows the run', () => {
     assert.deepEqual(parseArgs([]).kinds, []);
   });
 });
+
+// Keep the consumer-facing test entry point inclusive of learning regression suites.
+import './learning_repair.test.mjs';
+import './learning_recall.test.mjs';

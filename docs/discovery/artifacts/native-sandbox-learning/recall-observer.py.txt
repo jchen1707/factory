@@ -1,0 +1,5 @@
+import subprocess,sys,json,pathlib
+p=sys.stdin.read()
+r=subprocess.run(["node","/Users/james/factory/.agents/vendor/harness/hooks/learning_recall.mjs"],input=p,text=True,capture_output=True)
+with open('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace/worker-recall-provenance.jsonl',"a") as f:f.write(json.dumps({"input":json.loads(p),"output":json.loads(r.stdout)})+"\n")
+print(r.stdout)

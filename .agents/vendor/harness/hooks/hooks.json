@@ -1,5 +1,5 @@
 {
-  "description": "The shared enforcement layer: one implementation of the write guard, the read-and-command secret guard, the formatter, the Definition-of-Done Stop gate and the second-brain distiller. Every stack fact each one needs comes from the consuming repository's harness.config.json, so this file names no toolchain and no directory. Addressed through ${CLAUDE_PLUGIN_ROOT}, which resolves identically in a main checkout, a git worktree and a sandbox — the property a repo-relative path does not have.",
+  "description": "The shared enforcement layer: one implementation of the write guard, the read-and-command secret guard, the formatter, the Definition-of-Done Stop gate and the second-brain distiller. Every stack fact each one needs comes from the consuming repository's harness.config.json, so this file names no toolchain and no directory. Addressed through ${CLAUDE_PLUGIN_ROOT}, which resolves identically in a main checkout, a git worktree and a sandbox \u2014 the property a repo-relative path does not have.",
   "hooks": {
     "PreToolUse": [
       {
@@ -10,7 +10,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/protect_paths.mjs\"",
             "timeout": 30,
-            "statusMessage": "Checking protected paths…"
+            "statusMessage": "Checking protected paths\u2026"
           }
         ]
       }
@@ -23,7 +23,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/format_edited.mjs\"",
             "timeout": 120,
-            "statusMessage": "Formatting…"
+            "statusMessage": "Formatting\u2026"
           }
         ]
       }
@@ -35,7 +35,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/verify.mjs\"",
             "timeout": 600,
-            "statusMessage": "Verifying Definition of Done…"
+            "statusMessage": "Verifying Definition of Done\u2026"
           }
         ]
       }
@@ -45,9 +45,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session_learnings.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex_session_learnings.mjs\" --claude",
             "timeout": 300,
-            "statusMessage": "Distilling session learnings…"
+            "statusMessage": "Distilling session learnings\u2026"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/learning_recall.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recalling relevant learnings\u2026"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/learning_recall.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recalling relevant learnings\u2026"
           }
         ]
       }

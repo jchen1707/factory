@@ -1,0 +1,31 @@
+{
+  "sandbox": "factory-build-learning-source-b3c8e4a4",
+  "host_sensitive_names_removed": true,
+  "probes": [
+    {
+      "kind": "image",
+      "available": true,
+      "declared_env_presence": {}
+    },
+    {
+      "kind": "container",
+      "available": true,
+      "declared_env_presence": {
+        "GH_TOKEN": true
+      }
+    }
+  ],
+  "create_exit": 0,
+  "direct_exec": {
+    "exit": 0,
+    "presence": {
+      "GH_TOKEN": true
+    }
+  },
+  "initial_remove_exit": 1,
+  "cleanup": {
+    "stop_exit": 0,
+    "force_remove_exit": 0
+  },
+  "conclusion": "Template environment is clean. Sandbox creation adds the declared variable even for shell agent and sanitized host environment. Direct Python execution sees it, excluding shell startup. No model executed."
+}

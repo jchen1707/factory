@@ -1,0 +1,14 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+subprocess.run(['git','init','-q',str(root)],check=True);subprocess.run(['git','-C',str(root),'remote','add','origin','https://example.invalid/acme/fixture-project.git'],check=True)
+lesson='We debugged a rollback bug in the fixture queue. I initially assumed moving the queue cursor forward before recording the delivery made retries safe. The interruption test proved this wrong: killing the worker after cursor advancement but before the durable delivery record lost the message. We fixed it by committing the delivery intent to the ledger before the outbound call, then reconciling pending deliveries after restart. A failure-injection test now kills the worker in that window and verifies that the existing effect is reconciled rather than producing a duplicate or losing a message. The regression is called zebra-reconcile-83; retain that searchable identifier. This is isolated test transcript content, not production incident history.'
+(root/'lesson.jsonl').write_text(json.dumps({'type':'response_item','payload':{'role':'user','content':[{'type':'input_text','text':lesson}]}})+'\n')
+env.update(LEARNINGS_DISTILLER='codex',CODEX_LEARNINGS_MODEL='gpt-6-astra');env.pop('CLAUDE_LEARNINGS_OFF',None);env.pop('CLAUDE_LEARNINGS_SKIP',None)
+payload={'cwd':str(root),'session_id':'fixture-real-distill-83','transcript_path':str(root/'lesson.jsonl')}
+print(root,flush=True)
+if os.environ.get('PROBE_NATIVE_DEFAULT') == '1':
+ env.pop('LEARNINGS_DISTILLER', None);payload['runtime']='codex'
+for n in range(2):
+ r=subprocess.run(['node',str(pathlib.Path(os.environ['HARNESS_ROOT'])/'plugins/harness/hooks/session_learnings.mjs'),'--json'],input=json.dumps(payload),text=True,capture_output=True,cwd=root,env=env,timeout=90);(root/f'distill-{n}.json').write_text(r.stdout);print('capture',n,r.returncode,r.stdout,flush=True)
+print('files',[str(p.relative_to(root/'vault')) for p in (root/'vault').rglob('*') if p.is_file()],flush=True)
+r=subprocess.run(['node',str(pathlib.Path(os.environ['HARNESS_ROOT'])/'plugins/harness/hooks/learning_recall.mjs'),'--query','zebra-reconcile-83 rollback'],text=True,capture_output=True,cwd=root,env=env,timeout=10);(root/'recall.json').write_text(r.stdout);print(r.stdout)

@@ -1,0 +1,21 @@
+{
+  "created_utc": "2026-09-09T03:32:12.355455+00:00",
+  "canonical_env": "absent",
+  "alias_env": "temporary fixture vault",
+  "payload_runtime": "codex",
+  "distiller_override": "absent",
+  "capture": {
+    "target": "2026-09-09 fixture-project fixturer.md",
+    "outcome": "wrote 2026-09-09 fixture-project fixturer.md",
+    "retryable": false
+  },
+  "indexes_present": [
+    "_VAULT_INDEX.md",
+    "Project Learnings/_INDEX.md"
+  ],
+  "fresh_worktree_model_response": [
+    "- **Regression:** `zebra-reconcile-83`.\n- **Ordering fix:** Persist delivery intent before the outbound call; reconcile pending deliveries after restart. Advancing the queue cursor before recording durable delivery intent caused message loss on interruption.\n- **Note path:** `Project Learnings/2026-09-09 fixture-project fixturer.md`.\n\nThis finding came from an isolated test fixture, not a production incident."
+  ],
+  "capture_exit": 0,
+  "recall_exit": 0
+}

@@ -1,0 +1,13 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+import time,signal
+cmd=['codex','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(root),'--sandbox','read-only','--json','Think carefully through a proof of the infinitude of primes. Do not use tools.']
+print(root,flush=True)
+with (root/'stdout.jsonl').open('w') as out,(root/'stderr.log').open('w') as err:
+ p=subprocess.Popen(cmd,cwd=root,env=env,stdout=out,stderr=err,start_new_session=True)
+ for _ in range(100):
+  if (root/'hooks.jsonl').exists():break
+  if p.poll() is not None:break
+  time.sleep(.05)
+ os.killpg(p.pid,signal.SIGKILL);p.wait();print('exit',p.returncode)
+print((root/'hooks.jsonl').read_text() if (root/'hooks.jsonl').exists() else 'NO HOOKS')

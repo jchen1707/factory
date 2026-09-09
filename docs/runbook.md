@@ -1,8 +1,9 @@
 # Operator runbook — when the factory is stuck
 
-The factory stops at `awaiting_human` with a PR open, and merging is a human's. Everything
-below is what to do when it stops *before* that. Every entry came from a real run, not from
-imagination; the date and the ticket are named where known.
+Successful delivery stops at `awaiting_human` with a PR open; merging belongs to James.
+The same state can also hold a review escalation before a PR exists. Inspect the recorded
+reason before choosing an action. This is current operator guidance; dated examples
+describe historical runs and do not override current policy or evidence.
 
 The first command in every case is `factory status <TICKET> --evidence` — the transition
 timeline, the recorded checks and the effects ledger tell you which state below you are in.
@@ -20,34 +21,13 @@ timeline, the recorded checks and the effects ledger tell you which state below 
 
 ## It is stuck
 
-### `blocked: env-gate-failed` — an environment gate the agent cannot fix
+### `blocked: env-gate-failed` — inspect the environment evidence
 
-The gate report failed only on gates whose `caveat` names an environment condition, not a
-code defect — the `lighthouse`/`--all` hazard. Under `--all` every opt-in gate runs, so a
-frontend ticket that claims `playwright` (in scope) also forces `lighthouse` (out of
-scope), which fails on a missing Chrome and cannot pass even with it (its caveat: a null
-score is not a pass). Looping back to `implementing` would spend another ~10 M-token
-attempt "fixing" a missing tool, so the run blocks instead.
-
-The PR body still reports the failing gate honestly. Two ways out:
-
-- **Bypass the gate and let the PR open with the failure reported.** This is the FRO-6
-  resolution (2026-08-22):
-  ```
-  factory resume <TICKET> --from reviewing
-  ```
-  Verify/review is skipped; the gate failure stays in the PR body for a human to see.
-- **Install the tool the caveat names and re-run verify.** For lighthouse that is Chrome
-  inside the build sandbox (`pnpm exec playwright install chromium` covers the browser
-  gates; lighthouse additionally needs a Chrome it can drive). Then:
-  ```
-  factory resume <TICKET> --from verifying
-  ```
-
-`--from verifying` re-runs the gate report against the implement attempt's evidence. For a
-`--clone` run, prefer `--from reviewing`: review fetches a fresh worktree, while verify
-re-runs against a host mirror that a later run may have repointed (see the Phase 4 handoff's
-open question). Clear the block in Linear once you have decided.
+Read the retained gate report and its caveats. Resolve the named environment requirement
+in the target's declared runtime, then use `factory resume <TICKET> --from verifying`
+when the preserved source and authority still match. Do not copy an old run's gate bypass
+or install commands into a new run: gate selection belongs to the target harness.
+Historical FRO-6 bypass advice is superseded by this evidence-first procedure.
 
 ### `blocked` with any other reason — a judgement call
 
@@ -80,15 +60,16 @@ identical attempt.
 
 ### `failed` — the attempt budget is spent
 
-The ladder (§16.3a) exhausted: three attempts, then a planning rewind, then a fourth
-failure. Re-authorising spend is James's explicit act:
+The recorded recovery or spend limit is exhausted. Inspect the run's frozen policy,
+failure episodes and lifetime accounting rather than assuming a historical fixed
+attempt count. Re-authorising spend is James's explicit act:
 
 ```
 factory resume <TICKET> --authorise
 ```
 
-This is deliberately not automatic. A run that failed four times is telling you something a
-fifth attempt will not fix — read the evidence first.
+This is deliberately not automatic. Read the evidence and resolve the cause before
+authorizing another attempt.
 
 ### `illegal-transition` — a factory bug, not a stuck run
 
@@ -130,8 +111,9 @@ factory doctor                                   # registry, routing, sbx, codex
 Common causes:
 
 - **`tick refused: sqlite says …`** — the DB failed `PRAGMA integrity_check`. Restore from
-  the nightly copy (`~/factory/state/factory.db.bak*`); the DB is rebuildable from Linear +
-  git + artifacts, so nothing is lost.
+  the nightly copy (`~/factory/state/factory.db.bak*`); the database is **not** reconstructible from Linear and Git. Preserve the damaged
+  database and artifacts before recovery, and follow the
+  [backup and rollback procedure](runtime-certification-rollout.md).
 - **A bad `models.toml`** — the tick refuses and names the rule (F25): the reviewer sharing
   the builder's model, an unknown model, `ultra` on the builder, or a bad budget. Fix
   `config/models.toml`; the next tick succeeds. The daemon never falls back to a default.
@@ -153,17 +135,17 @@ uv run factory doctor --deep            # includes a live codex hook canary (cos
 tail -f ~/factory/logs/factory-$(date +%Y-%m-%d).jsonl   # the structured control-plane log
 ```
 
-`factory serve` opens the same five views in a browser at <http://127.0.0.1:7717> — the
+`factory serve` opens the seven views (runs, projects, run details, timeline, run settings, runtimes and configuration) in a browser at <http://127.0.0.1:7717> — the
 board and the run detail refresh without a reload, and the per-run controls (Suspend,
 Resume, Resume from planning, Cancel, Retry now) are the same code paths as the commands
 above. It binds loopback only and holds no credential of its own. **There is no Merge
 button**: merging is James's, on GitHub, and the console links out to the pull request.
 
-The context percentage is shown only when it can be defended — the agent's completed-turn
-`input_tokens` over the routed model's window from `~/.codex/models_cache.json`. Where
-either is missing the column shows `—` and names the reason on hover; it is never
-estimated. A run above ~70% that is still failing gates is one to rewind to `planning`
-(§16.3a) rather than retry.
+Context occupancy, cumulative tokens and estimated costs are separate measurements.
+The console labels unavailable or stale context observations; cumulative billed usage
+must never stand in for occupancy. Cost is an API-equivalent USD estimate, not an account
+charge. Missing usage or prices leaves evidence incomplete and known cost a lower bound.
+See [telemetry and costs](operator-reference.md#telemetry-and-costs).
 
 The transition `rule` on each hop is the named reason the factory took it. An unexplained
 hop is a bug; a hop with `rule="backoff"` is the daemon waiting §16.4's schedule. When in

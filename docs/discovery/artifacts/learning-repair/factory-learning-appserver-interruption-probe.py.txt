@@ -1,0 +1,15 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+(root/'prompt.txt').write_text('Respond with result LEARNING_RUNTIME_PROBE_OK. Do not use tools.')
+(root/'schema.json').write_text(json.dumps({'type':'object','properties':{'result':{'type':'string'}},'required':['result'],'additionalProperties':False}))
+req={'vault':str(root/'vault'),'workdir':str(root),'model':'gpt-6-astra','effort':'low','readonly':True,'schema':str(root/'schema.json'),'prompt':str(root/'prompt.txt'),'output':str(root/'answer.json'),'context_semantics_verified':False}
+(root/'request.json').write_text(json.dumps(req));print(root,flush=True)
+import time,signal
+with (root/'stdout.jsonl').open('w') as out,(root/'stderr.log').open('w') as err:
+ p=subprocess.Popen(['python3',str(pathlib.Path(os.environ['FACTORY_ROOT'])/'src/factory/agent/app_server_worker.py'),str(root/'request.json')],cwd=root,env=env,stdout=out,stderr=err,start_new_session=True)
+ for _ in range(200):
+  if (root/'hooks.jsonl').exists():break
+  if p.poll() is not None:break
+  time.sleep(.05)
+ os.killpg(p.pid,signal.SIGKILL);p.wait();print('exit',p.returncode)
+print((root/'hooks.jsonl').read_text() if (root/'hooks.jsonl').exists() else 'NO HOOKS')

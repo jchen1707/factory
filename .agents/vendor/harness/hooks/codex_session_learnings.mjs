@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Codex SessionEnd adapter: hand the distillation to a detached process and return.
+ * Nonblocking SessionEnd adapter: hand the distillation to a detached process and return.
  *
  * `session_learnings.mjs` shells out to a headless `claude -p` and can run for minutes.
  * Claude Code allows that — its SessionEnd hook has a 300-second budget. Codex gives the
@@ -21,9 +21,37 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { readPayload } from './lib.mjs';
+import { canonicalProject, learningsDirectory, logOutcome } from './session_learnings.mjs';
+import { mkdirSync } from 'node:fs';
+import { vaultDir } from './vault_index.mjs';
 
 const payload = await readPayload();
 if (payload === null) process.exit(0);
+if (process.env.CLAUDE_LEARNINGS_OFF === '1' || process.env.CLAUDE_LEARNINGS_SKIP === '1')
+  process.exit(0);
+const directory = learningsDirectory();
+if (!directory) {
+  process.stderr.write('session_learnings: unavailable: OBSIDIAN_VAULT_DIRECTORY not configured\n');
+  process.exit(0);
+}
+if (!vaultDir()) {
+  process.stderr.write('session_learnings: failed: configured vault unavailable\n');
+  process.exit(0);
+}
+const project = canonicalProject(payload.cwd || process.cwd());
+try {
+  mkdirSync(directory, { recursive: true });
+} catch {
+  process.stderr.write('session_learnings: failed: learnings directory unavailable\n');
+  process.exit(0);
+}
+logOutcome(
+  directory,
+  project,
+  `queued: session ${String(payload.session_id ?? 'unknown').replace(/[^a-zA-Z0-9-]/g, '')}`,
+);
+
+payload.runtime = process.argv.includes('--claude') ? 'claude' : 'codex';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'session_learnings.mjs');
 
@@ -33,12 +61,15 @@ try {
     stdio: ['pipe', 'ignore', 'ignore'],
     windowsHide: true,
   });
-  child.on('error', () => process.exit(0));
+  child.on('error', () => {
+    logOutcome(directory, project, 'failed: capture worker could not start');
+    process.exit(0);
+  });
   child.stdin.on('error', () => {}); // A child that died before reading is not our problem.
   child.stdin.end(JSON.stringify(payload));
   child.unref();
 } catch {
-  // Nothing a hook can usefully do about a process it could not start.
+  logOutcome(directory, project, 'failed: capture worker could not start');
 }
 
 process.exit(0);

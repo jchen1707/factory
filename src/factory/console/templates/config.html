@@ -4,11 +4,11 @@ write, so a configuration that puts the reviewer on the builder's model is rejec
 rather than at the next daemon start.</p>
 $banner
 <form method="post" action="/config/models">
-<div class="scroll"><table><thead><tr><th>role</th><th>model</th><th>effort</th></tr></thead>
+<div class="scroll" tabindex="0" role="region" aria-label="Model routing table"><table><thead><tr><th>role</th><th>model</th><th>effort</th></tr></thead>
 <tbody>$role_rows</tbody></table></div>
 <h2>budget</h2>
-<p>per-run ceiling $$<input name="usd_per_run" value="$usd_per_run" size="8">
-· warn at $$<input name="usd_warn_at" value="$usd_warn_at" size="8"></p>
+<p>per-run ceiling $$<input aria-label="Per-run estimated USD ceiling" name="usd_per_run" value="$usd_per_run" size="8">
+· warn at $$<input aria-label="Estimated USD warning threshold" name="usd_warn_at" value="$usd_warn_at" size="8"></p>
 <p><button type=submit>Save</button></p></form>
 <h2>projects <span class="muted">(read-only)</span></h2>
 <p class="note">A project's template, mount set and static MCP set are part of a sandbox

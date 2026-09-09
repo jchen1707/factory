@@ -1,0 +1,14 @@
+{
+  "name": "factory-build-learning-kit-d7838306",
+  "root": "/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw",
+  "create_exit": 0,
+  "container_nonempty": [],
+  "proxy_secrets": [
+    {
+      "name": "mcpgateway",
+      "source": "uploaded"
+    }
+  ],
+  "direct_exec_exit": 0,
+  "direct_exec_nonempty": []
+}

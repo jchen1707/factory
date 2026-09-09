@@ -1,0 +1,15 @@
+import pathlib,tempfile,json,subprocess,os,importlib.util
+root=pathlib.Path(tempfile.mkdtemp(prefix='factory-learning-runtime-'))
+(root/'vault').mkdir();(root/'.codex').mkdir();(root/'.claude').mkdir()
+probe=root/'probe.py'
+probe.write_text('import sys,json,pathlib\np=json.load(sys.stdin)\np["observed_transcript_exists"]=pathlib.Path(p.get("transcript_path", "__missing__")).is_file()\nwith open('+repr(str(root/'hooks.jsonl'))+',"a") as f:f.write(json.dumps(p)+"\\n")\n')
+hooks={e:[{'hooks':[{'type':'command','command':f'python3 {probe}','timeout':3}]}] for e in ['SessionStart','SessionEnd']}
+(root/'.codex/hooks.json').write_text(json.dumps({'hooks':hooks}));(root/'.claude/settings.json').write_text(json.dumps({'hooks':hooks}))
+spec=importlib.util.spec_from_file_location('worker',str(pathlib.Path(os.environ['FACTORY_ROOT'])/'src/factory/agent/app_server_worker.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+env=dict(os.environ,OBSIDIAN_VAULT_DIRECTORY=str(root/'vault'),CLAUDE_LEARNINGS_OFF='1');env.pop('CLAUDECODE',None)
+cmd=['codex','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(root),'--sandbox','read-only','--json','Respond with only LEARNING_RUNTIME_PROBE_OK. Do not use tools.']
+(root/'command.json').write_text(json.dumps(cmd));print(root,flush=True)
+with (root/'stdout.jsonl').open('w') as out,(root/'stderr.log').open('w') as err:
+ try:r=subprocess.run(cmd,env=env,stdout=out,stderr=err,timeout=90);print('exit',r.returncode,flush=True)
+ except subprocess.TimeoutExpired:print('timeout',flush=True)
+print((root/'hooks.jsonl').read_text() if (root/'hooks.jsonl').exists() else 'NO HOOKS')

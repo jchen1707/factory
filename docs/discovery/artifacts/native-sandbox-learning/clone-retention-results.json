@@ -1,0 +1,31 @@
+{
+  "removed": true,
+  "exports": [
+    {
+      "runtime": "legacy",
+      "receipt": {
+        "outcome": "retained",
+        "session_id": "01a08469-d795-7e83-a1cf-c513075c1475",
+        "sha256": "03dd162c2c663573062d1eb43915402a5059fb31e5504676d167345369ef8c8c",
+        "truncated_final_record": false
+      },
+      "user": true,
+      "tool": true,
+      "assistant": true,
+      "after_removal_sha256": "03dd162c2c663573062d1eb43915402a5059fb31e5504676d167345369ef8c8c"
+    },
+    {
+      "runtime": "appserver",
+      "receipt": {
+        "outcome": "retained",
+        "session_id": "01a0846a-051f-7420-ad91-f59d571a49e8",
+        "sha256": "20d126c3ad7f6b5d0132d23025f530c358e6665df762d04394cd175fb041b901",
+        "truncated_final_record": false
+      },
+      "user": true,
+      "tool": true,
+      "assistant": true,
+      "after_removal_sha256": "20d126c3ad7f6b5d0132d23025f530c358e6665df762d04394cd175fb041b901"
+    }
+  ]
+}

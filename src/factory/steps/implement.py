@@ -254,6 +254,9 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     second case work: the vault snapshot, the session id and the exit code are all on
     disk, in the attempt directory, under the same absolute path on both sides.
     """
+    from factory import learning
+
+    learning.collect(ctx, attempt_dir.events)
     exit_code = attempt_dir.exit_code()
     accounting.collect(ctx, attempt, STEP, attempt_dir.events)
     vault_before = _read_vault_snapshot(ctx, attempt_dir)

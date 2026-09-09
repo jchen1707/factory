@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-09-09T04:04:12.721903+00:00",
+  "runtime": "codex",
+  "version": "codex-cli 0.153.4",
+  "mode": "clean",
+  "frontend": "automated-owned-pty-interactive",
+  "exit_code": -9,
+  "actions": [
+    "exit-command",
+    "timeout-sigkill"
+  ],
+  "hooks": [
+    {
+      "hook_event_name": "SessionStart",
+      "reason": null,
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 46724,
+      "session_id_present": true
+    },
+    {
+      "hook_event_name": "SessionStart",
+      "reason": null,
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 46724,
+      "session_id_present": true
+    }
+  ],
+  "oauth_expired": false,
+  "refresh_failed": false,
+  "unexpected_argument": false,
+  "response_marker_occurrences": 2,
+  "temporary_vault_files": 0,
+  "fixture_root": "/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-interactive-learning-t7uq5676"
+}

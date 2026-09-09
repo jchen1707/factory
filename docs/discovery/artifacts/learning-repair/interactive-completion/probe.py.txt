@@ -1,0 +1,86 @@
+import datetime,fcntl,hashlib,json,os,pathlib,pty,re,select,signal,struct,subprocess,sys,tempfile,termios,time
+runtime,mode=sys.argv[1:3]
+root=pathlib.Path(sys.argv[3]) if len(sys.argv)>3 else pathlib.Path(tempfile.mkdtemp(prefix='factory-interactive-finish-'))
+root.mkdir(exist_ok=True);(root/'vault').mkdir(exist_ok=True)
+config=pathlib.Path.home()/'.codex/config.toml'
+def digest():return hashlib.sha256(config.read_bytes()).hexdigest()
+before=digest()
+version_at_start=subprocess.check_output([runtime,'--version'],text=True).strip()
+logger=root/'observe.py'
+logger.write_text('''import json,pathlib,sys,os,subprocess,time
+p=json.load(sys.stdin); root=pathlib.Path(__file__).parent
+path=pathlib.Path(p.get('transcript_path') or '__missing__')
+event=p.get('hook_event_name'); row={'event':event,'session_id':p.get('session_id'),'transcript_path':str(path),'transcript_exists_at_hook':path.is_file(),'vault_matches':os.environ.get('OBSIDIAN_VAULT_DIRECTORY')==str(root/'vault'),'time':time.time()}
+with (root/'hooks.jsonl').open('a') as f:f.write(json.dumps(row)+'\\n')
+source=pathlib.Path('/Users/james/harness-learning-repair/plugins/harness/hooks')
+script='codex_session_learnings.mjs' if event=='SessionEnd' else 'learning_recall.mjs'
+args=['node',str(source/script)]
+if event=='SessionEnd' and os.environ['PROBE_RUNTIME']=='claude':args+=['--claude']
+res=subprocess.run(args,input=json.dumps(p),text=True,capture_output=True)
+with (root/'hook-results.jsonl').open('a') as f:f.write(json.dumps({'event':event,'stdout':res.stdout,'stderr':res.stderr,'exit_code':res.returncode})+'\\n')
+print(res.stdout,end='')
+''')
+hooks={ev:[{'hooks':[{'type':'command','command':f'python3 {logger}','timeout':3}]}] for ev in ['SessionStart','UserPromptSubmit','SessionEnd']}
+hooks['Stop']=[]
+def toml(v):
+ if isinstance(v,dict):return '{'+','.join(json.dumps(k)+'='+toml(x) for k,x in v.items())+'}'
+ if isinstance(v,list):return '['+','.join(map(toml,v))+']'
+ return json.dumps(v)
+lesson="We just diagnosed a real hook configuration failure: codex -c shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY only sets child tool environments; native SessionStart and SessionEnd callbacks do not receive that variable. A fixture probe logged vault_matches=false despite a shell command showing the intended vault. Moving OBSIDIAN_VAULT_DIRECTORY into the parent process environment made both callbacks log vault_matches=true and produced the note plus both indexes. The durable regression rule is quasar-journal-731: verify native callback environment independently of tool environment, and supply the registry vault on the host worker process. Explain the incorrect assumption, the correction, and how to prevent this exact regression. Do not use tools, read files, invoke skills, or change anything."
+prompt='What is the prior lesson about shell_environment_policy and native learning callback environment? Cite the note and marker if supplied in recalled context. Do not use tools or read files.' if mode=='recall' else lesson
+if runtime=='codex':
+ cmd=['codex','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+toml(hooks),'-c','model_reasoning_effort="low"','--no-alt-screen','-C','/Users/james/factory','-s','read-only','-a','never',prompt]
+else:
+ settings=root/'settings.json';settings.write_text(json.dumps({'hooks':hooks}))
+ cmd=['claude','--settings',str(settings),'--setting-sources','user','--tools','','--model','sonnet',prompt]
+env=dict(os.environ,TERM='xterm-256color',OBSIDIAN_VAULT_DIRECTORY=str(root/'vault'),PROBE_RUNTIME=runtime,DISABLE_AUTOUPDATER='1')
+env.pop('CLAUDECODE',None);env.pop('CLAUDE_LEARNINGS_OFF',None);env.pop('CLAUDE_LEARNINGS_SKIP',None)
+pid,fd=pty.fork()
+if pid==0:
+ os.chdir('/Users/james/factory');os.execvpe(cmd[0],cmd,env)
+fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack('HHHH',42,160,0,0))
+started_epoch=time.time();start=time.monotonic();output=b'';actions=[];status=None;response=False;auth_error=False
+try:
+ while time.monotonic()-start<120:
+  ready,_,_=select.select([fd],[],[],0.2)
+  if ready:
+   try:chunk=os.read(fd,65536)
+   except OSError:break
+   if not chunk:break
+   output+=chunk
+   plain=b' '.join(re.sub(rb'\x1b\[[0-9;?]*[a-zA-Z]',b' ',output).lower().split())
+   if any(x in plain for x in [b'trust this folder',b'trust the contents',b'do you trust',b'quick safety check']):
+    os.killpg(pid,signal.SIGKILL);actions.append('trust-screen-abort-no-keys');break
+   if b'\x1b[6n' in chunk:os.write(fd,b'\x1b[1;1R')
+  rows=[json.loads(x) for x in (root/'hooks.jsonl').read_text().splitlines() if json.loads(x).get('time',0)>=started_epoch] if (root/'hooks.jsonl').exists() else []
+  if rows:
+   path=pathlib.Path(rows[-1]['transcript_path'])
+   if path.is_file():
+    for line in path.read_text(errors='replace').splitlines():
+     try:r=json.loads(line)
+     except ValueError:continue
+     p=r.get('payload',{})
+     if runtime=='claude' and r.get('type')=='assistant' and r.get('message',{}).get('model')=='<synthetic>':auth_error='login expired' in json.dumps(r).lower()
+     if (r.get('type')=='response_item' and p.get('role')=='assistant' and p.get('phase')=='final_answer') or (runtime=='claude' and r.get('type')=='assistant' and r.get('message',{}).get('model')!='<synthetic>'):response=True
+  if response and 'response-observed' not in actions:actions.append('response-observed')
+  if mode=='kill' and (response or (runtime=='claude' and time.monotonic()-start>10 and rows)):
+   os.killpg(pid,signal.SIGKILL);actions.append('owned-group-sigkill');break
+  if (response or auth_error) and mode!='kill' and 'exit-command' not in actions:
+   os.write(fd,b'/exit');time.sleep(.3);os.write(fd,b'\r');actions.append('exit-command')
+  ended,status=os.waitpid(pid,os.WNOHANG)
+  if ended:break
+ else:os.killpg(pid,signal.SIGKILL);actions.append('timeout-sigkill')
+finally:
+ os.close(fd)
+ try:_,status=os.waitpid(pid,0)
+ except ChildProcessError:pass
+(root/f'terminal-{mode}.private').write_bytes(output)
+time.sleep(2)
+rows=[json.loads(x) for x in (root/'hooks.jsonl').read_text().splitlines()] if (root/'hooks.jsonl').exists() else []
+summary=[]
+for row in rows:
+ if row.get('time',0)<started_epoch:continue
+ path=pathlib.Path(row.pop('transcript_path'));row['transcript_exists_after_exit']=path.is_file();row['transcript_bytes_after_exit']=path.stat().st_size if path.is_file() else 0
+ row['session_id_present']=bool(row.pop('session_id'));summary.append(row)
+r={'observed_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'runtime':runtime,'version':version_at_start,'mode':mode,'frontend':'automated-owned-pty-interactive','exit_code':os.waitstatus_to_exitcode(status) if status is not None else None,'actions':actions,'hooks':summary,'config_hash_before':before,'config_hash_after':digest(),'config_unchanged':before==digest(),'oauth_expired':auth_error or b'oauth token has expired' in output.lower() or b'login expired' in output.lower(),'authenticated_response':response,'fixture_root':str(root)}
+(root/f'result-{mode}.json').write_text(json.dumps(r,indent=2)+'\n');print(json.dumps(r,indent=2))

@@ -1,0 +1,47 @@
+{
+  "observed_at": "2026-09-09T04:20:59.580623+00:00",
+  "runtime": "codex",
+  "version": "codex-cli 0.153.4",
+  "mode": "recall",
+  "frontend": "automated-owned-pty-interactive",
+  "exit_code": 0,
+  "actions": [
+    "response-observed",
+    "exit-command"
+  ],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89555,
+      "session_id_present": true
+    },
+    {
+      "event": "UserPromptSubmit",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89555,
+      "session_id_present": true
+    },
+    {
+      "event": "SessionEnd",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89555,
+      "session_id_present": true
+    }
+  ],
+  "config_hash_before": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_hash_after": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_unchanged": true,
+  "oauth_expired": false,
+  "authenticated_response": true,
+  "fixture_root": "temporary isolated vault, host cwd /Users/james/factory",
+  "assistant_final": "The prior lesson: `shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY` supplies child tool environments, but native `SessionStart` and `SessionEnd` callbacks need that variable in the **parent host worker\u2019s environment**. A shell check succeeded while callbacks reported `vault_matches=false`; setting the host worker environment made both callbacks report `true` and delivered the note plus both indexes.\n\nRegression marker **`quasar-journal-731`**: independently verify both native callbacks and delivery of the note and both indexes to the intended vault. Keep the tool-environment-only configuration as a negative control.\n\nSource: `Project Learnings/2026-09-09 factory 01a08464.md`.",
+  "marker_absent_from_recall_prompt": true,
+  "marker_in_assistant_final": true
+}

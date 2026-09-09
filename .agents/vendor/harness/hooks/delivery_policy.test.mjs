@@ -1,3 +1,7 @@
+// Git hooks export repository selectors. Fixtures must select their own repositories.
+const fixtureEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+);
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { applyDelivery, resolveDelivery } from './delivery_policy.mjs';
@@ -69,10 +73,13 @@ test('Stop and gate report enforce immutable Prototype correctness and retain de
   const authority = join(dir, 'authority');
   mkdirSync(candidate);
   mkdirSync(authority);
-  assert.equal(spawnSync('git', ['init', '-q', candidate]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', candidate], { env: fixtureEnv }).status, 0);
   mkdirSync(join(candidate, 'src'));
   writeFileSync(join(candidate, 'src', 'changed.js'), 'changed\n');
-  assert.equal(spawnSync('git', ['add', 'src/changed.js'], { cwd: candidate }).status, 0);
+  assert.equal(
+    spawnSync('git', ['add', 'src/changed.js'], { cwd: candidate, env: fixtureEnv }).status,
+    0,
+  );
   writeFileSync(join(candidate, 'harness.config.json'), JSON.stringify({ gates: [] }));
   const trusted = structuredClone(config);
   trusted.hooks = { gatedPaths: ['src'], gatedExtensions: ['.js'] };
@@ -91,7 +98,7 @@ test('Stop and gate report enforce immutable Prototype correctness and retain de
   ];
   writeFileSync(join(authority, 'harness.config.json'), JSON.stringify(trusted));
   const env = {
-    ...process.env,
+    ...fixtureEnv,
     HARNESS_AUTHORITY_ROOT: authority,
     HARNESS_DELIVERY_PROFILE: 'prototype',
     HARNESS_SKIP_VERIFY: '',
@@ -102,7 +109,7 @@ test('Stop and gate report enforce immutable Prototype correctness and retain de
       cwd: candidate,
       env,
       encoding: 'utf8',
-      input: JSON.stringify({ cwd: candidate }),
+      input: JSON.stringify({ cwd: candidate, env: fixtureEnv }),
     });
   const stop = invoke('./verify.mjs');
   assert.equal(stop.status, 0, stop.stderr);

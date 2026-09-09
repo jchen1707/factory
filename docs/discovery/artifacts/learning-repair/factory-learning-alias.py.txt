@@ -1,0 +1,21 @@
+import pathlib
+exec(open(pathlib.Path(__file__).with_name('factory-learning-probe.py.txt')).read().split("cmd=['codex'")[0])
+subprocess.run(['git','init','-q',str(root)],check=True);subprocess.run(['git','-C',str(root),'remote','add','origin','https://example.invalid/acme/fixture-project.git'],check=True)
+lesson='We debugged a rollback bug in the fixture queue. I initially assumed moving the queue cursor forward before recording the delivery made retries safe. The interruption test proved this wrong: killing the worker after cursor advancement but before the durable delivery record lost the message. We fixed it by committing the delivery intent to the ledger before the outbound call, then reconciling pending deliveries after restart. A failure-injection test now kills the worker in that window and verifies that the existing effect is reconciled rather than producing a duplicate or losing a message. The regression is called zebra-reconcile-83; retain that searchable identifier. This is isolated test transcript content, not production incident history.'
+(root/'lesson.jsonl').write_text(json.dumps({'type':'response_item','payload':{'role':'user','content':[{'type':'input_text','text':lesson}]}})+'\n')
+env.update(LEARNINGS_DISTILLER='codex',CODEX_LEARNINGS_MODEL='gpt-6-astra');env.pop('CLAUDE_LEARNINGS_OFF',None);env.pop('CLAUDE_LEARNINGS_SKIP',None)
+payload={'cwd':str(root),'session_id':'fixture-real-distill-83','transcript_path':str(root/'lesson.jsonl')}
+print(root,flush=True)
+env['OBSIDIAN_VAULT_DIR']=env.pop('OBSIDIAN_VAULT_DIRECTORY');env.pop('LEARNINGS_DISTILLER',None);payload['runtime']='codex'
+r=subprocess.run(['node',str(pathlib.Path(os.environ['HARNESS_ROOT'])/'plugins/harness/hooks/session_learnings.mjs'),'--json'],input=json.dumps(payload),text=True,capture_output=True,cwd=root,env=env,timeout=90);(root/'alias-capture.json').write_text(r.stdout);print('capture',r.returncode,r.stdout,flush=True)
+print('files',[str(p.relative_to(root/'vault')) for p in (root/'vault').rglob('*') if p.is_file()],flush=True)
+subprocess.run(['git','-C',str(root),'-c','user.name=Runtime Fixture','-c','user.email=fixture@example.invalid','-c','core.hooksPath=/dev/null','commit','--allow-empty','-m','Isolated alias fixture'],check=True,capture_output=True)
+w=root/'another-worktree';subprocess.run(['git','-C',str(root),'worktree','add','--detach',str(w)],check=True,capture_output=True)
+hooks={e:[{'hooks':[{'type':'command','command':'node '+__import__('shlex').quote(str(pathlib.Path(os.environ['HARNESS_ROOT'])/'plugins/harness/hooks/learning_recall.mjs')),'timeout':3}]}] for e in ['SessionStart','UserPromptSubmit']}
+env['CLAUDE_LEARNINGS_OFF']='1'
+cmd=['codex','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(w),'--sandbox','read-only','--json','We need to debug queue delivery recovery. From recalled learning context, state the regression identifier, ordering fix and note path. Do not use tools.']
+with (root/'alias-recall.jsonl').open('w') as out,(root/'alias-recall.stderr').open('w') as err:
+ r=subprocess.run(cmd,cwd=w,env=env,stdout=out,stderr=err,timeout=90);print('recall exit',r.returncode,flush=True)
+for l in (root/'alias-recall.jsonl').read_text().splitlines():
+ x=json.loads(l)
+ if 'item' in x and x['item'].get('type')=='agent_message':print(x['item'])

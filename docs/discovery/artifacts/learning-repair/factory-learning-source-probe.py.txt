@@ -1,0 +1,28 @@
+import json,os,subprocess,tempfile,uuid
+from pathlib import Path
+from factory.harness import load_harness_config
+names=set(load_harness_config(Path('/Users/james/factory')).secret_vars)
+root=Path(tempfile.mkdtemp(prefix='factory-learning-source-'))
+name='factory-build-learning-source-'+uuid.uuid4().hex[:8]
+sock='unix:///Users/james/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/docker.sock'
+env={k:v for k,v in os.environ.items() if k not in names}
+results={'sandbox':name,'host_sensitive_names_removed':True,'probes':[]}
+def inspect(kind, ident):
+ r=subprocess.run(['docker','-H',sock,kind,'inspect',ident],capture_output=True,text=True)
+ if r.returncode:return {'kind':kind,'available':False,'exit':r.returncode}
+ d=json.loads(r.stdout)[0]
+ return {'kind':kind,'available':True,'declared_env_presence':{e.partition('=')[0]:bool(e.partition('=')[2]) for e in d.get('Config',{}).get('Env',[]) if e.partition('=')[0] in names}}
+try:
+ results['probes'].append(inspect('image','docker/sandbox-templates:codex-docker'))
+ r=subprocess.run(['sbx','create','--name',name,'--template','docker/sandbox-templates:codex-docker','--deny-network','api.github.com','shell',str(root)],env=env,capture_output=True,text=True,timeout=180)
+ results['create_exit']=r.returncode
+ if r.returncode==0:
+  results['probes'].append(inspect('container',name))
+  code='import os,json;names='+repr(sorted(names))+';print(json.dumps({n:bool(os.environ.get(n)) for n in names if n in os.environ}))'
+  r=subprocess.run(['sbx','exec',name,'python3','-c',code],capture_output=True,text=True,timeout=60)
+  results['direct_exec']={'exit':r.returncode,'presence':json.loads(r.stdout) if r.returncode==0 else {}}
+finally:
+ r=subprocess.run(['sbx','rm','--force',name],capture_output=True,text=True,timeout=90)
+ results['remove_exit']=r.returncode
+ (root/'result.json').write_text(json.dumps(results,indent=2))
+ print(json.dumps(results,indent=2));print('artifact:',root/'result.json')

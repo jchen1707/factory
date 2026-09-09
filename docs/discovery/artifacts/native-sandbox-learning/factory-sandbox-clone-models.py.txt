@@ -1,0 +1,18 @@
+import pathlib,json,subprocess,shutil,importlib.util
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace');d=json.loads((root/'clone-topology.json').read_text());a=root/'clone-artifacts';cwd=d['cwd']
+shutil.copy2(root/'worker.py',a/'worker.py');(a/'vault').mkdir(exist_ok=True)
+probe=a/'hook.py';probe.write_text('import json,sys,pathlib,os\np=json.load(sys.stdin)\np["observed_transcript_exists"]=pathlib.Path(p.get("transcript_path", "__missing__")).is_file()\np["vault_matches"]=os.environ.get("OBSIDIAN_VAULT_DIRECTORY")=='+repr(str(a/'vault'))+'\nwith open('+repr(str(a/'hooks.jsonl'))+',"a") as f:f.write(json.dumps(p)+"\\n")\n')
+hooks={e:[{'hooks':[{'type':'command','command':f'python3 {probe}','timeout':3}]}] for e in ['SessionStart','SessionEnd']}
+(a/'hooks.json').write_text(json.dumps({'hooks':hooks}));(a/'lesson.txt').write_text((root/'lesson.txt').read_text())
+spec=importlib.util.spec_from_file_location('worker',a/'worker.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+prompt='Use a shell tool to read lesson.txt, then explain its durable lesson and include marker ASSISTANT_QUOKKA_EXPORT_47. Do not modify files.'
+(a/'prompt.txt').write_text(prompt);shutil.copy2(root/'schema.json',a/'schema.json');req=json.loads((root/'request.json').read_text());req.update(workdir=cwd,vault=str(a/'vault'),prompt=str(a/'prompt.txt'),schema=str(a/'schema.json'),output=str(a/'answer.json'));(a/'request.json').write_text(json.dumps(req))
+setup='import pathlib,shutil; p=pathlib.Path('+repr(cwd)+');(p/".codex").mkdir(exist_ok=True);shutil.copy2('+repr(str(a/'hooks.json'))+',p/".codex/hooks.json");shutil.copy2('+repr(str(a/'lesson.txt'))+',p/"lesson.txt");(p/"clone-only-marker").write_text("private clone proof")'
+subprocess.run(['sbx','exec',d['name'],'python3','-c',setup],capture_output=True,check=True)
+assert not (root/'identity-source/clone-only-marker').exists()
+results=[]
+for runtime in ['legacy','appserver']:
+ cmd=['codex','exec','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',cwd,'--sandbox','read-only','--json',prompt] if runtime=='legacy' else ['python3',str(a/'worker.py'),str(a/'request.json')]
+ with (a/(runtime+'.stdout')).open('w') as out,(a/(runtime+'.stderr')).open('w') as err:r=subprocess.run(['sbx','exec',d['name'],'env','OBSIDIAN_VAULT_DIRECTORY='+str(a/'vault'),'CLAUDE_LEARNINGS_OFF=1',*cmd],stdout=out,stderr=err,timeout=100)
+ results.append({'runtime':runtime,'exit':r.returncode});print(json.dumps(results[-1]),flush=True)
+(a/'models-results.json').write_text(json.dumps({'private_clone_write_not_on_host':True,'models':results},indent=2))

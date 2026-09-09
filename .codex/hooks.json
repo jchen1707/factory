@@ -54,6 +54,32 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "statusMessage": "Recalling relevant learnings",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/vendor/harness/hooks/learning_recall.mjs\"",
+            "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; node (Join-Path $root '.agents/vendor/harness/hooks/learning_recall.mjs')\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "statusMessage": "Recalling relevant learnings",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/vendor/harness/hooks/learning_recall.mjs\"",
+            "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; node (Join-Path $root '.agents/vendor/harness/hooks/learning_recall.mjs')\""
+          }
+        ]
+      }
     ]
   }
 }

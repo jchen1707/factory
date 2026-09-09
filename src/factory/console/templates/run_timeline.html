@@ -1,6 +1,9 @@
+<p class="stream-status muted" id="timeline-status" role="status">Connecting to live updates…</p>
 $timeline
 <script>
 const es = new EventSource('/sse/timeline/$ticket');
+es.onopen = () => { document.getElementById('timeline-status').textContent = 'Connected to live updates'; };
+es.onerror = () => { document.getElementById('timeline-status').textContent = 'Live updates unavailable · showing last received data'; };
 es.onmessage = e => {
   const html = JSON.parse(e.data).html;
   if (html) { document.getElementById('timeline').innerHTML = html; }

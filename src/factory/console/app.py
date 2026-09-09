@@ -80,13 +80,43 @@ def _render(name: str, /, **fields: str) -> str:
     return _template(name).substitute(**fields)
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, *, ticket: str | None = None, view: str = "") -> str:
     """The shell every view shares: head, stylesheet, nav, body."""
+    links = [
+        ("runs", "/", "Runs"),
+        ("projects", "/projects", "Projects"),
+        ("runtimes", "/runtimes", "Runtimes"),
+        ("configuration", "/config", "Configuration"),
+    ]
+    current = view or title
+    navigation = "".join(
+        f'<a href="{href}"' + (' aria-current="page"' if key == current else "") + f">{label}</a>"
+        for key, href, label in links
+    )
+    run_navigation = ""
+    if ticket:
+        run_links = [
+            ("detail", f"/runs/{ticket}", "Run details"),
+            ("timeline", f"/runs/{ticket}/timeline", "Run timeline"),
+            ("settings", f"/settings/runs/{ticket}", "Run settings"),
+        ]
+        run_navigation = (
+            '<nav class="run-nav" aria-label="Current run">'
+            + "".join(
+                f'<a href="{_e(href)}"'
+                + (' aria-current="page"' if key == current else "")
+                + f">{label}</a>"
+                for key, href, label in run_links
+            )
+            + "</nav>"
+        )
     return _render(
         "page.html",
         title=_e(title),
         style=(TEMPLATES / "console.css").read_text(encoding="utf-8"),
         body=body,
+        navigation=navigation,
+        run_navigation=run_navigation,
     )
 
 
@@ -196,11 +226,12 @@ def _runtime_status(store: Store, project: str, run_id: str | None = None) -> st
     from factory.operator_controls import status
 
     observed = status(store, project, run_id)
-    completeness = "complete" if observed["cost_complete"] else "incomplete"
+    completeness = "complete" if observed["cost_complete"] else "incomplete · known lower bound"
+    estimate_prefix = "" if observed["cost_complete"] else "≥ "
     return (
         f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents · "
         f"{observed['queued_children']} queued children · {observed['pending_certifications']} pending/checking certifications</p>"
-        f"<p>API-equivalent estimated USD: ${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
+        f"<p>API-equivalent estimated USD: {estimate_prefix}${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
         "These are not Codex account charges. Queued children and certification jobs may overlap.</p>"
         + _runtime_table(
             "Children",
@@ -322,10 +353,71 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
             "</tr>"
         )
     return (
-        '<div class="scroll"><table><thead><tr>'
+        '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr>'
         "<th>ticket</th><th>project</th><th>state</th><th>attempt</th><th>in state</th>"
         "<th>context</th><th>tokens in / out</th><th>spend · API-equivalent estimated USD</th><th>activity</th><th>live</th>"
         "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
+    )
+
+
+def _board_overview(
+    rows: list[console_views.RunRow], waiting: dict[str, str], pending: dict[str, str]
+) -> str:
+    """Render observed holds before the queue; never infer activity or aggregate context."""
+    attention = [
+        r
+        for r in rows
+        if r.state in {"blocked", "suspended", "awaiting_human", "failed"}
+        or r.run_id in waiting
+        or r.run_id in pending
+    ]
+    counts = [
+        ("Open runs", len(rows)),
+        ("Blocked", sum(r.state == "blocked" for r in rows)),
+        ("Awaiting invocation approval", len(waiting)),
+        ("Pending agent launch", len(pending)),
+        ("Approved, unclaimed", sum(r.state == "approved" for r in rows)),
+    ]
+    summary = (
+        '<div class="ops-strip" aria-label="Observed run counts">'
+        + "".join(
+            f"<div><span>{label}</span><strong>{count}</strong></div>" for label, count in counts
+        )
+        + "</div>"
+    )
+    holds = ""
+    for row in attention:
+        reason = (
+            row.blocked_reason
+            or waiting.get(row.run_id)
+            or pending.get(row.run_id)
+            or row.state.replace("_", " ")
+        )
+        launch_status = (
+            "Approval required"
+            if row.run_id in waiting
+            else "Pending agent launch"
+            if row.run_id in pending
+            else ""
+        )
+        destination = (
+            f"/settings/runs/{row.ticket}" if row.run_id in waiting else f"/runs/{row.ticket}"
+        )
+        holds += (
+            f'<article class="attention-item"><a href="{_e(destination)}">{_e(row.ticket)}</a>'
+            f'<span class="chip warn">{_e(row.state)}</span><p>{_e(launch_status)}</p><p>{_e(reason)}</p></article>'
+        )
+    if not holds:
+        holds = '<p class="muted">No blocked, suspended, failed or pending agent runs.</p>'
+    return (
+        summary
+        + f'<div class="operations-grid{"" if attention else " no-attention"}"><section class="panel attention" '
+        'aria-labelledby="attention-heading"><h2 id="attention-heading">Needs attention</h2>'
+        + holds
+        + '</section><section class="panel" aria-labelledby="queue-heading">'
+        '<h2 id="queue-heading">Work in progress</h2><p class="table-hint muted">Scroll the table for all run signals, including context, token usage and estimated spend.</p>'
+        + _board_table(rows)
+        + "</section></div>"
     )
 
 
@@ -483,7 +575,7 @@ def _waterfall_html(blocks: list[console_views.WaterfallBlock]) -> str:
         + '<span><i class="wfsw dead"></i>dead attempt</span>'
         + "</div>"
     )
-    return f'<div class="waterfall">{axis}{"".join(rows)}{legend}</div>'
+    return f'<div class="waterfall" tabindex="0" role="region" aria-label="Runtime waterfall">{axis}{"".join(rows)}{legend}</div>'
 
 
 def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
@@ -509,7 +601,7 @@ def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
     )
     head = (
         '<h2>tool calls <span class="muted">this attempt</span></h2>'
-        '<div class="scroll"><table><thead><tr><th>#</th><th>type</th>'
+        '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>#</th><th>type</th>'
         "<th>command / summary</th>"
         + ("<th>dur</th>" if has_dur else "")
         + "<th>exit</th></tr></thead><tbody>"
@@ -573,11 +665,28 @@ def create_app(
         ln = linear or LinearClient()
         return reg, rt, st, ln
 
+    def _board_content(reg: Registry, rt: Routing, st: Store) -> str:
+        rows = console_views.runs_board(home, reg, rt, st)
+        waiting = {}
+        pending = {}
+        for row in rows:
+            effective = st.runtime.effective(row.project, row.run_id)
+            invocation = effective.get("waiting_invocation")
+            approved = st.runtime.settings("run", row.run_id).get("approved_invocation")
+            if (
+                invocation
+                and effective.get("mode", "automatic") == "approval"
+                and approved != invocation
+            ):
+                waiting[row.run_id] = str(invocation)
+            elif invocation:
+                pending[row.run_id] = str(invocation)
+        return _board_overview(rows, waiting, pending)
+
     @app.get("/", response_class=HTMLResponse)
     def board() -> HTMLResponse:
         reg, rt, st, _ = _cfg()
-        rows = console_views.runs_board(home, reg, rt, st)
-        body = _render("board.html", table=_board_table(rows))
+        body = _render("board.html", table=_board_content(reg, rt, st))
         return HTMLResponse(_page("runs", body))
 
     @app.get("/projects", response_class=HTMLResponse)
@@ -642,9 +751,26 @@ def create_app(
             )
         }
         form_settings = {key: value for key, value in form_settings.items() if value is not None}
-        body += f"<p>Effective delegation/capacity: {_e(json.dumps({key: settings.get(key, default) for key, default in (('delegation_mode', 'disabled'), ('max_active_agents', 8), ('max_children_per_parent', 2), ('max_delegation_depth', 1))}))}</p>"
+        body += (
+            '<h2>Effective limits</h2><dl class="effective-limits">'
+            + "".join(
+                f"<div><dt>{label}</dt><dd>{_e(settings.get(key, default))}</dd></div>"
+                for key, label, default in (
+                    ("delegation_mode", "Delegation", "disabled"),
+                    ("max_active_agents", "Active agent limit", 8),
+                    ("max_children_per_parent", "Children per parent", 2),
+                    ("max_delegation_depth", "Delegation depth", 1),
+                )
+            )
+            + "</dl>"
+        )
         body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings)
-        body += f"<h2>Effective delivery policy</h2><pre>{_e(json.dumps(policy, indent=2))}</pre>"
+        body += "<h2>Effective delivery policy</h2>"
+        if policy:
+            body += f"<p>Frozen profile: {_e(policy.get('profile', 'not recorded'))}</p>"
+            body += f"<details><summary>Frozen policy evidence</summary><pre>{_e(json.dumps(policy, indent=2))}</pre></details>"
+        else:
+            body += "<p>No frozen policy recorded.</p>"
         body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
         body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
         waiting = settings.get("waiting_invocation") or ""
@@ -652,7 +778,7 @@ def create_app(
         body += f'<p><a href="/runs/{_e(run.linear_id)}">Run and Suspend controls</a></p>'
         body += "<h2>Invocations</h2><p>API-equivalent estimated USD. These are not Codex account charges.</p>"
         body += _invocation_cards(st.runtime.invocations(run.id))
-        return HTMLResponse(_page("run controls", body))
+        return HTMLResponse(_page("run controls", body, ticket=run.linear_id, view="settings"))
 
     @app.post("/settings/{scope}/{owner}")
     async def settings_write(scope: str, owner: str, request: Request) -> HTMLResponse:
@@ -742,7 +868,7 @@ def create_app(
         def read_board() -> str:
             """Blocking: it opens SQLite and stats attempt directories. Off the loop."""
             reg, rt, st, _ = _cfg()
-            return _board_table(console_views.runs_board(home, reg, rt, st))
+            return _board_content(reg, rt, st)
 
         async def events() -> Any:
             while True:
@@ -791,7 +917,7 @@ def create_app(
             for t in detail.transitions
         )
         timeline_html = (
-            '<h2>transitions</h2><div class="scroll"><table><thead><tr><th>at</th>'
+            '<h2>transitions</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>at</th>'
             "<th>hop</th><th>actor</th><th>rule</th></tr></thead><tbody>"
             + timeline
             + "</tbody></table></div>"
@@ -811,7 +937,7 @@ def create_app(
             verdict_cls = "pass" if detail.gate_verdict == "pass" else "fail"
             gates_html = (
                 f'<h2>gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h2>'
-                '<div class="scroll"><table><thead><tr><th>status</th><th>gate</th>'
+                '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>status</th><th>gate</th>'
                 "<th>caveat</th></tr></thead><tbody>" + gate_rows + "</tbody></table></div>"
             )
 
@@ -832,7 +958,7 @@ def create_app(
             review_html = (
                 f"<h2>review <span class='muted'>tier 2: {_e(detail.review_tier2)}</span></h2>"
                 + (
-                    '<div class="scroll"><table><thead><tr><th>severity</th><th>where</th>'
+                    '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>severity</th><th>where</th>'
                     "<th>finding</th></tr></thead><tbody>" + finding_rows + "</tbody></table></div>"
                     if ranked
                     else '<p class="muted">No findings.</p>'
@@ -846,7 +972,7 @@ def create_app(
                 for a in detail.artifacts
             )
             artifacts_html = (
-                '<h2>artifacts</h2><div class="scroll"><table><thead><tr><th>sha256</th>'
+                '<h2>artifacts</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>sha256</th>'
                 "<th>file</th></tr></thead><tbody>" + items + "</tbody></table></div>"
             )
 
@@ -872,7 +998,7 @@ def create_app(
             artifacts=artifacts_html,
             tail=tail_html,
         )
-        return HTMLResponse(_page(r.ticket, body))
+        return HTMLResponse(_page(r.ticket, body, ticket=r.ticket, view="detail"))
 
     @app.get("/runs/{ticket}/timeline", response_class=HTMLResponse)
     def run_timeline_view(ticket: str) -> HTMLResponse:
@@ -890,7 +1016,9 @@ def create_app(
             timeline=_timeline_html(tl, ticket),
             ticket=_e(ticket.upper()),
         )
-        return HTMLResponse(_page(f"{ticket.upper()} timeline", body))
+        return HTMLResponse(
+            _page(f"{ticket.upper()} timeline", body, ticket=ticket.upper(), view="timeline")
+        )
 
     @app.get("/sse/timeline/{ticket}")
     async def timeline_stream(ticket: str) -> StreamingResponse:
@@ -999,7 +1127,7 @@ def create_app(
                 for r in rows
             )
             table = (
-                '<div class="scroll"><table><thead><tr><th>sandbox</th><th>state</th>'
+                '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>sandbox</th><th>state</th>'
                 "<th>workspace</th><th>ports</th><th>template</th><th>runs</th>"
                 "<th>last denial</th></tr></thead><tbody>" + body_rows + "</tbody></table></div>"
             )
@@ -1015,8 +1143,8 @@ def create_app(
         role_rows = "".join(
             "<tr>"
             f"<td>{_e(role.name)}</td>"
-            f'<td><input name="model.{_e(role.name)}" value="{_e(role.model)}" size="20"></td>'
-            f'<td><input name="effort.{_e(role.name)}" value="{_e(role.effort)}" size="10"></td>'
+            f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}" size="20"></td>'
+            f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}" size="10"></td>'
             "</tr>"
             for role in view.roles
         )

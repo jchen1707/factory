@@ -1,0 +1,48 @@
+{
+  "observed_at": "2026-09-09T04:19:04.460624+00:00",
+  "runtime": "claude",
+  "version": "2.1.266 (Claude Code)",
+  "mode": "clean",
+  "frontend": "automated-owned-pty-interactive",
+  "exit_code": 0,
+  "actions": [
+    "exit-command"
+  ],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "transcript_exists_at_hook": false,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 9213,
+      "session_id_present": true
+    },
+    {
+      "event": "UserPromptSubmit",
+      "transcript_exists_at_hook": false,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 9213,
+      "session_id_present": true
+    },
+    {
+      "event": "SessionEnd",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 9213,
+      "session_id_present": true
+    }
+  ],
+  "config_hash_before": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_hash_after": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_unchanged": true,
+  "oauth_expired": true,
+  "authenticated_response": false,
+  "fixture_root": "temporary isolated vault, host cwd /Users/james/factory",
+  "capture_outcomes": [
+    "2026-09-09 04:19 factory: queued: session 5aa3794d-287e-4c54-9f17-956f06378ee7",
+    "2026-09-09 04:19 factory: started: session 5aa3794d",
+    "2026-09-09 04:19 factory: failed: claude exited 1"
+  ]
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "label": "legacy",
+    "session": "01a08463-916f-7682-afdb-26179d171814",
+    "sha256": "a629281bf7d6b4ada41c23f71e1d33fdc937aa9ecb25ecf1de440410b0c3e183",
+    "bytes": 43125,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  },
+  {
+    "label": "appserver",
+    "session": "01a08464-4b81-7b91-8493-a993fa23ba20",
+    "sha256": "8de2c15f247c9fdf3c4057a07c536b8409a999be1d6e3890f3d58931833c55cb",
+    "bytes": 37661,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  },
+  {
+    "label": "legacy-interrupt",
+    "session": "01a08465-aac1-7e11-ab53-3c16ff57747d",
+    "sha256": "878ea31519586b7d2158f56665a7ec7ff217dddcfabbd06829768fc2d7888aef",
+    "bytes": 36021,
+    "user": true,
+    "tool": false,
+    "assistant": false
+  },
+  {
+    "label": "appserver-interrupt",
+    "session": "01a08465-b024-7111-aafe-0bbb358b0d51",
+    "sha256": "2cd682abe0b68429bf3ad1840ea4e0fbf2586b923b14d0ff6abba0a54564cc87",
+    "bytes": 32333,
+    "user": true,
+    "tool": false,
+    "assistant": false
+  },
+  {
+    "label": "worktree-legacy",
+    "session": "01a08466-f1bb-7c81-aea4-ea1d235dd313",
+    "sha256": "c5941aa73d597ce7ce469fffaef91fee4235b5ec46ab0808aa6ebde47bdbb376",
+    "bytes": 43467,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  },
+  {
+    "label": "worktree-appserver",
+    "session": "01a08467-1873-7f43-9713-fbff23d883ad",
+    "sha256": "4542437042f2e4c62505afbc3a06a24e040f5987e5290eab666cdab6aed622d3",
+    "bytes": 38142,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  },
+  {
+    "label": "clone-legacy",
+    "session": "01a08467-445d-70c2-964a-840a364fdcef",
+    "sha256": "6cc8c091699d68f3ea4f1cfe04c5ecf8c87b5795dee5fc6532b23e03edee33eb",
+    "bytes": 42758,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  },
+  {
+    "label": "clone-appserver",
+    "session": "01a08467-65c9-7280-bf9c-ff5146dec7b2",
+    "sha256": "856c091c23380123ce1b3f9a229330db5d4c8c0b9c3fe8533b81789f26b482b8",
+    "bytes": 37292,
+    "user": true,
+    "tool": true,
+    "assistant": true
+  }
+]
