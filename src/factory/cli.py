@@ -1715,6 +1715,24 @@ def _scheduling_hold(ticket: str, exc: AgentApprovalRequired | ProjectQueued) ->
 _CONTROLS: set[str] = {"suspend", "resume", "resume-planning", "cancel", "retry"}
 
 
+def control_unavailable_reason(action: str, run: Run) -> str | None:
+    """Read-only state checks; execution still owns lease, budget and target checks."""
+    if action == "suspend":
+        if run.state in machine.TERMINAL:
+            return f"{run.linear_id} is at {run.state}; nothing to suspend"
+        if not machine.can(run.state, State.SUSPENDED):
+            return f"{run.linear_id} is at {run.state}, which has no edge to {State.SUSPENDED}; use Resume, not Suspend"
+    if action == "retry" and run.state is not State.RESUMABLE:
+        return f"{run.linear_id} is {run.state}; retry is for a resumable run"
+    if action in {"resume", "resume-planning"}:
+        refusal = recovery.resume_state_refusal(
+            run.state, run.linear_id, from_state="planning" if action == "resume-planning" else None
+        )
+        if refusal is not None:
+            return refusal.detail
+    return None
+
+
 def dispatch_control(
     action: str,
     home: Path,
@@ -1756,17 +1774,9 @@ def dispatch_control(
     ctx = build(run)
     try:
         if action == "suspend":
-            if run.state in machine.TERMINAL:
-                return 1, f"{run.linear_id} is at {run.state}; nothing to suspend"
-            if not machine.can(run.state, State.SUSPENDED):
-                # The same refusal as `cmd_suspend`'s, because §18.5 says the control and
-                # the command share a path — and because this is the one that fired: the
-                # console suspended a `resumable` BAC-6 and recorded an edge that does
-                # not exist.
-                return 1, (
-                    f"{run.linear_id} is at {run.state}, which has no edge to "
-                    f"{State.SUSPENDED}; use Resume, not Suspend"
-                )
+            refusal = control_unavailable_reason(action, run)
+            if refusal is not None:
+                return 1, refusal
             origin = recovery.suspend(ctx, reason="suspended via console")
             return 0, f"{run.linear_id} suspended from {origin}"
         if action == "cancel":
@@ -1775,8 +1785,9 @@ def dispatch_control(
         if action == "resume-planning":
             recovery.resume(ctx, from_state="planning")
         elif action == "retry":
-            if run.state is not State.RESUMABLE:
-                return 1, f"{run.linear_id} is {run.state}; retry is for a resumable run"
+            refusal = control_unavailable_reason(action, run)
+            if refusal is not None:
+                return 1, refusal
             recovery.resume_run(ctx, skip_backoff=True)
         else:  # resume
             recovery.resume(ctx)

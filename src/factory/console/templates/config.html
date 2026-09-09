@@ -1,8 +1,13 @@
 <h1>Configuration</h1>
 <p class="sub">Model routing and cost limits for future invocations.</p>
 $banner
-<div class="detail-grid"><form method="post" action="/config/models"><section class="panel"><h2>Model routing</h2>
-<p>Builder and reviewer remain separate. Validation runs before any file is written.</p>
-<div class="scroll" tabindex="0" role="region" aria-label="Model routing table"><table><thead><tr><th>Role</th><th>Model</th><th>Effort</th></tr></thead><tbody>$role_rows</tbody></table></div></section>
-<section class="panel"><h2>Budget limits</h2><div class="fields"><label>Per-run estimated USD ceiling<input name="usd_per_run" value="$usd_per_run" inputmode="decimal"></label><label>Estimated USD warning threshold<input name="usd_warn_at" value="$usd_warn_at" inputmode="decimal"></label></div><p>API-equivalent estimates, not Codex account charges.</p><button type="submit">Save</button></section></form>
-<aside><section class="panel" id="configuration-sources"><h2>Configuration sources</h2><dl><dt>Editable routing</dt><dd><code>config/models.toml</code></dd><dt>Project registry · read-only</dt><dd><code>config/projects.toml</code></dd></dl><p>A project's template, mount set and static MCP set are fixed at creation. Edit the registry deliberately and rename the sandbox.</p><ul>$project_rows</ul></section></aside></div>
+<form class="configuration-editor" method="post" action="/config/models">
+<section class="panel"><h2>Model routing</h2>
+<p>Choose the model and reasoning effort for each configured role. Builder and reviewer use different models.</p>
+<div class="scroll" tabindex="0" role="region" aria-label="Model routing table"><table class="model-routing"><thead><tr><th>Role</th><th>Model</th><th>Reasoning effort</th></tr></thead><tbody>$role_rows</tbody></table></div>
+<p class="muted">Model names and supported efforts are validated against the available model catalog before saving.</p>
+<h2>Budget limits</h2>
+$budget_error
+<div class="fields"><label>Per-run estimated USD ceiling<input name="usd_per_run" value="$usd_per_run" inputmode="decimal"></label><label>Estimated USD warning threshold<input name="usd_warn_at" value="$usd_warn_at" inputmode="decimal"></label></div><p>API-equivalent estimates, not Codex account charges.</p>
+<div class="form-actions"><button type="submit">Save configuration</button><p class="muted">Changes apply to future invocations. Current work continues.</p></div></section></form>
+<details class="panel configuration-sources" id="configuration-sources"><summary>Configuration sources · project registry is read-only</summary><dl><dt>Editable routing</dt><dd><code>config/models.toml</code></dd><dt>Project registry · read-only</dt><dd><code>config/projects.toml</code></dd></dl><p>A project's template, mount set and static MCP set are fixed at creation. Edit the registry deliberately and rename the sandbox.</p><ul>$project_rows</ul></details>

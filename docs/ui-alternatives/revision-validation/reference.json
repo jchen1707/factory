@@ -1,0 +1,359 @@
+{
+  "browser": "152.0.7977.83",
+  "tracks": {
+    "original": "Unmodified original prototype DOM, illustrative data, not a matching-data baseline",
+    "matched": "Original composition reconstructed with manifest evidence; production-only navigation/actions remain intentional differences. Human review required."
+  },
+  "pages": [
+    {
+      "track": "original",
+      "name": "runs",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "runs",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "runs",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "projects",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "projects",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "projects",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "detail",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "detail",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "detail",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "timeline",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "timeline",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "timeline",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "settings",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "settings",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "settings",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "runtimes",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "runtimes",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "runtimes",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "config",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-desktop-fixture.json",
+      "name": "config",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-desktop-fixture.json",
+      "name": "config",
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "track": "original",
+      "name": "runs",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "runs",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "runs",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "projects",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "projects",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "projects",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "detail",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "detail",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "detail",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "timeline",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "timeline",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "timeline",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "settings",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "settings",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "settings",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "runtimes",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "runtimes",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "runtimes",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "original",
+      "name": "config",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "populated",
+      "manifest": "populated-narrow-fixture.json",
+      "name": "config",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "track": "matched",
+      "scenario": "stress",
+      "manifest": "stress-narrow-fixture.json",
+      "name": "config",
+      "viewport": "narrow",
+      "width": 390,
+      "height": 844
+    }
+  ]
+}

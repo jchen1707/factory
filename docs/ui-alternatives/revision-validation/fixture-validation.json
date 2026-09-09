@@ -1,0 +1,97 @@
+{
+  "kind": "deterministic fixture comparison",
+  "before_source": "ba9ca3c",
+  "after_source": "90a832222baa5033e0203346b99fe005f5fae342",
+  "pairs": [
+    {
+      "scenario": "populated",
+      "viewport": "desktop",
+      "equal_semantic_fields": [
+        "schema",
+        "scenario",
+        "clock",
+        "isolation",
+        "runs",
+        "detail",
+        "timeline",
+        "roles",
+        "runtimes",
+        "projects",
+        "settings",
+        "invocations",
+        "config"
+      ],
+      "equal": true,
+      "before_sha256": "a77328789a6fec0ae4ce1cb61b5c3a17c7a638984aaafa4eebf8f6c9bd5755c9",
+      "after_sha256": "d14bfba7b3f691c95a373b909ad4eda75850fb851fbb8fc84fee87581cfed3bb"
+    },
+    {
+      "scenario": "populated",
+      "viewport": "narrow",
+      "equal_semantic_fields": [
+        "schema",
+        "scenario",
+        "clock",
+        "isolation",
+        "runs",
+        "detail",
+        "timeline",
+        "roles",
+        "runtimes",
+        "projects",
+        "settings",
+        "invocations",
+        "config"
+      ],
+      "equal": true,
+      "before_sha256": "4bddd548873dd4a1e243285e04eb009fc47e00f0711d60273ad5b14405e9832c",
+      "after_sha256": "fa819741cff0bc908f544ac0c8fac02870b41dd466273d6bf28d2672ea3c9f71"
+    },
+    {
+      "scenario": "stress",
+      "viewport": "desktop",
+      "equal_semantic_fields": [
+        "schema",
+        "scenario",
+        "clock",
+        "isolation",
+        "runs",
+        "detail",
+        "timeline",
+        "roles",
+        "runtimes",
+        "projects",
+        "settings",
+        "invocations",
+        "config"
+      ],
+      "equal": true,
+      "before_sha256": "a8309641e6bebdeb0435da34d6395c0c923fe928a9674c0936ba9511ca5e9f7a",
+      "after_sha256": "95f272c7100a562e8017d11548e29868aadae62dc3db0239aa08c875a6cf66ab"
+    },
+    {
+      "scenario": "stress",
+      "viewport": "narrow",
+      "equal_semantic_fields": [
+        "schema",
+        "scenario",
+        "clock",
+        "isolation",
+        "runs",
+        "detail",
+        "timeline",
+        "roles",
+        "runtimes",
+        "projects",
+        "settings",
+        "invocations",
+        "config"
+      ],
+      "equal": true,
+      "before_sha256": "ca780d0543143820016b388e2d41a2a90eaec39bd002c99a5b453cea334a5d4b",
+      "after_sha256": "44fb04c8892870baf41510e6a1a29e98f027da00cb2f594a158a776d8d1a5b2b"
+    }
+  ],
+  "desktop_narrow_equal": true,
+  "visual_acceptance": "pending James review"
+}

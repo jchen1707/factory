@@ -109,3 +109,48 @@ def test_authority_snapshot_retains_runtime_hook_configuration(ctx: Context) -> 
     snapshot = authority.snapshot(ctx)
     assert snapshot is not None
     assert (Path(snapshot["root"]) / ".codex/hooks.json").read_text() == wiring.read_text()
+
+
+@pytest.mark.parametrize("interface", ["cli", "console"])
+def test_policy_replacement_rechecks_state_after_acquiring_lease(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, interface: str
+) -> None:
+    from factory.store import Store
+
+    run = ctx.store.insert_run(
+        linear_id="BAC-5", project=ctx.project.name, team=ctx.project.team, state=State.SUSPENDED
+    )
+    acquire = Store.acquire_lease
+
+    def resumed_before_acquisition(
+        store: Store, run_id: str, *, ttl_seconds: int, owner: str | None = None
+    ) -> bool:
+        # Another operator resumed after the request read its paused snapshot.
+        store.runtime.db.execute(
+            "UPDATE runs SET state=? WHERE id=?", (State.IMPLEMENTING.value, run_id)
+        )
+        return acquire(store, run_id, ttl_seconds=ttl_seconds, owner=owner)
+
+    def forbidden_snapshot(*args: object, **kwargs: object) -> None:
+        raise AssertionError("A resumed run must not receive replacement policy")
+
+    monkeypatch.setattr(Store, "acquire_lease", resumed_before_acquisition)
+    monkeypatch.setattr(authority, "snapshot", forbidden_snapshot)
+    monkeypatch.setenv("FACTORY_HOME", str(ctx.home))
+    if interface == "cli":
+        result = main(["configure", "--ticket", run.linear_id, "--replace-policy", "hardening"])
+        assert result == 2
+    else:
+        app = create_app(
+            ctx.home, registry=ctx.registry, routing=ctx.routing, store=ctx.store, linear=ctx.linear
+        )
+        response = TestClient(app).post(
+            f"/settings/replace-policy/{run.linear_id}", data={"profile": "hardening"}
+        )
+        assert response.status_code == 409
+        assert "Suspend the run before replacing its policy" in response.text
+    current = ctx.store.run_by_id(run.id)
+    assert current is not None
+    assert current.state is State.IMPLEMENTING
+    assert ctx.store.runtime.policy(run.id) is None
+    assert not ctx.store.holds_lease(run.id)

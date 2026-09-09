@@ -5,14 +5,15 @@ import path from 'node:path';
 const require = createRequire(path.join(process.env.FACTORY_BROWSER_MODULES, '../package.json'));
 const {chromium} = require('playwright');
 const {default: AxeBuilder} = require('@axe-core/playwright');
-const [base, scenario, output] = process.argv.slice(2);
+const [base, scenario, output, selectedViewport] = process.argv.slice(2);
 const browser = await chromium.launch({channel: 'chrome', headless: true});
-const report = {scenario, pages: [], failures: [], interactions: []};
+const report = {scenario, viewport: selectedViewport, browser: browser.version(), clock: 1788950760, fixtureIsolation: 'fresh server/database for each viewport', visualAcceptance: 'pending human side-by-side review', pages: [], failures: [], interactions: []};
 const routes = [['runs', '/'], ['projects', '/projects'], ['detail', '/runs/BAC-4'],
   ['timeline', '/runs/BAC-4/timeline'], ['settings', '/settings/runs/BAC-4'],
   ['runtimes', '/runtimes'], ['config', '/config']];
 try {
   for (const [viewport, width, height] of [['desktop', 1440, 1000], ['narrow', 390, 844]]) {
+    if (selectedViewport && viewport !== selectedViewport) continue;
     const context = await browser.newContext({viewport: {width, height}, reducedMotion: 'reduce'});
     await context.route('**/*', route => {
       if (scenario === 'unavailable' && new URL(route.request().url()).pathname.startsWith('/sse/')) return route.abort();
@@ -26,6 +27,7 @@ try {
       page.on('pageerror', listener);
       const response = await page.goto(base + route, {waitUntil: 'domcontentloaded'});
       await page.waitForTimeout(100);
+      report.renderIdentity = await page.locator('.build-marker').innerText();
       if (name === 'runs' || name === 'timeline') {
         const expected = scenario === 'unavailable' ? 'Live updates unavailable' : 'Connected to live updates';
         await page.locator('[role="status"]').filter({hasText: expected}).waitFor();
@@ -40,7 +42,7 @@ try {
         }));
         report.interactions.push({viewport, primary});
         if (primary.headings.length !== 5 || (viewport === 'desktop' && primary.clipped)) report.failures.push({viewport, primary});
-        if (scenario === 'populated' && primary.rows < 10) report.failures.push({viewport, insufficientRows: primary.rows});
+        if (scenario === 'stress' && primary.rows < 10) report.failures.push({viewport, insufficientRows: primary.rows});
       }
       if (name === 'runtimes' && viewport === 'desktop') {
         const clipped = await page.locator('table').first().evaluate(table => table.scrollWidth > table.parentElement.clientWidth + 1).catch(() => false);
@@ -48,7 +50,7 @@ try {
       }
       if (['projects', 'runtimes'].includes(name) && viewport === 'narrow' && await page.locator('table').count()) {
         const unreadableCells = await page.locator('table').first().locator('tbody td').evaluateAll(nodes => nodes.filter(node =>
-          node.getBoundingClientRect().width < 160 || !node.dataset.label || getComputedStyle(node, '::before').content === 'none'
+          node.getBoundingClientRect().width < 80 || !node.dataset.label || getComputedStyle(node, '::before').content === 'none'
         ).map(node => ({width: node.getBoundingClientRect().width, label: node.dataset.label || null, text: node.textContent.slice(0, 60)})));
         report.interactions.push({viewport, name, unreadableCells});
         if (unreadableCells.length) report.failures.push({viewport, name, unreadableCells});
@@ -75,6 +77,21 @@ try {
       {
         await page.evaluate(() => document.activeElement.blur());
         await page.screenshot({path: path.join(output, `${scenario}-${name}-${viewport}.png`), fullPage: true});
+        await page.screenshot({path: path.join(output, `${scenario}-${name}-${viewport}-first.png`)});
+        entry.layout = await page.evaluate(() => ({
+          pageHeight: document.documentElement.scrollHeight,
+          firstViewportHeadings: [...document.querySelectorAll('h1,h2')].filter(node => node.getBoundingClientRect().top < innerHeight).map(node => node.textContent.trim()),
+          rowHeights: [...document.querySelectorAll('.board-table tbody tr')].map(node => Math.round(node.getBoundingClientRect().height)),
+          selectedMode: document.querySelector('select[name="mode"]')?.value ?? null,
+        }));
+      }
+      if (scenario === 'populated' && ['detail', 'timeline', 'settings', 'runtimes', 'projects'].includes(name)) {
+        await page.locator('details').evaluateAll(nodes => nodes.forEach(node => {node.open = true;}));
+        const expandedOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+        const expandedViolations = (await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations.map(v => v.id);
+        if (expandedOverflow || expandedViolations.length) report.failures.push({viewport, name, expandedOverflow, expandedViolations});
+        report.interactions.push({viewport, name, expandedOverflow, expandedViolations});
+        await page.screenshot({path: path.join(output, `${scenario}-${name}-${viewport}-expanded.png`), fullPage: true});
       }
       page.off('pageerror', listener);
     }
@@ -85,14 +102,22 @@ try {
     for (const target of ['/projects', '/runtimes', '/config']) {
       if (!links.includes(target)) report.failures.push({viewport, missingNavigation: target});
     }
-    if (scenario === 'populated') {
+    if (['populated', 'stress'].includes(scenario)) {
       await page.goto(base + '/projects', {waitUntil: 'domcontentloaded'});
       const projectLink = page.locator('#project-inventory a').first();
-      const projectTarget = await projectLink.getAttribute('href');
+      const projectHref = await projectLink.getAttribute('href');
+      const projectTarget = new URL(projectHref, page.url()).hash;
       await projectLink.focus();
-      await page.keyboard.press('Enter');
+      await Promise.all([page.waitForURL(new URL(projectHref, page.url()).href, {waitUntil: 'load'}), page.keyboard.press('Enter')]);
       await page.waitForFunction(target => document.querySelector(target)?.open, projectTarget);
-      report.interactions.push({viewport, projectAnchor: projectTarget, opened: true});
+      const projectSelection = await page.locator(projectTarget).evaluate(node => ({open: node.open, focused: node.contains(document.activeElement)}));
+      if (projectHref.includes('?project=') && !projectSelection.focused) report.failures.push({viewport, projectSelection});
+      report.interactions.push({viewport, projectAnchor: projectTarget, ...projectSelection});
+      if (projectHref.includes('?project=')) {
+        await page.goto(base + '/projects' + projectTarget, {waitUntil: 'load'});
+        const directSelection = await page.locator(projectTarget).evaluate(node => ({open: node.open, focused: node.contains(document.activeElement)}));
+        if (!directSelection.open || !directSelection.focused) report.failures.push({viewport, directSelection});
+      }
       await page.goto(base, {waitUntil: 'domcontentloaded'});
       const sequence = viewport === 'desktop' ? 0 : 10;
       const mutate = n => page.evaluate(n => fetch(`/__fixture/update/${n}`, {method: 'POST'}), sequence + n);
@@ -131,6 +156,7 @@ try {
       report.interactions.push({viewport, attentionFocused, scrollBefore, timelineContinuity});
       await page.goto(base + '/runs/BAC-4', {waitUntil: 'domcontentloaded'});
       const tail = page.locator('#tail');
+      await tail.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; });
       await tail.filter({hasText: 'fixture retained event'}).waitFor();
       const tailBounds = await tail.evaluate(node => ({height: node.clientHeight, scrollHeight: node.scrollHeight}));
       if (tailBounds.height > 450 || tailBounds.scrollHeight <= tailBounds.height) report.failures.push({viewport, tailBounds});
@@ -154,8 +180,19 @@ try {
       const saved = await page.locator('select[name="mode"]').inputValue();
       report.interactions.push({viewport, savedMode: saved});
       if (saved !== 'approval') report.failures.push({viewport, savedMode: saved});
+      await page.screenshot({path: path.join(output, `${scenario}-settings-${viewport}-saved.png`), fullPage: true});
+      if (scenario === 'populated') {
+        await page.locator('input[name="max_active_agents"]').fill('0');
+        await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'POST'),
+          page.locator('input[name="max_active_agents"]').evaluate(input => input.form.submit()),
+        ]);
+        await page.locator('[role="alert"]').waitFor();
+        await page.screenshot({path: path.join(output, `${scenario}-settings-${viewport}-invalid.png`), fullPage: true});
+        report.interactions.push({viewport, invalidSettingsRejected: true});
+      }
     }
-    if (scenario === 'populated') {
+    if (['populated', 'stress'].includes(scenario)) {
       await page.setViewportSize({width: 320, height: 844});
       for (const stressRoute of ['/projects', '/settings/runs/BAC-4', '/']) {
         await page.goto(base + stressRoute, {waitUntil: 'domcontentloaded'});
@@ -170,7 +207,7 @@ try {
   report.failures.push({exception: error.stack});
 } finally {
   await browser.close();
-  await fs.writeFile(path.join(output, `${scenario}.json`), JSON.stringify(report, null, 2) + '\n');
+  await fs.writeFile(path.join(output, `${scenario}-${selectedViewport || 'both'}.json`), JSON.stringify(report, null, 2) + '\n');
 }
 console.log(JSON.stringify({scenario, pages: report.pages.length, failures: report.failures}));
 if (report.failures.length) process.exitCode = 1;

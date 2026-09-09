@@ -106,7 +106,7 @@ def test_failed_run_remains_visible_in_attention(ctx: Context) -> None:
     page = _client(ctx).get("/").text
     attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
     assert attention is not None
-    assert "failed" in attention[1]
+    assert 'class="chip fail">Failed</span>' in attention[1]
     assert 'href="/runs/BAC-4"' in attention[1]
 
 
@@ -149,10 +149,40 @@ def test_estimates_keep_known_partial_cost_visible(ctx: Context, route: str) -> 
         "partial-estimate", 1, {"estimate": {"usd": None, "known_usd": 0.25, "complete": False}}
     )
     page = _client(ctx).get(route).text
+    assert "$50 ceiling" in page
     if route == "/":
         cell = re.search(r'<td data-label="Estimate">(.*?)</td>', page, re.DOTALL)
         assert cell is not None
         page = cell[1]
     assert "≥ $0.25" in page
-    assert "$50 ceiling" in page
     assert "partial" in page
+
+
+def test_board_attention_does_not_invent_missing_reason(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.store.record_transition(
+        ctx.run.id, from_state=None, to_state=State.AWAITING_HUMAN, actor="fixture"
+    )
+    page = _client(ctx).get("/").text
+    attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
+    assert attention is not None
+    assert 'class="chip warn">Awaiting human</span>' in attention[1]
+    assert "No reason recorded." in attention[1]
+    assert "Inspect run →" in attention[1]
+
+
+def test_active_invocation_preserves_known_partial_estimate(ctx: Context) -> None:
+    ctx.store.runtime.start_invocation("active-partial", ctx.run.id, 1, "implement", {})
+    ctx.store.runtime.observe(
+        "active-partial", 1, {"estimate": {"usd": None, "known_usd": 0.05, "complete": False}}
+    )
+    ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "active-partial"})
+    page = _client(ctx).get("/settings/runs/BAC-4").text
+    invocation = re.search(
+        r'<details data-key="invocation-active-partial">(.*?)</summary>', page, re.DOTALL
+    )
+    assert invocation is not None
+    assert "≥ $0.0500 · incomplete" in invocation[1]
+    assert page.index('data-key="invocation-active-partial"') < page.index(
+        'id="effective-settings"'
+    )

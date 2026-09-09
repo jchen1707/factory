@@ -7,39 +7,65 @@ tracker, vault, operator home or factory database is opened.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
 import subprocess
 import threading
 import time
-from dataclasses import replace
+import uuid
+from dataclasses import asdict, replace
+from datetime import UTC, datetime, tzinfo
+from itertools import count
 from pathlib import Path
 
 import pytest
 import uvicorn
 
+from factory.console import views as console_views
 from factory.console.app import create_app
-from factory.console.views import InventoryResult, run_detail
+from factory.console.views import InventoryResult, run_detail, run_timeline, runs_board
 from factory.machine import State
+from factory.operator_controls import status
 from factory.runtime_jobs import RuntimeJobs
 from factory.steps import Context
 from factory.store import Store
 from tests.integration.test_console import _models_toml, _to_implementing
 
 MODULES = os.environ.get("FACTORY_BROWSER_MODULES")
+FIXTURE_NOW = 1788950760.0
+
+
+@pytest.fixture(autouse=True)
+def deterministic_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Freeze wall time and identities before ctx setup; monotonic server time stays real."""
+    sequence = count(1)
+    monkeypatch.setattr(time, "time", lambda: FIXTURE_NOW)
+    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(sequence)))
+    monkeypatch.setattr("factory.store.new_run_id", lambda: f"fixture{next(sequence):09d}")
+
+    class FixtureDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> FixtureDatetime:
+            return cls.fromtimestamp(FIXTURE_NOW, UTC)
+
+    monkeypatch.setattr("factory.console.assets.datetime", FixtureDatetime)
 
 
 @pytest.mark.skipif(not MODULES, reason="opt-in Chrome measurement: FACTORY_BROWSER_MODULES unset")
-@pytest.mark.parametrize("scenario", ["populated", "empty", "blocked", "approval", "unavailable"])
+@pytest.mark.parametrize(
+    "scenario", ["populated", "stress", "empty", "blocked", "approval", "unavailable"]
+)
+@pytest.mark.parametrize("viewport", ["desktop", "narrow"])
 def test_console_in_real_browser(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scenario: str
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scenario: str, viewport: str
 ) -> None:
     _models_toml(ctx)
     if scenario != "unavailable":
         _to_implementing(ctx)
-    if scenario == "populated":
-        _populate_history(ctx)
+    if scenario in ("populated", "stress"):
+        _populate_history(ctx, stress=scenario == "stress")
     if scenario == "approval":
         ctx.store.runtime.start_invocation(
             "fixture-approval", ctx.run.id, 1, "implement", {"model": "fixture"}
@@ -64,12 +90,49 @@ def test_console_in_real_browser(
             {
                 "name": "factory-build-python-harness",
                 "status": "running",
-                "workspaces": ["/fixture/project", "/fixture/long-workspace-" + "abcdef" * 12],
+                "workspaces": ["/fixture/project"]
+                + (["/fixture/long-workspace-" + "abcdef" * 12] if scenario == "stress" else []),
                 "agent": "codex",
                 "id": "fixture-runtime",
             }
         ]
     )
+    if scenario in ("populated", "stress"):
+        runtimes.extend(
+            [
+                {
+                    "name": "factory-review-fixture-certification-0",
+                    "status": "stopped",
+                    "workspaces": [],
+                    "agent": "codex",
+                },
+                {
+                    "name": "factory-review-fixture-certification-1",
+                    "status": "running",
+                    "workspaces": ["/fixture/review"],
+                    "agent": "claude",
+                },
+                {
+                    "name": "codex-james",
+                    "status": "running",
+                    "workspaces": ["/fixture/operator"],
+                    "agent": "codex",
+                },
+            ]
+        )
+    if scenario in ("populated", "stress"):
+        for name, clone in (
+            ("factory-build-python-harness", False),
+            ("factory-review-fixture-certification-1", True),
+        ):
+            owner = (ctx.run.id, 1, "parent", "delegation-mailbox", f"fixture-layout-{name}")
+            ctx.store.intend_effect(*owner)
+            ctx.store.confirm_effect(*owner, json.dumps({"spec": {"name": name, "clone": clone}}))
+    for heartbeat in ctx.home.rglob("heartbeat"):
+        os.utime(heartbeat, (FIXTURE_NOW - 8, FIXTURE_NOW - 8))
+    if ctx.run.worktree:
+        for heartbeat in Path(ctx.run.worktree).rglob("heartbeat"):
+            os.utime(heartbeat, (FIXTURE_NOW - 8, FIXTURE_NOW - 8))
     monkeypatch.setattr("factory.cli._sbx_ls_json", lambda: runtimes)
     monkeypatch.setattr(
         "factory.cli._sbx_inventory",
@@ -105,6 +168,75 @@ def test_console_in_real_browser(
 
     output = Path(os.environ.get("FACTORY_BROWSER_OUTPUT", str(tmp_path / "browser")))
     output.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema": 2,
+        "source": {
+            "commit": subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=Path(__file__).parents[2],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip(),
+            "tracked_diff_sha256": hashlib.sha256(
+                subprocess.run(
+                    [
+                        "git",
+                        "diff",
+                        "HEAD",
+                        "--",
+                        "src",
+                        "tests/browser",
+                        "tests/integration/test_console_browser.py",
+                    ],
+                    cwd=Path(__file__).parents[2],
+                    capture_output=True,
+                    check=True,
+                ).stdout
+            ).hexdigest(),
+        },
+        "scenario": scenario,
+        "viewport": viewport,
+        "clock": FIXTURE_NOW,
+        "isolation": "Fresh ctx/database/app per viewport; captures precede all mutation tests",
+        "runs": [asdict(row) for row in runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)],
+        "detail": asdict(run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)),
+        "timeline": asdict(run_timeline(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)),
+        "roles": {name: asdict(role) for name, role in ctx.routing.roles.items()},
+        "runtimes": [
+            asdict(row)
+            for row in console_views.runtimes(runtimes, ctx.store, registry=ctx.registry)
+        ],
+        "projects": [
+            {
+                "name": project.name,
+                "delivery_profile": json.loads((project.path / "harness.config.json").read_text())
+                .get("delivery", {})
+                .get("default")
+                or "Not declared",
+                "concurrency": ctx.registry.concurrency_for(project),
+                "occupied_slots": ctx.store.runtime.db.execute(
+                    "SELECT COUNT(*) FROM project_slots WHERE project=?", (project.name,)
+                ).fetchone()[0],
+                "active_agents": ctx.store.runtime.db.execute(
+                    "SELECT COUNT(*) FROM agent_leases WHERE project=? AND status='active'",
+                    (project.name,),
+                ).fetchone()[0],
+                "waiting": f"{status(ctx.store, project.name)['queued_children']} children · {status(ctx.store, project.name)['pending_certifications']} certifications",
+                "effective_agent_limit": status(ctx.store, project.name)["effective"][
+                    "max_active_agents"
+                ],
+                "settings": ctx.store.runtime.settings("project", project.name),
+            }
+            for project in ctx.registry.projects.values()
+        ],
+        "settings": ctx.store.runtime.effective(ctx.run.project, ctx.run.id),
+        "invocations": ctx.store.runtime.invocations(ctx.run.id),
+        "config": asdict(console_views.config_view(ctx.routing, ctx.registry)),
+    }
+    # Retained artifacts contain only synthetic data; normalize temporary host paths.
+    manifest_json = json.dumps(manifest, default=str, indent=2).replace(str(tmp_path), "/fixture")
+    (output / f"{scenario}-{viewport}-fixture.json").write_text(manifest_json + "\n")
     # Bind before starting the thread, avoiding a free-port discovery race.
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -124,6 +256,7 @@ def test_console_in_real_browser(
                     f"http://127.0.0.1:{listener.getsockname()[1]}",
                     scenario,
                     str(output),
+                    viewport,
                 ],
                 capture_output=True,
                 text=True,
@@ -131,30 +264,38 @@ def test_console_in_real_browser(
                 check=False,
             )
             assert result.returncode == 0, result.stdout + result.stderr
-            report = json.loads((output / f"{scenario}.json").read_text())
-            assert len(report["pages"]) == 14
+            report = json.loads((output / f"{scenario}-{viewport}.json").read_text())
+            assert len(report["pages"]) == 7
         finally:
             server.should_exit = True
             thread.join(timeout=10)
             assert not thread.is_alive(), "isolated console server did not shut down"
 
 
-def _populate_history(ctx: Context) -> None:
+def _populate_history(ctx: Context, *, stress: bool = False) -> None:
     """Sanitized long identities and retained histories, not production data."""
     projects = dict(ctx.registry.projects)
     for index in range(1, 3):
-        name = f"fixture-project-{index}-with-a-long-registry-identity"
+        name = (
+            f"fixture-project-{index}-with-a-long-registry-identity"
+            if stress
+            else ["frontend-harness", "nemoclaw-dev"][index - 1]
+        )
         projects[name] = replace(ctx.project, name=name, team=f"FX{index}")
     ctx.registry = replace(ctx.registry, projects=projects)
     names = list(projects)
-    for index in range(9):
+    for index in range(9 if stress else 2):
         run = ctx.store.insert_run(
             linear_id=f"FIXTURE-{index + 10}",
             project=names[index % len(names)],
             team="FIXTURE",
-            state=[State.IMPLEMENTING, State.BLOCKED, State.AWAITING_HUMAN][index % 3],
+            state=[State.BLOCKED, State.AWAITING_HUMAN, State.IMPLEMENTING][index % 3],
         )
-        ctx.store.update_run(run.id, branch="fix/" + "long-unbroken-identity-" * 5)
+        ctx.store.update_run(
+            run.id,
+            branch="fix/" + ("long-unbroken-identity-" * 5 if stress else "fixture-change"),
+            blocked_reason="Gate report incomplete" if index % 3 == 0 else None,
+        )
     ctx.store.record_cost(
         ctx.run.id,
         1,
@@ -166,7 +307,7 @@ def _populate_history(ctx: Context) -> None:
         usd=0.42,
     )
     jobs = RuntimeJobs(ctx.store)
-    for index in range(55):
+    for index in range(55 if stress else 3):
         invocation = f"fixture-invocation-{index:03}-" + "abcdef0123456789" * 4
         ctx.store.runtime.start_invocation(
             invocation,
@@ -222,10 +363,26 @@ def _populate_history(ctx: Context) -> None:
                 ),
             )
         if index < 12:
-            jobs.request_certification(
+            job = jobs.request_certification(
                 ctx.run.id,
-                {"sandbox": f"factory-certification-fixture-{index}", "revision": "a" * 64},
+                {"sandbox": f"factory-review-fixture-certification-{index}", "revision": "a" * 64},
             )
+            if index < 2:
+                ctx.store.runtime.db.execute(
+                    "UPDATE runtime_certifications SET status=?,evidence=?,failure=? WHERE id=?",
+                    (
+                        "completed" if index == 0 else "failed",
+                        json.dumps(
+                            {
+                                "compatible": index == 0,
+                                "probe": "fixture",
+                                "identity": job["identity"],
+                            }
+                        ),
+                        None if index == 0 else "hook probe incomplete",
+                        job["id"],
+                    ),
+                )
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path
     context_event = json.dumps(
@@ -242,3 +399,119 @@ def _populate_history(ctx: Context) -> None:
         + "\n"
         + "".join(f"fixture retained event {index:04}\n" for index in range(250))
     )
+
+    _populate_evidence(ctx)
+
+
+def _populate_evidence(ctx: Context) -> None:
+    """Actual persisted evidence shapes, with explicit missing/timed tool observations."""
+    detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
+    assert detail.events_path
+    attempt = Path(detail.events_path).parent
+    events = [
+        {"type": "item.started", "item": {"id": "fixture-read", "type": "command_execution"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "fixture-read",
+                "type": "command_execution",
+                "command": "cat src/app/settings.py",
+                "exit_code": 0,
+            },
+        },
+        {"type": "item.started", "item": {"id": "fixture-test", "type": "command_execution"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "fixture-test",
+                "type": "command_execution",
+                "command": "pytest tests/test_settings.py",
+                "exit_code": 0,
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "fixture-untimed",
+                "type": "command_execution",
+                "command": "git diff --stat",
+                "exit_code": 0,
+            },
+        },
+    ]
+    old_lines = Path(detail.events_path).read_text().splitlines()
+    Path(detail.events_path).write_text(
+        "\n".join([*old_lines, *(json.dumps(event) for event in events)]) + "\n"
+    )
+    timings = [FIXTURE_NOW - 8] * len(old_lines) + [
+        FIXTURE_NOW - 7,
+        FIXTURE_NOW - 6.8,
+        FIXTURE_NOW - 6,
+        FIXTURE_NOW - 2,
+        FIXTURE_NOW - 1,
+    ]
+    (attempt / "events.timings.jsonl").write_text(
+        "\n".join(json.dumps({"observed_at": t}) for t in timings) + "\n"
+    )
+    (attempt / "gates.json").write_text(
+        json.dumps(
+            {
+                "verdict": "pass",
+                "gates": [
+                    {"name": "lint", "status": "pass", "caveat": None},
+                    {
+                        "name": "unit tests",
+                        "status": "pass",
+                        "caveat": "Sandbox integration checks are separate evidence",
+                    },
+                ],
+            }
+        )
+    )
+    (attempt / "manifest.json").write_text(
+        json.dumps(
+            {
+                "files": [
+                    {
+                        "name": "source-snapshot.json",
+                        "path": "source-snapshot.json",
+                        "sha256": "7bf2d01" + "a" * 57,
+                    }
+                ]
+            }
+        )
+    )
+    (attempt / "source-snapshot.json").write_text('{"fixture": true}\n')
+    review = ctx.home / "state" / "runs" / ctx.run.id / "review"
+    review.mkdir(parents=True, exist_ok=True)
+    (review / "review-summary.json").write_text(
+        json.dumps(
+            {
+                "tier2": "ran:forced",
+                "findings": [
+                    {
+                        "severity": "low",
+                        "file": "src/app/settings.py",
+                        "line": 14,
+                        "summary": "Clarify the default timeout label",
+                    },
+                    {
+                        "severity": "high",
+                        "file": "src/app/settings.py",
+                        "line": 28,
+                        "summary": "Preserve source when recovery is interrupted",
+                    },
+                ],
+            }
+        )
+    )
+    # Real transition rows, measured durations rather than an invented CSS waterfall.
+    transitions = ctx.store.transitions(ctx.run.id)
+    start = FIXTURE_NOW - 300
+    ctx.store.runtime.db.execute("UPDATE runs SET created_at=? WHERE id=?", (start, ctx.run.id))
+    for index, transition in enumerate(transitions):
+        ctx.store.runtime.db.execute(
+            "UPDATE transitions SET at=? WHERE rowid=?",
+            (start + (index + 1) * 20, transition["id"]),
+        )
+    ctx.refresh()

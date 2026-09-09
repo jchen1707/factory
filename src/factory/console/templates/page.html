@@ -39,6 +39,19 @@ $body
 <footer class="build-marker"><span>$build_identity</span><span>Console started $started_at</span></footer>
 </main></div>
 <script>
-function revealProject() { const node = document.getElementById(decodeURIComponent(location.hash.slice(1))); if (node && node.matches('details.project-default')) { node.open = true; node.scrollIntoView(); } }
-addEventListener('hashchange', revealProject); revealProject();
+function revealProject() {
+  let id;
+  try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  const node = document.getElementById(id);
+  if (!node || !node.matches('details.project-default')) return;
+  document.querySelectorAll('details.project-default').forEach(editor => { editor.open = editor === node; });
+  document.querySelectorAll('[data-project-link]').forEach(link => {
+    if (link.dataset.projectLink === id) link.setAttribute('aria-current', 'true');
+    else link.removeAttribute('aria-current');
+  });
+  node.querySelector('summary').focus({preventScroll: true});
+  node.scrollIntoView({block: 'start'});
+}
+addEventListener('hashchange', revealProject);
+addEventListener('pageshow', () => requestAnimationFrame(revealProject));
 </script></body></html>
