@@ -1,0 +1,47 @@
+{
+  "observed_at": "2026-09-09T04:16:53.165825+00:00",
+  "runtime": "codex",
+  "version": "codex-cli 0.153.4",
+  "mode": "clean",
+  "frontend": "automated-owned-pty-interactive",
+  "exit_code": 0,
+  "actions": [
+    "response-observed",
+    "exit-command"
+  ],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89190,
+      "session_id_present": true
+    },
+    {
+      "event": "UserPromptSubmit",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89190,
+      "session_id_present": true
+    },
+    {
+      "event": "SessionEnd",
+      "transcript_exists_at_hook": true,
+      "vault_matches": true,
+      "transcript_exists_after_exit": true,
+      "transcript_bytes_after_exit": 89190,
+      "session_id_present": true
+    }
+  ],
+  "config_hash_before": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_hash_after": "a92d9dbfc2af841e992781099b48cf079354bbc54d3b04733bbab36d8cb08891",
+  "config_unchanged": true,
+  "oauth_expired": false,
+  "authenticated_response": true,
+  "fixture_root": "temporary isolated vault, host cwd /Users/james/factory",
+  "native_end_capture_note_exists": true,
+  "project_index_contains_note": true,
+  "vault_index_contains_note": true
+}
