@@ -19,6 +19,8 @@ class TranscriptSandbox(Protocol):
 
 
 def capture(sandbox: TranscriptSandbox, name: str, session: str, *, env: Mapping[str, str]) -> str:
+    if not callable(getattr(sandbox, "exec_sync", None)):
+        raise ValueError("sandbox transcript transport unavailable")
     result = sandbox.exec_sync(
         name,
         [
