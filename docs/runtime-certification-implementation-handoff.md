@@ -1,6 +1,8 @@
 # Runtime certification and delegation implementation handoff
 
-## Baseline Git pathspec fix prepared (2026-09-08)
+## Baseline Git pathspec fix ready in PR94 (2026-09-08)
+
+PR: https://github.com/jchen1707/factory/pull/94 (open, not merged/deployed).
 
 Objective remains Factory reliability and evidence-backed workflow validation, not
 extra hardening or completion of synthetic product tickets.
