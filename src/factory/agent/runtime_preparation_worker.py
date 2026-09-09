@@ -15,7 +15,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-
 PREPARATION_FAILURE_CODES = frozenset(
     {
         "trust-root-invalid",

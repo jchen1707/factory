@@ -71,10 +71,11 @@ class RuntimePreparation:
                     "Replacement requires corrected preparation source",
                 )
             before = receipt.get("before", {})
-            # Configuration may have changed during the unacknowledged thread start.
-            # Every other observed identity field must still match the diagnosed VM.
-            if {k: v for k, v in before.items() if k != "spec_sha256"} != {
-                k: v for k, v in current.items() if k != "spec_sha256"
+            # Configuration may have changed during thread start; probe identity includes
+            # the corrected preparation source. Neither authorizes reuse of a paid
+            # certificate. VM, native binaries and authority must still match.
+            if {k: v for k, v in before.items() if k not in {"spec_sha256", "probe_sha256"}} != {
+                k: v for k, v in current.items() if k not in {"spec_sha256", "probe_sha256"}
             }:
                 raise Blocked("runtime-preparation-resolution-invalid", "Identity changed")
             resolution = json.dumps(
@@ -176,9 +177,12 @@ class RuntimePreparation:
                             "runtime-preparation-uncertain",
                             "Reconcile the retained zero-model preparation before retrying",
                         )
-                if previous_owner == owner and completed.status == "confirmed":
-                    if receipt.get("after") == asdict(current):
-                        matched = True
+                if (
+                    previous_owner == owner
+                    and completed.status == "confirmed"
+                    and receipt.get("after") == asdict(current)
+                ):
+                    matched = True
             if matched:
                 return
             previous = self.store.find_effect(run_id, 0, key, "runtime-preparation", "thread-start")
@@ -238,12 +242,12 @@ class RuntimePreparation:
                 if len(result.stdout) <= 16384:
                     try:
                         refusal = json.loads(result.stdout)
-                        code = refusal.get("failure") if isinstance(refusal, dict) else None
+                        category = refusal.get("failure") if isinstance(refusal, dict) else None
                         if (
-                            isinstance(code, str)
-                            and code in runtime_preparation_worker.PREPARATION_FAILURE_CODES
+                            isinstance(category, str)
+                            and category in runtime_preparation_worker.PREPARATION_FAILURE_CODES
                         ):
-                            failure_code = code
+                            failure_code = category
                     except ValueError:
                         pass
                 raise ValueError("runtime preparation did not complete")

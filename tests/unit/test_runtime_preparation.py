@@ -193,7 +193,6 @@ def test_operator_replacement_preserves_unknown_receipt_and_replays(tmp_path: Pa
         prep.ensure(run.id, **kwargs)
     old = store.effects(run.id)[0]
     import hashlib
-
     import json
 
     assert old.external_id is not None
@@ -206,12 +205,14 @@ def test_operator_replacement_preserves_unknown_receipt_and_replays(tmp_path: Pa
     old = store.effects(run.id)[0]
     assert old.external_id is not None
     receipt = hashlib.sha256(old.external_id.encode()).hexdigest()
+    from dataclasses import replace
+
     for _ in range(2):
         prep.authorize_replacement(
             run.id,
             old.step,
             receipt_sha256=receipt,
-            observe=identity,
+            observe=lambda: replace(identity(), probe_sha256="9" * 64),
             evidence_sha256="a" * 64,
         )
     assert sandbox.calls == 1
