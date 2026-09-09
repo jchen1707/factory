@@ -1,0 +1,9 @@
+import pathlib,json,subprocess,os,importlib.util
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace');vault=json.loads((root/'distill-results.json').read_text())['vault'];worktree=root/'identity-worktree'
+spec=importlib.util.spec_from_file_location('worker','/Users/james/factory/src/factory/agent/app_server_worker.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+recall='/Users/james/harness-learning-repair/plugins/harness/hooks/learning_recall.mjs'
+hooks={e:[{'hooks':[{'type':'command','command':'node '+recall,'timeout':10}]}] for e in ['SessionStart','UserPromptSubmit']}
+env=dict(os.environ,OBSIDIAN_VAULT_DIRECTORY=vault,CLAUDE_LEARNINGS_OFF='1')
+cmd=['codex','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(worktree),'--sandbox','read-only','--json','What prior project lesson applies to native transcript preservation before sandbox removal? State the unique lesson identifier and cite the note path. Use only automatically supplied prior context; do not use tools.']
+with (root/'later-recall.stdout').open('w') as out,(root/'later-recall.stderr').open('w') as err:r=subprocess.run(cmd,env=env,stdout=out,stderr=err,timeout=100)
+rows=[json.loads(l) for l in (root/'later-recall.stdout').read_text().splitlines() if l.startswith('{')];text=json.dumps(rows);result={'exit':r.returncode,'lesson_identifier_received':'quokka-export-47' in text,'note_path_received':'Project Learnings/2026-09-09 native-learning 01a08463.md' in text};(root/'later-recall-results.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))

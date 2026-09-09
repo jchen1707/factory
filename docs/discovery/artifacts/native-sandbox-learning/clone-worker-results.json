@@ -1,0 +1,42 @@
+{
+  "vault": "/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-native-worker-vault-ohg5z5fe",
+  "registered_host_project": "/Users/james/factory",
+  "results": [
+    {
+      "runtime": "legacy",
+      "receipt": {
+        "sha256": "03dd162c2c663573062d1eb43915402a5059fb31e5504676d167345369ef8c8c",
+        "evidence": "retained-native-transcript",
+        "session_id": "01a08469-d795-7e83-a1cf-c513075c1475",
+        "finished": true,
+        "outcome": "no learnings: the session taught nothing",
+        "target": "",
+        "retryable": false,
+        "exit_code": 0
+      },
+      "snapshot_equals_native": true,
+      "replay_receipt_unchanged": true
+    },
+    {
+      "runtime": "appserver",
+      "receipt": {
+        "sha256": "20d126c3ad7f6b5d0132d23025f530c358e6665df762d04394cd175fb041b901",
+        "evidence": "retained-native-transcript",
+        "session_id": "01a0846a-051f-7420-ad91-f59d571a49e8",
+        "finished": true,
+        "outcome": "wrote 2026-09-09 factory 01a0846a.md",
+        "target": "/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-native-worker-vault-ohg5z5fe/Project Learnings/2026-09-09 factory 01a0846a.md",
+        "retryable": false,
+        "exit_code": 0
+      },
+      "snapshot_equals_native": true,
+      "replay_receipt_unchanged": true
+    }
+  ],
+  "files": [
+    "_VAULT_INDEX.md",
+    "Project Learnings/2026-09-09 factory 01a0846a.md",
+    "Project Learnings/_hook.log",
+    "Project Learnings/_INDEX.md"
+  ]
+}

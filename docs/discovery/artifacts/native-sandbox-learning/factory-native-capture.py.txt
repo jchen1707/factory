@@ -1,0 +1,15 @@
+import sys,pathlib,json,hashlib
+sys.path.insert(0,'/Users/james/factory-native-transcript/src')
+from factory.sandbox.sbx import SbxAdapter
+from factory.sandbox.native_transcript import capture
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+results=[]
+sessions=[('legacy','01a08463-916f-7682-afdb-26179d171814'),('appserver','01a08464-4b81-7b91-8493-a993fa23ba20'),('legacy-interrupt','01a08465-aac1-7e11-ab53-3c16ff57747d'),('appserver-interrupt','01a08465-b024-7111-aafe-0bbb358b0d51')]
+sessions.extend((r['label']+'-'+r['runtime'],r['hooks'][0]['session_id']) for l in (root/'paths-results.jsonl').read_text().splitlines() if (r:=json.loads(l)))
+for label,session in sessions:
+ text=capture(SbxAdapter(),'factory-build-learning-kit-d7838306',session,env={})
+ (root/(label+'.native.jsonl')).write_text(text)
+ rows=[json.loads(l) for l in text.splitlines()]
+ p=[r['payload'] for r in rows if r.get('type')=='response_item']
+ results.append({'label':label,'session':session,'sha256':hashlib.sha256(text.encode()).hexdigest(),'bytes':len(text.encode()),'user':any(r.get('role')=='user' and 'read lesson.txt' in json.dumps(r) for r in p),'tool':any('tool_call_output' in r.get('type','') and 'quokka-export-47' in json.dumps(r) for r in p),'assistant':any(r.get('role')=='assistant' and 'ASSISTANT_QUOKKA_EXPORT_47' in json.dumps(r) for r in p)})
+(root/'capture-results.json').write_text(json.dumps(results,indent=2));print(json.dumps(results))

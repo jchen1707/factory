@@ -1,0 +1,22 @@
+{
+  "vault": "/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-native-retained-vault-ryp24j6q",
+  "capture": [
+    {
+      "iteration": 0,
+      "exit": 0,
+      "output": "{\"target\":\"\",\"outcome\":\"no learnings: the session taught nothing\",\"retryable\":false}"
+    },
+    {
+      "iteration": 1,
+      "exit": 0,
+      "output": "{\"target\":\"/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-native-retained-vault-ryp24j6q/Project Learnings/2026-09-09 native-learning 01a08463.md\",\"outcome\":\"wrote 2026-09-09 native-learning 01a08463.md\",\"retryable\":false}"
+    }
+  ],
+  "recall": "{\"status\":\"recalled\",\"project\":\"native-learning\",\"index\":[],\"notes\":[{\"path\":\"Project Learnings/2026-09-09 native-learning 01a08463.md\",\"text\":\"---\\ndate: 2026-09-09 04:25\\nproject: native-learning\\nsession: 01a08463-916f-7682-afdb-26179d171814\\nsummary: quokka-export-47 sandbox removal requires preserving native messages because retained event streams are incomplete.\\ntags: [project-learnings, session-retro]\\n---\\n\\n# native-learning \u2014 session learnings (2026-09-09 04:25)\\n\\n## Architecture & design learnings\\n\\n- Retained event streams are insufficient for quokka-export-47 archival, contrary to the assumption that they capture the complete session. Preserve native user, tool, and assistant messages before removing the sandbox.\\n\"}],\"warnings\":[]}",
+  "files": [
+    "_VAULT_INDEX.md",
+    "Project Learnings/2026-09-09 native-learning 01a08463.md",
+    "Project Learnings/_hook.log",
+    "Project Learnings/_INDEX.md"
+  ]
+}

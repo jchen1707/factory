@@ -1,0 +1,7 @@
+import pathlib,json,sys,tempfile,os,hashlib
+sys.path.insert(0,'/Users/james/factory-native-transcript/src')
+from factory.learning_worker import run
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace');a=root/'clone-artifacts';project=pathlib.Path('/Users/james/factory');script=project/'.agents/vendor/harness/hooks/session_learnings.mjs';vault=pathlib.Path(tempfile.mkdtemp(prefix='factory-native-worker-vault-'));os.environ['CODEX_LEARNINGS_MODEL']='gpt-6-astra';os.environ.pop('CLAUDE_LEARNINGS_OFF',None);os.environ.pop('CLAUDE_LEARNINGS_SKIP',None);results=[]
+for runtime in ['legacy','appserver']:
+ events=a/(runtime+'.stdout');run(script,events,project,vault);receipt=json.loads(events.with_suffix('.learning.json').read_text());snapshot=events.with_suffix('.learning.jsonl').read_bytes();native=events.with_suffix('.native.jsonl').read_bytes();before=events.with_suffix('.learning.json').read_bytes();run(script,events,project,vault);results.append({'runtime':runtime,'receipt':receipt,'snapshot_equals_native':snapshot==native,'replay_receipt_unchanged':before==events.with_suffix('.learning.json').read_bytes()});print(json.dumps(results[-1]),flush=True)
+result={'vault':str(vault),'registered_host_project':str(project),'results':results,'files':[str(p.relative_to(vault)) for p in vault.rglob('*') if p.is_file()]};(a/'worker-results.json').write_text(json.dumps(result,indent=2))

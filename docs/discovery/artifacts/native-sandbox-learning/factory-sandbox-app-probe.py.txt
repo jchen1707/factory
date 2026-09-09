@@ -1,0 +1,9 @@
+import pathlib,json,subprocess
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+(root/'prompt.txt').write_text('Use a shell tool to read lesson.txt, then explain its durable lesson and include marker ASSISTANT_QUOKKA_EXPORT_47. Do not modify files.')
+(root/'schema.json').write_text(json.dumps({'type':'object','properties':{'result':{'type':'string'}},'required':['result'],'additionalProperties':False}))
+req={'vault':str(root/'vault'),'workdir':str(root),'model':'gpt-5.6-sol','effort':'low','readonly':True,'schema':str(root/'schema.json'),'prompt':str(root/'prompt.txt'),'output':str(root/'answer.json'),'context_semantics_verified':False}
+(root/'request.json').write_text(json.dumps(req))
+with (root/'appserver.stdout.jsonl').open('w') as out,(root/'appserver.stderr').open('w') as err:
+ r=subprocess.run(['sbx','exec','factory-build-learning-kit-d7838306','env','OBSIDIAN_VAULT_DIRECTORY='+str(root/'vault'),'CLAUDE_LEARNINGS_OFF=1','python3',str(root/'worker.py'),str(root/'request.json')],stdout=out,stderr=err,timeout=150)
+print(json.dumps({'exit':r.returncode,'stderr_tail':(root/'appserver.stderr').read_text()[-1000:]}))

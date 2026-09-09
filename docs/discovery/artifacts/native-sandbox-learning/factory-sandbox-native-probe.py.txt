@@ -1,0 +1,24 @@
+import os,json,subprocess,pathlib,shutil,importlib.util
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+name='factory-build-learning-kit-d7838306'
+repo=pathlib.Path('/Users/james/factory')
+spec=importlib.util.spec_from_file_location('worker',repo/'src/factory/agent/app_server_worker.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+from factory.harness import load_harness_config
+names=load_harness_config(repo).secret_vars
+code='import os,json;print(json.dumps([n for n in '+repr(list(names))+' if os.environ.get(n)]))'
+r=subprocess.run(['sbx','exec',name,'python3','-c',code],capture_output=True,text=True,check=True)
+assert json.loads(r.stdout.splitlines()[-1])==[], 'Capability environment must be empty'
+(root/'vault').mkdir(exist_ok=True)
+(root/'.codex').mkdir(exist_ok=True)
+(root/'lesson.txt').write_text('Known sandbox lesson: quokka-export-47 requires preserving native user, tool, and assistant messages before sandbox removal. Retained event streams alone are incomplete.\n')
+probe=root/'hook_probe.py'
+probe.write_text('import sys,json,pathlib,os\np=json.load(sys.stdin)\np["observed_transcript_exists"]=pathlib.Path(p.get("transcript_path", "__missing__")).is_file()\np["vault_matches"]=os.environ.get("OBSIDIAN_VAULT_DIRECTORY")=='+repr(str(root/'vault'))+'\nwith open('+repr(str(root/'hooks.jsonl'))+',"a") as f:f.write(json.dumps(p)+"\\n")\n')
+hooks={e:[{'hooks':[{'type':'command','command':f'python3 {probe}','timeout':3}]}] for e in ['SessionStart','SessionEnd']}
+(root/'.codex/hooks.json').write_text(json.dumps({'hooks':hooks}))
+shutil.copy2(repo/'src/factory/agent/app_server_worker.py',root/'worker.py')
+prompt='Use a shell tool to read lesson.txt, then explain its durable lesson and include marker ASSISTANT_QUOKKA_EXPORT_47. Do not modify files.'
+cmd=['sbx','exec',name,'env','OBSIDIAN_VAULT_DIRECTORY='+str(root/'vault'),'CLAUDE_LEARNINGS_OFF=1','codex','exec','--skip-git-repo-check','--dangerously-bypass-hook-trust','--enable','hooks','-c','hooks='+m.toml_literal(hooks),'-C',str(root),'--sandbox','read-only','--json',prompt]
+(root/'legacy-command.json').write_text(json.dumps(cmd))
+with (root/'legacy.stdout.jsonl').open('w') as out,(root/'legacy.stderr').open('w') as err:
+ r=subprocess.run(cmd,stdout=out,stderr=err,timeout=120)
+print(json.dumps({'exit':r.returncode,'hooks':(root/'hooks.jsonl').read_text() if (root/'hooks.jsonl').exists() else '', 'stderr_tail':(root/'legacy.stderr').read_text()[-1200:]}))

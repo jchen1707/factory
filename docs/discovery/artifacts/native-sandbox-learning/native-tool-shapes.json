@@ -1,0 +1,43 @@
+[
+  {
+    "timestamp": "2026-09-09T04:18:39.129Z",
+    "ordinal": 12,
+    "type": "response_item",
+    "payload": {
+      "type": "custom_tool_call",
+      "id": "ctc_0f9954c119d215b7016aa0de1c45f087d1a5c8653a48b3e683",
+      "status": "completed",
+      "call_id": "call_kAKhOqSuqXkbMLgJpnbV2Dzc",
+      "name": "exec",
+      "input": "const r = await tools.exec_command({cmd:\"sed -n '1,240p' lesson.txt\",\"workdir\":\"/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace\",\"yield_time_ms\":10000,\"max_output_tokens\":5000}); text(r.output);\n",
+      "internal_chat_message_metadata_passthrough": {
+        "turn_id": "01a08463-9192-7ea0-b3ea-06051915c066",
+        "create_time": 1788927514.107514
+      }
+    }
+  },
+  {
+    "timestamp": "2026-09-09T04:18:39.287Z",
+    "ordinal": 14,
+    "type": "response_item",
+    "payload": {
+      "type": "custom_tool_call_output",
+      "id": "ctco_01a08463-aa37-7572-b045-eb2f51f11513",
+      "call_id": "call_kAKhOqSuqXkbMLgJpnbV2Dzc",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "Script completed\nWall time 0.2 seconds\nOutput:\n"
+        },
+        {
+          "type": "input_text",
+          "text": "Known sandbox lesson: quokka-export-47 requires preserving native user, tool, and assistant messages before sandbox removal. Retained event streams alone are incomplete.\n"
+        }
+      ],
+      "internal_chat_message_metadata_passthrough": {
+        "turn_id": "01a08463-9192-7ea0-b3ea-06051915c066",
+        "create_time": 1788927519.2873187
+      }
+    }
+  }
+]

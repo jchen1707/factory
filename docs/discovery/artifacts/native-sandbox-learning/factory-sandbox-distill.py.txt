@@ -1,0 +1,13 @@
+import pathlib,json,subprocess,os,tempfile
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+vault=pathlib.Path(tempfile.mkdtemp(prefix='factory-native-retained-vault-'))
+hooks=pathlib.Path('/Users/james/harness-learning-repair/plugins/harness/hooks')
+env=dict(os.environ,OBSIDIAN_VAULT_DIRECTORY=str(vault),CODEX_LEARNINGS_MODEL='gpt-6-astra');env.pop('CLAUDE_LEARNINGS_OFF',None);env.pop('CLAUDE_LEARNINGS_SKIP',None);env.pop('LEARNINGS_DISTILLER',None)
+payload={'cwd':str(root/'identity-source'),'session_id':'01a08463-916f-7682-afdb-26179d171814','transcript_path':str(root/'legacy.native.jsonl'),'runtime':'codex'}
+results=[]
+for n in range(2):
+ r=subprocess.run(['node',str(hooks/'session_learnings.mjs'),'--json'],input=json.dumps(payload),capture_output=True,text=True,env=env,cwd=root,timeout=120)
+ results.append({'iteration':n,'exit':r.returncode,'output':r.stdout.strip()});print(json.dumps(results[-1]),flush=True)
+r=subprocess.run(['node',str(hooks/'learning_recall.mjs'),'--query','quokka-export-47 native transcript'],capture_output=True,text=True,env=env,cwd=root/'identity-worktree',timeout=20)
+result={'vault':str(vault),'capture':results,'recall':r.stdout.strip(),'files':[str(p.relative_to(vault)) for p in vault.rglob('*') if p.is_file()]}
+(root/'distill-results.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)

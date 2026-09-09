@@ -1,0 +1,21 @@
+import pathlib,subprocess,json
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+script=r'''import pathlib,subprocess,json,os
+root=pathlib.Path(__file__).parent
+results=[]
+for label,path in [('worktree',root/'identity-worktree'),('clone',pathlib.Path('/tmp/factory-learning-identity-clone'))]:
+ (path/'.codex').mkdir(exist_ok=True);(path/'.codex/hooks.json').write_text((root/'.codex/hooks.json').read_text());(path/'lesson.txt').write_text((root/'lesson.txt').read_text())
+ for runtime in ['legacy','appserver']:
+  before={json.loads(l)['session_id'] for l in (root/'hooks.jsonl').read_text().splitlines()}
+  if runtime=='legacy':
+   cmd=json.loads((root/'legacy-command.json').read_text())[3:];cmd[cmd.index('-C')+1]=str(path)
+  else:
+   req=json.loads((root/'request.json').read_text());req['workdir']=str(path);request=root/(label+'-request.json');request.write_text(json.dumps(req));cmd=['env','OBSIDIAN_VAULT_DIRECTORY='+str(root/'vault'),'CLAUDE_LEARNINGS_OFF=1','python3',str(root/'worker.py'),str(request)]
+  with (root/(label+'-'+runtime+'.stdout')).open('w') as out,(root/(label+'-'+runtime+'.stderr')).open('w') as err:r=subprocess.run(cmd,stdout=out,stderr=err,timeout=90)
+  hooks=[json.loads(l) for l in (root/'hooks.jsonl').read_text().splitlines() if json.loads(l)['session_id'] not in before]
+  results.append({'label':label,'runtime':runtime,'exit':r.returncode,'hooks':hooks});print(json.dumps(results[-1]),flush=True)
+'''
+(root/'paths.py').write_text(script)
+with (root/'paths-results.jsonl').open('w') as out:
+ r=subprocess.run(['sbx','exec','factory-build-learning-kit-d7838306','python3',str(root/'paths.py')],stdout=out,stderr=subprocess.PIPE,text=True,timeout=400)
+print('exit',r.returncode,r.stderr[-300:])

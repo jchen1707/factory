@@ -1,0 +1,26 @@
+import pathlib,json,subprocess
+root=pathlib.Path('/var/folders/1f/039kvb3j5vb1n0nr66j5xw6c0000gn/T/factory-learning-kit-60rklwvw/workspace')
+script=r'''import pathlib,json,subprocess,os,signal,time
+root=pathlib.Path(__file__).parent
+for label in ['legacy','appserver']:
+ before={json.loads(l)['session_id'] for l in (root/'hooks.jsonl').read_text().splitlines()}
+ prompt='Use a shell tool to run sleep 30, then read lesson.txt. This is an interruption recovery test.'
+ if label=='legacy':
+  cmd=json.loads((root/'legacy-command.json').read_text());cmd=cmd[3:];cmd[-1]=prompt
+ else:
+  (root/'interrupt-prompt.txt').write_text(prompt);req=json.loads((root/'request.json').read_text());req['prompt']=str(root/'interrupt-prompt.txt');(root/'interrupt-request.json').write_text(json.dumps(req));cmd=['env','OBSIDIAN_VAULT_DIRECTORY='+str(root/'vault'),'CLAUDE_LEARNINGS_OFF=1','python3',str(root/'worker.py'),str(root/'interrupt-request.json')]
+ with (root/(label+'-interrupt.stdout')).open('w') as out,(root/(label+'-interrupt.stderr')).open('w') as err:
+  p=subprocess.Popen(cmd,stdout=out,stderr=err,start_new_session=True)
+  deadline=time.monotonic()+30; found=None
+  while time.monotonic()<deadline:
+   rows=[json.loads(l) for l in (root/'hooks.jsonl').read_text().splitlines()]
+   found=next((r for r in rows if r['session_id'] not in before),None)
+   if found:break
+   time.sleep(.1)
+  if found:time.sleep(1)
+  os.killpg(p.pid,signal.SIGKILL);p.wait()
+  print(json.dumps({'label':label,'exit':p.returncode,'start':found,'end':any(r['session_id']==found['session_id'] and r['hook_event_name']=='SessionEnd' for r in [json.loads(l) for l in (root/'hooks.jsonl').read_text().splitlines()]) if found else None}),flush=True)
+'''
+(root/'interrupt.py').write_text(script)
+r=subprocess.run(['sbx','exec','factory-build-learning-kit-d7838306','python3',str(root/'interrupt.py')],capture_output=True,text=True,timeout=80)
+(root/'interruption-results.jsonl').write_text(r.stdout);print(r.stdout);print(r.stderr[-500:])

@@ -1,0 +1,13 @@
+{
+  "private_clone_write_not_on_host": true,
+  "models": [
+    {
+      "runtime": "legacy",
+      "exit": 0
+    },
+    {
+      "runtime": "appserver",
+      "exit": 0
+    }
+  ]
+}
