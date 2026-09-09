@@ -4,8 +4,10 @@ Capture and retrieval have separate outcomes. A registered hook, a surviving tra
 and a successful model response each prove different parts of capture; none alone proves
 a note was written and subsequently recalled.
 
-Set `OBSIDIAN_VAULT_DIRECTORY` to an existing absolute vault directory in the environment
-of the runtime or host capture worker. The shell, an interactive agent's environment and a
+Set `OBSIDIAN_VAULT_DIRECTORY` to an existing absolute vault directory in the process
+environment of the runtime or host capture worker. The existing `OBSIDIAN_VAULT_DIR`
+process binding is accepted when the canonical name is absent. An explicitly empty or
+invalid canonical value remains authoritative; it never falls through to the alias. The shell, an interactive agent's environment and a
 factory sandbox can have different settings. An unset shell variable does not establish
 that an interactive agent is unconfigured. Never commit a personal vault path.
 

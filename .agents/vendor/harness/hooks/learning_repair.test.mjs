@@ -59,9 +59,9 @@ test('first capture creates both indexes and retains canonical project across wo
       CLAUDE_LEARNINGS_OFF: '0',
       CLAUDE_LEARNINGS_SKIP: '0',
     };
-    const run = () =>
+    const run = (environment = env) =>
       spawnSync(process.execPath, [hook], {
-        env,
+        env: environment,
         input: JSON.stringify({
           cwd: tree,
           session_id: 'recovery-fixture-1',
@@ -81,6 +81,9 @@ test('first capture creates both indexes and retains canonical project across wo
     assert.match(readFileSync(join(vault, '_VAULT_INDEX.md'), 'utf8'), /Recovery preserves source/);
     run();
     assert.equal(notes().length, 1, 'replay must not duplicate notes');
+    const alias = { ...env, OBSIDIAN_VAULT_DIR: vault };
+    delete alias.OBSIDIAN_VAULT_DIRECTORY;
+    assert.match(run(alias).stderr, /skipped: unchanged/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

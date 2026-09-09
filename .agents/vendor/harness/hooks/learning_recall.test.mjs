@@ -102,3 +102,34 @@ test('cross-project matches are relevant and note context is bounded', (t) => {
   assert.equal(result.notes.length, 4);
   assert.ok(result.notes.every((note) => note.text.length <= 3000));
 });
+
+test('the established process alias works, but never overrides an explicit canonical setting', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'recall-alias-'));
+  try {
+    mkdirSync(join(fixture, 'Project Learnings'));
+    writeFileSync(
+      join(fixture, 'Project Learnings/_INDEX.md'),
+      '| Date | Project | Summary | Note |\n',
+    );
+    writeFileSync(join(fixture, '_VAULT_INDEX.md'), '| Note | Tags | Description |\n');
+    assert.equal(
+      recall({ environment: { OBSIDIAN_VAULT_DIR: fixture } }).status,
+      'no_relevant_learnings',
+    );
+    assert.equal(
+      recall({ environment: { OBSIDIAN_VAULT_DIR: fixture, OBSIDIAN_VAULT_DIRECTORY: '' } }).status,
+      'configuration_missing',
+    );
+    assert.equal(
+      recall({
+        environment: {
+          OBSIDIAN_VAULT_DIR: fixture,
+          OBSIDIAN_VAULT_DIRECTORY: '/nonexistent-vault',
+        },
+      }).status,
+      'unavailable',
+    );
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});

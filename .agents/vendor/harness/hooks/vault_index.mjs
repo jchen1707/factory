@@ -249,9 +249,17 @@ export function build(vault) {
   return `${lines.join('\n')}\n`;
 }
 
+/** The canonical binding is authoritative, including an explicit empty/invalid value. */
+export function configuredVault(environment = process.env) {
+  const value = Object.hasOwn(environment, 'OBSIDIAN_VAULT_DIRECTORY')
+    ? environment.OBSIDIAN_VAULT_DIRECTORY
+    : environment.OBSIDIAN_VAULT_DIR;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 /** The vault root, or `''` when none is configured or the path is not a directory. */
 export function vaultDir(environment = process.env) {
-  const raw = (environment.OBSIDIAN_VAULT_DIRECTORY ?? '').trim();
+  const raw = configuredVault(environment);
   if (!raw || !isAbsolute(raw)) return '';
   try {
     return statSync(raw).isDirectory() ? raw : '';

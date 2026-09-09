@@ -3,6 +3,7 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { configuredVault } from './vault_index.mjs';
 import { canonicalProject } from './session_learnings.mjs';
 
 const STOP = new Set(
@@ -20,7 +21,7 @@ const cells = (line) =>
 
 export function recall({ cwd = process.cwd(), query = '', environment = process.env } = {}) {
   const project = canonicalProject(cwd);
-  const raw = environment.OBSIDIAN_VAULT_DIRECTORY?.trim();
+  const raw = configuredVault(environment);
   const result = { status: 'configuration_missing', project, index: [], notes: [], warnings: [] };
   if (!raw) return result;
   result.status = 'unavailable';

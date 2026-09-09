@@ -111,7 +111,7 @@ credential boundary. Sanitized results are in
 
 ## Validation references
 
-Layer A: 158 shared tests, `scripts/check.py --since=origin/v2`, and Prettier passed.
+Layer A: 159 shared tests, `scripts/check.py --since=origin/v2`, and Prettier passed.
 The Python, frontend and Go consumer branches each passed their declared applicable gates
 and vendored integrity checks. Upstream freshness waits for the layer-A branch to land
 on `harness@v2`; consumers are prepared at its feature SHA, not misreported as published.
@@ -120,3 +120,21 @@ Factory lifecycle transport and its separate gate evidence are in
 [Reproducible host probes](artifacts/learning-repair/README.md) distinguish fixture inputs
 from actual model calls. Human interactive UI shutdown and sandbox model execution remain
 unverified; successful host paths must not be presented as those proofs.
+
+## Native hook environment seam — reproduced failure
+
+Two additional real successful model runs removed `OBSIDIAN_VAULT_DIRECTORY` from the parent process environment and supplied the temporary vault only through `-c shell_environment_policy.set.OBSIDIAN_VAULT_DIRECTORY=<temporary vault>`. On Codex 0.153.4, both exec and the actual factory app-server worker fired SessionStart and SessionEnd, but all four callbacks recorded `configured_vault_matches:false`. The native-hook environment does not receive this shell-tool configuration. Earlier successful capture/recall probes explicitly set the process environment, so they did not test this seam. Lifecycle launches must supply the native hook environment separately. The logger emits boolean equality only and never an environment value. Durable reproducer and sanitized results: `docs/discovery/artifacts/learning-repair/factory-learning-hook-env.py.txt` and `docs/discovery/artifacts/learning-repair/hook-environment-results.json`.
+
+
+## Alias-only process environment repair — real capture and recall
+
+After the central resolver change, a fresh isolated fixture supplied only `OBSIDIAN_VAULT_DIR` in the process environment, with `OBSIDIAN_VAULT_DIRECTORY` absent and no `LEARNINGS_DISTILLER` override. Capture used native `runtime:"codex"` and a real model call: exit 0, one written lesson, `retryable:false`, and both indexes. A new actual Codex session in a second Git worktree, using the repaired SessionStart/UserPromptSubmit recall hooks and the same alias-only environment, exited 0 and correctly cited `zebra-reconcile-83`, the persist-before-call ordering repair, and the exact note path. The response identified the source as a test fixture. This verifies the supported process-environment alias repair; policy-only configuration remains unsupported and is not represented as fixed. See `docs/discovery/artifacts/learning-repair/alias-results.json` and `factory-learning-alias.py.txt` in the same directory.
+
+
+The operational destination is the configured Obsidian vault's `Project Learnings` folder,
+not these repository artifacts. A read-only comparison confirmed that the existing host
+`OBSIDIAN_VAULT_DIR` resolves to the same vault as `config/projects.toml` and that its
+`Project Learnings` directory exists. The shared resolver now accepts that established
+process binding when the canonical variable is absent. Explicit canonical values,
+including empty or invalid ones, remain authoritative. The temporary vaults above are
+isolated tests only; no historical notes were uploaded, rewritten or recovered in bulk.

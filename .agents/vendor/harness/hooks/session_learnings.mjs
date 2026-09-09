@@ -197,7 +197,7 @@ Output GitHub-flavoured Markdown. Do not include front matter; it is added for y
 
 /** Return the Project Learnings directory from the configured Obsidian vault root. */
 export function learningsDirectory(environment = process.env) {
-  const vault = (environment.OBSIDIAN_VAULT_DIRECTORY ?? '').trim();
+  const vault = vaultIndex.configuredVault(environment);
   return vault ? join(vault, 'Project Learnings') : '';
 }
 
