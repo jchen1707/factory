@@ -144,6 +144,7 @@ def service(
             ctx.run.id,
             spec=spec,
             workdir=inputs.workdir,
+            trust_root=str(ctx.project.path),
             env=inputs.env,
             model=config["model"],
             observe=partial(observe, observer, inputs),
