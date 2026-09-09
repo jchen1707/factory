@@ -426,8 +426,7 @@ def test_fetch_back_lands_the_agents_commits_in_a_host_worktree(clone_ctx: Conte
 
 
 def test_fetch_back_is_re_entrant(clone_ctx: Context) -> None:
-    """A tick can die anywhere. The mirror is pure derived state, so the second call
-    rebuilds it rather than trying to reconcile it."""
+    """A repeated tick retains the same verified mirror."""
     _to_verifying(clone_ctx)
     first = clone_step.fetch_back(clone_ctx)
     head = git(first, "rev-parse", "HEAD")
@@ -436,6 +435,22 @@ def test_fetch_back_is_re_entrant(clone_ctx: Context) -> None:
 
     assert second == first
     assert git(second, "rev-parse", "HEAD") == head
+
+
+def test_fetch_back_preserves_an_open_reviewer_directory(clone_ctx: Context) -> None:
+    """Native hooks may retain a cwd/directory fd while certification is polled."""
+    import os
+
+    _to_verifying(clone_ctx)
+    mirror = clone_step.fetch_back(clone_ctx)
+    directory = mirror / "src" / "app"
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        clone_step.fetch_back(clone_ctx)
+        opened = os.open("main.py", os.O_RDONLY, dir_fd=descriptor)
+        os.close(opened)
+    finally:
+        os.close(descriptor)
 
 
 def test_fetch_back_picks_up_a_commit_the_vm_made_after_the_first_fetch(
@@ -983,3 +998,36 @@ def test_fresh_clone_with_children_reaches_worktree_ready(
     assert clone_ctx.state == State.WORKTREE_READY
     assert clone_ctx.run.worktree == str(clone_ctx.project.path)
     assert clone_ctx.store.runtime.invocations(clone_ctx.run.id) == []
+
+
+@pytest.mark.parametrize("untracked", [False, True])
+def test_fetch_back_preserves_dirty_mirror(clone_ctx: Context, untracked: bool) -> None:
+    _to_verifying(clone_ctx)
+    mirror = clone_step.fetch_back(clone_ctx)
+    path = mirror / ("retained.txt" if untracked else "src/app/main.py")
+    path.write_text("retained work\n")
+    with pytest.raises(Blocked, match="clone-mirror-dirty"):
+        clone_step.fetch_back(clone_ctx)
+    assert path.read_text() == "retained work\n"
+
+
+def test_changed_mirror_waits_for_active_readers(clone_ctx: Context) -> None:
+    _to_verifying(clone_ctx)
+    mirror = clone_step.fetch_back(clone_ctx)
+    original = repo.head_sha(mirror)
+    clone_ctx.store.runtime.start_invocation("reader", clone_ctx.run.id, 1, "reviewer", {})
+    clone_ctx.store.runtime.db.execute(
+        "INSERT INTO agent_leases VALUES (?, ?, ?, 'active', NULL)",
+        ("reader", clone_ctx.run.id, clone_ctx.project.name),
+    )
+    # Unchanged polling is safe while a reviewer holds the mirror.
+    assert clone_step.fetch_back(clone_ctx) == mirror
+    clone = _fake(clone_ctx).clone_dir(clone_ctx.project.build_sandbox)
+    assert clone is not None
+    (clone / "later.py").write_text("x = 1\n")
+    git(clone, "add", "-A")
+    git(clone, "commit", "-m", "new source")
+    with pytest.raises(Blocked, match="clone-mirror-in-use"):
+        clone_step.fetch_back(clone_ctx)
+    assert repo.head_sha(mirror) == original
+    assert not (mirror / "later.py").exists()
