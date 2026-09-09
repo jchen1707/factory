@@ -138,6 +138,67 @@ def configure(args: argparse.Namespace) -> int:
     return 0
 
 
+def retry_certification(args: argparse.Namespace) -> int:
+    """Queue one explicitly named retry after fresh observation; do not resume or approve."""
+    from dataclasses import asdict
+
+    from factory import cli, workflow_certification
+    from factory.intake.linear import LinearClient
+    from factory.registry import load_registry
+    from factory.routing import load_routing
+
+    home = cli.factory_home()
+    store = Store(home / "state/factory.db")
+    try:
+        run = store.run_by_ticket(args.ticket.upper())
+        if run is None:
+            raise Blocked("run-not-found", args.ticket)
+        if not store.acquire_lease(run.id, ttl_seconds=300):
+            raise Blocked("run-leased", run.id)
+        try:
+            ctx = cli._context_for(
+                home,
+                load_registry(home / "config/projects.toml"),
+                load_routing(home / "config/models.toml"),
+                store,
+                LinearClient(),
+                run,
+            )
+            runner, _ = workflow_certification.service(
+                ctx,
+                review=args.role == "review",
+                prepare_runtime=False,
+            )
+            # Reconcile retained execution before accepting a fresh attempt. Unknown
+            # or active launch reservations still block retry at the transaction seam.
+            previous = runner.status(args.job)
+            if previous["run_id"] != run.id:
+                raise Blocked("certification-retry-owner", args.job)
+            runner.collect(args.job)
+            current = runner.observe()
+            runner.driver.preflight(current)
+            result = runner.certifications.jobs.retry_certification(
+                run.id,
+                args.job,
+                asdict(current),
+                reason=args.reason,
+            )
+            print(
+                json.dumps(
+                    {
+                        "job_id": result["id"],
+                        "status": result["status"],
+                        "retry_of": result["retry_of"],
+                    }
+                )
+            )
+        finally:
+            store.release_lease(run.id)
+    finally:
+        store.close()
+    return 0
+
+
 def metrics(args: argparse.Namespace) -> int:
     from factory.evaluation import summarize
 
@@ -150,6 +211,14 @@ def metrics(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
+    retry = sub.add_parser(
+        "retry-certification", help="request one explicit failed-certification retry; no launch"
+    )
+    retry.add_argument("--ticket", required=True)
+    retry.add_argument("--job", required=True, help="exact failed certification ID")
+    retry.add_argument("--role", choices=("build", "review"), required=True)
+    retry.add_argument("--reason", required=True)
+    retry.set_defaults(func=retry_certification)
     evaluation = sub.add_parser(
         "metrics", help="summarize retained workflow outcomes and estimated cost"
     )
