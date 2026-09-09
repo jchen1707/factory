@@ -3,6 +3,8 @@
 from dataclasses import asdict
 from pathlib import Path
 
+import pytest
+
 from factory.certification import Certifications
 from factory.machine import State
 from factory.runtime_jobs import RuntimeJobs
@@ -195,8 +197,9 @@ def test_retry_still_requires_resume_and_exact_probe_approval(tmp_path: Path) ->
     store.close()
 
 
+@pytest.mark.parametrize("lease_loss", [None, "expired", "new-owner"])
 def test_operator_command_observes_and_queues_without_launching(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, lease_loss
 ) -> None:
     import argparse
 
@@ -221,6 +224,12 @@ def test_operator_command_observes_and_queues_without_launching(
 
         def observe():
             observations.append(True)
+            if lease_loss == "expired":
+                ctx.runtime.db.execute("UPDATE runs SET lease_expires_at=1 WHERE id=?", (run_id,))
+            elif lease_loss:
+                ctx.runtime.db.execute(
+                    "UPDATE runs SET lease_owner='new-owner' WHERE id=?", (run_id,)
+                )
             return identity()
 
         result.observe = observe
@@ -228,6 +237,18 @@ def test_operator_command_observes_and_queues_without_launching(
 
     monkeypatch.setattr(workflow_certification, "service", service)
     args = argparse.Namespace(ticket="SYN-1", job=previous["id"], role="review", reason="retry")
+    if lease_loss:
+        from factory.machine import Blocked
+
+        with pytest.raises(Blocked, match="run-lease-lost"):
+            configuration_cli.retry_certification(args)
+        reopened = Store(tmp_path / "state/factory.db")
+        assert len(list(reopened.runtime.db.execute("SELECT * FROM runtime_certifications"))) == 1
+        if lease_loss == "new-owner":
+            assert reopened.run_by_id(run_id).lease_owner == "new-owner"
+        assert sandbox.handles == []
+        reopened.close()
+        return
     assert configuration_cli.retry_certification(args) == 0
     assert configuration_cli.retry_certification(args) == 0
     reopened = Store(tmp_path / "state/factory.db")

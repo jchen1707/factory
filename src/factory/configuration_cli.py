@@ -141,6 +141,7 @@ def configure(args: argparse.Namespace) -> int:
 def retry_certification(args: argparse.Namespace) -> int:
     """Queue one explicitly named retry after fresh observation; do not resume or approve."""
     from dataclasses import asdict
+    from uuid import uuid4
 
     from factory import cli, workflow_certification
     from factory.intake.linear import LinearClient
@@ -153,7 +154,8 @@ def retry_certification(args: argparse.Namespace) -> int:
         run = store.run_by_ticket(args.ticket.upper())
         if run is None:
             raise Blocked("run-not-found", args.ticket)
-        if not store.acquire_lease(run.id, ttl_seconds=300):
+        lease_owner = "certification-retry:" + uuid4().hex
+        if not store.acquire_lease(run.id, ttl_seconds=300, owner=lease_owner):
             raise Blocked("run-leased", run.id)
         try:
             ctx = cli._context_for(
@@ -177,12 +179,15 @@ def retry_certification(args: argparse.Namespace) -> int:
             runner.collect(args.job)
             current = runner.observe()
             runner.driver.preflight(current)
-            result = runner.certifications.jobs.retry_certification(
-                run.id,
-                args.job,
-                asdict(current),
-                reason=args.reason,
-            )
+            with store.runtime.transaction():
+                if not store.holds_lease(run.id, owner=lease_owner):
+                    raise Blocked("run-lease-lost", run.id)
+                result = runner.certifications.jobs.retry_certification(
+                    run.id,
+                    args.job,
+                    asdict(current),
+                    reason=args.reason,
+                )
             print(
                 json.dumps(
                     {
@@ -193,7 +198,9 @@ def retry_certification(args: argparse.Namespace) -> int:
                 )
             )
         finally:
-            store.release_lease(run.id)
+            with store.runtime.transaction():
+                if store.holds_lease(run.id, owner=lease_owner):
+                    store.release_lease(run.id)
     finally:
         store.close()
     return 0
