@@ -40,7 +40,21 @@ The branch was then pushed successfully. Python's hosted Windows check also expo
 platform-specific fixture failure: URL.pathname constructed an invalid `D:\D:\...` module
 path. Harness `4aae43e` uses `fileURLToPath` and a portable Node distiller stub. The
 wrapper preserves full failure output, and no Windows coverage was skipped. Local source
-and consumer gates passed; hosted Windows verification is pending.
+and consumer gates passed. Python hosted Windows, Ubuntu and integration jobs all
+[passed on the final commit](https://github.com/jchen1707/python-harness/actions/runs/34361832478).
+
+Frontend Windows also exposed the outer Vitest test's five-second default timeout
+while running the entire shared suite. Commit `fed64d9` aligns that one wrapper with
+the existing 300-second subprocess budget, with five seconds for reporting, and
+preserves full failure output. Local gates and the actual pre-push hook passed.
+The final hosted Windows, Ubuntu, e2e and Lighthouse jobs
+[passed](https://github.com/jchen1707/frontend-harness/actions/runs/34362162488).
+The PR-body and generation checks also passed.
+
+Shared harness cross-stack, submodule and generation checks passed; Go gates and
+generation passed. Only the three consumer freshness checks remain red because the
+shared source PR has not landed. Authenticated Claude acceptance still requires host
+login renewal; these passing checks do not replace that runtime measurement.
 
 Factory publication validation passed Ruff lint, Ruff format, mypy and pytest after the
 Git-environment repair ([gate report](acceptance/publication-gates-2026-09-09.json)).

@@ -101,7 +101,7 @@ is at `4aae43e`, based on harness v2. Standalone consumers under `/Users/james/`
 | Worktree | Head |
 | --- | --- |
 | python-harness-learning-repair | d07e51b |
-| frontend-harness-learning-repair | 83a38e6 |
+| frontend-harness-learning-repair | fed64d9 |
 | go-harness-learning-repair | 3896ae2 |
 
 Factory feature/evidence worktrees remain: `factory-native-transcript` (`8565298`),
