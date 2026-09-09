@@ -120,6 +120,14 @@ def test_console_in_real_browser(
                 },
             ]
         )
+    if scenario in ("populated", "stress"):
+        for name, clone in (
+            ("factory-build-python-harness", False),
+            ("factory-review-fixture-certification-1", True),
+        ):
+            owner = (ctx.run.id, 1, "parent", "delegation-mailbox", f"fixture-layout-{name}")
+            ctx.store.intend_effect(*owner)
+            ctx.store.confirm_effect(*owner, json.dumps({"spec": {"name": name, "clone": clone}}))
     for heartbeat in ctx.home.rglob("heartbeat"):
         os.utime(heartbeat, (FIXTURE_NOW - 8, FIXTURE_NOW - 8))
     if ctx.run.worktree:
@@ -202,6 +210,10 @@ def test_console_in_real_browser(
         "projects": [
             {
                 "name": project.name,
+                "delivery_profile": json.loads((project.path / "harness.config.json").read_text())
+                .get("delivery", {})
+                .get("default")
+                or "Not declared",
                 "concurrency": ctx.registry.concurrency_for(project),
                 "occupied_slots": ctx.store.runtime.db.execute(
                     "SELECT COUNT(*) FROM project_slots WHERE project=?", (project.name,)
