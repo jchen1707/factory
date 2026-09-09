@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Factory console revision review</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui;background:#111821;color:#eaf0f5}*{box-sizing:border-box}body{margin:0;padding:24px}h1{font-size:28px;margin:0 0 8px}p{color:#a6b6c5;max-width:900px}a{color:#85dec5}form{display:flex;gap:16px;flex-wrap:wrap;margin:24px 0}label{display:grid;gap:6px}select{font:inherit;background:#19232e;color:#eaf0f5;border:1px solid #364656;padding:8px;border-radius:4px}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}figure{margin:0;min-width:0}figcaption{padding:12px;background:#19232e;border:1px solid #364656}img{display:block;width:100%;height:auto;border:1px solid #364656}a:focus-visible,select:focus-visible{outline:3px solid #ffd18c;outline-offset:3px}@media(max-width:800px){main{grid-template-columns:1fr}body{padding:16px}}
+</style>
+<h1>Dark console · revision review</h1>
+<p>Compare the revised implementation with the original proposal or the same fixtures before revision. These are isolated test captures. Functional checks and visual approval are separate; James’s visual review is pending.</p>
+<p><a href="README.md">Evidence, checks and deliberate differences</a> · Open either image for its full resolution.</p>
+<form aria-label="Compare captures">
+<label>View<select id="view"><option value="runs">Runs</option><option value="projects">Projects</option><option value="detail">Run details</option><option value="timeline">Run timeline</option><option value="settings">Run settings</option><option value="runtimes">Runtimes</option><option value="config">Configuration</option></select></label>
+<label>Layout<select id="viewport"><option value="desktop">Desktop · 1440px</option><option value="narrow">Narrow · 390px</option></select></label>
+<label>Fixture<select id="scenario"><option value="populated">Normal</option><option value="stress">Stress</option></select></label>
+<label>Compare against<select id="track"><option value="original">Original proposal · illustrative data</option><option value="before">Before revision · matching fixtures</option><option value="matched">Proposed composition · matching fixtures</option></select></label>
+</form>
+<main><figure><figcaption id="left-title"></figcaption><a id="left-link"><img id="left" alt="Reference console capture"></a></figure><figure><figcaption>Revised implementation · fixtures only</figcaption><a id="right-link"><img id="right" alt="Revised console capture"></a></figure></main>
+<script>
+function update(){const view=document.getElementById('view').value,viewport=document.getElementById('viewport').value,scenario=document.getElementById('scenario').value,track=document.getElementById('track').value;const left=track==='original'?`original-${view}-${viewport}.png`:`${track}-${scenario}-${view}-${viewport}.png`;const right=`${scenario}-${view}-${viewport}.png`;document.getElementById('left-title').textContent=document.getElementById('track').selectedOptions[0].textContent;for(const [side,src]of [['left',left],['right',right]]){document.getElementById(side).src=src;document.getElementById(side+'-link').href=src;}}document.querySelectorAll('select').forEach(select=>select.addEventListener('change',update));update();
+</script></html>

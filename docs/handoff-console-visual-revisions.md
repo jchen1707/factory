@@ -1,6 +1,8 @@
 # Handoff: revise the dark operations console
 
-Date: 2026-09-09. Status: evidence reviewed; revisions required, not implemented.
+Date: 2026-09-09. Historical revision backlog; implementation and new evidence are in
+[revision validation](ui-alternatives/revision-validation/README.md). James’s visual
+acceptance remains pending. The observations below describe the pre-revision implementation.
 
 James reviewed the result of PR #99 and requested a revision handoff because the
 implementation still falls materially short of the proposed dark UI. The previous

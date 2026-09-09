@@ -1,0 +1,82 @@
+{
+  "source_commit": "90a832222baa5033e0203346b99fe005f5fae342",
+  "before_source": "ba9ca3c",
+  "browser_cases": 12,
+  "pages": 84,
+  "failures": 0,
+  "visual_acceptance": "James review pending",
+  "reports": [
+    {
+      "report": "populated-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "populated-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "stress-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "stress-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "empty-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "empty-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "blocked-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "blocked-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "approval-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "approval-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "unavailable-desktop.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    },
+    {
+      "report": "unavailable-narrow.json",
+      "pages": 7,
+      "failures": 0,
+      "browser": "152.0.7977.83"
+    }
+  ]
+}

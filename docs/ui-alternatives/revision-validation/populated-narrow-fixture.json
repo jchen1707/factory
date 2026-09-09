@@ -1,0 +1,727 @@
+{
+  "schema": 2,
+  "source": {
+    "commit": "90a832222baa5033e0203346b99fe005f5fae342",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "scenario": "populated",
+  "viewport": "narrow",
+  "clock": 1788950760.0,
+  "isolation": "Fresh ctx/database/app per viewport; captures precede all mutation tests",
+  "runs": [
+    {
+      "run_id": "fixture000000007",
+      "ticket": "FIXTURE-10",
+      "project": "python-harness",
+      "branch": "fix/fixture-change",
+      "state": "blocked",
+      "badge": "blocked",
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in blocked",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": "Gate report incomplete",
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000008",
+      "ticket": "FIXTURE-11",
+      "project": "frontend-harness",
+      "branch": "fix/fixture-change",
+      "state": "awaiting_human",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in awaiting_human",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    }
+  ],
+  "detail": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    },
+    "transitions": [
+      {
+        "at": 1788950480,
+        "from_state": "approved",
+        "to_state": "claimed",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950500,
+        "from_state": "claimed",
+        "to_state": "context_loaded",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950520,
+        "from_state": "context_loaded",
+        "to_state": "sandbox_creating",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950540,
+        "from_state": "sandbox_creating",
+        "to_state": "sandbox_ready",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950560,
+        "from_state": "sandbox_ready",
+        "to_state": "worktree_ready",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950580,
+        "from_state": "worktree_ready",
+        "to_state": "implementing",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      }
+    ],
+    "gate_verdict": "pass",
+    "gates": [
+      {
+        "name": "lint",
+        "status": "pass",
+        "caveat": null
+      },
+      {
+        "name": "unit tests",
+        "status": "pass",
+        "caveat": "Sandbox integration checks are separate evidence"
+      }
+    ],
+    "review_tier2": "ran:forced",
+    "review_findings": [
+      {
+        "severity": "low",
+        "file": "src/app/settings.py",
+        "line": 14,
+        "summary": "Clarify the default timeout label"
+      },
+      {
+        "severity": "high",
+        "file": "src/app/settings.py",
+        "line": 28,
+        "summary": "Preserve source when recovery is interrupted"
+      }
+    ],
+    "artifacts": [
+      {
+        "name": "source-snapshot.json",
+        "path": "source-snapshot.json",
+        "sha256": "7bf2d01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "events_path": "/fixture/python-harness/.factory/worktrees/BAC-4/.factory/run/1/events.jsonl",
+    "pr_url": null,
+    "blocked_reason": null
+  },
+  "timeline": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    },
+    "blocks": [
+      {
+        "state": "approved",
+        "lane": "engineer",
+        "start": 1788950460,
+        "end": 1788950480,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "claimed",
+        "lane": "code",
+        "start": 1788950480,
+        "end": 1788950500,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "context_loaded",
+        "lane": "code",
+        "start": 1788950500,
+        "end": 1788950520,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "sandbox_creating",
+        "lane": "code",
+        "start": 1788950520,
+        "end": 1788950540,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "sandbox_ready",
+        "lane": "code",
+        "start": 1788950540,
+        "end": 1788950560,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "worktree_ready",
+        "lane": "code",
+        "start": 1788950560,
+        "end": 1788950580,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "implementing",
+        "lane": "builder",
+        "start": 1788950580,
+        "end": 1788950760,
+        "duration_s": 180.0,
+        "attempt": 1,
+        "dead": false,
+        "live": true
+      }
+    ],
+    "cards": [
+      {
+        "role": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      },
+      {
+        "role": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "status": "live",
+        "context_pct": 0.46,
+        "context_reason": "fresh; measured 0s ago",
+        "activity": "git diff --stat",
+        "heartbeat_age": 8.0
+      },
+      {
+        "role": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      }
+    ],
+    "tool_calls": [
+      {
+        "index": 0,
+        "kind": "command_execution",
+        "summary": "cat src/app/settings.py",
+        "exit_code": 0,
+        "duration_s": 0.20000004768371582
+      },
+      {
+        "index": 1,
+        "kind": "command_execution",
+        "summary": "pytest tests/test_settings.py",
+        "exit_code": 0,
+        "duration_s": 4.0
+      },
+      {
+        "index": 2,
+        "kind": "command_execution",
+        "summary": "git diff --stat",
+        "exit_code": 0,
+        "duration_s": null
+      }
+    ],
+    "elapsed_total_s": 300.0
+  },
+  "roles": {
+    "planner": {
+      "name": "planner",
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "preset": "existing"
+    },
+    "builder": {
+      "name": "builder",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "reviewer": {
+      "name": "reviewer",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "synthesiser": {
+      "name": "synthesiser",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "documenter": {
+      "name": "documenter",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    }
+  },
+  "runtimes": [
+    {
+      "name": "factory-build-python-harness",
+      "state": "running",
+      "workspace": "/fixture/project",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [
+        "BAC-4"
+      ],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "attempt",
+          "reference": "1 \u00b7 implementing",
+          "current": true
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "invocation",
+          "reference": "fixture000000001:1:implement",
+          "current": true
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "prepared specification",
+          "reference": "parent",
+          "current": false
+        }
+      ],
+      "layout": "bind \u00b7 recorded BAC-4 attempt 1",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": []
+    },
+    {
+      "name": "factory-review-fixture-certification-0",
+      "state": "stopped",
+      "workspace": "Unavailable",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "certification completed",
+          "reference": "00000000000000000000000000000009",
+          "current": false
+        }
+      ],
+      "layout": "Unavailable \u2014 no recorded execution layout",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": [
+        {
+          "source": "recorded certification",
+          "ticket": "BAC-4",
+          "job_id": "00000000000000000000000000000009",
+          "status": "completed",
+          "identity": {
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sandbox": "factory-review-fixture-certification-0"
+          },
+          "fingerprint": "2d8c3f87550b8c81dcdc6945afda8a36bc65a18dc36e15df6332a7c754630a37",
+          "failure": null,
+          "evidence": {
+            "compatible": true,
+            "probe": "fixture",
+            "identity": {
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "sandbox": "factory-review-fixture-certification-0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "factory-review-fixture-certification-1",
+      "state": "running",
+      "workspace": "/fixture/review",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "prepared specification",
+          "reference": "parent",
+          "current": false
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "certification failed",
+          "reference": "0000000000000000000000000000000a",
+          "current": false
+        }
+      ],
+      "layout": "clone \u00b7 recorded BAC-4 attempt 1",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "claude",
+      "recorded_compatibility": [
+        {
+          "source": "recorded certification",
+          "ticket": "BAC-4",
+          "job_id": "0000000000000000000000000000000a",
+          "status": "failed",
+          "identity": {
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sandbox": "factory-review-fixture-certification-1"
+          },
+          "fingerprint": "1c2a0da0c3d56449ba1a913665b6e39d0f3f91bdb65dfeb1bb5aef0590fe1692",
+          "failure": "hook probe incomplete",
+          "evidence": {
+            "compatible": false,
+            "probe": "fixture",
+            "identity": {
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "sandbox": "factory-review-fixture-certification-1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "codex-james",
+      "state": "running",
+      "workspace": "/fixture/operator",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": true,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [],
+      "layout": "Unavailable \u2014 no recorded execution layout",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": []
+    }
+  ],
+  "projects": [
+    {
+      "name": "python-harness",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 1,
+      "active_agents": 2,
+      "waiting": "0 children \u00b7 1 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    },
+    {
+      "name": "frontend-harness",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 0,
+      "active_agents": 0,
+      "waiting": "0 children \u00b7 0 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    },
+    {
+      "name": "nemoclaw-dev",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 0,
+      "active_agents": 0,
+      "waiting": "0 children \u00b7 0 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    }
+  ],
+  "settings": {
+    "isolation": "shared",
+    "agent_adapter": "codex-exec",
+    "launch:1:implement": 1,
+    "waiting_invocation": null
+  },
+  "invocations": [
+    {
+      "id": "fixture-invocation-000-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 1,
+      "role": "implement",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-0"
+      },
+      "telemetry": {
+        "context": {
+          "tokens": 46000,
+          "effective_window": 100000,
+          "observed_at": 1788950760.0
+        },
+        "usage": {
+          "input_tokens": 24000,
+          "output_tokens": 1600,
+          "cached_input_tokens": 12000
+        },
+        "usage_complete": false,
+        "estimate": {
+          "known_usd": 0.05,
+          "complete": false
+        }
+      },
+      "sequence": 1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-001-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 2,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-1"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-002-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 3,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-2"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture000000001:1:implement",
+      "run_id": "fixture000000001",
+      "attempt": 1,
+      "role": "implement",
+      "metadata": {
+        "semantic_role": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "preset": "existing",
+        "adapter": "codex-exec",
+        "runtime_compatibility": null,
+        "events": "/fixture/python-harness/.factory/worktrees/BAC-4/.factory/run/1/events.jsonl",
+        "cost_step": "implement",
+        "service_tier": null,
+        "policy_revision": null
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    }
+  ],
+  "config": {
+    "roles": [
+      {
+        "name": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max"
+      },
+      {
+        "name": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high"
+      },
+      {
+        "name": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high"
+      },
+      {
+        "name": "synthesiser",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      },
+      {
+        "name": "documenter",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      }
+    ],
+    "usd_per_run": 50.0,
+    "usd_warn_at": 30.0,
+    "projects_read_only": [
+      "python-harness",
+      "frontend-harness",
+      "nemoclaw-dev"
+    ]
+  }
+}

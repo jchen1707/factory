@@ -1,0 +1,275 @@
+{
+  "scenario": "stress",
+  "viewport": "desktop",
+  "browser": "152.0.7977.83",
+  "clock": 1788950760,
+  "fixtureIsolation": "fresh server/database for each viewport",
+  "visualAcceptance": "pending human side-by-side review",
+  "pages": [
+    {
+      "name": "runs",
+      "route": "/",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1896,
+        "firstViewportHeadings": [
+          "Runs",
+          "Needs attention",
+          "Work in progress"
+        ],
+        "rowHeights": [
+          105,
+          105,
+          105,
+          105,
+          105,
+          105,
+          105,
+          105,
+          105,
+          152
+        ],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1000,
+        "firstViewportHeadings": [
+          "Projects",
+          "Registered projects",
+          "Project defaults"
+        ],
+        "rowHeights": [],
+        "selectedMode": "automatic"
+      }
+    },
+    {
+      "name": "detail",
+      "route": "/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1654,
+        "firstViewportHeadings": [
+          "BAC-4 python-harness",
+          "Current attempt",
+          "Controls",
+          "Verification · gate report — pass",
+          "Retained artifacts",
+          "Live tail"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "timeline",
+      "route": "/runs/BAC-4/timeline",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1865,
+        "firstViewportHeadings": [
+          "BAC-4 python-harness",
+          "Agent activity",
+          "Runtime · swim-lane waterfall",
+          "Tool calls this attempt"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 2190,
+        "firstViewportHeadings": [
+          "BAC-4 · Run settings",
+          "Invocation admission",
+          "Effective settings",
+          "Effective limits"
+        ],
+        "rowHeights": [],
+        "selectedMode": "automatic"
+      }
+    },
+    {
+      "name": "runtimes",
+      "route": "/runtimes",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1261,
+        "firstViewportHeadings": [
+          "Runtimes",
+          "Sandbox inventory",
+          "Runtime compatibility"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "config",
+      "route": "/config",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1179,
+        "firstViewportHeadings": [
+          "Configuration",
+          "Model routing",
+          "Budget limits",
+          "Configuration sources"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    }
+  ],
+  "failures": [],
+  "interactions": [
+    {
+      "viewport": "desktop",
+      "name": "runs",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "primary": {
+        "headings": [
+          "Ticket",
+          "Project",
+          "State",
+          "Context",
+          "Estimate"
+        ],
+        "clipped": false,
+        "rows": 10
+      }
+    },
+    {
+      "viewport": "desktop",
+      "name": "timeline",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "navigation": [
+        "/",
+        "/projects",
+        "/runtimes",
+        "/config"
+      ]
+    },
+    {
+      "viewport": "desktop",
+      "projectAnchor": "#project-python-harness",
+      "open": true,
+      "focused": false
+    },
+    {
+      "viewport": "desktop",
+      "continuity": {
+        "open": true,
+        "focused": true
+      }
+    },
+    {
+      "viewport": "desktop",
+      "attentionFocused": true,
+      "scrollBefore": 0,
+      "timelineContinuity": {
+        "focused": true,
+        "scrollLeft": 0
+      }
+    },
+    {
+      "viewport": "desktop",
+      "tailBounds": {
+        "height": 358,
+        "scrollHeight": 1017
+      },
+      "retainedScroll": 40,
+      "following": true
+    },
+    {
+      "viewport": "desktop",
+      "savedMode": "approval"
+    },
+    {
+      "stressRoute": "/projects",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/settings/runs/BAC-4",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/",
+      "width": 320,
+      "overflow": false
+    }
+  ],
+  "renderIdentity": "Console code 24a40732accc / assets ab7f40f88449 · source revision unverified\nConsole started 2026-09-09 10:46:00 UTC"
+}
