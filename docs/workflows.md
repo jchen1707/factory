@@ -211,7 +211,18 @@ flowchart TD
 
 ## Learning capture and recall
 
-Capture and retrieval are distinct contracts owned by layer A. Session-end hooks consume available transcripts and distill notes into the configured vault; factory owns sandbox lifecycle and retained execution evidence. Capture outcomes and retrieval availability must distinguish missing configuration, missing transcripts, distillation/indexing failure and no useful lesson or match. A successful model turn or gate suite does not prove that a session-end hook ran. The learning repair work must separately measure clean completion, interruption recovery and later-session recall across worktrees; runtime paths without such evidence remain unverified.
+Layer A owns note writing, indexing and recall; Factory owns lifecycle coordination and
+retained evidence. Native session-end hooks consume runtime transcripts when available.
+Factory independently schedules host recovery from partial retained events after collection
+or terminal reconciliation. Both target Markdown notes under the configured Obsidian vault's
+`Project Learnings/`, with stable session identity; partial evidence preserves an existing
+session note. Receipts distinguish unavailable, failed, unfinished and completed capture.
+
+The [operator learning reference](operator-reference.md#learning-capture-and-relevant-recall)
+explains configuration and recovery. [Host measurement](discovery/learning-repair-2026-09-08.md)
+proves capture and later worktree recall, while [lifecycle acceptance](acceptance/learning-lifecycle-2026-09-08.md)
+proves retained-event transport separately. Sandbox model execution and transcript export
+remain unverified because the credential preflight blocked the disposable probes.
 
 ![Learning capture and recall workflow](diagrams/learning.svg)
 
@@ -220,17 +231,23 @@ Capture and retrieval are distinct contracts owned by layer A. Session-end hooks
 
 ```mermaid
 flowchart TD
-  S[Interactive session or factory sandbox attempt] --> T{Transcript available to shared hook?}
-  T -->|no| U[Unavailable capture; preserve recovery evidence]
-  T -->|yes| D[Layer A: distill bounded lesson]
-  D --> N[Vault: preserve note identity and content]
-  N --> I[Layer A: update project index]
-  D -->|failure| F[Observable nonblocking outcome]
-  L[Later task in same project or another worktree] --> R[Layer A: bounded relevant recall]
-  I --> R
-  R --> C[Relevant notes and provenance in context]
-  R -->|unavailable| E[Report retrieval unavailable]
-  R -->|no matches| Z[Report no relevant learnings]
+  S[Runtime session] --> T{Native SessionEnd and transcript available?}
+  T -->|yes| N[Layer A: native transcript capture]
+  T -->|interrupted or unavailable| U[Retain recoverable gap]
+  H[Host: terminal collection or reconciliation] --> P[Snapshot complete event lines; label partial]
+  P --> W[Detached host worker: trusted shared capture]
+  W --> R[Host receipt: outcome, completion, retryability]
+  R -->|failed or unfinished| X[Recollect selected attempt to retry]
+  X --> P
+  N --> D[Layer A: distill and preserve session note identity]
+  W --> D
+  D --> V[Obsidian vault: Project Learnings note and indexes]
+  D -->|failure| F[Observable nonblocking capture outcome]
+  L[Later task in another worktree] --> I[Bounded project index and topic recall]
+  V --> I
+  I --> C[Relevant note bodies and source paths]
+  I -->|unavailable| E[Report retrieval unavailable]
+  I -->|no summary matches| Z[No relevant results; deeper search when needed]
 ```
 
 </details>

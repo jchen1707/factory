@@ -172,6 +172,49 @@ Budgets are checked before subsequent attempts, not by killing a writer midway t
 The checked-in routing currently declares a $50 run ceiling and $30 warning; inspect effective
 configuration rather than assuming those defaults govern every run.
 
+## Learning capture and relevant recall
+
+Learnings are Markdown notes in the configured Obsidian vault's `Project Learnings/`
+directory. They are not stored solely in Factory artifacts. Successful capture writes the
+note and updates `Project Learnings/_INDEX.md` and `_VAULT_INDEX.md`; session identity
+keeps repeated capture attached to the same note. Existing full-session notes are preserved
+when Factory only has partial evidence.
+
+For Factory, the host registry's `[vault].path` in `config/projects.toml` selects that vault.
+The detached capture worker passes it as `OBSIDIAN_VAULT_DIRECTORY` to the registered host
+repository's vendored capture script. Interactive sessions use their own runtime environment;
+a missing variable in an ordinary shell does not prove the agent is unconfigured. See the
+[shared learning instructions](../.agents/vendor/harness/docs/agents/learnings.md) for
+configuration, backend selection and bounded recall policy. Those details belong to layer A.
+
+Native session-end capture reads the runtime transcript. Interrupted sessions can skip that
+hook. Separately, Factory collection and terminal reconciliation schedule capture from
+retained event streams, including orphan reaping and cancellation's archived copies. Beside
+the stream, `*.learning.jsonl` keeps complete JSON lines and `*.learning.json` records the
+outcome, completion and retryability. The receipt labels the source `retained-events-partial`:
+these streams may lack user prompts or tool details and are not full sandbox transcript
+exports. Capture runs on the host without delaying the workflow transition or changing its
+state verdict.
+
+Inspect the receipt to distinguish unavailable input/configuration, failed processing,
+unfinished work and a completed result. Recollection can retry failed or interrupted work;
+unchanged snapshots with finished non-retryable results are skipped. Detached workers do
+not constitute a durable job queue, and old attempts never recollected remain recoverable
+gaps. This repair does not run bulk historical recovery.
+
+At task start, shared hooks supply a bounded current-project index. Topic recall before
+planning or debugging selects a bounded set of relevant note bodies, including other
+projects when relevant, and records their source paths. It does not load the whole vault.
+Unavailable retrieval differs from no relevant results. Summary-based matching can miss a
+term present only in a note body; use the shared instructions' deeper-search fallback when
+that matters. Notes are historical evidence, never executable instructions.
+
+[Real host measurements](discovery/learning-repair-2026-09-08.md) connect a model-written
+note to later recall in another worktree. The [lifecycle acceptance record](acceptance/learning-lifecycle-2026-09-08.md)
+separately proves Factory's transport and receipts. Sandbox credential preflight blocked
+model execution in the disposable probes, so sandbox transcript export and human interactive
+UI shutdown remain unverified. A passing host measurement does not establish those paths.
+
 ## Commands and observation
 
 All commands below use `uv run factory`:

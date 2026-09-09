@@ -84,6 +84,15 @@ because they are old. For current commands use the operator reference above.
 - [Architecture decisions](adr/): retained decisions; status is recorded within each ADR.
 - [Runtime certification artifacts](runtime-certification/): retained runtime evidence.
 
+## Learning repair evidence
+
+- [Learning runtime measurements](discovery/learning-repair-2026-09-08.md): historical host
+  capture/recall measurements and explicit sandbox credential-preflight limits.
+- [Factory learning lifecycle acceptance](acceptance/learning-lifecycle-2026-09-08.md):
+  historical transport, partial-event receipt and recovery evidence.
+- [Current learning operations](operator-reference.md#learning-capture-and-relevant-recall):
+  configured Obsidian destination, capture outcomes and relevant recall.
+
 ## Superseded handoffs
 
 Phase 2's own retirement condition was met by the
