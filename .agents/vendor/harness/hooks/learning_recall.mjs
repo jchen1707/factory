@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Bounded index-first recall. No note or vault writes; hook failures never block work. */
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configuredVault } from './vault_index.mjs';
@@ -78,7 +78,7 @@ export function recall({ cwd = process.cwd(), query = '', environment = process.
         : 'no_relevant_learnings';
     return result;
   }
-  const selected = candidates
+  let selected = candidates
     .filter((row) => row.score > 0)
     .sort(
       (a, b) =>
@@ -87,12 +87,54 @@ export function recall({ cwd = process.cwd(), query = '', environment = process.
         a.path.localeCompare(b.path),
     )
     .slice(0, 4);
+  // Bound disk reads as well as model context; never follow an index outside the vault.
+  const readNote = (row) => {
+    const path = realpathSync(join(vault, row.path));
+    const within = relative(vault, path);
+    if (within.startsWith('..') || isAbsolute(within)) throw new Error('outside vault');
+    if (!statSync(path).isFile()) throw new Error('not a regular file');
+    const fd = openSync(path, 'r');
+    try {
+      const buffer = Buffer.alloc(65536);
+      const size = readSync(fd, buffer, 0, buffer.length, 0);
+      if (statSync(path).size > buffer.length)
+        result.warnings.push(`Note search truncated: ${row.path}`);
+      return buffer.subarray(0, size).toString('utf8');
+    } finally {
+      closeSync(fd);
+    }
+  };
+  if (!selected.length) {
+    result.search = 'body_fallback';
+    const ordered = candidates.sort(
+      (a, b) =>
+        Number(b.project === project) - Number(a.project === project) ||
+        b.date.localeCompare(a.date) ||
+        a.path.localeCompare(b.path),
+    );
+    if (ordered.length > 32) result.warnings.push('Body search limited to 32 indexed notes');
+    const matches = [];
+    for (const row of ordered.slice(0, 32)) {
+      try {
+        const text = readNote(row);
+        const bodyTerms = terms(text);
+        const matched = words.filter((word) => bodyTerms.includes(word));
+        if (matched.length) {
+          const offset = Math.max(
+            0,
+            text.toLowerCase().indexOf(matched.sort((a, b) => b.length - a.length)[0]) - 300,
+          );
+          matches.push({ ...row, score: matched.length, text: text.slice(offset, offset + 3000) });
+        }
+      } catch {
+        result.warnings.push(`Body search note unavailable: ${row.path}`);
+      }
+    }
+    selected = matches.sort((a, b) => b.score - a.score).slice(0, 4);
+  }
   for (const row of selected) {
     try {
-      const path = realpathSync(join(vault, row.path));
-      const within = relative(vault, path);
-      if (within.startsWith('..') || isAbsolute(within)) throw new Error('outside vault');
-      result.notes.push({ path: row.path, text: readFileSync(path, 'utf8').slice(0, 3000) });
+      result.notes.push({ path: row.path, text: row.text ?? readNote(row).slice(0, 3000) });
     } catch {
       result.warnings.push(`Selected note unavailable: ${row.path}`);
     }

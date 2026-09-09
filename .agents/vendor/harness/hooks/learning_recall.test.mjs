@@ -133,3 +133,64 @@ test('the established process alias works, but never overrides an explicit canon
     rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+test('automatic body fallback retrieves a bounded matching excerpt without unrelated context', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'recall-body-'));
+  t.after(() => rmSync(vault, { recursive: true, force: true }));
+  mkdirSync(join(vault, 'Project Learnings'));
+  writeFileSync(join(vault, 'Project Learnings/_INDEX.md'), '');
+  writeFileSync(
+    join(vault, '_VAULT_INDEX.md'),
+    '| `lesson.md` | queue | delivery recovery |\n| `other.md` | style | typography |',
+  );
+  writeFileSync(
+    join(vault, 'lesson.md'),
+    'only intro '.repeat(800) +
+      'zebra-reconcile-83 rollback requires durable intent before the external call.',
+  );
+  writeFileSync(join(vault, 'other.md'), 'UNRELATED_BODY');
+  const options = { cwd: vault, environment: { OBSIDIAN_VAULT_DIRECTORY: vault } };
+  assert.deepEqual(recall(options).notes, []);
+  const result = recall({
+    ...options,
+    query: 'Using only provided learning context, describe zebra-reconcile-83 rollback',
+  });
+  assert.equal(result.status, 'recalled');
+  assert.equal(result.search, 'body_fallback');
+  assert.equal(result.notes.length, 1);
+  assert.match(result.notes[0].text, /durable intent/);
+  assert.ok(result.notes[0].text.length <= 3000);
+  assert.equal(JSON.stringify(result).includes('UNRELATED_BODY'), false);
+});
+
+test('body fallback reports incomplete search budgets and refuses escaped notes', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'recall-body-limit-'));
+  t.after(() => rmSync(vault, { recursive: true, force: true }));
+  mkdirSync(join(vault, 'Project Learnings'));
+  writeFileSync(join(vault, 'Project Learnings/_INDEX.md'), '');
+  const rows = [];
+  for (let i = 0; i < 34; i++) {
+    const path = `note-${String(i).padStart(2, '0')}.md`;
+    rows.push(`| \`${path}\` | neutral | unrelated |`);
+    writeFileSync(join(vault, path), i === 0 ? 'a'.repeat(65536) + ' hiddenword' : 'ordinary body');
+  }
+  writeFileSync(join(vault, '_VAULT_INDEX.md'), rows.join('\n'));
+  const result = recall({
+    cwd: vault,
+    query: 'hiddenword',
+    environment: { OBSIDIAN_VAULT_DIRECTORY: vault },
+  });
+  assert.equal(result.status, 'partial');
+  assert.equal(result.notes.length, 0);
+  assert.ok(result.warnings.some((w) => w.includes('32 indexed')));
+  assert.ok(result.warnings.some((w) => w.includes('truncated')));
+  symlinkSync('/etc/hosts', join(vault, 'escape.md'));
+  writeFileSync(join(vault, '_VAULT_INDEX.md'), '| `escape.md` | neutral | unrelated |');
+  const escaped = recall({
+    cwd: vault,
+    query: 'localhost',
+    environment: { OBSIDIAN_VAULT_DIRECTORY: vault },
+  });
+  assert.equal(escaped.status, 'partial');
+  assert.deepEqual(escaped.notes, []);
+});

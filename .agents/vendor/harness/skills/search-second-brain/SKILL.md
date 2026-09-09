@@ -15,7 +15,9 @@ The notes live outside this workspace, so read them with **absolute paths**. The
 `$OBSIDIAN_VAULT_DIRECTORY` — in PowerShell, `$env:OBSIDIAN_VAULT_DIRECTORY`. Learnings live
 in its `Project Learnings` directory.
 
-If the variable is unset, say so and stop. Do not guess at a path.
+When the canonical variable is absent, use the process `OBSIDIAN_VAULT_DIR` alias.
+An explicitly empty or invalid canonical value remains authoritative. If neither is
+configured, report missing configuration and stop. Do not guess at a path.
 
 Two generated indexes sit above the notes. Both are cheap; read them before anything else:
 
@@ -49,7 +51,10 @@ them.
    with the task topic (plugin-relative or under `.agents/vendor/harness/`). It consults the
    indexes locally and returns at most four matching note excerpts, without loading the vault
    into context. SessionStart supplies at most eight project index rows; UserPromptSubmit
-   recalls matching notes automatically where registered. Project identity follows Git origin
+   recalls matching notes automatically where registered. If no index entry matches,
+   bounded recall searches at most 32 indexed note bodies, up to 64 KiB each, and returns
+   matching excerpts. This fallback does not replace step 2: unindexed notes and body-only
+   details alongside index hits still need the wider search. Project identity follows Git origin
    across worktrees and clones. Record the note paths that informed the task.
 
    Distinguish `configuration_missing`, `unavailable`, and `partial` from
@@ -115,9 +120,10 @@ check you without re-searching.
 
 A session that should have produced a note but did not is a diagnosable event, not a mystery.
 Read `_hook.log` in `Project Learnings` — the session-end hook appends one line per run:
-`wrote`, `skipped`, `no learnings`, or `failed:` with the reason. No line at all for the
-session means the hook never fired; a closed terminal window skips it. Report which case it was
-rather than guessing.
+`wrote`, `skipped`, `no learnings`, or `failed:` with the reason. A missing line does not prove the hook never fired: missing configuration or failed
+logging can leave no entry. Detached capture also records queued and started outcomes;
+without a terminal outcome, completion is unproven. Interruption can skip SessionEnd.
+Compare registration, transcript availability and runtime outcomes before reporting a cause.
 
 ## When the search comes up empty
 
