@@ -24,6 +24,9 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 
 ## Historical evidence and decision records
 
+- [UI and learning publication](publication-ui-learning-2026-09-09.md): draft PRs, dependency
+  order and the pre-push test isolation repair.
+
 - [Native learning implementation and acceptance](acceptance/native-learning-completion-2026-09-09.md):
   sandbox export, Codex interactive capture/recall and the remaining Claude login check.
 

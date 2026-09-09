@@ -663,8 +663,9 @@ it('keeps fixture Git and gate discovery isolated from the invoking hook reposit
       process.execPath,
       [
         '--test',
-        '--test-name-pattern=^gate report — base diff integration',
+        '--test-name-pattern=^(gate report — base diff integration|first capture creates both indexes|same project in another worktree|Stop and gate report enforce)',
         fileURLToPath(import.meta.url),
+        fileURLToPath(new URL('./delivery_policy.test.mjs', import.meta.url)),
       ],
       {
         cwd: outer,
@@ -697,6 +698,9 @@ it('keeps fixture Git and gate discovery isolated from the invoking hook reposit
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /runs the gate for a committed change/);
     assert.match(result.stdout, /skips the gate when no --base is given/);
+    assert.match(result.stdout, /first capture creates both indexes/);
+    assert.match(result.stdout, /same project in another worktree/);
+    assert.match(result.stdout, /Stop and gate report enforce/);
   } finally {
     rmSync(outer, { recursive: true, force: true });
   }

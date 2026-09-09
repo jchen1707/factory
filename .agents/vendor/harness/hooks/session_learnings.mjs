@@ -225,8 +225,16 @@ export function logOutcome(directory, project, outcome) {
 }
 
 /** Stable across worktrees and clones; never retain credentials from a remote URL. */
+function projectGit(cwd, args) {
+  // The transcript's cwd selects the project, not an invoking Git hook's repository.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+  );
+  return output('git', args, { cwd, env });
+}
+
 export function canonicalProject(cwd) {
-  const origin = output('git', ['remote', 'get-url', 'origin'], { cwd }).trim();
+  const origin = projectGit(cwd, ['remote', 'get-url', 'origin']).trim();
   if (origin) {
     const name = origin
       .replace(/[?#].*$/, '')
@@ -236,17 +244,19 @@ export function canonicalProject(cwd) {
       .replace(/\.git$/, '');
     if (/^[a-zA-Z0-9._-]+$/.test(name)) return name;
   }
-  const common = output('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-    cwd,
-  }).trim();
+  const common = projectGit(cwd, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]).trim();
   return basename(common ? dirname(common) : cwd) || 'session';
 }
 
 /** Branch, recent commits and dirty files — the facts a model should not have to infer. */
 export function gitContext(cwd) {
-  const branch = output('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }) || '(unknown)';
-  const log = output('git', ['log', '--oneline', '-15'], { cwd });
-  const status = output('git', ['status', '--porcelain'], { cwd });
+  const branch = projectGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']) || '(unknown)';
+  const log = projectGit(cwd, ['log', '--oneline', '-15']);
+  const status = projectGit(cwd, ['status', '--porcelain']);
   const parts = [`Branch: ${branch}`];
   if (log) parts.push(`Recent commits:\n${log}`);
   if (status) parts.push(`Uncommitted:\n${status}`);

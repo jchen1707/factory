@@ -1,3 +1,7 @@
+// Git hooks export repository selectors. Fixtures must select their own repositories.
+const fixtureEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+);
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
@@ -12,7 +16,7 @@ test('same project in another worktree recalls relevant lesson, excludes unrelat
   const repo = join(root, 'product');
   mkdirSync(repo);
   const git = (...args) => {
-    const r = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    const r = spawnSync('git', args, { cwd: repo, env: fixtureEnv, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
   };
   git('init');

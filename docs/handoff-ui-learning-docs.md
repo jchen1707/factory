@@ -95,21 +95,22 @@ harness. Never run candidate worktree scripts on the host or hand-edit generated
 ## Worktrees and publication
 
 Shared source `/Users/james/harness-learning-repair`, branch `fix/learning-capture-recall`,
-is at `54c5c9a`, based on harness v2. Standalone consumers under `/Users/james/`, each on
+is at `4aae43e`, based on harness v2. Standalone consumers under `/Users/james/`, each on
 `fix/learning-recall-sync`, are:
 
 | Worktree | Head |
 | --- | --- |
-| python-harness-learning-repair | 0f93e93 |
-| frontend-harness-learning-repair | ed20bfe |
-| go-harness-learning-repair | 674b53a |
+| python-harness-learning-repair | d07e51b |
+| frontend-harness-learning-repair | 83a38e6 |
+| go-harness-learning-repair | 3896ae2 |
 
 Factory feature/evidence worktrees remain: `factory-native-transcript` (`8565298`),
 `factory-interactive-completion` (`e472d67`), and `factory-sandbox-learning-evidence`
 (`58025a2`). Their commits are integrated; do not open overlapping duplicate factory PRs.
 Earlier worktrees remain intact. Verify current heads rather than assuming this table is live.
 
-Nothing was pushed, merged or deployed. Source lands on harness v2 first; James merges,
+All five feature branches are pushed and have [draft PRs](publication-ui-learning-2026-09-09.md).
+Nothing was merged or deployed. Source lands on harness v2 first; James merges,
 then consumers sync to the landed source and follow the stack/submodule publication flow.
 Current vendor integrity passes; it does not establish upstream freshness. Never edit
 main or the user's stack submodules. James owns live restart/deployment, credential rotation
