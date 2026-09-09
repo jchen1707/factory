@@ -94,4 +94,6 @@ Original paths remain forwarding links so historical inbound references still re
 - [Phase 2 verify-step handoff](archive/handoff-phase-2-step-2.md).
 
 Untracked local plans and acceptance records are outside this checked-in inventory and
-were left untouched. UI alternatives are approval drafts, not current production guidance.
+were left untouched. [UI alternatives](ui-alternatives/index.html) are approval drafts,
+not current production guidance; their [validation evidence](ui-alternatives/validation/RESULTS.md)
+describes fixture behavior only.

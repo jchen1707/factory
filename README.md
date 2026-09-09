@@ -24,6 +24,8 @@ prerequisites. `doctor --deep` performs a paid model canary.
   certification, delegation, concurrency and accounting.
 - [Recovery runbook](docs/runbook.md): inspect and resolve a stopped run.
 - [Documentation index](docs/README.md): current guidance, historical evidence and archived handoffs.
+- [UI alternatives](docs/ui-alternatives/index.html): three clickable fixture workspaces and
+  desktop/narrow screenshots for James's design choice.
 - [Contributor boundaries](AGENTS.md) and [canonical specification](SOFTWARE-FACTORY-PLAN.md).
 
 James approves readiness, disputed findings, merges, deployment, schema migrations and
