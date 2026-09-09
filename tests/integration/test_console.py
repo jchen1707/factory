@@ -80,7 +80,7 @@ def test_the_board_renders_primary_columns_and_retains_every_run_signal(ctx: Con
     page = _client(ctx).get("/").text
 
     assert "BAC-4" in page
-    assert "implementing" in page
+    assert "Implementing" in page
     # attempt and the §16.3a rung it occupies
     assert "restart" in page
     # Five scan columns; secondary §18.5 signals remain in the row disclosure.

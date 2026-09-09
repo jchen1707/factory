@@ -106,7 +106,7 @@ def test_failed_run_remains_visible_in_attention(ctx: Context) -> None:
     page = _client(ctx).get("/").text
     attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
     assert attention is not None
-    assert "failed" in attention[1]
+    assert 'class="chip fail">Failed</span>' in attention[1]
     assert 'href="/runs/BAC-4"' in attention[1]
 
 
@@ -149,10 +149,23 @@ def test_estimates_keep_known_partial_cost_visible(ctx: Context, route: str) -> 
         "partial-estimate", 1, {"estimate": {"usd": None, "known_usd": 0.25, "complete": False}}
     )
     page = _client(ctx).get(route).text
+    assert "$50 ceiling" in page
     if route == "/":
         cell = re.search(r'<td data-label="Estimate">(.*?)</td>', page, re.DOTALL)
         assert cell is not None
         page = cell[1]
     assert "≥ $0.25" in page
-    assert "$50 ceiling" in page
     assert "partial" in page
+
+
+def test_board_attention_does_not_invent_missing_reason(ctx: Context) -> None:
+    _to_implementing(ctx)
+    ctx.store.record_transition(
+        ctx.run.id, from_state=None, to_state=State.AWAITING_HUMAN, actor="fixture"
+    )
+    page = _client(ctx).get("/").text
+    attention = re.search(r'<article class="attention-item">(.*?)</article>', page, re.DOTALL)
+    assert attention is not None
+    assert 'class="chip warn">Awaiting human</span>' in attention[1]
+    assert "No reason recorded." in attention[1]
+    assert "Inspect run →" in attention[1]

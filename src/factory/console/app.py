@@ -327,6 +327,20 @@ def _elapsed_cell(elapsed: float, timeout: int | None) -> str:
     )
 
 
+def _state_chip(state: str) -> str:
+    """Visual semantics only; action eligibility remains with machine/policy."""
+    tone = (
+        "fail"
+        if state in {"failed", "blocked"}
+        else "warn"
+        if state in {"suspended", "awaiting_human"}
+        else "muted"
+        if state in {"approved", "cancelled", "complete"}
+        else "pass"
+    )
+    return f'<span class="chip {tone}">{_e(state.replace("_", " ").capitalize())}</span>'
+
+
 def _board_table(rows: list[console_views.RunRow]) -> str:
     """Five primary scan columns; every retained run signal stays keyboard reachable."""
     if not rows:
@@ -339,7 +353,9 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
         title = f"<small>{_e(r.title)}</small>" if r.title else ""
         signals = (
             f'<details data-key="run-{_e(r.run_id)}"><summary>Run signals</summary><dl>'
+            f"<dt>Project</dt><dd>{_e(r.project)}</dd>"
             f"<dt>Branch</dt><dd>{_e(r.branch or 'not recorded')}</dd>"
+            f"<dt>Cost evidence</dt><dd>API-equivalent USD · {_e(r.spend_status)} · ${r.spend_ceiling:.0f} ceiling</dd>"
             f"<dt>Attempt / rung</dt><dd>{r.attempt} · {_e(r.rung)}</dd>"
             f"<dt>Elapsed / timeout</dt><dd>{_duration(r.elapsed_in_state)} / {_duration(r.timeout_seconds)}</dd>"
             f"<dt>Tokens in / out</dt><dd>{r.tokens_in:,} / {r.tokens_out:,} ({r.tokens_cached:,} cached) · {_e(r.usage_status)}</dd>"
@@ -357,11 +373,11 @@ def _board_table(rows: list[console_views.RunRow]) -> str:
         cells.append(
             "<tr>"
             f'<td data-label="Ticket"><a data-focus-key="ticket-{_e(r.run_id)}" href="/runs/{_e(r.ticket)}">{_e(r.ticket)}</a>{title}{signals}</td>'
-            f'<td data-label="Project">{_e(r.project)}</td>'
-            f'<td data-label="State"><span class="chip">{_e(r.state)}</span>{badge}'
+            f'<td data-label="Project"><span class="project-identity" tabindex="0" title="{_e(r.project)}">{_e(r.project)}</span></td>'
+            f'<td data-label="State">{_state_chip(r.state)}{badge}'
             + (f"<small>{_e(r.blocked_reason)}</small>" if r.blocked_reason else "")
             + f'</td><td data-label="Context">{_pct_cell(r.context_pct, r.context_reason) if r.context_pct is not None else "Unavailable"}</td>'
-            f'<td data-label="Estimate">{_estimate_cell(r)}</td></tr>'
+            f'<td data-label="Estimate">{_estimate_value(r)}<small>{_e(r.spend_status) if r.spend_status != "complete" else ""}</small></td></tr>'
         )
     return (
         '<table class="board-table"><thead><tr><th>Ticket</th><th>Project</th><th>State</th><th>Context</th><th>Estimate</th></tr></thead><tbody>'
@@ -436,7 +452,7 @@ def _board_overview(
             row.blocked_reason
             or waiting.get(row.run_id)
             or pending.get(row.run_id)
-            or row.state.replace("_", " ")
+            or "No reason recorded."
         )
         launch_status = (
             "Approval required"
@@ -452,7 +468,15 @@ def _board_overview(
             holds += f'<details data-key="more-attention"><summary>Show {len(attention) - 3} more runs needing attention</summary>'
         holds += (
             f'<article class="attention-item"><a data-focus-key="attention-{_e(row.run_id)}" href="{_e(destination)}">{_e(row.ticket)}</a>'
-            f'<span class="chip warn">{_e(row.state)}</span><p>{_e(launch_status)}</p><p>{_e(reason)}</p></article>'
+            f"{_state_chip(row.state)}"
+            + (f"<p>{_e(launch_status)}</p>" if launch_status else "")
+            + f"<p>{_e(reason)}</p>"
+            + (
+                f'<a class="attention-action" href="{_e(row.pr_url)}">Review pull request →</a>'
+                if row.pr_url and row.state == "awaiting_human"
+                else f'<a class="attention-action" href="{_e(destination)}">{"Review approval" if row.run_id in waiting else "Inspect run"} →</a>'
+            )
+            + "</article>"
         )
     if len(attention) > 3:
         holds += "</details>"
@@ -466,7 +490,7 @@ def _board_overview(
         + f'<p class="muted">{len(attention)} runs need attention</p>'
         + holds
         + '</section><section class="panel" aria-labelledby="queue-heading">'
-        '<h2 id="queue-heading">Work in progress</h2><p class="table-hint muted">Expand Run signals for activity, tokens and controls.</p>'
+        '<h2 id="queue-heading">Work in progress</h2><p class="table-hint muted">Current context · estimates in API-equivalent USD. Expand Run signals for full evidence and controls.</p>'
         + _board_table(rows)
         + "</section></div>"
     )

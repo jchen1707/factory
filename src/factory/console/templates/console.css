@@ -488,7 +488,8 @@ p {
 }
 .operations-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(230px, 0.85fr) minmax(0, 2fr);
+  align-items: start;
   gap: 18px;
 }
 .panel {
@@ -503,7 +504,7 @@ p {
   margin-top: 0;
 }
 .attention-item {
-  padding: 18px 0;
+  padding: 14px 0;
   border-bottom: 1px solid var(--line);
 }
 .attention-item:last-child {
@@ -525,6 +526,12 @@ p {
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 12px;
+}
+.chip.fail {
+  background: #402a2d;
+}
+.chip.muted {
+  background: #293542;
 }
 .chip.warn {
   background: #3c3022;
@@ -739,18 +746,24 @@ code {
 .ops-strip { display:flex; flex-wrap:wrap; gap:12px 22px; padding:14px 18px; background:var(--chip); border:1px solid var(--line); font-size:12px; }
 .ops-strip > div { display:flex; gap:8px; align-items:baseline; }
 .ops-strip strong { color:var(--pass); }
-.operations-grid { grid-template-columns:minmax(220px,1fr) minmax(0,2fr); align-items:start; }
 .operations-grid > *, .fields > *, section, aside, details { min-width:0; }
 .board-table { table-layout:fixed; }
-.board-table th, .board-table td { white-space:normal; overflow-wrap:anywhere; padding:14px 8px; }
-.board-table th:first-child { width:24%; }
+.board-table th, .board-table td { white-space:normal; overflow-wrap:anywhere; padding:12px 8px; }
+.board-table th:first-child { width:29%; padding-left:0; }
+.board-table th:nth-child(2) { width:20%; }
+.board-table th:nth-child(3) { width:23%; }
 .board-table td:first-child { padding-left:0; }
-.board-table th:nth-child(4) { width:18%; }
-.board-table details { font-size:12px; }
-.board-table summary { font-size:12px; }
+.board-table th:nth-child(4) { width:14%; }
+.board-table th:nth-child(5) { width:14%; }
+.board-table details { font-size:12px; padding:5px 0 0; border:0; }
+.board-table summary { font-size:12px; font-weight:400; color:var(--muted); }
 .board-table dl { display:block; }
 .board-table dd { margin:2px 0 9px; }
-.board-table .bar { max-width:100%; }
+.board-table .bar { display:block; width:48px; margin-top:7px; max-width:100%; }
+.board-table td > small { margin-top:4px; }
+.project-identity { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-identity:focus, .project-identity:hover { white-space:normal; overflow-wrap:anywhere; }
+.attention-item .attention-action { display:block; margin-top:10px; font-size:13px; }
 .table-hint { font-size:12px; }
 details { padding:14px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
 summary { cursor:pointer; font-weight:600; font-size:14px; }
@@ -779,15 +792,20 @@ form.control button { margin-top:0; }
  .fields { grid-template-columns:1fr; }
  .board-table, .board-table tbody, .board-table tr, .board-table td { display:block; width:100%; }
  .board-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
- .board-table tr { border-bottom:1px solid var(--line); padding:12px 0; }
- .board-table td { border:0; padding:6px 0; }
+ .board-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; border-bottom:1px solid var(--line); padding:16px 0; }
+ .board-table td:first-child { grid-column:1 / -1; }
+ .board-table td:first-child::before { display:none; }
+ .board-table td:first-child > a { font-size:15px; font-weight:650; }
+ .board-table td { border:0; padding:0; }
  .board-table td::before { content:attr(data-label); display:block; color:var(--muted); font-size:11px; text-transform:uppercase; margin-bottom:4px; }
- .board-table details { padding:10px 0; }
+ .board-table details { padding:4px 0 0; }
  .ops-strip { gap:8px 16px; }
  dl { grid-template-columns:1fr; gap:4px; } dd { margin-bottom:10px; }
 }
 
-.inventory-table { table-layout:fixed; }
+.inventory-table { table-layout:auto; }
+.project-inventory th:first-child { width:32%; }
+.runtime-inventory th:first-child { width:32%; }
 .inventory-table th, .inventory-table td { white-space:normal; overflow-wrap:anywhere; }
 
 @media (max-width: 700px) {
@@ -796,4 +814,36 @@ form.control button { margin-top:0; }
   .inventory-table tr { padding:14px; border-bottom:1px solid var(--line); }
   .inventory-table td { border:0; padding:8px 0; }
   .inventory-table td::before { content:attr(data-label); display:block; color:var(--muted); font-size:11px; text-transform:uppercase; margin-bottom:4px; }
+}
+
+/* Editors and evidence hierarchy share the original dark workspace spacing. */
+button.secondary { background:transparent; color:var(--fg); border-color:var(--line); }
+button.danger { background:transparent; color:var(--fail); border-color:var(--fail); }
+button:disabled { cursor:not-allowed; opacity:0.6; }
+.configuration-editor { width:100%; }
+.model-routing { table-layout:fixed; }
+.model-routing th:first-child { width:24%; }
+.model-routing th:nth-child(2) { width:48%; }
+.model-routing input { width:100%; }
+.configuration-sources { color:var(--muted); }
+.project-default[open] { border-color:var(--pass); }
+.runtime-compatibility-entry summary { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:baseline; }
+.evidence-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:22px; }
+.evidence-summary > * { min-width:0; }
+.attempt-activity { font-size:16px; }
+.attempt-meta, .timeline-meta { display:flex; flex-wrap:wrap; gap:12px 28px; }
+.timeline-support-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; align-items:start; }
+.timeline-support-grid > * { min-width:0; }
+.evidence-rail { font-size:13px; }
+.evidence-rail dl { display:block; }
+.evidence-rail dd { margin:4px 0 14px; }
+.evidence-rail h2 { font-size:16px; }
+.control-actions { display:flex; flex-wrap:wrap; gap:8px; }
+@media(max-width:700px) {
+ .evidence-summary, .timeline-support-grid { grid-template-columns:1fr; }
+ .model-routing th, .model-routing td { white-space:normal; padding:10px 6px; overflow-wrap:anywhere; }
+ .model-routing th:first-child { width:22%; }
+ .model-routing th:nth-child(2) { width:48%; }
+ .model-routing input { padding:8px 5px; }
+ .inventory-table td { padding:5px 0; }
 }
