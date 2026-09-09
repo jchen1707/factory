@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from factory.repo import GitError
-from factory.steps.redphase import _existing_test_files
+from factory.repo import GitError, paths_at_ref
 
 
 def git(root: Path, *args: str) -> str:
@@ -31,8 +30,8 @@ def test_baseline_globs_from_app_directory(tmp_path: Path) -> None:
     (app / "src/new.test.ts").write_text("candidate test\n")
     git(tmp_path, "add", ".")
     git(tmp_path, "commit", "-m", "candidate")
-    assert _existing_test_files(
-        app, base, [":(glob)src/**/*.test.ts", ":(glob)src/**/*.test.tsx"]
+    assert set(
+        paths_at_ref(app, base, [":(glob)src/**/*.test.ts", ":(glob)src/**/*.test.tsx"])
     ) == {"src/old.test.ts", "src/nested/view.test.tsx"}
 
 
@@ -88,9 +87,9 @@ def test_baseline_pathspec_semantics_and_candidate_preservation(
     (app / "src/untracked.test.ts").write_text("untracked\n")
     index_before = (tmp_path / ".git/index").read_bytes()
     status_before = git(tmp_path, "status", "--porcelain")
-    assert _existing_test_files(app, "HEAD", pathspecs) == expected
+    assert set(paths_at_ref(app, "HEAD", pathspecs)) == expected
     assert (tmp_path / ".git/index").read_bytes() == index_before
     assert git(tmp_path, "status", "--porcelain") == status_before
     assert (app / "src/plain.test.ts").read_text() == "unstaged\n"
     with pytest.raises(GitError):
-        _existing_test_files(app, "missing-ref", pathspecs)
+        paths_at_ref(app, "missing-ref", pathspecs)
