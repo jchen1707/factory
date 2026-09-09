@@ -1,5 +1,95 @@
 # Runtime certification and delegation implementation handoff
 
+## Schema7 deployed; clone mirror defect fixed in PR97 (2026-09-09 UTC)
+
+James merged PR96 and explicitly approved schema7. Deployed merge d7e2b51078c9347f7af120269b42af1af07130f4
+(tree identical to reviewed PR96 head98846f3). Disabled/stopped writer+console, verified
+both absent, took mode0600 SQLite backup before checkout/migration. Applied approved
+6→7: all3666 existing rows and all15 original certification records preserved, table
+counts equal, integrity/FKs pass. Both services restored. No rollback or schema issue.
+The earlier schema7 approval-pending sections below are superseded.
+
+Fresh exact observation matched failed reviewer job64df02bca42c45bb85bf1a50131a311b.
+Supported retry-certification created successor b92549e2fb40429b891f2c0579a3eb00;
+original failed record unchanged. Resumed same FRO-12 c8d569fcd49a4094, attempt2, from
+reviewing. No new builder/run/thread overwrite. Initial resume and several workflow
+polls hit observer FileNotFoundError for actual host-mirror files, while12 standalone
+observations passed. Error-only instrumentation captured full missing MANIFEST.json
+and agents/design-reviewer.md paths under:
+/Users/james/factory-crud-verification/.factory/worktrees/FRO-12/.agents/vendor/harness/.
+No environment/config/credential dumps or persistent hook instrumentation.
+
+One exact canary was approved and launched. Original project and sessionFlags hooks
+again failed exit1, including preToolUse/Stop. Recovery script stopped on observed hook
+failure before approving the remaining8 probes. Collected terminal canary/accounting,
+then marked that certification failed through claim/finish with the observed failure;
+no compatibility publication or assertion of six-check acceptance. New canary thread
+01a083e3-38a3-7620-a75e-3f3ddd499bbb. Failed job now b92549... is the retry predecessor
+for the next explicitly authorized retry; do not name64df again to purchase another
+attempt (replaying64df correctly returns b92549's existing failure).
+
+Temporarily stopped writer for diagnosis. Its gone host PID73015 left run lease
+Mac:73015; verified PID absent and no active agent reservations, released exact dead
+lease transactionally with operator-dead-lease-released audit, then used normal
+factory suspend FRO-12. Run suspended FROM reviewing, attempt2, worktree/branch/native
+session kept. Writer restored, consoleHTTP200. No active agents or approval loops.
+
+Root mechanism isolated: review.start calls clone.fetch_back on each entry, which
+removed/recreated even an unchanged host mirror. Live workflow polling therefore
+invalidated directories already held by certification/reviewer processes. Real-Git
+regression holds an open directory across fetch-back and fails FileNotFoundError.
+Zero-model comparison in the actual reviewer VM also failed opening MANIFEST.json
+through the held directory (errno2), despite unchanged HEAD. Corrected source passes
+that same VM test, retaining the directory, unchanged HEAD and invocation records.
+This proves directory invalidation; full app-server recertification is still needed
+before declaring the production hook failure resolved. Do not overstate correlation
+as a completed six-check/hook validation.
+
+Fix PR97: https://github.com/jchen1707/factory/pull/97
+Worktree /Users/james/factory-stable-review-mirror, branch fix/stable-review-mirror,
+source commit d012e2e. Fetch under existing project Git lock, retain clean unchanged
+registered mirrors, refuse dirty/in-progress mirrors, refuse replacement with active
+run-agent reservations, preserve existing changed-clean-unused rebuild and HEAD check.
+No schema/policy/model changes. All50 clone tests and four full gates pass at d012e2e
+(ruff check/format/mypy/pytest exit0). Both independent reviews clear. Fake-runtime test
+caveat still applies to full workflow acceptance; the real VM test covers the directory
+mechanism only. No unchecked new source paths for the mypy caveat.
+
+Accounting:31 launches=31 launched invocation records;33 total include prior2
+unlaunched children. New canary USD0.0455192 complete. Known API-equivalent estimate
+USD3.5230808; prior7 incomplete records unchanged. Three canary accounting replays
+identical. No reviewer application or child launched. Original failed certificate and
+uncertain preparation evidence preserved. Project settings unchanged, live source
+still d7e2b51/schema7; PR97 NOT deployed. Production VMs were used only for approved
+canary and zero-model diagnosis; no manual stop/remove of production/codex VMs.
+
+Evidence: /Users/james/factory/artifacts/runtime-pr96-deploy-20260909/
+deploy.py,before.db,before.json,backup.json,migration.txt,deployment.json,retry.txt,
+resume.txt,observation.txt,recover.py,recovery.jsonl,stop-retry.py,mirror-repro.py,
+mirror-original.json,mirror-fixed.json,mirror-gates.json,reconcile.py,accounting.json,
+certification-replay.json,final-status.py/final-status.json,publish.py,pr-body.md.
+Protocol events: state/certifications/b92549e2fb40429b891f2c0579a3eb00/canary-events.jsonl.
+VM diagnostic marker files under reviewer scratch/<run>/mirror-diagnosis/{original,fixed}
+are retained; the diagnostic scripts are finished. Host GitHub writes use effects ledger.
+
+Next:
+1. James merges PR97. Deploy reviewed merge using stopped writers + fresh backup;
+   no further migration needed (live schema7 already approved/applied). Restore services.
+2. Freshly observe reviewer identity. For same identity explicitly request:
+   factory retry-certification --ticket FRO-12 --role review \
+     --job b92549e2fb40429b891f2c0579a3eb00 \
+     --reason 'Authorized recertification after stable mirror fix'
+   Naturally changed identity uses normal new certification; never fabricate changes.
+3. Normal factory resume FRO-12 from its suspended reviewing state. Drive only this
+   run; approve exact new probes sequentially. Early canary hook failure must stop
+   further approvals. Do not repeat a failed full paid cycle blindly.
+4. Only after all six production assertions pass, launch independent reviewers on
+   preserved attempt2 through current approval/budget/capacity controls. Reconcile
+   final accounting and interventions. Objective is Factory workflow correctness,
+   not additional CRUD hardening or completing tickets for its own sake.
+
+
+
 ## Explicit certification retry implemented; schema 7 approval needed (2026-09-08)
 
 Objective remains Factory workflow correctness on preserved FRO-12, not additional
