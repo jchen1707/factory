@@ -538,9 +538,12 @@ p {
 }
 .detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
-  gap: 22px;
+  grid-template-columns: minmax(230px, 0.85fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: start;
 }
+.detail-grid > .detail-main { grid-column:2; grid-row:1; }
+.detail-grid > .evidence-rail { grid-column:1; grid-row:1; }
 .detail-grid > * {
   min-width: 0;
 }
@@ -670,9 +673,7 @@ code {
   .detail-grid {
     grid-template-columns: 1fr;
   }
-  .ops-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .detail-grid > .detail-main, .detail-grid > .evidence-rail { grid-column:auto; grid-row:auto; }
 }
 @media (max-width: 700px) {
   .console-shell {
@@ -828,12 +829,21 @@ button:disabled { cursor:not-allowed; opacity:0.6; }
 .configuration-sources { color:var(--muted); }
 .project-default[open] { border-color:var(--pass); }
 .runtime-compatibility-entry summary { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:baseline; }
-.evidence-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:22px; }
+.evidence-summary { display:block; }
+.evidence-summary h3 { margin:18px 0 8px; }
+.evidence-empty { color:var(--muted); font-size:13px; }
 .evidence-summary > * { min-width:0; }
 .attempt-activity { font-size:16px; }
+.attempt-context progress { width:100%; height:7px; accent-color:var(--pass); }
+.attempt-context { color:var(--muted); font-size:13px; }
 .attempt-meta, .timeline-meta { display:flex; flex-wrap:wrap; gap:12px 28px; }
 .timeline-support-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; align-items:start; }
 .timeline-support-grid > * { min-width:0; }
+.timeline-support-grid .cards { grid-template-columns:1fr; gap:12px; }
+.transition-preview { list-style:none; padding:0; }
+.transition-preview li { border-left:2px solid var(--line); padding:0 0 18px 16px; }
+.transition-preview time { display:block; color:var(--muted); font-size:12px; }
+.transition-preview p { margin:4px 0 0; color:var(--muted); font-size:12px; }
 .evidence-rail { font-size:13px; }
 .evidence-rail dl { display:block; }
 .evidence-rail dd { margin:4px 0 14px; }
