@@ -98,3 +98,16 @@ project identity here; the earlier fixture-project identity test is a separate m
 
 Both owned sandboxes have been removed. No live factory run, remote repository write,
 deployment, user trust-store update or actual vault mutation occurred in this probe.
+
+A final actual Codex session in `/Users/james/factory-sandbox-learning-evidence`, a different
+factory worktree from the registered host project, used the **worker-produced post-removal
+note**. Root's synced recall hook supplied the bounded initial index and prompt retrieval.
+A logging wrapper recorded both callback outputs. An additional indexed note from a different
+fixture project was absent from SessionStart but unexpectedly included at UserPromptSubmit:
+the generic query word `project` matched its ubiquitous `Project Learnings` folder path. The
+model did not cite the unrelated note. This is a retrieval precision defect, not proof of
+unrelated context exclusion. The
+model exited 0 and returned the worker note's full session identifier
+`01a0846a-051f-7420-ad91-f59d571a49e8` and exact note path, neither present in the task prompt.
+This closes the actual native model → retain → sandbox removal → host worker → indexed note
+→ later worktree session chain. Capture was disabled in this recall probe.
