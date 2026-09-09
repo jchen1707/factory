@@ -789,10 +789,13 @@ def create_app(
         return HTMLResponse(_page("runs", body))
 
     @app.get("/projects", response_class=HTMLResponse)
-    def projects() -> HTMLResponse:
+    def projects(request: Request) -> HTMLResponse:
         reg, _, st, _ = _cfg()
         from factory.operator_controls import status
 
+        selected = request.query_params.get("project", next(iter(reg.projects), ""))
+        if selected not in reg.projects:
+            selected = next(iter(reg.projects), "")
         inventory = []
         for name, project in reg.projects.items():
             settings = st.runtime.settings("project", name)
@@ -811,7 +814,7 @@ def create_app(
             except (OSError, ValueError):
                 profile = "Unavailable"
             inventory.append(
-                f'<tr><td data-label="Project"><a href="#project-{_e(name)}">{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["queued_children"]} children · {observed["pending_certifications"]} certifications<small>May overlap</small></td></tr>'
+                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["queued_children"]} children · {observed["pending_certifications"]} certifications<small>May overlap</small></td></tr>'
             )
         body = (
             '<h1>Projects</h1><p class="sub">Registered projects, capacity and defaults for future work.</p><section class="panel" id="project-inventory"><h2>Registered projects</h2><div class="scroll" tabindex="0" role="region" aria-label="Project inventory"><table class="inventory-table project-inventory"><thead><tr><th>Project</th><th>Run slots</th><th>Delivery profile</th><th>Agent slots</th><th>Waiting</th></tr></thead><tbody>'
@@ -827,7 +830,7 @@ def create_app(
                 "SELECT COUNT(*) FROM project_slots WHERE project=?", (name,)
             ).fetchone()[0]
             queued = sum(r.state is State.APPROVED for r in runs)
-            body += f'<details class="panel project-default" id="project-{_e(name)}"><summary>{_e(name)} · defaults and runtime evidence</summary><p>{occupied} / {limit} slots · {queued} queued · '
+            body += f'<details class="panel project-default" id="project-{_e(name)}"{" open" if name == selected else ""}><summary>{_e(name)} · project defaults</summary><p>{occupied} / {limit} slots · {queued} queued · '
             body += f"{'inherited' if explicit is None else 'explicit'} concurrency</p>"
             try:
                 config = json.loads((project.path / "harness.config.json").read_text())
@@ -850,6 +853,15 @@ def create_app(
                     body += "<p>No project deferrals declared.</p>"
             except (OSError, ValueError):
                 body += "<p>Delivery policy unavailable.</p>"
+            effective = status(st, name)["effective"]
+            body += (
+                '<p class="muted">Defaults apply to future work. Blank limits inherit the factory defaults; '
+                "delivery profile inherits the repository policy.</p>"
+                '<dl class="project-effective"><dt>Effective active-agent limit</dt>'
+                f"<dd>{_e(effective['max_active_agents'])}</dd><dt>Effective child limit</dt>"
+                f"<dd>{_e(effective['max_children_per_parent'])}</dd><dt>Effective delegation depth</dt>"
+                f"<dd>{_e(effective['max_delegation_depth'])}</dd></dl>"
+            )
             body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
             body += (
                 "<details><summary>Runtime and certification history</summary>"
@@ -1286,21 +1298,46 @@ def create_app(
                 )
                 cells.append(
                     f"<tr><td data-label='Sandbox'>{_e(r.name)}"
-                    + (' <span class="chip">operator-owned</span>' if r.operator_owned else "")
-                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Layout'>{_e(r.layout)}</td><td data-label='Certification'>Unverified</td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
+                    + f' <small class="runtime-owner">{"operator-owned" if r.operator_owned else "factory-owned"}</small>'
+                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Layout'>{_e(r.layout) if not r.layout.startswith('Unavailable') else '<details><summary>Unavailable</summary><p>' + _e(r.layout) + '</p></details>'}</td><td data-label='Certification'>Unverified<small>Current identity unobserved</small></td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
                 )
             table = (
                 '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Layout</th><th>Certification</th><th>Runs</th></tr></thead><tbody>'
                 + "".join(cells)
                 + "</tbody></table></div>"
             )
-        compatibility = (
-            "".join(
-                f"<details><summary>{_e(r.name)}</summary><p>{_e(r.compatibility)}</p><h3>Historical recorded evidence</h3><p>These retained reports are not a current identity attestation.</p><pre>{_e(json.dumps(r.recorded_compatibility, indent=2))}</pre></details>"
-                for r in rows
+        compatibility_rows = []
+        for row in rows:
+            # Retained outcomes are useful scan evidence, never a current attestation.
+            outcomes = []
+            for record in row.recorded_compatibility:
+                report = record.get("report", {})
+                outcome = record.get("status") or report.get("status")
+                checks = report.get("checks", {})
+                if outcome is not None:
+                    label = str(outcome)
+                elif isinstance(checks, dict) and checks:
+                    passed = sum(
+                        isinstance(check, dict) and check.get("status") == "pass"
+                        for check in checks.values()
+                    )
+                    label = f"{passed}/{len(checks)} recorded checks passed"
+                else:
+                    label = "outcome unavailable"
+                outcomes.append(f"{record.get('ticket', 'Unknown ticket')}: {label}")
+            unique = list(dict.fromkeys(outcomes))
+            summary = "; ".join(unique[:3]) or "No historical report"
+            if len(unique) > 3:
+                summary += f"; {len(unique) - 3} more outcomes in evidence"
+            compatibility_rows.append(
+                f'<details class="runtime-compatibility-entry"><summary><span>{_e(row.name)}</span> '
+                f'<span class="muted">Historical · {_e(summary)}</span></summary>'
+                f"<p>Current certification: Unverified. {_e(row.compatibility)}</p>"
+                "<h3>Historical recorded evidence</h3>"
+                "<p>These retained reports are not a current identity attestation.</p>"
+                f"<pre>{_e(json.dumps(row.recorded_compatibility, indent=2))}</pre></details>"
             )
-            or "<p>Compatibility evidence unavailable.</p>"
-        )
+        compatibility = "".join(compatibility_rows) or "<p>Compatibility evidence unavailable.</p>"
         return HTMLResponse(
             _page("runtimes", _render("runtimes.html", table=table, compatibility=compatibility))
         )
@@ -1312,23 +1349,42 @@ def create_app(
         error = request.query_params.get("error")
         saved = request.query_params.get("saved")
 
-        role_rows = "".join(
-            "<tr>"
-            f"<td>{_e(role.name)}</td>"
-            f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}" size="20"></td>'
-            f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}" size="10"></td>'
-            "</tr>"
-            for role in view.roles
-        )
+        rows = []
+        for role in view.roles:
+            affected = bool(
+                error and (f"roles.{role.name}." in error or f"role {role.name!r}" in error)
+            )
+            description = (
+                f' aria-describedby="error-{_e(role.name)}" aria-invalid="true"' if affected else ""
+            )
+            inline_error = (
+                f'<small id="error-{_e(role.name)}" class="fail">{_e(error)}</small>'
+                if affected
+                else ""
+            )
+            rows.append(
+                "<tr>"
+                f'<th scope="row">{_e(role.name.replace("_", " ").capitalize())}</th>'
+                f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}"{description}>{inline_error}</td>'
+                f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}"{description}></td>'
+                "</tr>"
+            )
+        role_rows = "".join(rows)
         banner = ""
         if error:
-            banner = f'<p class="fail">rejected: {_e(error)}</p>'
+            banner = f'<p class="fail" role="alert">Configuration not saved: {_e(error)}</p>'
         elif saved:
-            banner = '<p class="pass">models.toml written.</p>'
+            banner = '<p class="pass" role="status">Configuration saved for future invocations.</p>'
+        budget_error = (
+            f'<p id="budget-error" class="fail">{_e(error)}</p>'
+            if error and "budget." in error
+            else ""
+        )
 
         body = _render(
             "config.html",
             banner=banner,
+            budget_error=budget_error,
             role_rows=role_rows,
             usd_per_run=str(view.usd_per_run),
             usd_warn_at=str(view.usd_warn_at),

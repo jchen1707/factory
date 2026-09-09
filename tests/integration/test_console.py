@@ -830,3 +830,79 @@ def test_refused_settings_preserve_unknown_choice_and_accept_correction(ctx: Con
     saved = client.post(action, data={"delegation_mode": "read-only", "max_active_agents": "8"})
     assert saved.status_code == 200
     assert ctx.store.runtime.settings("project", ctx.run.project)["delegation_mode"] == "read-only"
+
+
+def test_project_selection_opens_only_requested_defaults(ctx: Context) -> None:
+    alternate = replace(ctx.project, name="another-project")
+    ctx.registry = replace(
+        ctx.registry, projects={ctx.project.name: ctx.project, alternate.name: alternate}
+    )
+    client = _client(ctx)
+    default = client.get("/projects").text
+    selected = client.get("/projects?project=another-project").text
+    first = f'<details class="panel project-default" id="project-{ctx.project.name}"'
+    second = '<details class="panel project-default" id="project-another-project"'
+    assert first + " open>" in default
+    assert second + ">" in default
+    assert first + ">" in selected
+    assert second + " open>" in selected
+    assert (
+        'data-project-link="project-another-project" href="?project=another-project#project-another-project" aria-current=true'
+        in selected
+    )
+    assert "Effective active-agent limit" in selected
+    assert 'name="max_active_agents"' in selected
+    assert 'name="template"' not in selected
+    assert first + " open>" in client.get("/projects?project=unknown").text
+
+
+def test_config_rejection_identifies_affected_role_without_writing(ctx: Context) -> None:
+    path = _models_toml(ctx)
+    before = path.read_text()
+    builder = ctx.routing.role("builder").model
+    client = _client(ctx)
+    page = client.post("/config/models", data=_form(ctx, **{"model.reviewer": builder}))
+    assert 'role="alert"' in page.text
+    assert 'aria-describedby="error-reviewer" aria-invalid="true"' in page.text
+    assert 'id="error-reviewer"' in page.text
+    assert 'class="configuration-editor"' in page.text
+    assert page.text.index('class="configuration-editor"') < page.text.index(
+        'id="configuration-sources"'
+    )
+    assert path.read_text() == before
+
+
+def test_runtime_scan_separates_ownership_historical_checks_and_current_identity(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory.console.views import InventoryResult
+
+    sandbox = "factory-build-check-history"
+    ctx.store.runtime.start_invocation(
+        "checks",
+        ctx.run.id,
+        1,
+        "builder",
+        {
+            "runtime_compatibility": {
+                "sandbox": sandbox,
+                "checks": {"hooks": {"status": "pass"}, "transcripts": {"status": "fail"}},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "factory.cli._sbx_inventory",
+        lambda: InventoryResult(
+            [
+                {"name": sandbox, "status": "running"},
+                {"name": "codex-operator-session", "status": "stopped"},
+            ]
+        ),
+    )
+    page = _client(ctx).get("/runtimes").text
+    assert "factory-owned" in page
+    assert "operator-owned" in page
+    assert "Historical · BAC-4: 1/2 recorded checks passed" in page
+    assert "Current certification: Unverified" in page
+    assert "Current identity unobserved" in page
+    assert "<button" not in page
