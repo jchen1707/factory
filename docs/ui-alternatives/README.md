@@ -1,6 +1,6 @@
 # Factory UI alternatives
 
-Open [the comparison page](index.html), then choose light, dark or compact. Each alternative has seven linked views. These drafts use representative fixtures only; no request reaches the factory, tracker, sandbox or forge. Production implementation awaits James's choice.
+Open [the comparison page](index.html) to revisit light, dark or compact. Each alternative has seven linked views. These drafts use representative fixtures only; no request reaches the factory, tracker, sandbox or forge. James selected the dark operations console on 2026-09-08. The real console now implements that direction; all three drafts remain as approval history.
 
 Light emphasizes spacious reading. Dark places failures and approval holds ahead of the queue, with a persistent operations strip. Compact uses horizontal navigation, full-width tables and expandable evidence. All offer the same capabilities, including project and run policy settings, invocation approval, lifecycle controls, runtime inventory, tool timing and estimated usage. Controls acknowledge local fixture actions; saved settings last until the view reloads or its fixture state changes. Acknowledgments do not simulate a real factory transition. PR identifiers and abbreviated hashes are illustrative.
 
@@ -27,3 +27,5 @@ The views retain console capabilities as follows:
 | Run settings | Effective settings, frozen policy replacement, invocation admission and usage |
 | Runtimes | Ownership, layout, certification freshness and compatibility evidence |
 | Configuration | Role routing, effort, warning/ceiling estimates and project registry links |
+
+Production implementation and isolated browser measurements are described in [production validation](production-validation/README.md).

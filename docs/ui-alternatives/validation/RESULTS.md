@@ -6,7 +6,7 @@ Axe WCAG 2 A/AA and 2.1 AA checks passed on the 42 populated views; WCAG 2 A/AA 
 
 The first pass found light detail overflow at 390px. Giving the nested grid child `min-width: 0` fixed it; the complete browser check then passed. Desktop dark and narrow light screenshots were also inspected visually. Screenshots and machine-readable results are retained beside the reproducible checker.
 
-These checks establish fixture behavior only. Factory gates exercise production Python code and do not cover this prototype JavaScript. Production implementation remains pending James's design selection.
+These checks establish fixture behavior only. Factory gates exercise production Python code and do not cover this prototype JavaScript. At the time of this draft measurement, production implementation awaited selection. James subsequently selected dark on 2026-09-08; production evidence is recorded separately.
 
 Factory verification: `node .agents/vendor/harness/hooks/gate_report.mjs --force --json` exited 0 with verdict `pass`: Ruff lint, Ruff format check, mypy and pytest all passed. The report returned empty output tails; the exact JSON is retained in [factory-gates.json](factory-gates.json). Mypy's declared-path caveat applies: it does not inspect these browser files. Pytest's fake-runtime caveat also applies; no real sandbox or external integration claim follows from this gate run. No gates were skipped in this report.
 
