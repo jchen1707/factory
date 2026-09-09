@@ -1074,9 +1074,15 @@ def create_app(
                 if not st.acquire_lease(run.id, ttl_seconds=300):
                     raise Blocked("run-leased", "The run is owned by another process")
                 try:
-                    project = project_for_run(reg.resolve(run.linear_id), run, st)
+                    current = st.run_by_id(run.id)
+                    refusal = operator_controls.policy_replacement_refusal(current)
+                    if refusal or current is None:
+                        raise Blocked(
+                            "policy-replacement-needs-paused-run", refusal or "Run not found"
+                        )
+                    project = project_for_run(reg.resolve(current.linear_id), current, st)
                     load_harness_config(project.path)
-                    snapshot_ctx = authority.SnapshotContext(home, project, run, st)
+                    snapshot_ctx = authority.SnapshotContext(home, project, current, st)
                     authority.snapshot(snapshot_ctx, profile=form["profile"], replace=True)
                 finally:
                     st.release_lease(run.id)
