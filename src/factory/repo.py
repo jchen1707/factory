@@ -9,6 +9,7 @@ repository content runs inside the sandbox.
 from __future__ import annotations
 
 import fcntl
+import os
 import re
 import subprocess
 import threading
@@ -540,11 +541,29 @@ def apply_patch(worktree: Path, patch: str) -> None:
 
 
 def paths_at_ref(repo: Path, ref: str, pathspecs: Sequence[str]) -> list[str]:
-    """`git ls-tree --name-only <ref> -- <pathspecs>` — the paths that existed at `ref`.
+    """Files at `ref` matching Git pathspecs, relative to the app directory.
 
     The red-phase test-weakening guard scopes itself to test files the base ref already
     knew about: a new test file has no prior assertions to weaken, and the replay already
     covers whether a new test catches the regression.
     """
-    listing = _git(repo, "ls-tree", "--name-only", ref, "--", *pathspecs)
-    return [line for line in listing.splitlines() if line]
+    # ls-tree rejects :(glob) magic and does not recursively enumerate directory
+    # pathspecs. Diffing from an empty tree uses Git's full pathspec implementation
+    # without consulting or modifying the candidate index/worktree. Let Git compute
+    # and store the empty tree in the repository's object format (SHA-1 or SHA-256).
+    empty_tree = _git(repo, "hash-object", "-w", "-t", "tree", "--", os.devnull)
+    listing = _git_raw(
+        repo,
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--relative",
+        "-z",
+        empty_tree,
+        f"{ref}^{{tree}}",
+        "--",
+        *pathspecs,
+    )
+    return [path for path in listing.split("\0") if path]

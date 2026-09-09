@@ -1,6 +1,173 @@
 # Runtime certification and delegation implementation handoff
 
+## Baseline Git pathspec fix ready in PR94 (2026-09-08)
+
+PR: https://github.com/jchen1707/factory/pull/94 (open, not merged/deployed).
+
+Objective remains Factory reliability and evidence-backed workflow validation, not
+extra hardening or completion of synthetic product tickets.
+
+Implementation in `/Users/james/factory-baseline-pathspec`, branch
+`fix/baseline-git-pathspec`, commits `873c6ff` and `29cc29b`, based on deployed
+PR93 merge `2908333`. `repo.paths_at_ref` now diffs an empty tree against the
+requested base tree using Git's full pathspec matcher. Paths remain app-relative;
+NUL-delimited output preserves unusual filenames. Git computes/stores the immutable
+empty tree using the repository's object format. Candidate index/worktree and
+review requirements are unchanged; no custom glob matcher or guard bypass.
+
+The regression first reproduced the exact unsupported `glob` error through the
+weakening guard. Fifteen real-Git regression cases now pass through the public
+adapter seam, covering nested globs, recursive directory selection, exclusions,
+top-relative/case-insensitive/literal paths, SHA-1/SHA-256, missing refs, deleted
+baseline tests versus new candidate tests, and staged/unstaged work preservation.
+Against FRO-12's actual app config and `origin/main`, old command exits128; fixed
+selector returns `src/health.test.ts`. This is adapter validation, not a claim that
+independent review has run.
+
+Standards and Spec reviews are clear. Standards initially requested testing the
+public adapter instead of its private redphase wrapper; `29cc29b` resolves it.
+All four declared gates pass: ruff check, ruff format --check, mypy and pytest.
+Lint/format/types were rerun after the public-seam test correction, and all15
+regressions rerun successfully. Type-checker scope caveat does not apply (existing
+checked directories). Suite success does not prove live reviewer launch; the
+separate actual-source Git replay is recorded above.
+Private evidence: `/Users/james/factory/artifacts/runtime-baseline-pathspec-20260908/`.
+
+Next steps:
+1. Merge the reviewed fix through the normal operator path, then deploy with
+   checked maintenance sequencing: disable/stop writers and console, prove both
+   stopped, back up SQLite before source checkout, then restore services.
+2. Let existing run `c8d569fcd49a4094` attempt2 continue from `reviewing`. Do not
+   restart the builder or create another run. Preserve its clone/thread/evidence.
+3. Observe baseline guard and independent reviewer startup. Respect exact Approval
+   gates and fresh certification if requested; do not blanket-approve children.
+4. Reconcile new launched invocations and incomplete usage after actual progress.
+   Previous checkpoint remains20 launches, USD3.2296624 known API-equivalent,
+   five incomplete records; no new model work in this repair session.
+
+Production source remains `2908333`; no service, settings, schema or tracker
+changes in this repair session. Merge/deployment and live review progression remain
+pending. Existing writer can still encounter the old pathspec error until deployment.
+
+## Recovery completed; independent review blocked by Git pathspec error (2026-09-08)
+
+Outcome check only: no source/deployment/settings/tracker changes, model approvals
+or new launches by this session. Deployed revision remains `2908333`.
+
+FRO-12 run `c8d569fcd49a4094` attempt2 exited0, emitted a valid final result, and
+moved `implementing -> verifying` at20:02:37 then `verifying -> reviewing` at20:03:41
+America/Toronto. All ten target gates actually passed. Builder retained commit
+`e05436b`; the final result reports implementation complete. No independent review
+or delivery acceptance is claimed: the builder's local fallback review is not a
+substitute for the isolated review stage.
+
+Real child transport passed the previously failing timing boundary. Initial
+invalid child calls returned refusals at58.318s and62.231s without killing the
+parent. Corrected calls created two durable requests:
+`d4494cee2cc3425e9cddb4232705f3af` and `2850781768254de7856fcbc06feb6242`.
+Status queries worked. Child certification canaries
+`certification:e030c732c833486cb7e3051c368c2103:canary` and
+`certification:9f770235b1694da190bf5d92033bccaa:canary` awaited approval; neither
+launched. Parent eventually called `factory_cancel_child` successfully on both,
+then completed. Both requests are cancelled, child_id null. This proves request,
+status, cancellation and Approval behavior in the resumed workflow, not actual
+child execution in this attempt.
+
+New blocker: normal writer repeatedly reports an adapter error before independent
+review:
+`git ls-tree --name-only origin/main -- :(glob)src/**/*.test.ts :(glob)src/**/*.test.tsx`
+rejects `glob` pathspec magic. The run remains `reviewing`, not a terminal blocked
+state. Relevant seam: `src/factory/repo.py:paths_at_ref`, called by
+`src/factory/steps/redphase.py` for the baseline test-weakening guard. Do not bypass
+the guard or weaken target configuration. Next implementation task is reproduce
+this with a real Git fixture, fix baseline path selection while preserving the
+declared pathspec semantics, run gates/reviews, and use the normal deployment path.
+Then the existing reviewing run can progress; do not start another builder or run.
+
+Accounting reconciled with three stable replays:
+- Twenty launches match twenty launched invocation records. Two additional
+  prepared child-certification records were never launched and are not paid calls.
+- Attempt2 complete: 2,001,926 input tokens (1,983,488 cached), 9,039 output,
+  23 priced requests, API-equivalent USD1.0479272. Reasoning output3,870 is a subset.
+- Combined known subtotal USD3.2296624. Five older records remain incomplete:
+  two interrupted probes, two compaction probes and failed attempt1 builder.
+  This remains a lower bound, not Codex account charges or cost per accepted change.
+- CLI now displays cached1,983,488 for attempt2; prior discrepancy was recorded
+  against failed attempt1. Do not claim a cached-display fix was implemented here.
+
+Writer loaded, consoleHTTP200. Private evidence
+`/Users/james/factory/artifacts/runtime-fro12-outcome-20260908/` contains immutable
+copies of terminal attempt2 events/result/exit, final snapshot, reconciliation
+script, stable replay/summary, writer error tail and health. Preserve active
+workflow source/thread and all evidence. Factory reliability is the objective;
+no need to harden or finish the synthetic product beyond that verification goal.
+
+
+## PR93 deployed; recertification and exact recovery passed (2026-09-08)
+
+James explicitly authorized merge, deployment, recertification and recovery retry.
+PR93 merged as `29083331c5ceb3495e648a221f58ba5f021d5971`, now deployed in
+`/Users/james/factory`. Its tree matches tested PR head `122fe26` exactly; four-gate
+and two-review evidence applies to those same source bytes. No additional full
+suite run is claimed for deployment. Merge was recorded through the host effects
+ledger under `operator:child-transport-fix`, `github`, `merge:93`.
+
+Real certification `0a17a7fc539044eda9a9d77cad110658` PASSED all six checks:
+hook enforcement, schema output, sandbox isolation, detached durability, recovery
+and usage semantics. Nine new probe launches; no duplicates. Only fingerprint
+field changed from the previous certificate was `worker_sha256`. Sandbox remains
+`factory-build-delegation-41871635b70fafe0aa124011`, generation
+`facb1d56-925d-4c56-98b4-dbfd7eb449ba`. Retained clone and mailbox were not replaced.
+
+After certification passed, exact invocation `c8d569fcd49a4094:2:implement` was
+approved and launched. FRO-12 is `implementing`, attempt2. Live `thread.started`
+confirms original native thread `01a0834b-1f05-7720-9ff2-0ce5019359ab`, and builder
+says it is resuming existing work and the interrupted review. Normal writer is
+restored on its original60-second timer and observed `implementing:running`;
+console HTTP200. Project settings compare exactly with backup. No tracker edits,
+new runs, blanket approvals, schema changes or unrelated work by this session.
+At the first resumed snapshot no child request had yet been recorded; do not claim
+that the resumed application's child requests or complete delivery have passed.
+
+Accounting checkpoint after recovery launch:
+- Twenty launches match twenty invocation records, zero unlaunched preparations.
+- New certification known API-equivalent estimate USD0.2087652; its accounting
+  stayed identical across three replays. Interrupted/compaction records remain
+  explicitly incomplete.
+- Combined run known subtotal USD2.1817352 at initial recovery launch, including
+  prior attempt/certification. This is a lower bound; attempt2 is active, so its
+  usage/cost are provisional. Six records were incomplete at this snapshot:
+  old interrupted/compaction/failed-builder, new interrupted/compaction, active
+  recovery builder. No fabricated missing usage or account-charge claim.
+
+Operational caveat, preserved for audit: initial pre-deployment backup assertion
+found console still visible after bootout; the shell batch continued to source
+checkout before that backup existed. Both services were then explicitly disabled,
+unloaded and confirmed absent; a consistent0600 backup with integrity_check=ok was
+made before any recertification/recovery/model launch. No schema changed. This
+backup is after source checkout, not a falsely claimed pre-checkout backup. Use
+checked subprocess sequencing in future deployments so failed prerequisites stop
+subsequent actions. Console was restored after backup, writer after recovery launch.
+
+Evidence: `/Users/james/factory/artifacts/runtime-pr93-deploy-20260908/` contains
+`before.db`, `backup.json`, `deployment.json`, targeted `advance.py`/`recover.py`,
+`recovery.jsonl`, `recovery-result.json`, `accounting.json`,
+`certification-replay.json` and before/after service snapshots. New certificate's
+source-owned report/events live under `state/certifications/0a17a7fc539044eda9a9d77cad110658/`.
+Never restore the backup over newer run/accounting evidence.
+
+Next: observe this existing attempt's child requests and outcome, then reconcile
+final accounting. Keep Approval mode and inspect exact pending child/probe/application
+approvals; this session authorized only this certificate's probes and attempt2.
+Do not start another run or manually resume the active one. Preserve its VM/thread.
+CLI cached-token display is still a separate unresolved discrepancy. Factory
+workflow reliability is the objective; do not harden/complete synthetic CRUD
+work unnecessarily. James owns later merges and Done decisions.
+
+
 ## FRO-12 child transport fix ready for review (2026-09-08)
+
+PR #93: https://github.com/jchen1707/factory/pull/93 (head `122fe26`).
 
 Implementation commit `623f99a` on `fix/child-mailbox-response`, checkout
 `/Users/james/factory-child-transport`, fixes the reproduced controller-cadence
