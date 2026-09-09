@@ -4,7 +4,7 @@ Measured 2026-09-08 against the production FastAPI console, with isolated integr
 fixtures. This directory contains 22 screenshots and five JSON reports: 70 page checks
 across seven routes, two viewports, and five fixture scenarios. All returned HTTP 200,
 passed axe WCAG A/AA checks (including contrast), had no document overflow or JavaScript
-page errors, and exposed keyboard focus. Browser suite: **5 passed in 28.50s**.
+page errors, and exposed keyboard focus. Browser suite: **5 passed in 26.43s**.
 
 ## Reproduce
 
@@ -48,11 +48,13 @@ possible production state or that runtime collection succeeds against real adapt
 
 The browser checks actual board/timeline SSE connection status, and confirms explicit
 unavailable status after blocking their SSE requests. It records shell navigation links,
-checks keyboard focus, and saves/reloads run approval mode at both widths. Seven additional
+checks keyboard focus, and saves/reloads run approval mode at both widths. Ten additional
 integration regressions verify blocked attention ordering and reasons, observed invocation
 approval counts (approval mode alone is insufficient), and sibling run navigation with a
 single current-page marker, explicit missing frozen policy, and incomplete versus complete
-runtime cost labels.
+runtime cost labels. Automatic prepared invocations and already-approved invocations
+appear as pending launches, without inferring capacity or a human approval hold; failed
+runs remain visible in attention. The approval browser fixture explicitly uses approval mode.
 
 Axe found a real narrow-screen waterfall keyboard failure on the first pass. The production
 scroll container gained a keyboard focus target and accessible region name, then all 70
