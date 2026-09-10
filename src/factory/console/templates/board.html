@@ -1,10 +1,10 @@
 <h1>Runs</h1>
-<p class="sub">Recorded work, from claim to human merge. Context and estimated usage remain per run.</p>
+<p class="sub">Recorded work, from claim to human merge.</p>
 <p class="stream-status muted" id="board-status" role="status">Connecting to live updates…</p>
 <div id="board">$table</div>
 <script>
 const es = new EventSource('/sse/board');
 es.onopen = () => { document.getElementById('board-status').textContent = 'Connected to live updates'; };
 es.onerror = () => { document.getElementById('board-status').textContent = 'Live updates unavailable · showing last received data'; };
-es.onmessage = e => { document.getElementById('board').innerHTML = JSON.parse(e.data).html; };
+es.onmessage = e => { preserveUpdate(document.getElementById('board'), JSON.parse(e.data).html); };
 </script>

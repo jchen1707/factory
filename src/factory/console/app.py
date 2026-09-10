@@ -23,9 +23,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import replace
-from functools import cache
 from pathlib import Path
-from string import Template
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -33,11 +31,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from factory import routing as routing_module
 from factory.console import views as console_views
+from factory.console.assets import BundleMiddleware, RenderBundle, current_bundle
 from factory.intake.linear import LinearClient
 from factory.machine import Blocked, State
 from factory.registry import Registry, load_registry
 from factory.routing import Routing, RoutingError, load_routing
-from factory.store import Store
+from factory.store import Run, Store
 
 __all__ = ["create_app"]
 
@@ -69,15 +68,8 @@ def _e(value: object) -> str:
 TEMPLATES = Path(__file__).parent / "templates"
 
 
-@cache
-def _template(name: str) -> Template:
-    """One template, read once and cached. Cached because a served page should not hit the
-    filesystem per request, and these files never change while the process is alive."""
-    return Template((TEMPLATES / name).read_text(encoding="utf-8"))
-
-
 def _render(name: str, /, **fields: str) -> str:
-    return _template(name).substitute(**fields)
+    return current_bundle().render(name, **fields)
 
 
 def _page(title: str, body: str, *, ticket: str | None = None, view: str = "") -> str:
@@ -113,7 +105,9 @@ def _page(title: str, body: str, *, ticket: str | None = None, view: str = "") -
     return _render(
         "page.html",
         title=_e(title),
-        style=(TEMPLATES / "console.css").read_text(encoding="utf-8"),
+        style=current_bundle().style,
+        build_identity=_e(current_bundle().identity),
+        started_at=_e(current_bundle().started_at),
         body=body,
         navigation=navigation,
         run_navigation=run_navigation,
@@ -134,14 +128,18 @@ def _pct_cell(pct: float | None, reason: str | None) -> str:
     )
 
 
-def _spend_cell(usd: float | None, ceiling: float) -> str:
-    if usd is None:
-        return f'<span class="muted">incomplete / ${ceiling:.0f}</span>'
-    width = max(0, min(100, int((usd / ceiling) * 100))) if ceiling else 0
-    cls = "fail" if usd >= ceiling else ("warn" if width >= 60 else "")
+def _estimate_value(row: console_views.RunRow) -> str:
+    """One evidence-aware amount across the board, detail cards and timeline."""
+    if row.known_spend_usd is None:
+        return "Unavailable"
+    prefix = "" if row.spend_status == "complete" else "≥ "
+    return f"{prefix}${row.known_spend_usd:.2f}"
+
+
+def _estimate_cell(row: console_views.RunRow) -> str:
     return (
-        f'<span class="{cls}">${usd:.2f}</span> <span class="muted">/ ${ceiling:.0f}</span> '
-        f'<span class="bar"><i style="width:{width}%"></i></span>'
+        _estimate_value(row)
+        + f"<small>API-equivalent USD · {_e(row.spend_status)} · ${row.spend_ceiling:.0f} ceiling</small>"
     )
 
 
@@ -151,11 +149,51 @@ def _settings_form(
     *,
     concurrency: int | str | None = None,
     error: str | None = None,
+    effective: dict[str, Any] | None = None,
 ) -> str:
+    labels = {
+        "mode": "Launch mode",
+        "model_preset": "Model preset",
+        "delivery_profile": "Delivery profile",
+        "workflow": "Workflow",
+        "test_design": "Test design",
+        "max_active_agents": "Active agent limit",
+        "max_children_per_parent": "Children per parent",
+        "max_delegation_depth": "Delegation depth",
+    }
+    option_labels = {
+        "": "Repository default",
+        "false": "Disabled",
+        "true": "Enabled",
+        "inherit": "Inherit project default",
+        "existing": "Repository default",
+        "read-only": "Read only",
+        "isolated-write": "Isolated write",
+        "high-confidence": "High confidence",
+        "per-run": "Per run",
+    }
+
+    def effective_hint(key: str) -> str:
+        if effective is None:
+            return ""
+        value = effective.get(
+            key,
+            {
+                "delegation_mode": "disabled",
+                "max_active_agents": 8,
+                "max_children_per_parent": 2,
+                "max_delegation_depth": 1,
+            }.get(key, "repository default"),
+        )
+        source = "Run override" if settings.get(key) is not None else "Inherited"
+        return (
+            f"<small>{source} · effective: {_e(option_labels.get(str(value), str(value)))}</small>"
+        )
+
     def options_for(choices: tuple[str, ...], selected: object) -> str:
         value = str(selected)
         options = "".join(
-            f'<option value="{_e(choice)}"{" selected" if choice == value else ""}>{_e(choice or "repository default")}</option>'
+            f'<option value="{_e(choice)}"{" selected" if choice == value else ""}>{_e(option_labels.get(choice, choice.capitalize()))}</option>'
             for choice in choices
         )
         if error is not None and value not in choices:
@@ -179,16 +217,16 @@ def _settings_form(
         options = options_for(
             choices, str(selected).lower() if str(selected).lower() in choices else selected
         )
-        fields.append(
-            f'<label>{_e(key.replace("_", " "))} <select name="{key}">{options}</select></label> '
-        )
+        fields.append(f'<label>{_e(labels[key])} <select name="{key}">{options}</select></label> ')
     choices = ("inherit", "disabled", "read-only", "isolated-write")
     selected = settings.get("delegation_mode", "inherit")
     options = options_for(choices, selected)
-    fields.append(f'<label>Delegation <select name="delegation_mode">{options}</select></label> ')
+    fields.append(
+        f'<label>Delegation <select name="delegation_mode">{options}</select>{effective_hint("delegation_mode")}</label> '
+    )
     for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
         fields.append(
-            f'<label>{_e(key.replace("_", " "))} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="inherited"></label> '
+            f'<label>{_e(labels[key])} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="Inherited">{effective_hint(key)}</label> '
         )
     if "/projects/" in action:
         options = options_for(("manual", "automatic"), settings.get("certification_mode", "manual"))
@@ -217,7 +255,9 @@ def _settings_form(
     return (
         notice
         + f'<form method="post" action="{_e(action)}"{description}>'
+        + '<div class="fields">'
         + "".join(fields)
+        + "</div>"
         + "<button>Save settings</button></form>"
     )
 
@@ -266,13 +306,13 @@ def _runtime_table(title: str, headings: tuple[str, ...], rows: list[tuple[str, 
     if not rows:
         return f"<h3>{_e(title)}</h3><p>None recorded.</p>"
     return (
-        f"<h3>{_e(title)}</h3><table><thead><tr>"
+        f'<h3>{_e(title)}</h3><div class="scroll" tabindex="0" role="region" aria-label="{_e(title)} evidence"><table><thead><tr>'
         + "".join(f"<th scope='col'>{_e(label)}</th>" for label in headings)
         + "</tr></thead><tbody>"
         + "".join(
             "<tr>" + "".join(f"<td>{_e(value)}</td>" for value in row) + "</tr>" for row in rows
         )
-        + "</tbody></table>"
+        + "</tbody></table></div>"
     )
 
 
@@ -290,17 +330,20 @@ def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
         )
         estimate = telemetry.get("estimate", {})
         usd = estimate.get("usd")
-        spend = f"${usd:.4f}" if usd is not None else "unknown"
+        if usd is None:
+            usd = estimate.get("known_usd")
+        prefix = "" if estimate.get("complete") else "≥ "
+        spend = f"{prefix}${usd:.4f}" if usd is not None else "unknown"
         if not estimate.get("complete"):
             spend += " · incomplete"
         model = telemetry.get("current_model", metadata.get("model", "unknown"))
         cards.append(
-            f"<article><h3>{_e(invocation['role'])} · attempt {invocation['attempt']}</h3>"
+            f'<details data-key="invocation-{_e(invocation["id"])}"><summary>{_e(invocation["role"])} · attempt {invocation["attempt"]} · {_e(model)} · {context} context · {spend}</summary>'
             f"<p>Invocation ID: <code>{_e(invocation['id'])}</code></p>"
             f"<p>{_e(model)} · {_e(metadata.get('effort', 'unknown'))} · {_e(metadata.get('preset', 'existing'))}</p>"
             f"<p>Context: {context} · {_e(reading.status)}{age}</p>"
             f"<p>API-equivalent estimate: {spend}</p>"
-            f"<details><summary>Usage and evidence</summary><pre>{_e(json.dumps(invocation, indent=2))}</pre></details></article>"
+            f"<details><summary>Usage and evidence</summary><pre>{_e(json.dumps(invocation, indent=2))}</pre></details></details>"
         )
     return "".join(cards) or "<p>No model invocations recorded.</p>"
 
@@ -327,36 +370,94 @@ def _elapsed_cell(elapsed: float, timeout: int | None) -> str:
     )
 
 
+def _state_chip(state: str) -> str:
+    """Visual semantics only; action eligibility remains with machine/policy."""
+    tone = (
+        "fail"
+        if state in {"failed", "blocked"}
+        else "warn"
+        if state in {"suspended", "awaiting_human"}
+        else "muted"
+        if state in {"approved", "cancelled", "complete"}
+        else "pass"
+    )
+    return f'<span class="chip {tone}">{_e(state.replace("_", " ").capitalize())}</span>'
+
+
 def _board_table(rows: list[console_views.RunRow]) -> str:
-    """View 1 — the runs board. Every column §18.5 names, and no Merge control."""
+    """Five primary scan columns; every retained run signal stays keyboard reachable."""
     if not rows:
         return '<p class="muted">No runs yet.</p>'
     cells = []
     for r in rows:
-        badge = f' <span class="chip">{_e(r.badge)}</span>' if r.badge else ""
-        blocked = (
-            f'<div class="muted">blocked: {_e(r.blocked_reason)}</div>' if r.blocked_reason else ""
+        badge = (
+            f' <span class="chip">{_e(r.badge)}</span>' if r.badge and r.badge != r.state else ""
+        )
+        title = f"<small>{_e(r.title)}</small>" if r.title else ""
+        signals = (
+            f'<details data-key="run-{_e(r.run_id)}"><summary>Run signals</summary><dl>'
+            f"<dt>Project</dt><dd>{_e(r.project)}</dd>"
+            f"<dt>Branch</dt><dd>{_e(r.branch or 'not recorded')}</dd>"
+            f"<dt>Cost evidence</dt><dd>API-equivalent USD · {_e(r.spend_status)} · ${r.spend_ceiling:.0f} ceiling</dd>"
+            f"<dt>Attempt / rung</dt><dd>{r.attempt} · {_e(r.rung)}</dd>"
+            f"<dt>Elapsed / timeout</dt><dd>{_duration(r.elapsed_in_state)} / {_duration(r.timeout_seconds)}</dd>"
+            f"<dt>Tokens in / out</dt><dd>{r.tokens_in:,} / {r.tokens_out:,} ({r.tokens_cached:,} cached) · {_e(r.usage_status)}</dd>"
+            f"<dt>Heartbeat</dt><dd>{_duration(r.heartbeat_age)}</dd>"
+            f"<dt>Context evidence</dt><dd>{_e(r.context_reason or 'Current occupancy observed')} · {_e(r.context_source or 'Source unavailable')} · {_duration(r.context_age_seconds)} ago</dd>"
+            f"<dt>Activity</dt><dd>{_e(r.activity or 'not recorded')}</dd></dl>"
+            f'<a data-focus-key="settings-{_e(r.run_id)}" href="/settings/runs/{_e(r.ticket)}">Run settings and controls</a>'
+            + (
+                f'<p><a href="{_e(r.pr_url)}">Pull request</a></p>'
+                if r.pr_url
+                else "<p>Pull request: not recorded</p>"
+            )
+            + "</details>"
         )
         cells.append(
             "<tr>"
-            f'<td><a href="/runs/{_e(r.ticket)}">{_e(r.ticket)}</a> <a href="/settings/runs/{_e(r.ticket)}">controls</a></td>'
-            f"<td>{_e(r.project)}</td>"
-            f'<td class="wrap">{_e(r.state)}{badge}{blocked}</td>'
-            f"<td>{r.attempt} <span class='muted'>· {_e(r.rung)}</span></td>"
-            f"<td>{_elapsed_cell(r.elapsed_in_state, r.timeout_seconds)}</td>"
-            f"<td>{_pct_cell(r.context_pct, r.context_reason)}</td>"
-            f"<td>{r.tokens_in:,} / {r.tokens_out:,}"
-            f"<span class='muted'> ({r.tokens_cached:,} cached)</span></td>"
-            f"<td>{_spend_cell(r.spend_usd, r.spend_ceiling)}</td>"
-            f'<td class="wrap">{_e(r.activity) if r.activity else "<span class=muted>—</span>"}</td>'
-            f"<td>{_duration(r.heartbeat_age)}</td>"
-            "</tr>"
+            f'<td data-label="Ticket"><a data-focus-key="ticket-{_e(r.run_id)}" href="/runs/{_e(r.ticket)}">{_e(r.ticket)}</a>{title}{signals}</td>'
+            f'<td data-label="Project"><span class="project-identity" tabindex="0" title="{_e(r.project)}">{_e(r.project)}</span></td>'
+            f'<td data-label="State">{_state_chip(r.state)}{badge}'
+            + (f"<small>{_e(r.blocked_reason)}</small>" if r.blocked_reason else "")
+            + f'</td><td data-label="Context">{_pct_cell(r.context_pct, r.context_reason) if r.context_pct is not None else "Unavailable"}</td>'
+            f'<td data-label="Estimate">{_estimate_value(r)}<small>{_e(r.spend_status) if r.spend_status != "complete" else ""}</small></td></tr>'
         )
     return (
-        '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr>'
-        "<th>ticket</th><th>project</th><th>state</th><th>attempt</th><th>in state</th>"
-        "<th>context</th><th>tokens in / out</th><th>spend · API-equivalent estimated USD</th><th>activity</th><th>live</th>"
-        "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
+        '<table class="board-table"><thead><tr><th>Ticket</th><th>Project</th><th>State</th><th>Context</th><th>Estimate</th></tr></thead><tbody>'
+        + "".join(cells)
+        + "</tbody></table>"
+    )
+
+
+def _metric(label: str, value: str, scope: str) -> str:
+    return f'<div class="stat"><span>{_e(label)}</span><strong>{value}</strong><small>{_e(scope)}</small></div>'
+
+
+def _usage_cards(rows: list[console_views.RunRow]) -> str:
+    observed = [r for r in rows if r.usage_status != "unknown"]
+    tokens = f"{sum(r.tokens_in + r.tokens_out for r in observed):,}" if observed else "Unavailable"
+    token_status = (
+        "complete" if rows and all(r.usage_status == "complete" for r in rows) else "incomplete"
+    )
+    costs = [r.known_spend_usd for r in rows if r.known_spend_usd is not None]
+    complete = bool(rows) and all(r.spend_status == "complete" for r in rows)
+    cost = (("" if complete else "≥ ") + f"${sum(costs):.2f}") if costs else "Unavailable"
+    return (
+        '<div class="stats">'
+        + _metric("Open runs", str(len(rows)), "Displayed runs")
+        + _metric(
+            "Context availability",
+            str(sum(r.fresh_context_invocations for r in rows)),
+            "Live invocations with fresh context observations",
+        )
+        + _metric("Cumulative tokens", tokens, f"Displayed runs · {token_status}")
+        + _metric(
+            "Estimated cost",
+            cost,
+            "Displayed runs · API-equivalent USD · "
+            + ("complete" if complete else "incomplete / lower bound"),
+        )
+        + "</div>"
     )
 
 
@@ -372,7 +473,10 @@ def _board_overview(
         or r.run_id in pending
     ]
     counts = [
-        ("Open runs", len(rows)),
+        (
+            "Active invocations",
+            sum(r.active_invocations for r in rows),
+        ),
         ("Blocked", sum(r.state == "blocked" for r in rows)),
         ("Awaiting invocation approval", len(waiting)),
         ("Pending agent launch", len(pending)),
@@ -386,12 +490,12 @@ def _board_overview(
         + "</div>"
     )
     holds = ""
-    for row in attention:
+    for index, row in enumerate(attention):
         reason = (
             row.blocked_reason
             or waiting.get(row.run_id)
             or pending.get(row.run_id)
-            or row.state.replace("_", " ")
+            or "No reason recorded."
         )
         launch_status = (
             "Approval required"
@@ -403,19 +507,33 @@ def _board_overview(
         destination = (
             f"/settings/runs/{row.ticket}" if row.run_id in waiting else f"/runs/{row.ticket}"
         )
+        if index == 3:
+            holds += f'<details data-key="more-attention"><summary>Show {len(attention) - 3} more runs needing attention</summary>'
         holds += (
-            f'<article class="attention-item"><a href="{_e(destination)}">{_e(row.ticket)}</a>'
-            f'<span class="chip warn">{_e(row.state)}</span><p>{_e(launch_status)}</p><p>{_e(reason)}</p></article>'
+            f'<article class="attention-item"><a data-focus-key="attention-{_e(row.run_id)}" href="{_e(destination)}">{_e(row.ticket)}</a>'
+            f"{_state_chip(row.state)}"
+            + (f"<p>{_e(launch_status)}</p>" if launch_status else "")
+            + f"<p>{_e(reason)}</p>"
+            + (
+                f'<a class="attention-action" href="{_e(row.pr_url)}">Review pull request →</a>'
+                if row.pr_url and row.state == "awaiting_human"
+                else f'<a class="attention-action" href="{_e(destination)}">{"Review approval" if row.run_id in waiting else "Inspect run"} →</a>'
+            )
+            + "</article>"
         )
+    if len(attention) > 3:
+        holds += "</details>"
     if not holds:
         holds = '<p class="muted">No blocked, suspended, failed or pending agent runs.</p>'
     return (
         summary
+        + _usage_cards(rows)
         + f'<div class="operations-grid{"" if attention else " no-attention"}"><section class="panel attention" '
         'aria-labelledby="attention-heading"><h2 id="attention-heading">Needs attention</h2>'
+        + f'<p class="muted">{len(attention)} runs need attention</p>'
         + holds
         + '</section><section class="panel" aria-labelledby="queue-heading">'
-        '<h2 id="queue-heading">Work in progress</h2><p class="table-hint muted">Scroll the table for all run signals, including context, token usage and estimated spend.</p>'
+        '<h2 id="queue-heading">Work in progress</h2><p class="table-hint muted">Current context · estimates in API-equivalent USD. Expand Run signals for full evidence and controls.</p>'
         + _board_table(rows)
         + "</section></div>"
     )
@@ -432,13 +550,34 @@ _CONTROL_BUTTONS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _controls(ticket: str) -> str:
-    buttons = "".join(
-        f'<form class="control" method="post" action="/runs/{_e(ticket)}/{slug}">'
-        f"<button type=submit>{_e(label)}</button></form> "
-        for slug, label in _CONTROL_BUTTONS
-    )
-    return _render("controls.html", buttons=buttons)
+def _controls(run: Run) -> str:
+    from factory.cli import control_unavailable_reason
+
+    buttons: list[str] = []
+    unavailable: list[str] = []
+    for slug, label in _CONTROL_BUTTONS:
+        reason = control_unavailable_reason(slug, run)
+        if reason:
+            unavailable.append(f"<li><strong>{_e(label)}</strong>: {_e(reason)}</li>")
+            continue
+        style = (
+            "danger secondary"
+            if slug == "cancel"
+            else "secondary"
+            if slug == "resume-planning"
+            else ""
+        )
+        buttons.append(
+            f'<form class="control" method="post" action="/runs/{_e(run.linear_id)}/{slug}">'
+            f'<button class="{style}" type="submit">{_e(label)}</button></form>'
+        )
+    if unavailable:
+        buttons.append(
+            '<details class="control-unavailable"><summary>Unavailable actions</summary><ul>'
+            + "".join(unavailable)
+            + "</ul></details>"
+        )
+    return _render("controls.html", buttons="".join(buttons))
 
 
 # --------------------------------------------------------------------------------
@@ -454,13 +593,16 @@ _WF_LANES: tuple[str, ...] = ("engineer", "planner", "builder", "reviewer", "cod
 def _timeline_head(r: console_views.RunRow, tl: console_views.RunTimeline) -> str:
     """Band 1 — the summary strip. The same `RunRow` fields the run-detail head renders, so
     the page's header and `/runs/{ticket}`'s header are one producer apart."""
-    badge = f' <span class="chip">{_e(r.badge)}</span>' if r.badge else ""
+    badge = f' <span class="chip">{_e(r.badge)}</span>' if r.badge and r.badge != r.state else ""
     head = (
-        f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
-        f'<p class="sub">{_e(r.state)}{badge} · attempt {r.attempt} · rung {_e(r.rung)} · '
-        f"elapsed {_duration(tl.elapsed_total_s)} · context "
-        f"{_pct_cell(r.context_pct, r.context_reason)} · "
-        f"spend {_spend_cell(r.spend_usd, r.spend_ceiling)}</p>"
+        "<h1>Run timeline</h1>"
+        + f'<p class="sub">{_e(r.ticket)} · {_e(r.title or r.project)}</p>'
+        + '<dl class="timeline-meta">'
+        f"<div><dt>State</dt><dd>{_e(r.state.replace('_', ' ').capitalize())}{badge}</dd></div>"
+        f"<div><dt>Attempt / rung</dt><dd>{r.attempt} / {_e(r.rung)}</dd></div>"
+        f"<div><dt>Elapsed</dt><dd>{_duration(tl.elapsed_total_s)}</dd></div>"
+        f"<div><dt>Current context</dt><dd>{_pct_cell(r.context_pct, r.context_reason)}</dd></div>"
+        f"<div><dt>Estimated run cost</dt><dd>{_estimate_cell(r)}</dd></div></dl>"
     )
     if r.pr_url:
         head += (
@@ -575,7 +717,7 @@ def _waterfall_html(blocks: list[console_views.WaterfallBlock]) -> str:
         + '<span><i class="wfsw dead"></i>dead attempt</span>'
         + "</div>"
     )
-    return f'<div class="waterfall" tabindex="0" role="region" aria-label="Runtime waterfall">{axis}{"".join(rows)}{legend}</div>'
+    return f'<div class="waterfall" tabindex="0" role="region" data-scroll-key="waterfall" aria-label="Runtime waterfall">{axis}{"".join(rows)}{legend}</div>'
 
 
 def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
@@ -585,7 +727,7 @@ def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
     Phase 1 look (no column of em dashes), and a run with one gains the column honestly."""
     if not calls:
         return (
-            '<h2>tool calls <span class="muted">this attempt</span></h2>'
+            '<h2>Tool calls <span class="muted">this attempt</span></h2>'
             '<p class="muted">No completed calls yet.</p>'
         )
     has_dur = any(c.duration_s is not None for c in calls)
@@ -600,7 +742,7 @@ def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
         for c in calls
     )
     head = (
-        '<h2>tool calls <span class="muted">this attempt</span></h2>'
+        '<h2>Tool calls <span class="muted">this attempt</span></h2>'
         '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>#</th><th>type</th>'
         "<th>command / summary</th>"
         + ("<th>dur</th>" if has_dur else "")
@@ -609,16 +751,61 @@ def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
     return head + rows + "</tbody></table></div>"
 
 
-def _timeline_html(tl: console_views.RunTimeline, ticket: str) -> str:
+def _timeline_html(tl: console_views.RunTimeline, ticket: str, transitions: str = "") -> str:
     """The full inner timeline, wrapped in `#timeline` so the SSE stream can swap it."""
+    tools = (
+        _tool_calls_html(tl.tool_calls)
+        if tl.tool_calls
+        else '<p class="muted">No completed tool calls recorded for this attempt.</p>'
+    )
     return (
         '<div id="timeline">'
         + _timeline_head(tl.row, tl)
-        + _cards_html(tl.cards)
-        + '<h2 class="wf-title">runtime · swim-lane waterfall</h2>'
+        + '<section class="panel"><h2 class="wf-title">Runtime · swim-lane waterfall</h2>'
         + _waterfall_html(tl.blocks)
-        + _tool_calls_html(tl.tool_calls)
-        + "</div>"
+        + tools
+        + '</section><div class="timeline-support-grid"><section class="panel"><h2>Execution history</h2>'
+        + transitions
+        + '</section><section class="panel"><h2>Agent activity</h2>'
+        + (_cards_html(tl.cards) or '<p class="muted">No agent activity recorded.</p>')
+        + "</section></div></div>"
+    )
+
+
+def _transitions_html(store: Store, run_id: str) -> str:
+    rows = store.transitions(run_id)
+    preview = (
+        '<ol class="transition-preview">'
+        + "".join(
+            "<li><time>"
+            + time.strftime("%H:%M:%S UTC", time.gmtime(row["at"]))
+            + f" · {_e(row['actor'])}</time><strong>{_e(str(row['to_state']).replace('_', ' ').capitalize())}</strong>"
+            + f'<p class="muted">{_e(row["rule"] or "No rule recorded")}</p></li>'
+            for row in reversed(rows[-5:])
+        )
+        + "</ol>"
+        if rows
+        else '<p class="muted">No transitions recorded.</p>'
+    )
+    table = _runtime_table(
+        "Transition history",
+        ("At", "Transition", "Actor", "Rule"),
+        [
+            (
+                time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(row["at"])),
+                f"{row['from_state']} → {row['to_state']}",
+                str(row["actor"]),
+                str(row["rule"] or "not recorded"),
+            )
+            for row in rows
+        ],
+    )
+
+    return (
+        preview
+        + '<details data-key="timeline-transitions"><summary>Full transition evidence</summary>'
+        + table
+        + "</details>"
     )
 
 
@@ -639,6 +826,9 @@ def create_app(
     against a `FakeSandbox` rather than needing a Docker login.
     """
     app = FastAPI(title="factory console", docs_url=None, redoc_url=None)
+    app.add_middleware(
+        BundleMiddleware, bundle=RenderBundle.load(TEMPLATES, code_namespace=globals())
+    )
 
     def _cfg() -> tuple[Registry, Routing, Store, LinearClient]:
         """Resolve config and store for one request (or one SSE tick).
@@ -690,9 +880,38 @@ def create_app(
         return HTMLResponse(_page("runs", body))
 
     @app.get("/projects", response_class=HTMLResponse)
-    def projects() -> HTMLResponse:
+    def projects(request: Request) -> HTMLResponse:
         reg, _, st, _ = _cfg()
-        body = "<h1>Projects</h1>"
+        from factory.operator_controls import status
+
+        selected = request.query_params.get("project", next(iter(reg.projects), ""))
+        if selected not in reg.projects:
+            selected = next(iter(reg.projects), "")
+        inventory = []
+        for name, project in reg.projects.items():
+            settings = st.runtime.settings("project", name)
+            explicit = settings.get("concurrency", project.concurrency_per_project)
+            occupied = st.runtime.db.execute(
+                "SELECT COUNT(*) FROM project_slots WHERE project=?", (name,)
+            ).fetchone()[0]
+            observed = status(st, name)
+            try:
+                config = json.loads((project.path / "harness.config.json").read_text())
+                profile = (
+                    settings.get("delivery_profile")
+                    or config.get("delivery", {}).get("default")
+                    or "Not declared"
+                )
+            except (OSError, ValueError):
+                profile = "Unavailable"
+            inventory.append(
+                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["queued_children"]} children · {observed["pending_certifications"]} certifications<small>May overlap</small></td></tr>'
+            )
+        body = (
+            '<h1>Projects</h1><p class="sub">Registered projects, capacity and defaults for future work.</p><section class="panel" id="project-inventory"><h2>Registered projects</h2><div class="scroll" tabindex="0" role="region" aria-label="Project inventory"><table class="inventory-table project-inventory"><thead><tr><th>Project</th><th>Run slots</th><th>Delivery profile</th><th>Agent slots</th><th>Waiting</th></tr></thead><tbody>'
+            + "".join(inventory)
+            + '</tbody></table></div></section><section id="project-defaults"><h2>Project defaults</h2>'
+        )
         for name, project in reg.projects.items():
             settings = st.runtime.settings("project", name)
             explicit = settings.get("concurrency", project.concurrency_per_project)
@@ -702,7 +921,7 @@ def create_app(
                 "SELECT COUNT(*) FROM project_slots WHERE project=?", (name,)
             ).fetchone()[0]
             queued = sum(r.state is State.APPROVED for r in runs)
-            body += f"<h2>{_e(name)}</h2><p>{occupied} / {limit} slots · {queued} queued · "
+            body += f'<details class="panel project-default" id="project-{_e(name)}"{" open" if name == selected else ""}><summary>{_e(name)} · project defaults</summary><p>{occupied} / {limit} slots · {queued} queued · '
             body += f"{'inherited' if explicit is None else 'explicit'} concurrency</p>"
             try:
                 config = json.loads((project.path / "harness.config.json").read_text())
@@ -725,9 +944,22 @@ def create_app(
                     body += "<p>No project deferrals declared.</p>"
             except (OSError, ValueError):
                 body += "<p>Delivery policy unavailable.</p>"
-            body += _runtime_status(st, name)
+            effective = status(st, name)["effective"]
+            body += (
+                '<p class="muted">Defaults apply to future work. Blank limits inherit the factory defaults; '
+                "delivery profile inherits the repository policy.</p>"
+                '<dl class="project-effective"><dt>Effective active-agent limit</dt>'
+                f"<dd>{_e(effective['max_active_agents'])}</dd><dt>Effective child limit</dt>"
+                f"<dd>{_e(effective['max_children_per_parent'])}</dd><dt>Effective delegation depth</dt>"
+                f"<dd>{_e(effective['max_delegation_depth'])}</dd></dl>"
+            )
             body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
-        return HTMLResponse(_page("projects", body))
+            body += (
+                "<details><summary>Runtime and certification history</summary>"
+                + _runtime_status(st, name)
+                + "</details></details>"
+            )
+        return HTMLResponse(_page("projects", body + "</section>"))
 
     @app.get("/settings/runs/{ticket}", response_class=HTMLResponse)
     def run_settings(ticket: str) -> HTMLResponse:
@@ -735,12 +967,58 @@ def create_app(
         run = st.run_by_ticket(ticket.upper())
         if run is None:
             return HTMLResponse("Run not found", status_code=404)
+        from factory import operator_controls
+
         settings = st.runtime.effective(run.project, run.id)
         policy = st.runtime.policy(run.id)
         if policy:
             settings["delivery_profile"] = policy["profile"]
-        body = f"<h1>{_e(run.linear_id)} controls</h1>"
-        body += _runtime_status(st, run.project, run.id)
+        body = f'<h1>Run settings</h1><p class="sub">{_e(run.linear_id)} · Effective policy and the next agent attempt.</p>'
+        waiting = settings.get("waiting_invocation") or ""
+        approved = st.runtime.settings("run", run.id).get("approved_invocation")
+        requires_approval = (
+            waiting and settings.get("mode", "automatic") == "approval" and approved != waiting
+        )
+        admission = (
+            "Awaiting approval"
+            if requires_approval
+            else "Already approved · waiting to launch"
+            if waiting and approved == waiting
+            else "Automatic launch pending"
+            if waiting
+            else "No pending invocation"
+        )
+        body += f'<section class="panel" id="invocation-admission"><h2>Next invocation</h2><p>{admission}</p>'
+        if waiting:
+            body += f"<details><summary>Pending invocation identity</summary><code>{_e(waiting)}</code></details>"
+        if requires_approval:
+            body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><input type="hidden" name="invocation" value="{_e(waiting)}"><button>Approve next attempt</button></form>'
+        elif not waiting:
+            body += '<p class="muted">An approval action appears here when an invocation needs your decision.</p>'
+        body += "</section>"
+        invocations = st.runtime.invocations(run.id)
+        observed = operator_controls.status(st, run.project, run.id)
+        current_ids = {
+            agent["invocation_id"] for agent in observed["agents"] if agent["status"] == "active"
+        }
+        if waiting:
+            current_ids.add(waiting)
+        current = [item for item in invocations if item["id"] in current_ids]
+        history = [item for item in invocations if item["id"] not in current_ids]
+        body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p class="muted">API-equivalent estimated USD, not account charges.</p>'
+        body += "<h3>Active and waiting</h3>" + (
+            _invocation_cards(current)
+            if current
+            else "<p>No active or waiting invocation evidence recorded.</p>"
+        )
+        if history:
+            body += (
+                f'<details data-key="invocation-history"><summary>Invocation history ({len(history)})</summary>'
+                + _invocation_cards(list(reversed(history)))
+                + "</details>"
+            )
+        body += "</section>"
+        body += '<section class="panel" id="effective-settings"><h2>Effective settings</h2>'
         form_settings = settings | {
             key: st.runtime.settings("run", run.id).get(key)
             for key in (
@@ -751,33 +1029,26 @@ def create_app(
             )
         }
         form_settings = {key: value for key, value in form_settings.items() if value is not None}
-        body += (
-            '<h2>Effective limits</h2><dl class="effective-limits">'
-            + "".join(
-                f"<div><dt>{label}</dt><dd>{_e(settings.get(key, default))}</dd></div>"
-                for key, label, default in (
-                    ("delegation_mode", "Delegation", "disabled"),
-                    ("max_active_agents", "Active agent limit", 8),
-                    ("max_children_per_parent", "Children per parent", 2),
-                    ("max_delegation_depth", "Delegation depth", 1),
-                )
-            )
-            + "</dl>"
-        )
-        body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings)
-        body += "<h2>Effective delivery policy</h2>"
+        body += '<p class="muted">Blank limits and inherited delegation use project defaults. Run overrides may lower project limits.</p>'
+        body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings, effective=settings)
+        body += '</section><section class="panel"><h2>Effective delivery policy</h2>'
         if policy:
             body += f"<p>Frozen profile: {_e(policy.get('profile', 'not recorded'))}</p>"
             body += f"<details><summary>Frozen policy evidence</summary><pre>{_e(json.dumps(policy, indent=2))}</pre></details>"
         else:
             body += "<p>No frozen policy recorded.</p>"
-        body += "<p>Replacing a policy requires an explicit operator action and new verification and review.</p>"
-        body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button>Replace paused run policy</button></form>'
-        waiting = settings.get("waiting_invocation") or ""
-        body += f'<form method="post" action="/settings/approve/{_e(run.linear_id)}"><label>Next invocation ID <input name="invocation" value="{_e(waiting)}" required></label><button>Approve next attempt</button></form>'
-        body += f'<p><a href="/runs/{_e(run.linear_id)}">Run and Suspend controls</a></p>'
-        body += "<h2>Invocations</h2><p>API-equivalent estimated USD. These are not Codex account charges.</p>"
-        body += _invocation_cards(st.runtime.invocations(run.id))
+        refusal = operator_controls.policy_replacement_refusal(run)
+        if refusal:
+            body += f"<p>{_e(refusal)}.</p>"
+        else:
+            body += "<p>Replacement requires new verification and review. Run ownership and profile availability are checked when you submit.</p>"
+            body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button class="secondary">Replace paused run policy</button></form>'
+        body += f'<p><a href="/runs/{_e(run.linear_id)}">Run controls</a></p></section>'
+        body += (
+            '<section class="panel"><details><summary>Runtime and certification history</summary>'
+            + _runtime_status(st, run.project, run.id)
+            + "</details></section>"
+        )
         return HTMLResponse(_page("run controls", body, ticket=run.linear_id, view="settings"))
 
     @app.post("/settings/{scope}/{owner}")
@@ -797,26 +1068,26 @@ def create_app(
                 from factory.harness import load_harness_config
                 from factory.isolation import project_for_run
 
-                if run is None or run.state not in {
-                    State.SUSPENDED,
-                    State.BLOCKED,
-                    State.AWAITING_HUMAN,
-                }:
-                    raise Blocked(
-                        "policy-replacement-needs-paused-run",
-                        "Suspend the run before replacing its policy",
-                    )
+                refusal = operator_controls.policy_replacement_refusal(run)
+                if refusal or run is None:
+                    raise Blocked("policy-replacement-needs-paused-run", refusal or "Run not found")
                 if not st.acquire_lease(run.id, ttl_seconds=300):
                     raise Blocked("run-leased", "The run is owned by another process")
                 try:
-                    project = project_for_run(reg.resolve(run.linear_id), run, st)
+                    current = st.run_by_id(run.id)
+                    refusal = operator_controls.policy_replacement_refusal(current)
+                    if refusal or current is None:
+                        raise Blocked(
+                            "policy-replacement-needs-paused-run", refusal or "Run not found"
+                        )
+                    project = project_for_run(reg.resolve(current.linear_id), current, st)
                     load_harness_config(project.path)
-                    snapshot_ctx = authority.SnapshotContext(home, project, run, st)
+                    snapshot_ctx = authority.SnapshotContext(home, project, current, st)
                     authority.snapshot(snapshot_ctx, profile=form["profile"], replace=True)
                 finally:
                     st.release_lease(run.id)
             elif scope == "approve" and run:
-                st.runtime.approve(run.id, str(form["invocation"]))
+                operator_controls.approve_pending(st, run, str(form.get("invocation", "")))
             else:
                 target = run.id if run else owner
                 if (
@@ -853,10 +1124,15 @@ def create_app(
             else:
                 body = f"<p>{_e(str(exc))}</p>"
             return HTMLResponse(_page("settings refused", body), status_code=409)
+        destination = (
+            f"/settings/runs/{_query(run.linear_id)}"
+            if run
+            else f"/projects?project={_query(owner)}#project-{_query(owner)}"
+        )
         return HTMLResponse(
             _page(
                 "settings saved",
-                '<p>Settings saved. Current work continues. <a href="/projects">Projects</a></p>',
+                f'<p>Settings saved. Current work continues. <a href="{_e(destination)}">Return to settings</a></p>',
             )
         )
 
@@ -890,11 +1166,8 @@ def create_app(
         r = detail.row
 
         head = (
-            f"<h1>{_e(r.ticket)} <span class='muted'>{_e(r.project)}</span></h1>"
-            f'<p class="sub">{_e(r.state)} · attempt {r.attempt} · rung {_e(r.rung)} · '
-            f"context {_pct_cell(r.context_pct, r.context_reason)} · "
-            f"spend {_spend_cell(r.spend_usd, r.spend_ceiling)} · "
-            f'<a href="/runs/{_e(r.ticket)}/timeline">timeline</a></p>'
+            "<h1>Run details</h1>"
+            + f'<p class="sub">{_e(r.ticket)} · {_e(r.title or r.project)}</p>'
         )
         if detail.pr_url:
             head += (
@@ -904,8 +1177,6 @@ def create_app(
             )
         if detail.blocked_reason:
             head += f'<p class="fail">blocked: {_e(detail.blocked_reason)}</p>'
-        if r.context_pct is None and r.context_reason:
-            head += f'<p class="note">context hidden: {_e(r.context_reason)}</p>'
 
         timeline = "".join(
             "<tr>"
@@ -917,13 +1188,13 @@ def create_app(
             for t in detail.transitions
         )
         timeline_html = (
-            '<h2>transitions</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>at</th>'
+            '<h2>Transitions</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>at</th>'
             "<th>hop</th><th>actor</th><th>rule</th></tr></thead><tbody>"
             + timeline
             + "</tbody></table></div>"
         )
 
-        gates_html = ""
+        gates_html = '<div class="evidence-empty"><h3>Verification</h3><p class="muted">No gate report recorded.</p></div>'
         if detail.gates:
             gate_rows = "".join(
                 "<tr>"
@@ -936,12 +1207,12 @@ def create_app(
             )
             verdict_cls = "pass" if detail.gate_verdict == "pass" else "fail"
             gates_html = (
-                f'<h2>gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h2>'
+                f'<h3>Verification · gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h3>'
                 '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>status</th><th>gate</th>'
                 "<th>caveat</th></tr></thead><tbody>" + gate_rows + "</tbody></table></div>"
             )
 
-        review_html = ""
+        review_html = '<div class="evidence-empty"><h3>Review</h3><p class="muted">No review evidence recorded.</p></div>'
         if detail.review_findings or detail.review_tier2:
             order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
             ranked = sorted(
@@ -956,7 +1227,7 @@ def create_app(
                 for f in ranked
             )
             review_html = (
-                f"<h2>review <span class='muted'>tier 2: {_e(detail.review_tier2)}</span></h2>"
+                f"<h3>Review <span class='muted'>tier 2: {_e(detail.review_tier2)}</span></h3>"
                 + (
                     '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>severity</th><th>where</th>'
                     "<th>finding</th></tr></thead><tbody>" + finding_rows + "</tbody></table></div>"
@@ -965,33 +1236,77 @@ def create_app(
                 )
             )
 
-        artifacts_html = ""
+        artifacts_html = "<h2>Retained artifacts</h2><p>No artifacts recorded.</p>"
         if detail.artifacts:
             items = "".join(
-                f"<tr><td class='muted'>{_e((a.sha256 or '-')[:12])}</td><td>{_e(a.name)}</td></tr>"
+                f"<tr><td class='muted'><code>{_e(a.sha256 or 'not recorded')}</code></td><td>{_e(a.name)}<small>{_e(a.path)}</small></td></tr>"
                 for a in detail.artifacts
             )
             artifacts_html = (
-                '<h2>artifacts</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>sha256</th>'
+                '<h2>Retained artifacts</h2><div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>sha256</th>'
                 "<th>file</th></tr></thead><tbody>" + items + "</tbody></table></div>"
             )
 
-        tail_html = ""
+        tail_html = "<h2>Live tail</h2><p>No event stream recorded.</p>"
         if detail.events_path:
             tail_html = (
-                "<h2>live tail</h2>"
-                f'<pre id="tail" class="muted">reading {_e(detail.events_path)}…</pre>'
+                '<h2>Live tail</h2><label class="follow-control"><input type="checkbox" id="tail-follow"> Follow new events</label>'
+                f'<pre id="tail" class="muted" tabindex="0" role="region" aria-label="Recent event log">reading {_e(detail.events_path)}…</pre>'
                 "<script>"
                 f"const t=new EventSource('/sse/tail/{_e(r.ticket)}');"
                 "t.onmessage=e=>{const p=document.getElementById('tail');"
-                "p.textContent=JSON.parse(e.data).text;p.scrollTop=p.scrollHeight;};"
+                "const top=p.scrollTop;p.textContent=JSON.parse(e.data).text;p.scrollTop=document.getElementById('tail-follow').checked?p.scrollHeight:top;};"
                 "</script>"
             )
 
         body = _render(
             "run_detail.html",
             head=head,
-            controls=_controls(r.ticket),
+            controls=_controls(run),
+            metrics='<div class="stats">'
+            + _metric(
+                "State / attempt",
+                f'<span class="state-value">{_e(r.state.replace("_", " ").capitalize())}</span>',
+                f"Attempt {r.attempt} · {r.rung}",
+            )
+            + _metric(
+                "Current context",
+                _pct_cell(r.context_pct, r.context_reason)
+                if r.context_pct is not None
+                else "Unavailable",
+                f"{r.context_source or 'Source unavailable'} · observed {_duration(r.context_age_seconds)} ago · {r.context_reason or 'current live invocation'}",
+            )
+            + _metric(
+                "Cumulative tokens",
+                f"{r.tokens_in + r.tokens_out:,}" if r.usage_status != "unknown" else "Unavailable",
+                f"Run total · {r.usage_status} · {r.tokens_cached:,} cached input",
+            )
+            + _metric(
+                "Estimated run cost",
+                _estimate_value(r),
+                f"API-equivalent USD · {r.spend_status} · ${r.spend_ceiling:.0f} ceiling",
+            )
+            + "</div>",
+            current=(
+                f"<h2>Attempt {r.attempt} · {_e(r.state.replace('_', ' ').capitalize())}</h2>"
+                f'<p class="attempt-activity">{_e(r.activity or "No activity recorded")}</p>'
+                + (
+                    f'<progress class="attempt-context" value="{r.context_pct * 100:.1f}" max="100" aria-label="Current context occupancy {r.context_pct * 100:.0f} percent"></progress>'
+                    f'<p class="muted">{r.context_pct * 100:.0f}% current context · observed {_duration(r.context_age_seconds)} ago. Cumulative usage includes earlier attempts.</p>'
+                    if r.context_pct is not None
+                    else '<p class="muted">Current context occupancy is unavailable.</p>'
+                )
+                + '<dl class="attempt-meta">'
+                f"<div><dt>Time in state / timeout</dt><dd>{_duration(r.elapsed_in_state)} / {_duration(r.timeout_seconds)}</dd></div>"
+                f"<div><dt>Heartbeat age</dt><dd>{_duration(r.heartbeat_age)}</dd></div></dl>"
+                f'<p><a href="/runs/{_e(r.ticket)}/timeline">Open timeline →</a></p>'
+            ),
+            source=(
+                '<details data-key="run-source"><summary>Source and attempt</summary><dl>'
+                f"<dt>Branch</dt><dd>{_e(r.branch or 'not recorded')}</dd>"
+                f"<dt>Attempt / rung</dt><dd>{r.attempt} / {_e(r.rung)}</dd></dl></details>"
+                f'<p><a href="/settings/runs/{_e(r.ticket)}">Run settings and policy →</a></p>'
+            ),
             timeline=timeline_html,
             gates=gates_html,
             review=review_html,
@@ -1013,7 +1328,7 @@ def create_app(
         tl = console_views.run_timeline(home, reg, rt, st, run)
         body = _render(
             "run_timeline.html",
-            timeline=_timeline_html(tl, ticket),
+            timeline=_timeline_html(tl, ticket, _transitions_html(st, run.id)),
             ticket=_e(ticket.upper()),
         )
         return HTMLResponse(
@@ -1033,7 +1348,7 @@ def create_app(
             if run is None:
                 return ""
             tl = console_views.run_timeline(home, reg, rt, st, run)
-            return _timeline_html(tl, ticket)
+            return _timeline_html(tl, ticket, _transitions_html(st, run.id))
 
         async def events() -> Any:
             while True:
@@ -1103,35 +1418,67 @@ def create_app(
 
     @app.get("/runtimes", response_class=HTMLResponse)
     def runtimes_view() -> HTMLResponse:
-        from factory.cli import _sbx_ls_json
+        from factory.cli import _sbx_inventory
 
-        _, _, st, _ = _cfg()
-        rows = console_views.runtimes(_sbx_ls_json(), st)
-        if not rows:
-            table = '<p class="muted">No sandboxes reported by <code>sbx ls --json</code>.</p>'
+        reg, _, st, _ = _cfg()
+        inventory = _sbx_inventory()
+        rows = console_views.runtimes(inventory.sandboxes, st, registry=reg)
+        if inventory.status != "available":
+            table = f'<p role="status">Runtime inventory unavailable · {_e(inventory.status)}: {_e(inventory.reason)}</p>'
+        elif not rows:
+            table = "<p>No sandboxes reported by <code>sbx ls --json</code>.</p>"
         else:
-            body_rows = "".join(
-                "<tr>"
-                + (
-                    f'<td class="muted">{_e(r.name)} <span class="chip">operator-owned</span></td>'
-                    if r.operator_owned
-                    else f"<td>{_e(r.name)}</td>"
+            cells = []
+            for r in rows:
+                associations = "".join(
+                    f"<li>{_e(a.ticket)} · {_e(a.source)} · {'current' if a.current else 'historical'} · {_e(a.reference)}</li>"
+                    for a in r.associations
                 )
-                + f"<td>{_e(r.state)}</td>"
-                + f'<td class="wrap">{_e(r.workspace)}</td>'
-                + f"<td>{_e(', '.join(r.published_ports) or '—')}</td>"
-                + f"<td>{_e(r.template)}</td>"
-                + f"<td>{_e(', '.join(r.runs_using) or '—')}</td>"
-                + f'<td class="wrap muted">{_e(r.last_denial or "")}</td>'
-                "</tr>"
-                for r in rows
-            )
+                cells.append(
+                    f"<tr><td data-label='Sandbox'>{_e(r.name)}"
+                    + f' <small class="runtime-owner">{"operator-owned" if r.operator_owned else "factory-owned"}</small>'
+                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Layout'>{_e(r.layout) if not r.layout.startswith('Unavailable') else '<details><summary>Unavailable</summary><p>' + _e(r.layout) + '</p></details>'}</td><td data-label='Certification'>Unverified<small>Current identity unobserved</small></td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
+                )
             table = (
-                '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>sandbox</th><th>state</th>'
-                "<th>workspace</th><th>ports</th><th>template</th><th>runs</th>"
-                "<th>last denial</th></tr></thead><tbody>" + body_rows + "</tbody></table></div>"
+                '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Layout</th><th>Certification</th><th>Runs</th></tr></thead><tbody>'
+                + "".join(cells)
+                + "</tbody></table></div>"
             )
-        return HTMLResponse(_page("runtimes", _render("runtimes.html", table=table)))
+        compatibility_rows = []
+        for row in rows:
+            # Retained outcomes are useful scan evidence, never a current attestation.
+            outcomes = []
+            for record in row.recorded_compatibility:
+                report = record.get("report", {})
+                outcome = record.get("status") or report.get("status")
+                checks = report.get("checks", {})
+                if outcome is not None:
+                    label = str(outcome)
+                elif isinstance(checks, dict) and checks:
+                    passed = sum(
+                        isinstance(check, dict) and check.get("status") == "pass"
+                        for check in checks.values()
+                    )
+                    label = f"{passed}/{len(checks)} recorded checks passed"
+                else:
+                    label = "outcome unavailable"
+                outcomes.append(f"{record.get('ticket', 'Unknown ticket')}: {label}")
+            unique = list(dict.fromkeys(outcomes))
+            summary = "; ".join(unique[:3]) or "No historical report"
+            if len(unique) > 3:
+                summary += f"; {len(unique) - 3} more outcomes in evidence"
+            compatibility_rows.append(
+                f'<details class="runtime-compatibility-entry"><summary><span>{_e(row.name)}</span> '
+                f'<span class="muted">Historical · {_e(summary)}</span></summary>'
+                f"<p>Current certification: Unverified. {_e(row.compatibility)}</p>"
+                "<h3>Historical recorded evidence</h3>"
+                "<p>These retained reports are not a current identity attestation.</p>"
+                f"<pre>{_e(json.dumps(row.recorded_compatibility, indent=2))}</pre></details>"
+            )
+        compatibility = "".join(compatibility_rows) or "<p>Compatibility evidence unavailable.</p>"
+        return HTMLResponse(
+            _page("runtimes", _render("runtimes.html", table=table, compatibility=compatibility))
+        )
 
     @app.get("/config", response_class=HTMLResponse)
     def config_view(request: Request) -> HTMLResponse:
@@ -1140,23 +1487,42 @@ def create_app(
         error = request.query_params.get("error")
         saved = request.query_params.get("saved")
 
-        role_rows = "".join(
-            "<tr>"
-            f"<td>{_e(role.name)}</td>"
-            f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}" size="20"></td>'
-            f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}" size="10"></td>'
-            "</tr>"
-            for role in view.roles
-        )
+        rows = []
+        for role in view.roles:
+            affected = bool(
+                error and (f"roles.{role.name}." in error or f"role {role.name!r}" in error)
+            )
+            description = (
+                f' aria-describedby="error-{_e(role.name)}" aria-invalid="true"' if affected else ""
+            )
+            inline_error = (
+                f'<small id="error-{_e(role.name)}" class="fail">{_e(error)}</small>'
+                if affected
+                else ""
+            )
+            rows.append(
+                "<tr>"
+                f'<th scope="row">{_e(role.name.replace("_", " ").capitalize())}</th>'
+                f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}"{description}>{inline_error}</td>'
+                f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}"{description}></td>'
+                "</tr>"
+            )
+        role_rows = "".join(rows)
         banner = ""
         if error:
-            banner = f'<p class="fail">rejected: {_e(error)}</p>'
+            banner = f'<p class="fail" role="alert">Configuration not saved: {_e(error)}</p>'
         elif saved:
-            banner = '<p class="pass">models.toml written.</p>'
+            banner = '<p class="pass" role="status">Configuration saved for future invocations.</p>'
+        budget_error = (
+            f'<p id="budget-error" class="fail">{_e(error)}</p>'
+            if error and "budget." in error
+            else ""
+        )
 
         body = _render(
             "config.html",
             banner=banner,
+            budget_error=budget_error,
             role_rows=role_rows,
             usd_per_run=str(view.usd_per_run),
             usd_warn_at=str(view.usd_warn_at),

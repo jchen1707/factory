@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from factory import authority, operator_controls
-from factory.machine import Blocked, State
+from factory.machine import Blocked
 from factory.store import Store
 
 
@@ -59,22 +59,20 @@ def configure(args: argparse.Namespace) -> int:
                 raise Blocked("approval-needs-run", "Pass --ticket")
             store.runtime.approve(run.id, args.approve)
         if args.replace_policy:
-            if run is None or run.state not in {
-                State.SUSPENDED,
-                State.BLOCKED,
-                State.AWAITING_HUMAN,
-            }:
-                raise Blocked(
-                    "policy-replacement-needs-paused-run",
-                    "Suspend the run before replacing its policy",
-                )
+            refusal = operator_controls.policy_replacement_refusal(run)
+            if refusal or run is None:
+                raise Blocked("policy-replacement-needs-paused-run", refusal or "Run not found")
             if not store.acquire_lease(run.id, ttl_seconds=300):
                 raise Blocked("run-leased", "The run is owned by another process")
             try:
+                current = store.run_by_id(run.id)
+                refusal = operator_controls.policy_replacement_refusal(current)
+                if refusal or current is None:
+                    raise Blocked("policy-replacement-needs-paused-run", refusal or "Run not found")
                 registry = load_registry(home / "config/projects.toml")
-                project = project_for_run(registry.resolve(run.linear_id), run, store)
+                project = project_for_run(registry.resolve(current.linear_id), current, store)
                 load_harness_config(project.path)
-                ctx = authority.SnapshotContext(home, project, run, store)
+                ctx = authority.SnapshotContext(home, project, current, store)
                 print(
                     json.dumps(
                         authority.snapshot(ctx, profile=args.replace_policy, replace=True), indent=2

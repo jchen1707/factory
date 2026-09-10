@@ -1,0 +1,300 @@
+{
+  "scenario": "populated",
+  "viewport": "desktop",
+  "browser": "152.0.7977.83",
+  "clock": 1788950760,
+  "fixtureIsolation": "fresh server/database for each viewport",
+  "visualAcceptance": "pending human side-by-side review",
+  "pages": [
+    {
+      "name": "runs",
+      "route": "/",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1048,
+        "firstViewportHeadings": [
+          "Runs",
+          "Needs attention",
+          "Work in progress"
+        ],
+        "rowHeights": [
+          74,
+          69,
+          109
+        ],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1960,
+        "firstViewportHeadings": [
+          "Projects",
+          "Registered projects",
+          "Project defaults"
+        ],
+        "rowHeights": [],
+        "selectedMode": "automatic"
+      }
+    },
+    {
+      "name": "detail",
+      "route": "/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1608,
+        "firstViewportHeadings": [
+          "Run details",
+          "Attempt 1 · Implementing",
+          "Verification and review",
+          "Retained evidence",
+          "Retained artifacts",
+          "Live tail"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "timeline",
+      "route": "/runs/BAC-4/timeline",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1733,
+        "firstViewportHeadings": [
+          "Run timeline",
+          "Runtime · swim-lane waterfall",
+          "Tool calls this attempt"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1922,
+        "firstViewportHeadings": [
+          "Run settings",
+          "Next invocation",
+          "Invocations · 4",
+          "Effective settings"
+        ],
+        "rowHeights": [],
+        "selectedMode": "automatic"
+      }
+    },
+    {
+      "name": "runtimes",
+      "route": "/runtimes",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1185,
+        "firstViewportHeadings": [
+          "Runtimes",
+          "Sandbox inventory",
+          "Runtime compatibility"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "config",
+      "route": "/config",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1272,
+        "firstViewportHeadings": [
+          "Configuration",
+          "Model routing",
+          "Budget limits"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    }
+  ],
+  "failures": [],
+  "interactions": [
+    {
+      "viewport": "desktop",
+      "name": "runs",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "primary": {
+        "headings": [
+          "Ticket",
+          "Project",
+          "State",
+          "Context",
+          "Estimate"
+        ],
+        "clipped": false,
+        "rows": 3
+      }
+    },
+    {
+      "viewport": "desktop",
+      "name": "projects",
+      "expandedOverflow": false,
+      "expandedViolations": []
+    },
+    {
+      "viewport": "desktop",
+      "name": "detail",
+      "expandedOverflow": false,
+      "expandedViolations": []
+    },
+    {
+      "viewport": "desktop",
+      "name": "timeline",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "name": "timeline",
+      "expandedOverflow": false,
+      "expandedViolations": []
+    },
+    {
+      "viewport": "desktop",
+      "name": "settings",
+      "expandedOverflow": false,
+      "expandedViolations": []
+    },
+    {
+      "viewport": "desktop",
+      "name": "runtimes",
+      "expandedOverflow": false,
+      "expandedViolations": []
+    },
+    {
+      "viewport": "desktop",
+      "navigation": [
+        "/",
+        "/projects",
+        "/runtimes",
+        "/config"
+      ]
+    },
+    {
+      "viewport": "desktop",
+      "projectAnchor": "#project-python-harness",
+      "open": true,
+      "focused": true
+    },
+    {
+      "viewport": "desktop",
+      "continuity": {
+        "open": true,
+        "focused": true
+      }
+    },
+    {
+      "viewport": "desktop",
+      "attentionFocused": true,
+      "scrollBefore": 19,
+      "timelineContinuity": {
+        "focused": true,
+        "scrollLeft": 19
+      }
+    },
+    {
+      "viewport": "desktop",
+      "tailBounds": {
+        "height": 358,
+        "scrollHeight": 1055
+      },
+      "retainedScroll": 40,
+      "following": true
+    },
+    {
+      "viewport": "desktop",
+      "savedMode": "approval"
+    },
+    {
+      "viewport": "desktop",
+      "invalidSettingsRejected": true
+    },
+    {
+      "stressRoute": "/projects",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/settings/runs/BAC-4",
+      "width": 320,
+      "overflow": false
+    },
+    {
+      "stressRoute": "/",
+      "width": 320,
+      "overflow": false
+    }
+  ],
+  "renderIdentity": "Console code 022f9141032c / assets 270003548c2c · source revision unverified\nConsole started 2026-09-09 10:46:00 UTC"
+}

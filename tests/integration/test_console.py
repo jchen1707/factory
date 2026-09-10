@@ -74,18 +74,28 @@ def _to_implementing(ctx: Context) -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_the_board_renders_a_live_run_with_every_column(ctx: Context) -> None:
+def test_the_board_renders_primary_columns_and_retains_every_run_signal(ctx: Context) -> None:
     _to_implementing(ctx)
 
     page = _client(ctx).get("/").text
 
     assert "BAC-4" in page
-    assert "implementing" in page
+    assert "Implementing" in page
     # attempt and the §16.3a rung it occupies
     assert "restart" in page
-    # the column headers §18.5 names
-    for header in ("state", "attempt", "context", "tokens in / out", "spend", "activity"):
-        assert header in page, header
+    # Five scan columns; secondary §18.5 signals remain in the row disclosure.
+    for header in ("Ticket", "Project", "State", "Context", "Estimate"):
+        assert f"<th>{header}</th>" in page
+    assert "<summary>Run signals</summary>" in page
+    for label in (
+        "Branch",
+        "Attempt / rung",
+        "Elapsed / timeout",
+        "Tokens in / out",
+        "Heartbeat",
+        "Activity",
+    ):
+        assert f"<dt>{label}</dt>" in page
 
 
 def test_the_board_refreshes_without_a_reload(ctx: Context) -> None:
@@ -156,11 +166,11 @@ def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Con
     row = next(r for r in rows if r.ticket == "BAC-4")
     assert row.context_pct is None
     assert row.context_reason == reason
-    # And the page renders the em dash carrying the reason, never a figure.
     page = _client(ctx).get("/").text
-    assert f'title="{reason}"' in page
-    # The context cell is the em dash and the reason — no figure of any kind beside it.
-    context_cell = page.split(f'title="{reason}"')[1].split("</td>")[0]
+    signals = page.split("summary>Run signals</summary>", 1)[1].split("</details>", 1)[0]
+    assert f"<dt>Context evidence</dt><dd>{reason}" in signals
+    context_cell = page.split('<td data-label="Context">', 1)[1].split("</td>", 1)[0]
+    assert context_cell == "Unavailable"
     assert "%" not in context_cell
 
 
@@ -594,7 +604,7 @@ def test_the_run_timeline_page_renders_all_three_bands(ctx: Context) -> None:
     assert response.status_code == 200
     page = response.text
     # band 1 (head), band 2 (cards), band 3 (waterfall) are all present
-    assert "runtime · swim-lane waterfall" in page
+    assert "Runtime · swim-lane waterfall" in page
     for role in ("planner", "builder", "reviewer"):
         assert role in page
     assert "implementing" in page  # the live builder block
@@ -699,7 +709,8 @@ def test_invocation_controls_show_context_freshness_and_incomplete_cost(ctx: Con
     assert "gpt-5.6-sol" in page.text
     ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "observed"})
     page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
-    assert 'name="invocation" value="observed"' in page.text
+    assert "Automatic launch pending" in page.text
+    assert 'action="/settings/approve/' not in page.text
     assert "Invocation ID: <code>observed</code>" in page.text
     ctx.store.runtime.observe(
         "observed",
@@ -820,3 +831,172 @@ def test_refused_settings_preserve_unknown_choice_and_accept_correction(ctx: Con
     saved = client.post(action, data={"delegation_mode": "read-only", "max_active_agents": "8"})
     assert saved.status_code == 200
     assert ctx.store.runtime.settings("project", ctx.run.project)["delegation_mode"] == "read-only"
+
+
+def test_project_selection_opens_only_requested_defaults(ctx: Context) -> None:
+    alternate = replace(ctx.project, name="another-project")
+    ctx.registry = replace(
+        ctx.registry, projects={ctx.project.name: ctx.project, alternate.name: alternate}
+    )
+    client = _client(ctx)
+    default = client.get("/projects").text
+    selected = client.get("/projects?project=another-project").text
+    first = f'<details class="panel project-default" id="project-{ctx.project.name}"'
+    second = '<details class="panel project-default" id="project-another-project"'
+    assert first + " open>" in default
+    assert second + ">" in default
+    assert first + ">" in selected
+    assert second + " open>" in selected
+    assert (
+        'data-project-link="project-another-project" href="?project=another-project#project-another-project" aria-current=true'
+        in selected
+    )
+    assert "Effective active-agent limit" in selected
+    assert 'name="max_active_agents"' in selected
+    assert 'name="template"' not in selected
+    assert first + " open>" in client.get("/projects?project=unknown").text
+
+
+def test_config_rejection_identifies_affected_role_without_writing(ctx: Context) -> None:
+    path = _models_toml(ctx)
+    before = path.read_text()
+    builder = ctx.routing.role("builder").model
+    client = _client(ctx)
+    page = client.post("/config/models", data=_form(ctx, **{"model.reviewer": builder}))
+    assert 'role="alert"' in page.text
+    assert 'aria-describedby="error-reviewer" aria-invalid="true"' in page.text
+    assert 'id="error-reviewer"' in page.text
+    assert 'class="configuration-editor"' in page.text
+    assert page.text.index('class="configuration-editor"') < page.text.index(
+        'id="configuration-sources"'
+    )
+    assert path.read_text() == before
+
+
+def test_runtime_scan_separates_ownership_historical_checks_and_current_identity(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory.console.views import InventoryResult
+
+    sandbox = "factory-build-check-history"
+    ctx.store.runtime.start_invocation(
+        "checks",
+        ctx.run.id,
+        1,
+        "builder",
+        {
+            "runtime_compatibility": {
+                "sandbox": sandbox,
+                "checks": {"hooks": {"status": "pass"}, "transcripts": {"status": "fail"}},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "factory.cli._sbx_inventory",
+        lambda: InventoryResult(
+            [
+                {"name": sandbox, "status": "running"},
+                {"name": "codex-operator-session", "status": "stopped"},
+            ]
+        ),
+    )
+    page = _client(ctx).get("/runtimes").text
+    assert "factory-owned" in page
+    assert "operator-owned" in page
+    assert "Historical · BAC-4: 1/2 recorded checks passed" in page
+    assert "Current certification: Unverified" in page
+    assert "Current identity unobserved" in page
+    assert "<button" not in page
+
+
+@pytest.mark.parametrize(
+    ("settings", "message", "actionable"),
+    [
+        ({}, "No pending invocation", False),
+        ({"waiting_invocation": "next"}, "Automatic launch pending", False),
+        ({"waiting_invocation": "next", "mode": "approval"}, "Awaiting approval", True),
+        (
+            {"waiting_invocation": "next", "mode": "approval", "approved_invocation": "next"},
+            "Already approved",
+            False,
+        ),
+    ],
+)
+def test_admission_only_offers_the_current_pending_approval(
+    ctx: Context, settings: dict[str, str], message: str, actionable: bool
+) -> None:
+    ctx.store.runtime.configure("run", ctx.run.id, settings)
+    client = _client(ctx)
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
+    assert message in page
+    assert ('action="/settings/approve/' in page) is actionable
+    if actionable:
+        assert '<input type="hidden" name="invocation" value="next">' in page
+        result = client.post(f"/settings/approve/{ctx.run.linear_id}", data={"invocation": "next"})
+        assert result.status_code == 200
+        assert "Already approved" in client.get(f"/settings/runs/{ctx.run.linear_id}").text
+
+
+@pytest.mark.parametrize("submitted", ["stale", "", "not-an-invocation"])
+def test_console_refuses_stale_or_invalid_approval_without_recording_it(
+    ctx: Context, submitted: str
+) -> None:
+    ctx.store.runtime.configure(
+        "run", ctx.run.id, {"mode": "approval", "waiting_invocation": "current"}
+    )
+    before = ctx.store.runtime.events(ctx.run.id)
+    result = _client(ctx).post(
+        f"/settings/approve/{ctx.run.linear_id}", data={"invocation": submitted}
+    )
+    assert result.status_code == 409
+    assert "Reload run settings" in result.text
+    assert ctx.store.runtime.settings("run", ctx.run.id).get("approved_invocation") is None
+    assert ctx.store.runtime.events(ctx.run.id) == before
+
+
+@pytest.mark.parametrize(("mode", "approved"), [("automatic", None), ("approval", "current")])
+def test_console_refuses_unnecessary_approval(
+    ctx: Context, mode: str, approved: str | None
+) -> None:
+    ctx.store.runtime.configure(
+        "run",
+        ctx.run.id,
+        {"mode": mode, "waiting_invocation": "current", "approved_invocation": approved},
+    )
+    result = _client(ctx).post(
+        f"/settings/approve/{ctx.run.linear_id}", data={"invocation": "current"}
+    )
+    assert result.status_code == 409
+
+
+def test_policy_replacement_form_matches_paused_state_requirement(ctx: Context) -> None:
+    _to_implementing(ctx)
+    client = _client(ctx)
+    page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
+    assert "Suspend the run before replacing its policy" in page
+    assert 'action="/settings/replace-policy/' not in page
+    response = client.post(
+        f"/settings/replace-policy/{ctx.run.linear_id}", data={"profile": "hardening"}
+    )
+    assert response.status_code == 409
+    assert ctx.store.runtime.policy(ctx.run.id) is None
+
+
+def test_current_invocations_remain_before_large_history(ctx: Context) -> None:
+    for index, role in enumerate(["implement", "review:spec", *(["child"] * 55)]):
+        identity = f"invocation-{index}"
+        ctx.store.runtime.start_invocation(identity, ctx.run.id, index + 1, role, {})
+        if index < 2:
+            ctx.store.runtime.db.execute(
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
+                (identity, ctx.run.id, ctx.run.project, "active", None),
+            )
+    ctx.store.runtime.configure(
+        "run", ctx.run.id, {"waiting_invocation": "invocation-56", "mode": "approval"}
+    )
+    page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}").text
+    visible, history = page.split('<details data-key="invocation-history">', 1)
+    for identity in ("invocation-0", "invocation-1", "invocation-56"):
+        assert f'data-key="invocation-{identity}"' in visible
+    assert 'data-key="invocation-invocation-55"' in history
+    assert "Invocation history (54)" in page

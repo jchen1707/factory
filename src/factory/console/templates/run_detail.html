@@ -1,3 +1,15 @@
 $head
-<section class="panel">$controls</section>
-<div class="detail-grid"><div><section class="panel">$timeline</section>$gates$review</div><aside>$artifacts$tail</aside></div>
+$metrics
+<div class="detail-grid">
+  <div class="detail-main">
+    <section class="panel" id="current-attempt">$current$controls</section>
+    <section class="panel evidence-summary"><h2>Verification and review</h2>$gates$review</section>
+    <section class="panel" id="run-history"><details data-key="run-history"><summary>Execution history</summary>$timeline</details></section>
+  </div>
+  <aside class="evidence-rail panel" aria-label="Retained evidence">
+    <h2>Retained evidence</h2>
+    $source
+    <details data-key="run-artifacts"><summary>Artifacts</summary>$artifacts</details>
+    <details data-key="run-tail"><summary>Live tail</summary>$tail</details>
+  </aside>
+</div>

@@ -1,0 +1,215 @@
+{
+  "scenario": "approval",
+  "viewport": "desktop",
+  "browser": "152.0.7977.83",
+  "clock": 1788950760,
+  "fixtureIsolation": "fresh server/database for each viewport",
+  "visualAcceptance": "pending human side-by-side review",
+  "pages": [
+    {
+      "name": "runs",
+      "route": "/",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1000,
+        "firstViewportHeadings": [
+          "Runs",
+          "Needs attention",
+          "Work in progress"
+        ],
+        "rowHeights": [
+          109
+        ],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "projects",
+      "route": "/projects",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1645,
+        "firstViewportHeadings": [
+          "Projects",
+          "Registered projects",
+          "Project defaults"
+        ],
+        "rowHeights": [],
+        "selectedMode": "automatic"
+      }
+    },
+    {
+      "name": "detail",
+      "route": "/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1300,
+        "firstViewportHeadings": [
+          "Run details",
+          "Attempt 1 · Implementing",
+          "Verification and review",
+          "Retained evidence",
+          "Retained artifacts",
+          "Live tail"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "timeline",
+      "route": "/runs/BAC-4/timeline",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1514,
+        "firstViewportHeadings": [
+          "Run timeline",
+          "Runtime · swim-lane waterfall",
+          "Execution history",
+          "Agent activity"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "settings",
+      "route": "/settings/runs/BAC-4",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1968,
+        "firstViewportHeadings": [
+          "Run settings",
+          "Next invocation",
+          "Invocations · 2",
+          "Effective settings"
+        ],
+        "rowHeights": [],
+        "selectedMode": "approval"
+      }
+    },
+    {
+      "name": "runtimes",
+      "route": "/runtimes",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1000,
+        "firstViewportHeadings": [
+          "Runtimes",
+          "Sandbox inventory",
+          "Runtime compatibility"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    },
+    {
+      "name": "config",
+      "route": "/config",
+      "viewport": "desktop",
+      "status": 200,
+      "overflow": false,
+      "focus": {
+        "tag": "A",
+        "text": "Skip to content"
+      },
+      "violations": [],
+      "errors": [],
+      "layout": {
+        "pageHeight": 1272,
+        "firstViewportHeadings": [
+          "Configuration",
+          "Model routing",
+          "Budget limits"
+        ],
+        "rowHeights": [],
+        "selectedMode": null
+      }
+    }
+  ],
+  "failures": [],
+  "interactions": [
+    {
+      "viewport": "desktop",
+      "name": "runs",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "primary": {
+        "headings": [
+          "Ticket",
+          "Project",
+          "State",
+          "Context",
+          "Estimate"
+        ],
+        "clipped": false,
+        "rows": 1
+      }
+    },
+    {
+      "viewport": "desktop",
+      "name": "timeline",
+      "stream": "Connected to live updates"
+    },
+    {
+      "viewport": "desktop",
+      "navigation": [
+        "/",
+        "/projects",
+        "/runtimes",
+        "/config"
+      ]
+    }
+  ],
+  "renderIdentity": "Console code ab58d0191a5f / assets 270003548c2c · source revision unverified\nConsole started 2026-09-09 10:46:00 UTC"
+}

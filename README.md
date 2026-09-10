@@ -16,6 +16,8 @@ uv run factory serve
 ```
 
 `serve` exposes the operator console on loopback at http://127.0.0.1:7717.
+It runs in the foreground; an existing background console needs a restart after code or
+UI asset updates. See [console operation and revision checks](docs/operator-reference.md#console-operation-and-revision-checks).
 A registered project, configured host credentials and compatible sandbox runtime are
 prerequisites. `doctor --deep` performs a paid model canary.
 

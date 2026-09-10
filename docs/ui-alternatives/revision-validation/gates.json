@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "root": ".",
+  "targets": [
+    {
+      "name": "factory",
+      "dir": "."
+    }
+  ],
+  "missingApps": [],
+  "requestedKinds": [],
+  "gates": [
+    {
+      "name": "ruff check",
+      "app": "factory",
+      "kind": "lint",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 92,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "ruff format --check",
+      "app": "factory",
+      "kind": "format",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 52,
+      "caveat": null,
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "mypy",
+      "app": "factory",
+      "kind": "types",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 415,
+      "caveat": "mypy reads only the paths in pyproject.toml's `files` and skips dot-directories during discovery. A new top-level directory is silently unchecked while this stays green \u2014 add it to `files` in the same change that creates it.",
+      "when": null,
+      "outputTail": ""
+    },
+    {
+      "name": "pytest",
+      "app": "factory",
+      "kind": "test",
+      "status": "pass",
+      "exit": 0,
+      "durationMs": 195334,
+      "caveat": "Every test here runs against a fake sandbox and fixture transcripts. A green suite proves the control plane's logic, never that `sbx`, `codex`, `gh` or Linear behave the way the fakes say they do \u2014 that is what `factory doctor` and a real run are for.",
+      "when": null,
+      "outputTail": ""
+    }
+  ],
+  "verdict": "pass"
+}

@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from factory import recovery
+from factory import operator_controls, recovery
+from factory.agent.telemetry import CurrentContext
 from factory.console.events import (
     ToolCallView,
     TurnView,
@@ -100,6 +101,104 @@ class RunRow:
     heartbeat_age: float | None
     blocked_reason: str | None
     pr_url: str | None
+    title: str | None = None
+    usage_status: str = "unknown"
+    spend_status: str = "unknown"
+    known_spend_usd: float | None = None
+    context_source: str | None = None
+    context_age_seconds: float | None = None
+    active_invocations: int = 0
+    fresh_context_invocations: int = 0
+
+
+@dataclass(frozen=True)
+class UsageSummary:
+    tokens_in: int
+    tokens_out: int
+    tokens_cached: int
+    usage_status: str
+    spend_status: str
+    known_spend_usd: float | None
+
+
+def run_usage(store: Store, run: Run) -> UsageSummary:
+    """Ledger counters are cumulative; invocation telemetry establishes completeness.
+
+    The cost row written at admission is a placeholder, not an observation of zero.
+    Complete invocation estimates already appear in the ledger; known_spend adds only
+    incomplete invocation lower bounds, preventing parent/child double accounting.
+    """
+    costs = store.costs(run.id)
+    invocations = store.runtime.invocations(run.id)
+    observed = [
+        item for item in invocations if isinstance((item["telemetry"] or {}).get("usage"), dict)
+    ]
+    placeholder_keys = {
+        (item["attempt"], item["metadata"].get("cost_step", item["id"]))
+        for item in invocations
+        if item not in observed
+    }
+    observed_costs = [row for row in costs if (row["attempt"], row["step"]) not in placeholder_keys]
+    available = bool(observed_costs or observed)
+    status = operator_controls.status(store, run.project, run.id)
+    complete = available and all(
+        (item["telemetry"] or {}).get("usage_complete") is True for item in invocations
+    )
+    complete = complete and not any(
+        (item["telemetry"] or {}).get("nested_accounting", {}).get("complete") is False
+        for item in invocations
+    )
+    complete = (
+        complete
+        and not status["active_agents"]
+        and not status["queued_children"]
+        and not status["pending_certifications"]
+    )
+    priced = any(row["usd"] is not None for row in costs) or any(
+        "known_usd" in (item["telemetry"] or {}).get("estimate", {}) for item in invocations
+    )
+    cost_complete = bool(costs) and all(row["usd"] is not None for row in costs)
+    cost_complete = cost_complete and (not invocations or status["cost_complete"])
+    return UsageSummary(
+        sum(row["input_tokens"] or 0 for row in costs),
+        sum(row["output_tokens"] or 0 for row in costs),
+        sum(row["cached_tokens"] or 0 for row in costs),
+        "complete" if complete else "partial" if available else "unknown",
+        "complete" if cost_complete else "partial" if priced else "unknown",
+        store.known_spend(run.id) if priced else None,
+    )
+
+
+def _invocation_context_counts(store: Store, run: Run) -> tuple[int, int]:
+    active_ids = {
+        row["invocation_id"]
+        for row in store.runtime.db.execute(
+            "SELECT invocation_id FROM agent_leases WHERE run_id=? AND status='active'", (run.id,)
+        )
+    }
+    fresh = 0
+    for invocation in store.runtime.invocations(run.id):
+        if invocation["id"] not in active_ids:
+            continue
+        context = (invocation["telemetry"] or {}).get("context", {})
+        try:
+            reading = CurrentContext(**context).read(now=time.time())
+        except (TypeError, ValueError):
+            continue
+        fresh += reading.fraction is not None
+    return len(active_ids), fresh
+
+
+def _ticket_title(home: Path, run: Run) -> str | None:
+    try:
+        with (home / "state" / "runs" / run.id / "context" / "ticket.md").open(
+            encoding="utf-8"
+        ) as stream:
+            heading = stream.readline(8192).strip()
+    except (OSError, UnicodeError):
+        return None
+    prefix = f"# {run.linear_id} — "
+    return heading.removeprefix(prefix).strip() or None if heading.startswith(prefix) else None
 
 
 def runs_board(
@@ -140,7 +239,9 @@ def runs_board(
 
         context_pct, context_reason = context_percentage(view, run.state, routing)
         tokens_in, tokens_out, usd = store.spend(run.id)
-        cached = view.cached_input_tokens if view is not None else 0
+        usage = run_usage(store, run)
+        cached = usage.tokens_cached
+        active_invocations, fresh_context_invocations = _invocation_context_counts(store, run)
 
         rows.append(
             RunRow(
@@ -165,6 +266,18 @@ def runs_board(
                 heartbeat_age=heartbeat_age,
                 blocked_reason=run.blocked_reason,
                 pr_url=run.pr_url,
+                title=_ticket_title(home, run),
+                active_invocations=active_invocations,
+                fresh_context_invocations=fresh_context_invocations,
+                usage_status=usage.usage_status,
+                spend_status=usage.spend_status,
+                known_spend_usd=usage.known_spend_usd,
+                context_source="current attempt events.jsonl"
+                if view is not None and view.context.observed_at is not None
+                else None,
+                context_age_seconds=max(0.0, time.time() - view.context.observed_at)
+                if view is not None and view.context.observed_at is not None
+                else None,
             )
         )
     return rows
@@ -343,6 +456,22 @@ def run_detail(
 
 
 @dataclass(frozen=True)
+class InventoryResult:
+    sandboxes: list[dict[str, Any]]
+    status: str = "available"
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeAssociation:
+    ticket: str
+    run_id: str
+    source: str
+    reference: str
+    current: bool
+
+
+@dataclass(frozen=True)
 class RuntimeRow:
     name: str
     state: str
@@ -352,6 +481,11 @@ class RuntimeRow:
     operator_owned: bool
     runs_using: list[str] = field(default_factory=list)
     last_denial: str | None = None
+    associations: list[RuntimeAssociation] = field(default_factory=list)
+    layout: str = "Unavailable — no recorded execution layout"
+    compatibility: str = "Unavailable — current runtime identity unobserved"
+    agent: str = "Unavailable"
+    recorded_compatibility: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _ports_of(sandbox: dict[str, Any]) -> list[str]:
@@ -363,59 +497,214 @@ def _ports_of(sandbox: dict[str, Any]) -> list[str]:
     than letting an operator assume the one they saw last time still holds.
     """
     out: list[str] = []
-    for port in sandbox.get("ports") or []:
+    ports = sandbox.get("ports")
+    for port in ports if isinstance(ports, list) else []:
         if not isinstance(port, dict):
-            out.append(str(port))
+            if isinstance(port, str):
+                out.append(port)
             continue
         host_port = port.get("host_port")
         sandbox_port = port.get("sandbox_port")
         if host_port is None and sandbox_port is None:
             continue
-        out.append(f"{host_port}->{sandbox_port}")
+        if type(host_port) is int and type(sandbox_port) is int:
+            out.append(f"{host_port}->{sandbox_port}")
     return out
 
 
-def runtimes(
-    sandboxes: list[dict[str, Any]], store: Store, namespace: str = "factory-"
-) -> list[RuntimeRow]:
-    """View 2 — `sbx ls --json` joined to the runs using each sandbox. A sandbox not
-    matching `^factory-(build|review)-` is `operator_owned` (James's `codex-*`); the
-    console offers no control over it (§18.5, F26).
+def _display(value: Any) -> str:
+    return value if isinstance(value, str) and value.strip() else "Unavailable"
 
-    The `sandboxes` argument is the parsed `sbx ls --json` output, procured by the caller
-    so this module shells out to nothing. The join is a heuristic on the sandbox-name →
-    project convention (`factory-build-<project>` / `factory-review-<project>`); the
-    attempt row's `sandbox` column is the source of truth for which run is actually in
-    which sandbox, but a board does not need that precision and the convention is the one
-    `projects.toml` fixes at creation."""
+
+def _runtime_associations(store: Store) -> dict[str, list[RuntimeAssociation]]:
+    associations: dict[str, list[RuntimeAssociation]] = {}
+    for run in store.all_runs():
+
+        def add(name: Any, source: str, reference: str, current: bool, owner: Run = run) -> None:
+            if isinstance(name, str) and name:
+                association = RuntimeAssociation(
+                    owner.linear_id, owner.id, source, reference, current
+                )
+                if association not in associations.setdefault(name, []):
+                    associations[name].append(association)
+
+        for attempt in store.runtime.db.execute("SELECT * FROM attempts WHERE run_id=?", (run.id,)):
+            add(
+                attempt["sandbox"],
+                "attempt",
+                f"{attempt['attempt']} · {attempt['state']}",
+                attempt["attempt"] == run.attempt
+                and attempt["state"] == run.state.value
+                and attempt["ended_at"] is None
+                and run.state not in TERMINAL,
+            )
+        active = {
+            row["invocation_id"]
+            for row in store.runtime.db.execute(
+                "SELECT invocation_id FROM agent_leases WHERE run_id=? AND status='active'",
+                (run.id,),
+            )
+        }
+        for effect in store.effects(run.id):
+            if effect.system not in {
+                "agent-launch",
+                "agent-preparation",
+                "delegation-mailbox",
+                "child-execution",
+            }:
+                continue
+            try:
+                payload = json.loads(effect.external_id or "{}")
+            except (ValueError, TypeError):
+                continue
+            if isinstance(payload, dict) and effect.system == "delegation-mailbox":
+                spec = payload.get("spec", {})
+                if isinstance(spec, dict):
+                    add(spec.get("name"), "prepared specification", effect.step, False)
+            if isinstance(payload, dict) and effect.system == "child-execution":
+                add(payload.get("sandbox"), "child preparation", effect.step, False)
+            handle = payload.get("handle", {}) if isinstance(payload, dict) else {}
+            if isinstance(handle, dict):
+                add(handle.get("sandbox"), "invocation", effect.step, effect.step in active)
+        for invocation in store.runtime.invocations(run.id):
+            metadata = invocation["metadata"]
+            handle = (metadata.get("preparation") or {}).get("handle", {})
+            add(handle.get("sandbox"), "invocation", invocation["id"], invocation["id"] in active)
+        for job in store.runtime.db.execute(
+            "SELECT * FROM runtime_certifications WHERE run_id=?", (run.id,)
+        ):
+            identity = json.loads(job["identity"])
+            add(identity.get("sandbox"), "certification " + job["status"], job["id"], False)
+    return associations
+
+
+def _recorded_compatibility(store: Store) -> dict[str, list[dict[str, Any]]]:
+    records: dict[str, list[dict[str, Any]]] = {}
+    for run in store.all_runs():
+        for row in store.runtime.db.execute(
+            "SELECT * FROM runtime_certifications WHERE run_id=?", (run.id,)
+        ):
+            identity = json.loads(row["identity"])
+            sandbox = identity.get("sandbox")
+            if not isinstance(sandbox, str):
+                continue
+            evidence = json.loads(row["evidence"]) if row["evidence"] else None
+            records.setdefault(sandbox, []).append(
+                {
+                    "source": "recorded certification",
+                    "ticket": run.linear_id,
+                    "job_id": row["id"],
+                    "status": row["status"],
+                    "identity": identity,
+                    "fingerprint": row["fingerprint"],
+                    "failure": row["failure"],
+                    "evidence": evidence,
+                }
+            )
+        for invocation in store.runtime.invocations(run.id):
+            report = invocation["metadata"].get("runtime_compatibility")
+            if not isinstance(report, dict):
+                continue
+            certification = report.get("certification", {})
+            identity = certification.get("identity", {}) if isinstance(certification, dict) else {}
+            sandbox = (
+                identity.get("sandbox", report.get("sandbox"))
+                if isinstance(identity, dict)
+                else report.get("sandbox")
+            )
+            if isinstance(sandbox, str):
+                records.setdefault(sandbox, []).append(
+                    {
+                        "source": "recorded invocation compatibility",
+                        "ticket": run.linear_id,
+                        "invocation_id": invocation["id"],
+                        "report": report,
+                    }
+                )
+    return records
+
+
+def _recorded_layouts(store: Store) -> dict[str, set[str]]:
+    """Only retained specifications establish bind/clone; registry defaults do not."""
+    layouts: dict[str, set[str]] = {}
+    for run in store.all_runs():
+        for effect in store.effects(run.id):
+            if effect.system != "delegation-mailbox" or effect.status != "confirmed":
+                continue
+            try:
+                payload = json.loads(effect.external_id or "{}")
+            except ValueError:
+                continue
+            spec = payload.get("spec", {}) if isinstance(payload, dict) else {}
+            if (
+                not isinstance(spec, dict)
+                or not isinstance(spec.get("name"), str)
+                or type(spec.get("clone")) is not bool
+            ):
+                continue
+            label = "clone" if spec["clone"] else "bind"
+            layouts.setdefault(spec["name"], set()).add(
+                f"{label} · recorded {run.linear_id} attempt {effect.attempt}"
+            )
+    return layouts
+
+
+def runtimes(
+    sandboxes: list[dict[str, Any]],
+    store: Store,
+    namespace: str = "factory-",
+    *,
+    registry: Registry | None = None,
+) -> list[RuntimeRow]:
+    """Normalize inventory and join recorded uses, without inferring activity from names.
+
+    Certification records describe their retained identity. Listing an identically named
+    sandbox does not observe its runtime generation, so it cannot establish certification.
+    """
+    recorded = _runtime_associations(store)
+    layouts = _recorded_layouts(store)
+    compatibility = _recorded_compatibility(store)
     rows: list[RuntimeRow] = []
     for sbx in sandboxes:
         if not isinstance(sbx, dict):
             continue
-        name = str(sbx.get("name", ""))
-        is_build = name.startswith("factory-build-")
-        is_review = name.startswith("factory-review-")
-        is_factory = is_build or is_review
-        using: list[str] = []
-        if is_factory:
-            project_name = name.removeprefix("factory-build-").removeprefix("factory-review-")
-            for run in store.all_runs():
-                if run.project != project_name:
-                    continue
-                if (
-                    run.state in (State.IMPLEMENTING, State.VERIFYING, State.PLANNING) and is_build
-                ) or (run.state is State.REVIEWING and is_review):
-                    using.append(run.linear_id)
+        name = _display(sbx.get("name"))
+        is_factory = name.startswith(("factory-build-", "factory-review-"))
+        associations = list(recorded.get(name, []))
+        if not associations and registry is not None:
+            for project in registry.projects.values():
+                if name in (project.build_sandbox, project.review_sandbox):
+                    associations.append(
+                        RuntimeAssociation("", "", "registry default", project.name, False)
+                    )
+        workspaces = sbx.get("workspaces", sbx.get("workspace"))
+        workspace = (
+            ", ".join(workspaces)
+            if isinstance(workspaces, list)
+            and workspaces
+            and all(isinstance(item, str) for item in workspaces)
+            else _display(workspaces)
+        )
         rows.append(
             RuntimeRow(
                 name=name,
-                state=str(sbx.get("state", "")),
-                workspace=str(sbx.get("workspace", "")),
+                state=_display(sbx.get("status", sbx.get("state"))),
+                workspace=workspace,
                 published_ports=_ports_of(sbx),
-                template=str(sbx.get("template", "")),
+                template=_display(sbx.get("template")),
                 operator_owned=not is_factory,
-                runs_using=using,
-                last_denial=sbx.get("last_denial"),
+                runs_using=sorted(
+                    {item.ticket for item in associations if item.current and item.ticket}
+                ),
+                last_denial=sbx.get("last_denial")
+                if isinstance(sbx.get("last_denial"), str)
+                else None,
+                associations=associations,
+                recorded_compatibility=compatibility.get(name, []),
+                layout="; ".join(sorted(layouts[name]))
+                if name in layouts
+                else "Unavailable — no recorded execution layout",
+                agent=_display(sbx.get("agent")),
             )
         )
     return rows

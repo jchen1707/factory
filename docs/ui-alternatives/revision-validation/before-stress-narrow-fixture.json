@@ -1,0 +1,1672 @@
+{
+  "schema": 2,
+  "source": {
+    "commit": "ba9ca3c32fb4a4b0e55ac0dbfe0464424d38c201",
+    "tracked_diff_sha256": "b23e1ecd805050d0790a3b3c88b8419f460bb1ff724ff3e95e9a4017aeadb8e6"
+  },
+  "scenario": "stress",
+  "viewport": "narrow",
+  "clock": 1788950760.0,
+  "isolation": "Fresh ctx/database/app per viewport; captures precede all mutation tests",
+  "runs": [
+    {
+      "run_id": "fixture000000007",
+      "ticket": "FIXTURE-10",
+      "project": "python-harness",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "blocked",
+      "badge": "blocked",
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in blocked",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": "Gate report incomplete",
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000008",
+      "ticket": "FIXTURE-11",
+      "project": "fixture-project-1-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "awaiting_human",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in awaiting_human",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000009",
+      "ticket": "FIXTURE-12",
+      "project": "fixture-project-2-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": 30,
+      "context_pct": null,
+      "context_reason": "no event stream for this attempt yet",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000010",
+      "ticket": "FIXTURE-13",
+      "project": "python-harness",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "blocked",
+      "badge": "blocked",
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in blocked",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": "Gate report incomplete",
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000011",
+      "ticket": "FIXTURE-14",
+      "project": "fixture-project-1-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "awaiting_human",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in awaiting_human",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000012",
+      "ticket": "FIXTURE-15",
+      "project": "fixture-project-2-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": 30,
+      "context_pct": null,
+      "context_reason": "no event stream for this attempt yet",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000013",
+      "ticket": "FIXTURE-16",
+      "project": "python-harness",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "blocked",
+      "badge": "blocked",
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in blocked",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": "Gate report incomplete",
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000014",
+      "ticket": "FIXTURE-17",
+      "project": "fixture-project-1-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "awaiting_human",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in awaiting_human",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000015",
+      "ticket": "FIXTURE-18",
+      "project": "fixture-project-2-with-a-long-registry-identity",
+      "branch": "fix/long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-long-unbroken-identity-",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": 30,
+      "context_pct": null,
+      "context_reason": "no event stream for this attempt yet",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    }
+  ],
+  "detail": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    },
+    "transitions": [
+      {
+        "at": 1788950480,
+        "from_state": "approved",
+        "to_state": "claimed",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950500,
+        "from_state": "claimed",
+        "to_state": "context_loaded",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950520,
+        "from_state": "context_loaded",
+        "to_state": "sandbox_creating",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950540,
+        "from_state": "sandbox_creating",
+        "to_state": "sandbox_ready",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950560,
+        "from_state": "sandbox_ready",
+        "to_state": "worktree_ready",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      },
+      {
+        "at": 1788950580,
+        "from_state": "worktree_ready",
+        "to_state": "implementing",
+        "actor": "auto",
+        "rule": null,
+        "detail": null
+      }
+    ],
+    "gate_verdict": "pass",
+    "gates": [
+      {
+        "name": "lint",
+        "status": "pass",
+        "caveat": null
+      },
+      {
+        "name": "unit tests",
+        "status": "pass",
+        "caveat": "Sandbox integration checks are separate evidence"
+      }
+    ],
+    "review_tier2": "ran:forced",
+    "review_findings": [
+      {
+        "severity": "low",
+        "file": "src/app/settings.py",
+        "line": 14,
+        "summary": "Clarify the default timeout label"
+      },
+      {
+        "severity": "high",
+        "file": "src/app/settings.py",
+        "line": 28,
+        "summary": "Preserve source when recovery is interrupted"
+      }
+    ],
+    "artifacts": [
+      {
+        "name": "source-snapshot.json",
+        "path": "source-snapshot.json",
+        "sha256": "7bf2d01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "events_path": "/fixture/python-harness/.factory/worktrees/BAC-4/.factory/run/1/events.jsonl",
+    "pr_url": null,
+    "blocked_reason": null
+  },
+  "timeline": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": "feat/BAC-4-application-skeleton-settings-structured",
+      "state": "implementing",
+      "badge": null,
+      "attempt": 1,
+      "rung": "restart",
+      "elapsed_in_state": 180.0,
+      "timeout_seconds": 30,
+      "context_pct": 0.46,
+      "context_reason": "fresh; measured 0s ago",
+      "tokens_in": 24000,
+      "tokens_out": 1600,
+      "tokens_cached": 12000,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": "git diff --stat",
+      "heartbeat_age": 8.0,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": "Application skeleton: Settings, structured logging, app factory",
+      "usage_status": "partial",
+      "spend_status": "partial",
+      "known_spend_usd": 0.47,
+      "context_source": "current attempt events.jsonl",
+      "context_age_seconds": 0.0,
+      "active_invocations": 2,
+      "fresh_context_invocations": 1
+    },
+    "blocks": [
+      {
+        "state": "approved",
+        "lane": "engineer",
+        "start": 1788950460,
+        "end": 1788950480,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "claimed",
+        "lane": "code",
+        "start": 1788950480,
+        "end": 1788950500,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "context_loaded",
+        "lane": "code",
+        "start": 1788950500,
+        "end": 1788950520,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "sandbox_creating",
+        "lane": "code",
+        "start": 1788950520,
+        "end": 1788950540,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "sandbox_ready",
+        "lane": "code",
+        "start": 1788950540,
+        "end": 1788950560,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "worktree_ready",
+        "lane": "code",
+        "start": 1788950560,
+        "end": 1788950580,
+        "duration_s": 20.0,
+        "attempt": 1,
+        "dead": false,
+        "live": false
+      },
+      {
+        "state": "implementing",
+        "lane": "builder",
+        "start": 1788950580,
+        "end": 1788950760,
+        "duration_s": 180.0,
+        "attempt": 1,
+        "dead": false,
+        "live": true
+      }
+    ],
+    "cards": [
+      {
+        "role": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      },
+      {
+        "role": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "status": "live",
+        "context_pct": 0.46,
+        "context_reason": "fresh; measured 0s ago",
+        "activity": "git diff --stat",
+        "heartbeat_age": 8.0
+      },
+      {
+        "role": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      }
+    ],
+    "tool_calls": [
+      {
+        "index": 0,
+        "kind": "command_execution",
+        "summary": "cat src/app/settings.py",
+        "exit_code": 0,
+        "duration_s": 0.20000004768371582
+      },
+      {
+        "index": 1,
+        "kind": "command_execution",
+        "summary": "pytest tests/test_settings.py",
+        "exit_code": 0,
+        "duration_s": 4.0
+      },
+      {
+        "index": 2,
+        "kind": "command_execution",
+        "summary": "git diff --stat",
+        "exit_code": 0,
+        "duration_s": null
+      }
+    ],
+    "elapsed_total_s": 300.0
+  },
+  "roles": {
+    "planner": {
+      "name": "planner",
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "preset": "existing"
+    },
+    "builder": {
+      "name": "builder",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "reviewer": {
+      "name": "reviewer",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "synthesiser": {
+      "name": "synthesiser",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "documenter": {
+      "name": "documenter",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    }
+  },
+  "runtimes": [
+    {
+      "name": "factory-build-python-harness",
+      "state": "running",
+      "workspace": "/fixture/project, /fixture/long-workspace-abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [
+        "BAC-4"
+      ],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "attempt",
+          "reference": "1 \u00b7 implementing",
+          "current": true
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "invocation",
+          "reference": "fixture000000001:1:implement",
+          "current": true
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "prepared specification",
+          "reference": "parent",
+          "current": false
+        }
+      ],
+      "layout": "bind \u00b7 recorded BAC-4 attempt 1",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": []
+    },
+    {
+      "name": "factory-review-fixture-certification-0",
+      "state": "stopped",
+      "workspace": "Unavailable",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "certification completed",
+          "reference": "00000000000000000000000000000010",
+          "current": false
+        }
+      ],
+      "layout": "Unavailable \u2014 no recorded execution layout",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": [
+        {
+          "source": "recorded certification",
+          "ticket": "BAC-4",
+          "job_id": "00000000000000000000000000000010",
+          "status": "completed",
+          "identity": {
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sandbox": "factory-review-fixture-certification-0"
+          },
+          "fingerprint": "2d8c3f87550b8c81dcdc6945afda8a36bc65a18dc36e15df6332a7c754630a37",
+          "failure": null,
+          "evidence": {
+            "compatible": true,
+            "probe": "fixture",
+            "identity": {
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "sandbox": "factory-review-fixture-certification-0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "factory-review-fixture-certification-1",
+      "state": "running",
+      "workspace": "/fixture/review",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": false,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "prepared specification",
+          "reference": "parent",
+          "current": false
+        },
+        {
+          "ticket": "BAC-4",
+          "run_id": "fixture000000001",
+          "source": "certification failed",
+          "reference": "00000000000000000000000000000011",
+          "current": false
+        }
+      ],
+      "layout": "clone \u00b7 recorded BAC-4 attempt 1",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "claude",
+      "recorded_compatibility": [
+        {
+          "source": "recorded certification",
+          "ticket": "BAC-4",
+          "job_id": "00000000000000000000000000000011",
+          "status": "failed",
+          "identity": {
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sandbox": "factory-review-fixture-certification-1"
+          },
+          "fingerprint": "1c2a0da0c3d56449ba1a913665b6e39d0f3f91bdb65dfeb1bb5aef0590fe1692",
+          "failure": "hook probe incomplete",
+          "evidence": {
+            "compatible": false,
+            "probe": "fixture",
+            "identity": {
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "sandbox": "factory-review-fixture-certification-1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "codex-james",
+      "state": "running",
+      "workspace": "/fixture/operator",
+      "published_ports": [],
+      "template": "Unavailable",
+      "operator_owned": true,
+      "runs_using": [],
+      "last_denial": null,
+      "associations": [],
+      "layout": "Unavailable \u2014 no recorded execution layout",
+      "compatibility": "Unavailable \u2014 current runtime identity unobserved",
+      "agent": "codex",
+      "recorded_compatibility": []
+    }
+  ],
+  "projects": [
+    {
+      "name": "python-harness",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 1,
+      "active_agents": 2,
+      "waiting": "0 children \u00b7 10 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    },
+    {
+      "name": "fixture-project-1-with-a-long-registry-identity",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 0,
+      "active_agents": 0,
+      "waiting": "0 children \u00b7 0 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    },
+    {
+      "name": "fixture-project-2-with-a-long-registry-identity",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 0,
+      "active_agents": 0,
+      "waiting": "0 children \u00b7 0 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    }
+  ],
+  "settings": {
+    "isolation": "shared",
+    "agent_adapter": "codex-exec",
+    "launch:1:implement": 1,
+    "waiting_invocation": null
+  },
+  "invocations": [
+    {
+      "id": "fixture-invocation-000-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 1,
+      "role": "implement",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-0"
+      },
+      "telemetry": {
+        "context": {
+          "tokens": 46000,
+          "effective_window": 100000,
+          "observed_at": 1788950760.0
+        },
+        "usage": {
+          "input_tokens": 24000,
+          "output_tokens": 1600,
+          "cached_input_tokens": 12000
+        },
+        "usage_complete": false,
+        "estimate": {
+          "known_usd": 0.05,
+          "complete": false
+        }
+      },
+      "sequence": 1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-001-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 2,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-1"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-002-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 3,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-2"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-003-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 4,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-3"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-004-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 5,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-4"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-005-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 6,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-5"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-006-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 7,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-6"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-007-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 8,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-7"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-008-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 9,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-8"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-009-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 10,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-9"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-010-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 11,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-10"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-011-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 12,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-11"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-012-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 13,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-12"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-013-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 14,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-13"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-014-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 15,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-14"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-015-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 16,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-15"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-016-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 17,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-16"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-017-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 18,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-17"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-018-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 19,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-18"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-019-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 20,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-19"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-020-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 21,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-20"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-021-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 22,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-21"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-022-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 23,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-22"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-023-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 24,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-23"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-024-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 25,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-24"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-025-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 26,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-25"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-026-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 27,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-26"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-027-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 28,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-27"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-028-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 29,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-28"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-029-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 30,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-29"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-030-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 31,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-30"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-031-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 32,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-31"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-032-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 33,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-32"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-033-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 34,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-33"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-034-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 35,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-34"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-035-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 36,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-35"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-036-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 37,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-36"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-037-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 38,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-37"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-038-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 39,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-38"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-039-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 40,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-39"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-040-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 41,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-40"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-041-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 42,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-41"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-042-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 43,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-42"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-043-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 44,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-43"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-044-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 45,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-44"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-045-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 46,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-45"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-046-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 47,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-46"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-047-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 48,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-47"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-048-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 49,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-48"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-049-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 50,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-49"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-050-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 51,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-50"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-051-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 52,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-51"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-052-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 53,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-52"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-053-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 54,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-53"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture-invocation-054-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "run_id": "fixture000000001",
+      "attempt": 55,
+      "role": "child",
+      "metadata": {
+        "model": "fixture-model",
+        "sandbox": "factory-review-fixture-54"
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    },
+    {
+      "id": "fixture000000001:1:implement",
+      "run_id": "fixture000000001",
+      "attempt": 1,
+      "role": "implement",
+      "metadata": {
+        "semantic_role": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "preset": "existing",
+        "adapter": "codex-exec",
+        "runtime_compatibility": null,
+        "events": "/fixture/python-harness/.factory/worktrees/BAC-4/.factory/run/1/events.jsonl",
+        "cost_step": "implement",
+        "service_tier": null,
+        "policy_revision": null
+      },
+      "telemetry": null,
+      "sequence": -1,
+      "started_at": 1788950760.0,
+      "updated_at": 1788950760.0
+    }
+  ],
+  "config": {
+    "roles": [
+      {
+        "name": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max"
+      },
+      {
+        "name": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high"
+      },
+      {
+        "name": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high"
+      },
+      {
+        "name": "synthesiser",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      },
+      {
+        "name": "documenter",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      }
+    ],
+    "usd_per_run": 50.0,
+    "usd_warn_at": 30.0,
+    "projects_read_only": [
+      "python-harness",
+      "fixture-project-1-with-a-long-registry-identity",
+      "fixture-project-2-with-a-long-registry-identity"
+    ]
+  }
+}

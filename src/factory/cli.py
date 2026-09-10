@@ -58,7 +58,7 @@ from factory.machine import Blocked, Resumable, State
 from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import Routing, RoutingError, load_routing
-from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
+from factory.sandbox.sbx import SbxAdapter, SbxError
 from factory.steps import Context, advance, factory_dir_for, record_stop, redphase
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
@@ -979,33 +979,31 @@ def cmd_runtimes(args: argparse.Namespace) -> int:
     return 0
 
 
-def _sbx_ls_json() -> list[dict[str, object]]:
-    """`sbx ls --json`, parsed into the sandbox list.
-
-    The document is an **object** with a `sandboxes` array, not a bare array — the shape
-    `SbxAdapter.git_daemon_url` already reads, and the one measured against v0.38.0. A
-    reader that expected a list would show an empty runtimes view on a healthy machine and
-    look like "no sandboxes" rather than "parsed the wrong thing".
-
-    Returns `[]` when `sbx` is missing or refuses (it needs a Docker login), so the console
-    degrades to an empty view instead of failing the page.
-    """
-    available, _ = sbx_available()
-    if not available:
-        return []
-    proc = subprocess.run(
-        ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
-    )
+def _sbx_inventory() -> console_views.InventoryResult:
+    """Read-only inventory with collection failures distinct from a successful empty list."""
+    try:
+        proc = subprocess.run(
+            ["sbx", "ls", "--json"], capture_output=True, text=True, check=False, timeout=30
+        )
+    except subprocess.TimeoutExpired:
+        return console_views.InventoryResult([], "timeout", "sbx inventory timed out")
+    except OSError:
+        return console_views.InventoryResult([], "missing", "sbx executable unavailable")
     if proc.returncode != 0:
-        return []
+        return console_views.InventoryResult([], "failed", "sbx inventory command failed")
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return []
-    if isinstance(data, dict):
-        listing = data.get("sandboxes", [])
-        return [entry for entry in listing if isinstance(entry, dict)]
-    return [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+        return console_views.InventoryResult([], "invalid", "Invalid sbx inventory JSON")
+    listing = data.get("sandboxes") if isinstance(data, dict) else data
+    if not isinstance(listing, list) or any(not isinstance(item, dict) for item in listing):
+        return console_views.InventoryResult([], "invalid", "Invalid sbx inventory shape")
+    return console_views.InventoryResult(listing)
+
+
+def _sbx_ls_json() -> list[dict[str, object]]:
+    """Compatibility wrapper for callers expecting a list; UI uses the structured result."""
+    return _sbx_inventory().sandboxes
 
 
 # --------------------------------------------------------------------------------
@@ -1884,6 +1882,24 @@ def _scheduling_hold(ticket: str, exc: AgentApprovalRequired | ProjectQueued) ->
 _CONTROLS: set[str] = {"suspend", "resume", "resume-planning", "cancel", "retry"}
 
 
+def control_unavailable_reason(action: str, run: Run) -> str | None:
+    """Read-only state checks; execution still owns lease, budget and target checks."""
+    if action == "suspend":
+        if run.state in machine.TERMINAL:
+            return f"{run.linear_id} is at {run.state}; nothing to suspend"
+        if not machine.can(run.state, State.SUSPENDED):
+            return f"{run.linear_id} is at {run.state}, which has no edge to {State.SUSPENDED}; use Resume, not Suspend"
+    if action == "retry" and run.state is not State.RESUMABLE:
+        return f"{run.linear_id} is {run.state}; retry is for a resumable run"
+    if action in {"resume", "resume-planning"}:
+        refusal = recovery.resume_state_refusal(
+            run.state, run.linear_id, from_state="planning" if action == "resume-planning" else None
+        )
+        if refusal is not None:
+            return refusal.detail
+    return None
+
+
 def dispatch_control(
     action: str,
     home: Path,
@@ -1925,17 +1941,9 @@ def dispatch_control(
     ctx = build(run)
     try:
         if action == "suspend":
-            if run.state in machine.TERMINAL:
-                return 1, f"{run.linear_id} is at {run.state}; nothing to suspend"
-            if not machine.can(run.state, State.SUSPENDED):
-                # The same refusal as `cmd_suspend`'s, because §18.5 says the control and
-                # the command share a path — and because this is the one that fired: the
-                # console suspended a `resumable` BAC-6 and recorded an edge that does
-                # not exist.
-                return 1, (
-                    f"{run.linear_id} is at {run.state}, which has no edge to "
-                    f"{State.SUSPENDED}; use Resume, not Suspend"
-                )
+            refusal = control_unavailable_reason(action, run)
+            if refusal is not None:
+                return 1, refusal
             origin = recovery.suspend(ctx, reason="suspended via console")
             return 0, f"{run.linear_id} suspended from {origin}"
         if action == "cancel":
@@ -1944,8 +1952,9 @@ def dispatch_control(
         if action == "resume-planning":
             recovery.resume(ctx, from_state="planning")
         elif action == "retry":
-            if run.state is not State.RESUMABLE:
-                return 1, f"{run.linear_id} is {run.state}; retry is for a resumable run"
+            refusal = control_unavailable_reason(action, run)
+            if refusal is not None:
+                return 1, refusal
             recovery.resume_run(ctx, skip_backoff=True)
         else:  # resume
             recovery.resume(ctx)

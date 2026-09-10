@@ -6,6 +6,6 @@ es.onopen = () => { document.getElementById('timeline-status').textContent = 'Co
 es.onerror = () => { document.getElementById('timeline-status').textContent = 'Live updates unavailable · showing last received data'; };
 es.onmessage = e => {
   const html = JSON.parse(e.data).html;
-  if (html) { document.getElementById('timeline').innerHTML = html; }
+  if (html) { const parsed = new DOMParser().parseFromString(html, 'text/html'); preserveUpdate(document.getElementById('timeline'), parsed.getElementById('timeline').innerHTML); }
 };
 </script>

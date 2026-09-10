@@ -1,0 +1,246 @@
+{
+  "schema": 2,
+  "source": {
+    "commit": "90a832222baa5033e0203346b99fe005f5fae342",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "scenario": "unavailable",
+  "viewport": "desktop",
+  "clock": 1788950760.0,
+  "isolation": "Fresh ctx/database/app per viewport; captures precede all mutation tests",
+  "runs": [
+    {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": null,
+      "state": "approved",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in approved",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    }
+  ],
+  "detail": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": null,
+      "state": "approved",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in approved",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    "transitions": [],
+    "gate_verdict": null,
+    "gates": [],
+    "review_tier2": null,
+    "review_findings": [],
+    "artifacts": [],
+    "events_path": null,
+    "pr_url": null,
+    "blocked_reason": null
+  },
+  "timeline": {
+    "row": {
+      "run_id": "fixture000000001",
+      "ticket": "BAC-4",
+      "project": "python-harness",
+      "branch": null,
+      "state": "approved",
+      "badge": null,
+      "attempt": 0,
+      "rung": "fail",
+      "elapsed_in_state": 0.0,
+      "timeout_seconds": null,
+      "context_pct": null,
+      "context_reason": "no agent running in approved",
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": 0,
+      "spend_usd": null,
+      "spend_ceiling": 50.0,
+      "activity": null,
+      "heartbeat_age": null,
+      "blocked_reason": null,
+      "pr_url": null,
+      "title": null,
+      "usage_status": "unknown",
+      "spend_status": "unknown",
+      "known_spend_usd": null,
+      "context_source": null,
+      "context_age_seconds": null,
+      "active_invocations": 0,
+      "fresh_context_invocations": 0
+    },
+    "blocks": [
+      {
+        "state": "approved",
+        "lane": "engineer",
+        "start": 1788950760,
+        "end": 1788950760,
+        "duration_s": 0.0,
+        "attempt": 0,
+        "dead": false,
+        "live": true
+      }
+    ],
+    "cards": [
+      {
+        "role": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      },
+      {
+        "role": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      },
+      {
+        "role": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "status": "idle",
+        "context_pct": null,
+        "context_reason": "role not yet reached",
+        "activity": null,
+        "heartbeat_age": null
+      }
+    ],
+    "tool_calls": [],
+    "elapsed_total_s": 0.0
+  },
+  "roles": {
+    "planner": {
+      "name": "planner",
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "preset": "existing"
+    },
+    "builder": {
+      "name": "builder",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "reviewer": {
+      "name": "reviewer",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "synthesiser": {
+      "name": "synthesiser",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    },
+    "documenter": {
+      "name": "documenter",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "preset": "existing"
+    }
+  },
+  "runtimes": [],
+  "projects": [
+    {
+      "name": "python-harness",
+      "delivery_profile": "Not declared",
+      "concurrency": 1,
+      "occupied_slots": 0,
+      "active_agents": 0,
+      "waiting": "0 children \u00b7 0 certifications",
+      "effective_agent_limit": 8,
+      "settings": {}
+    }
+  ],
+  "settings": {},
+  "invocations": [],
+  "config": {
+    "roles": [
+      {
+        "name": "planner",
+        "model": "gpt-5.6-sol",
+        "effort": "max"
+      },
+      {
+        "name": "builder",
+        "model": "gpt-5.6-sol",
+        "effort": "high"
+      },
+      {
+        "name": "reviewer",
+        "model": "gpt-5.6-terra",
+        "effort": "high"
+      },
+      {
+        "name": "synthesiser",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      },
+      {
+        "name": "documenter",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      }
+    ],
+    "usd_per_run": 50.0,
+    "usd_warn_at": 30.0,
+    "projects_read_only": [
+      "python-harness"
+    ]
+  }
+}
