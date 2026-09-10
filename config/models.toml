@@ -7,21 +7,21 @@
 provider = "codex"
 
 [roles.planner]
-model  = "gpt-5.6-sol"
-effort = "max"                     # the plan is copied into every later step
+model  = "gpt-6-astra"
+effort = "medium"                  # the plan is copied into every later step
 
 [roles.builder]
-model  = "gpt-5.6-sol"
+model  = "gpt-6-astra"
 # Was "xhigh". Dropped a step after BAC-4's four re-runs exhausted the Codex credit:
 # each implement attempt spent 7-16 M input tokens, and the defects those runs found
 # were all in the factory's own plumbing, not in what the builder wrote. "medium" is
 # the next step down if this is still too expensive; "max" is above, and "ultra" is
 # never routable — the validation refuses it.
-effort = "high"
+effort = "low"
 
 [roles.reviewer]
-model  = "gpt-5.6-terra"           # MUST differ from roles.builder.model
-effort = "high"
+model  = "gpt-5.6-sol"             # MUST differ from roles.builder.model
+effort = "medium"
 
 [roles.synthesiser]
 model  = "gpt-5.6-luna"

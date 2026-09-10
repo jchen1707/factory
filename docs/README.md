@@ -16,6 +16,7 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 
 - [certification-retry.md](certification-retry.md)
 - [operator-reference.md](operator-reference.md)
+- [review-disposition-handoff.md](review-disposition-handoff.md)
 - [runbook.md](runbook.md)
 - [runtime-certification-rollout.md](runtime-certification-rollout.md)
 - [runtime-certification-service.md](runtime-certification-service.md)

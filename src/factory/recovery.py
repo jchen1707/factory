@@ -765,6 +765,71 @@ def continuation_prompt(ctx: Context) -> str:
                 lines += ["```", str(row["detail"])[:2000], "```", ""]
             break
 
+    # A later host repair does not rewrite the frozen ticket/specification or a historical
+    # transition.  It is a separately audited fact, scoped to this run, whose retained
+    # bytes are digest-checked before they are handed to the agent.
+    from factory import prerequisite_evidence
+
+    resolutions = prerequisite_evidence.retained(ctx)
+    if resolutions:
+        lines += ["### Fresh host prerequisite resolutions", ""]
+        for evidence in resolutions:
+            verification = evidence["verification"]
+            lines += [
+                f"- `{evidence['prerequisite']}` was verified resolved at "
+                f"`{evidence['verified_at']}` by "
+                f"`{' '.join(verification['command'])}` (exit 0): {verification['summary']}",
+            ]
+        lines += [
+            "Treat historical descriptions of these prerequisites as superseded by the "
+            "audited host evidence above. Do not rewrite the ticket or specification.",
+            "",
+        ]
+
+    # The latest blocker can be a host prerequisite, but prior review findings still
+    # describe defects in the preserved candidate.  Carry every such finding forward
+    # until a fresh review replaces the obligation; never let the latest stop hide it.
+    review_details: list[str] = []
+    for row in ctx.store.transitions(ctx.run.id):
+        if row["rule"] == "review-finding" and row["detail"]:
+            detail = str(row["detail"])
+            if detail not in review_details:
+                review_details.append(detail)
+    if review_details:
+        lines += ["### Unresolved review repair obligations", ""]
+        for detail in review_details:
+            lines += ["```", detail[:2000], "```", ""]
+        lines += ["Resolve these findings; do not discard or weaken their guarantees.", ""]
+
+    # A review repair can require James to settle an architecture or scope choice that the
+    # reviewer correctly identified but cannot decide.  The retained document is bound to
+    # this run and the latest review detail, so a later review automatically makes it stale.
+    from factory import review_disposition
+
+    dispositions = review_disposition.retained(ctx)
+    if dispositions:
+        lines += ["### James's audited review dispositions", ""]
+        for disposition in dispositions:
+            lines += [
+                f"Decision recorded by `{disposition['decided_by']}` at "
+                f"`{disposition['decided_at']}` for this exact blocking review.",
+                "",
+            ]
+            for finding in disposition["findings"]:
+                lines += [
+                    f"- Source finding: {finding['finding']}",
+                    f"  - Disposition: `{finding['disposition']}`",
+                    f"  - Direction: {finding['direction']}",
+                    "  - Acceptance:",
+                ]
+                lines += [f"    - {item}" for item in finding["acceptance"]]
+            lines += [""]
+        lines += [
+            "Apply these as repair decisions. They do not accept unresolved findings, "
+            "authorize delivery, or grant any deployment, credential, network, or live-effect scope.",
+            "",
+        ]
+
     if ctx.run.worktree:
         try:
             stat = repo.diff_stat(Path(ctx.run.worktree), ctx.run.base_ref or "HEAD")

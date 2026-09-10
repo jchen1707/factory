@@ -23,9 +23,22 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from factory import artifacts, doctor, driver, gc, machine, policy, recovery, repo
+from factory import (
+    artifacts,
+    candidate_handoff,
+    doctor,
+    driver,
+    gc,
+    machine,
+    policy,
+    prerequisite_evidence,
+    recovery,
+    repo,
+    review_disposition,
+)
 from factory.agent.base import SchemaInvalid, SchemaUnsupported, validate_against_schema
 from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
@@ -129,6 +142,51 @@ def assess(registry: Registry, project: Project, issue: Issue) -> Assessment:
 # --------------------------------------------------------------------------------
 
 
+def cmd_candidate_handoff_check(args: argparse.Namespace) -> int:
+    """Validate a preserved candidate against its current source run; write nothing."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    ticket = args.ticket.upper()
+    project = registry.resolve(ticket)
+    harness = load_harness_config(project.path)
+    store = _open_store(home)
+    candidate = candidate_handoff.check_external(
+        store, project, harness, ticket, Path(args.manifest)
+    )
+    print(
+        f"{ticket}: candidate {candidate.candidate_commit} is valid for source run "
+        f"{candidate.source_run_id}; {len(candidate.changed_paths)} changed paths"
+    )
+    print("Nothing was written: candidate-handoff-check only validates evidence.")
+    return 0
+
+
+def cmd_candidate_handoff_retain(args: argparse.Namespace) -> int:
+    """Retain a validated candidate under its blocked or suspended source run."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    ticket = args.ticket.upper()
+    project = registry.resolve(ticket)
+    harness = load_harness_config(project.path)
+    store = _open_store(home)
+    source = store.run_by_ticket(ticket)
+    if source is None:
+        raise Blocked("candidate-source-unavailable", f"no Factory run exists for {ticket}")
+    candidate = candidate_handoff.retain(
+        store,
+        project,
+        harness,
+        ticket,
+        Path(args.manifest),
+        home / "state" / "runs" / source.id,
+    )
+    print(
+        f"{ticket}: retained candidate {candidate.candidate_commit} under source run "
+        f"{candidate.source_run_id}; bundle {candidate.bundle_sha256}"
+    )
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     home = factory_home()
     registry = load_registry(home / "config" / "projects.toml")
@@ -167,6 +225,24 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"  NOTE  a remote branch already mentions {ticket}: {', '.join(stale)}")
         print("        the factory will not reuse it; it is also a free oracle to diff against")
 
+    store: Store | None = None
+    candidate: candidate_handoff.Candidate | None = None
+    if getattr(args, "candidate_from_run", None) and eligible:
+        store = _open_store(home)
+        source_run_id = str(args.candidate_from_run)
+        candidate = candidate_handoff.validate_retained_source(
+            store,
+            project,
+            harness,
+            ticket,
+            source_run_id,
+            home / "state" / "runs" / source_run_id,
+        )
+        print(
+            f"  PASS  candidate {candidate.candidate_commit} retained from cancelled run "
+            f"{source_run_id}"
+        )
+
     if args.check:
         # §7.1's verdict, and nothing else. This is what `--dry-run` promised and did not
         # deliver: everything above this line is a read, so the answer is the real one,
@@ -189,18 +265,38 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
         print(f"\n{ticket} is blocked: {block_reason} ({failures})")
 
-    store = _open_store(home)
-    run = store.insert_run(
-        linear_id=ticket,
-        project=project.name,
-        team=issue.team_key,
-        full_review=args.full_review,
-        force_plan=args.plan,
-    )
+    store = store or _open_store(home)
+    if candidate is not None:
+        with store.transaction():
+            if live := store.live_run_for_ticket(ticket):
+                raise Blocked(
+                    "candidate-live-run-exists",
+                    f"{ticket} already has live run {live.id} at {live.state}",
+                )
+            run = store.insert_run(
+                linear_id=ticket,
+                project=project.name,
+                team=issue.team_key,
+                full_review=args.full_review,
+                force_plan=args.plan,
+            )
+            if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+                raise Blocked("candidate-run-lease-failed", f"could not lease fresh run {run.id}")
+            candidate_handoff.copy_to_new_run(candidate, home / "state" / "runs" / run.id)
+        acquired = True
+    else:
+        run = store.insert_run(
+            linear_id=ticket,
+            project=project.name,
+            team=issue.team_key,
+            full_review=args.full_review,
+            force_plan=args.plan,
+        )
+        acquired = store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS)
     if args.full_review:
         print("  NOTE  --full-review: Tier 2 runs whatever the §15.2 trigger rules decide")
 
-    if not store.acquire_lease(run.id, ttl_seconds=LEASE_TTL_SECONDS):
+    if not acquired:
         print(f"\n{ticket} is leased by another process ({run.lease_owner}); nothing to do.")
         return 0
 
@@ -217,6 +313,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         issue=issue,
         harness=harness,
     )
+    if candidate is not None:
+        ctx.log(
+            "candidate.attached",
+            source_run_id=candidate.source_run_id,
+            candidate_commit=candidate.candidate_commit,
+            candidate_tree=candidate.candidate_tree,
+        )
 
     if not eligible and block_reason:
         _block(ctx, block_reason, "; ".join(failures))
@@ -1641,6 +1744,47 @@ def cmd_suspend(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------------
 
 
+def cmd_review_disposition_template(args: argparse.Namespace) -> int:
+    """Print a non-valid draft bound to the named run's latest blocking review."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+    decided_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    print(json.dumps(review_disposition.template(ctx, decided_at=decided_at), indent=2))
+    return 0
+
+
+def cmd_review_disposition_check(args: argparse.Namespace) -> int:
+    """Validate a disposition against current Factory evidence without writing state."""
+    home = factory_home()
+    registry = load_registry(home / "config" / "projects.toml")
+    routing = load_routing(home / "config" / "models.toml")
+    store = _open_store(home)
+    ticket = args.ticket.upper()
+    run = store.run_by_ticket(ticket)
+    if run is None:
+        print(f"no run for {ticket}")
+        return 1
+    ctx = _context_for(home, registry, routing, store, LinearClient(), run)
+    try:
+        evidence = review_disposition.check(ctx, Path(args.path))
+    except Blocked as exc:
+        print(f"{ticket}: [{exc.reason}] {exc.detail}")
+        return 2
+    print(
+        f"{ticket}: review disposition is valid for run {run.id} "
+        f"and all {len(evidence['findings'])} current findings"
+    )
+    return 0
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     """§16.3b — resume a parked run. Re-enters the state it left (or `--from`), then drives
     forward through the synchronous states. An agent state starts the agent and hands the
@@ -1667,6 +1811,29 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     linear = LinearClient()
     ctx = _context_for(home, registry, routing, store, linear, run)
+
+    if args.prerequisite_evidence:
+        try:
+            prerequisite_evidence.record(ctx, Path(args.prerequisite_evidence))
+        except Blocked as exc:
+            store.release_lease(ctx.run.id)
+            print(f"{ticket}: [{exc.reason}] {exc.detail}")
+            return 2
+
+    if args.review_disposition:
+        if args.from_state != "implementing":
+            store.release_lease(ctx.run.id)
+            print(
+                f"{ticket}: [review-disposition-target-invalid] "
+                "--review-disposition requires --from implementing"
+            )
+            return 2
+        try:
+            review_disposition.record(ctx, Path(args.review_disposition))
+        except Blocked as exc:
+            store.release_lease(ctx.run.id)
+            print(f"{ticket}: [{exc.reason}] {exc.detail}")
+            return 2
 
     try:
         recovery.resume(ctx, from_state=args.from_state, authorise=args.authorise)
@@ -1935,6 +2102,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     register(sub)
 
+    candidate_check = sub.add_parser(
+        "candidate-handoff-check",
+        help="validate a preserved Git candidate against its current source run; write nothing",
+    )
+    candidate_check.add_argument("ticket")
+    candidate_check.add_argument("manifest")
+    candidate_check.set_defaults(func=cmd_candidate_handoff_check)
+
+    candidate_retain = sub.add_parser(
+        "candidate-handoff-retain",
+        help="retain a validated Git candidate under its blocked or suspended source run",
+    )
+    candidate_retain.add_argument("ticket")
+    candidate_retain.add_argument("manifest")
+    candidate_retain.set_defaults(func=cmd_candidate_handoff_retain)
+
     run = sub.add_parser("run", help="drive one approved ticket")
     run.add_argument("ticket")
     run.add_argument(
@@ -1953,6 +2136,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--full-review",
         action="store_true",
         help="run Tier 2's full fan-out on this run whatever the trigger rules say",
+    )
+    run.add_argument(
+        "--candidate-from-run",
+        help=(
+            "restore the exact candidate retained under this cancelled source run; "
+            "supported for named host-worktree starts only"
+        ),
     )
     run.set_defaults(func=cmd_run)
 
@@ -2061,6 +2251,21 @@ def build_parser() -> argparse.ArgumentParser:
     suspend.add_argument("--reason", default="suspended by hand")
     suspend.set_defaults(func=cmd_suspend)
 
+    disposition_template = sub.add_parser(
+        "review-disposition-template",
+        help="print a draft bound to a run's latest blocking review",
+    )
+    disposition_template.add_argument("ticket")
+    disposition_template.set_defaults(func=cmd_review_disposition_template)
+
+    disposition_check = sub.add_parser(
+        "review-disposition-check",
+        help="validate a disposition against current review evidence without writing state",
+    )
+    disposition_check.add_argument("ticket")
+    disposition_check.add_argument("path")
+    disposition_check.set_defaults(func=cmd_review_disposition_check)
+
     resume = sub.add_parser(
         "resume",
         help="resume a parked run or reopen a rejected review escalation",
@@ -2075,6 +2280,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--authorise",
         action="store_true",
         help="re-authorise spend for a `failed` run (§16.4: `failed -> resumable`)",
+    )
+    resume.add_argument(
+        "--prerequisite-evidence",
+        help="fresh ticket-bound JSON proof that a historical host prerequisite is resolved",
+    )
+    resume.add_argument(
+        "--review-disposition",
+        help=(
+            "ticket/run-bound JSON with James's disposition of every current review finding; "
+            "requires --from implementing"
+        ),
     )
     resume.set_defaults(func=cmd_resume)
 

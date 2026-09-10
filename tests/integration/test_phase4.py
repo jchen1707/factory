@@ -12,10 +12,12 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from factory import cli, machine, recovery
+from factory import cli, machine, prerequisite_evidence, recovery, review_disposition
 from factory.intake.linear import LinearError
 from factory.machine import Blocked, State
 from factory.recovery import Disposition
@@ -31,10 +33,20 @@ from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
-from factory.store import Effect, Run
+from factory.store import Effect, Run, Store
 from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeSandbox, advance_state
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+@pytest.fixture
+def prerequisite_ctx(tmp_path: Path) -> Any:
+    """The evidence/prompt seam needs SQLite, not routing, a sandbox, or a model."""
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="BAC-55", project="test", team="BAC")
+    state_dir = tmp_path / "state" / "runs" / run.id
+    state_dir.mkdir(parents=True)
+    return SimpleNamespace(store=store, run=run, state_dir=state_dir)
 
 
 def _fixture(name: str) -> dict[str, object]:
@@ -262,6 +274,347 @@ def test_the_continuation_names_a_block_the_human_is_sending_back(ctx: Context) 
 
     assert "review-finding" in continuation
     assert "vacuous" in continuation
+
+
+def test_audited_prerequisite_resolution_supersedes_stale_host_blocker_without_losing_review(
+    prerequisite_ctx: Any, tmp_path: Path
+) -> None:
+    ctx = prerequisite_ctx
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=None,
+        to_state=State.IMPLEMENTING,
+        actor="test",
+    )
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.IMPLEMENTING,
+        to_state=State.BLOCKED,
+        actor="test",
+        rule="review-finding",
+        detail="- [high] src/widget.py: preserve the authorization regression",
+    )
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.BLOCKED,
+        to_state=State.IMPLEMENTING,
+        actor="human",
+        rule="unblock-is-a-judgement",
+    )
+    ctx.store.record_transition(
+        ctx.run.id,
+        from_state=State.IMPLEMENTING,
+        to_state=State.BLOCKED,
+        actor="test",
+        rule="host-preflight",
+        detail="vendor installation is broken",
+    )
+    ctx.run = ctx.store.run_by_id(ctx.run.id)
+    assert ctx.run is not None
+    evidence = tmp_path / "resolution.json"
+    verified_at = "2026-09-10T12:00:00Z"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "ticket": ctx.run.linear_id,
+                "prerequisite": "host-preflight",
+                "status": "resolved",
+                "verified_at": verified_at,
+                "verification": {
+                    "command": ["uv", "run", "factory", "doctor"],
+                    "exit_code": 0,
+                    "summary": "vendor installation and doctor passed",
+                },
+            }
+        )
+    )
+
+    prerequisite_evidence.record(ctx, evidence, now=1789041600)
+    prerequisite_evidence.record(ctx, evidence, now=1789041600)
+    continuation = recovery.continuation_prompt(ctx)
+
+    assert "Fresh host prerequisite resolutions" in continuation
+    assert "vendor installation and doctor passed" in continuation
+    assert "Unresolved review repair obligations" in continuation
+    assert "preserve the authorization regression" in continuation
+    events = ctx.store.runtime.events(ctx.run.id)
+    recorded = [e for e in events if e["action"] == "prerequisite-resolution-recorded"]
+    assert len(recorded) == 1
+    payload = json.loads(recorded[0]["payload"])
+    assert payload["ticket"] == ctx.run.linear_id
+    assert (ctx.state_dir / payload["artifact"]).is_file()
+
+
+def test_prerequisite_resolution_refuses_another_ticket_and_changes_no_audit(
+    prerequisite_ctx: Any, tmp_path: Path
+) -> None:
+    ctx = prerequisite_ctx
+    evidence = tmp_path / "resolution.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "ticket": "BAC-56",
+                "prerequisite": "host-preflight",
+                "status": "resolved",
+                "verified_at": "2026-09-10T12:00:00Z",
+                "verification": {
+                    "command": ["uv", "run", "factory", "doctor"],
+                    "exit_code": 0,
+                    "summary": "passed",
+                },
+            }
+        )
+    )
+
+    with pytest.raises(Blocked) as caught:
+        prerequisite_evidence.record(ctx, evidence, now=1789041600)
+
+    assert caught.value.reason == "prerequisite-evidence-wrong-ticket"
+    assert ctx.store.runtime.events(ctx.run.id) == []
+
+
+def test_resume_parser_accepts_ticket_scoped_prerequisite_evidence() -> None:
+    args = cli.build_parser().parse_args(
+        ["resume", "BAC-56", "--prerequisite-evidence", "resolution.json"]
+    )
+
+    assert args.ticket == "BAC-56"
+    assert args.prerequisite_evidence == "resolution.json"
+
+
+def _write_review_summary(ctx: Any, findings: list[dict[str, object]]) -> None:
+    review_dir = ctx.state_dir / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-summary.json").write_text(
+        json.dumps({"tier2": "ran", "findings": findings})
+    )
+
+
+def _review_decision(ctx: Any) -> dict[str, object]:
+    source_digest, findings = review_disposition.source_review(ctx)
+    return {
+        "schema_version": 1,
+        "ticket": ctx.run.linear_id,
+        "run_id": ctx.run.id,
+        "source_review_sha256": source_digest,
+        "decided_by": "James",
+        "decided_at": "2026-09-10T20:00:00Z",
+        "findings": [
+            {
+                "finding": finding,
+                "disposition": "must-fix",
+                "direction": f"repair direction {index}",
+                "acceptance": [f"observable acceptance {index}"],
+            }
+            for index, finding in enumerate(findings, start=1)
+        ],
+    }
+
+
+def test_audited_review_disposition_covers_and_renders_every_current_finding(
+    prerequisite_ctx: Any, tmp_path: Path
+) -> None:
+    ctx = prerequisite_ctx
+    _write_review_summary(
+        ctx,
+        [
+            {
+                "severity": "high",
+                "file": "src/a.py",
+                "line": 11,
+                "summary": "verify the executable that actually runs",
+            },
+            {
+                "severity": "high",
+                "file": "src/b.py",
+                "line": 22,
+                "summary": "acquire the shared lock",
+            },
+            {
+                "severity": "medium",
+                "file": "src/c.py",
+                "line": None,
+                "summary": "bound output while reading",
+            },
+        ],
+    )
+    evidence = tmp_path / "review-disposition.json"
+    evidence.write_text(json.dumps(_review_decision(ctx)))
+
+    checked = review_disposition.check(ctx, evidence, now=1789070400)
+    assert len(checked["findings"]) == 3
+    assert ctx.store.runtime.events(ctx.run.id) == []
+    review_disposition.record(ctx, evidence, now=1789070400)
+    review_disposition.record(ctx, evidence, now=1789070400)
+    continuation = recovery.continuation_prompt(ctx)
+
+    assert "James's audited review dispositions" in continuation
+    for index, finding in enumerate(review_disposition.source_review(ctx)[1], start=1):
+        assert finding in continuation
+        assert f"repair direction {index}" in continuation
+        assert f"observable acceptance {index}" in continuation
+    events = ctx.store.runtime.events(ctx.run.id)
+    recorded = [event for event in events if event["action"] == "review-disposition-recorded"]
+    assert len(recorded) == 1
+    payload = json.loads(recorded[0]["payload"])
+    assert payload["ticket"] == ctx.run.linear_id
+    assert payload["run_id"] == ctx.run.id
+    assert payload["finding_count"] == 3
+    assert (ctx.state_dir / payload["artifact"]).is_file()
+
+
+@pytest.mark.parametrize("mutation", ["wrong-run", "incomplete"])
+def test_review_disposition_refuses_unbound_or_incomplete_decisions_without_audit(
+    prerequisite_ctx: Any, tmp_path: Path, mutation: str
+) -> None:
+    ctx = prerequisite_ctx
+    _write_review_summary(
+        ctx,
+        [
+            {"severity": "high", "file": "src/a.py", "line": 1, "summary": "first"},
+            {
+                "severity": "medium",
+                "file": "src/b.py",
+                "line": 2,
+                "summary": "second",
+            },
+        ],
+    )
+    document = _review_decision(ctx)
+    if mutation == "wrong-run":
+        document["run_id"] = "another-run"
+    else:
+        document["findings"] = document["findings"][:-1]  # type: ignore[index]
+    evidence = tmp_path / "review-disposition.json"
+    evidence.write_text(json.dumps(document))
+
+    with pytest.raises(Blocked) as caught:
+        review_disposition.record(ctx, evidence, now=1789070400)
+
+    expected = (
+        "review-disposition-wrong-run"
+        if mutation == "wrong-run"
+        else "review-disposition-incomplete"
+    )
+    assert caught.value.reason == expected
+    assert ctx.store.runtime.events(ctx.run.id) == []
+
+
+def test_a_new_review_makes_an_old_disposition_unavailable(
+    prerequisite_ctx: Any, tmp_path: Path
+) -> None:
+    ctx = prerequisite_ctx
+    _write_review_summary(
+        ctx,
+        [{"severity": "high", "file": "src/a.py", "line": 1, "summary": "first review"}],
+    )
+    evidence = tmp_path / "review-disposition.json"
+    evidence.write_text(json.dumps(_review_decision(ctx)))
+    review_disposition.record(ctx, evidence, now=1789070400)
+    _write_review_summary(
+        ctx,
+        [
+            {
+                "severity": "high",
+                "file": "src/b.py",
+                "line": 2,
+                "summary": "replacement review",
+            }
+        ],
+    )
+
+    assert review_disposition.retained(ctx) == []
+    assert "repair direction" not in recovery.continuation_prompt(ctx)
+
+
+def test_resume_parser_accepts_ticket_scoped_review_disposition() -> None:
+    args = cli.build_parser().parse_args(
+        [
+            "resume",
+            "BAC-56",
+            "--from",
+            "implementing",
+            "--review-disposition",
+            "decision.json",
+        ]
+    )
+
+    assert args.ticket == "BAC-56"
+    assert args.from_state == "implementing"
+    assert args.review_disposition == "decision.json"
+
+
+def test_review_disposition_template_is_bound_and_deliberately_not_valid(
+    prerequisite_ctx: Any,
+) -> None:
+    ctx = prerequisite_ctx
+    _write_review_summary(
+        ctx,
+        [
+            {
+                "severity": "high",
+                "file": "src/a.py",
+                "line": 7,
+                "summary": "decide the executable authority",
+            }
+        ],
+    )
+
+    document = review_disposition.template(ctx, decided_at="2026-09-10T20:00:00Z")
+
+    assert document["ticket"] == ctx.run.linear_id
+    assert document["run_id"] == ctx.run.id
+    assert document["findings"] == [
+        {
+            "finding": "- [high] src/a.py:7 decide the executable authority",
+            "disposition": "REPLACE",
+            "direction": "",
+            "acceptance": [],
+        }
+    ]
+    evidence = ctx.state_dir / "draft.json"
+    evidence.write_text(json.dumps(document))
+    with pytest.raises(Blocked) as caught:
+        review_disposition.record(ctx, evidence, now=1789070400)
+    assert caught.value.reason == "review-disposition-invalid"
+
+
+def test_review_disposition_template_parser_accepts_a_ticket() -> None:
+    args = cli.build_parser().parse_args(["review-disposition-template", "BAC-56"])
+
+    assert args.ticket == "BAC-56"
+
+
+def test_review_disposition_check_parser_accepts_ticket_and_path() -> None:
+    args = cli.build_parser().parse_args(["review-disposition-check", "BAC-56", "decision.json"])
+
+    assert args.ticket == "BAC-56"
+    assert args.path == "decision.json"
+
+
+def test_review_disposition_refuses_a_conflicting_second_decision(
+    prerequisite_ctx: Any, tmp_path: Path
+) -> None:
+    ctx = prerequisite_ctx
+    _write_review_summary(
+        ctx,
+        [{"severity": "high", "file": "src/a.py", "line": 1, "summary": "first"}],
+    )
+    first = _review_decision(ctx)
+    first_path = tmp_path / "first.json"
+    first_path.write_text(json.dumps(first))
+    review_disposition.record(ctx, first_path, now=1789070400)
+    second = _review_decision(ctx)
+    second["findings"][0]["direction"] = "contradictory direction"  # type: ignore[index]
+    second_path = tmp_path / "second.json"
+    second_path.write_text(json.dumps(second))
+
+    with pytest.raises(Blocked) as caught:
+        review_disposition.record(ctx, second_path, now=1789070400)
+
+    assert caught.value.reason == "review-disposition-conflict"
 
 
 def test_the_third_attempt_rewinds_to_planning_instead_of_running_again(ctx: Context) -> None:

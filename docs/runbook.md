@@ -99,6 +99,12 @@ is merged by the factory, and that is a unit-tested invariant
   `review-finding`. The command requires passing gates and a recorded blocking finding,
   writes James's judgement to the checks ledger, and enters delivery. The PR body keeps the
   findings and records James's position separately under "Disputed review findings".
+- **A repair needs James's architecture/scope decisions:** suspend active work first, prepare
+  the exact ticket/run/review-bound JSON described in
+  [Review disposition handoff](review-disposition-handoff.md), then use
+  `factory resume <TICKET> --from implementing --review-disposition PATH`. Factory refuses an
+  incomplete or stale finding set and renders an intact audited copy into the fresh repair
+  prompt. This is not finding acceptance, delivery approval or an external-effect grant.
 
 ## The daemon did nothing / is not running
 

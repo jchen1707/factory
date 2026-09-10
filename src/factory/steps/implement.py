@@ -22,7 +22,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from factory import accounting, artifacts, authority, execution, policy, workflow_launches
+from factory import (
+    accounting,
+    artifacts,
+    authority,
+    candidate_handoff,
+    execution,
+    policy,
+    workflow_launches,
+)
 from factory.agent.base import (
     AgentInvocation,
     SchemaInvalid,
@@ -567,6 +575,7 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
             for path in sorted(collected.glob("*"))
             if path.is_file() and path.stat().st_size
         )
+    sections.extend(candidate_handoff.prompt_section(ctx))
     if continuation:
         sections += [
             "",
