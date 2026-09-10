@@ -13,7 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
-from factory import repo
+from factory import candidate_handoff, repo
 from factory.machine import Blocked, State
 from factory.sandbox.sbx import worktree_inside
 from factory.steps import Context, advance
@@ -57,6 +57,7 @@ def run(ctx: Context) -> None:
     )
     ctx.refresh()
 
+    candidate_handoff.restore(ctx, path)
     _seed(ctx, path)
     ctx.log("worktree.created", branch=branch, path=str(path), base=ctx.project.base_ref)
     advance(ctx, State.WORKTREE_READY)

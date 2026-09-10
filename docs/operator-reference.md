@@ -238,6 +238,9 @@ All commands below use `uv run factory`:
 | `config models` | Inspect validated routing |
 | `serve` | Console: policy, models, approvals, telemetry, certification, child and capacity status |
 | `suspend BAC-6` / `resume BAC-6` | Stop current work or resume preserved work |
+| `review-disposition-template BAC-6` | Print a non-valid decision draft bound to the latest blocking review |
+| `review-disposition-check BAC-6 PATH` | Validate a completed decision document without writing Factory state |
+| `resume BAC-6 --from implementing --review-disposition PATH` | Retain James's ticket/run/review-bound finding decisions and render them into a fresh repair prompt |
 | `resume BAC-6 --authorise` | Explicitly re-authorize an exhausted run |
 | `accept BAC-6 --note "decision"` | Record a human review-escalation decision |
 | `cancel BAC-6 --reason "duplicate"` | Cancel owned work and retain anything unsafe to clean |

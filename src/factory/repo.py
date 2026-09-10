@@ -25,24 +25,32 @@ __all__ = [
     "add_detached_worktree",
     "add_worktree",
     "added_modified_paths",
+    "apply_indexed_patch",
     "apply_patch",
+    "binary_diff",
     "branch_name",
     "branch_type_for_labels",
     "changed_lines",
     "changed_paths",
+    "changed_paths_between",
+    "clone_bundle",
     "commits_beyond",
     "diff_pathspec",
     "fetch",
     "holds_only_factory_scaffolding",
     "identifier_on_base",
     "in_progress_operation",
+    "index_tree",
+    "is_ancestor",
     "local_branches_matching",
+    "mode_at_ref",
     "orphan_worktree_dir",
     "prune_worktrees",
     "reason_to_keep_branch",
     "remote_branch_exists",
     "remote_branches_matching",
     "remove_worktree",
+    "resolve_ref",
     "slugify",
     "worktree_exists",
 ]
@@ -425,6 +433,82 @@ def diff_stat(worktree: Path, base_ref: str) -> str:
 
 def head_sha(repo: Path, ref: str = "HEAD") -> str:
     return _git(repo, "rev-parse", ref)
+
+
+def resolve_ref(repository: Path, ref: str) -> str:
+    """Resolve one commit-ish without changing the repository."""
+    return _git(repository, "rev-parse", "--verify", f"{ref}^{{commit}}")
+
+
+def is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
+    """Whether `ancestor` is reachable from `descendant`."""
+    return _git_ok(repository, "merge-base", "--is-ancestor", ancestor, descendant)
+
+
+def clone_bundle(bundle: Path, destination: Path) -> None:
+    """Materialise a complete Git bundle without checking out repository content."""
+    proc = subprocess.run(
+        ["git", "clone", "--quiet", "--no-checkout", str(bundle), str(destination)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GitError(f"git clone from bundle {bundle} failed:\n{proc.stderr.strip()}")
+
+
+def binary_diff(repository: Path, base: str, candidate: str) -> str:
+    """A deterministic, binary-capable patch between two commits."""
+    return _git_raw(
+        repository,
+        "diff",
+        "--binary",
+        "--full-index",
+        "--no-ext-diff",
+        "--no-textconv",
+        base,
+        candidate,
+    )
+
+
+def changed_paths_between(repository: Path, base: str, candidate: str) -> list[str]:
+    listing = _git_raw(
+        repository,
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "-z",
+        base,
+        candidate,
+    )
+    return [path for path in listing.split("\0") if path]
+
+
+def mode_at_ref(repository: Path, ref: str, path: str) -> str | None:
+    listing = _git(repository, "ls-tree", ref, "--", path)
+    if not listing:
+        return None
+    return listing.split(None, 1)[0]
+
+
+def apply_indexed_patch(worktree: Path, patch: str) -> None:
+    """Apply a retained patch to both the worktree and index, without running hooks."""
+    proc = subprocess.run(
+        ["git", "-C", str(worktree), "apply", "--index", "--binary", "-"],
+        input=patch,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GitError(f"git apply failed in {worktree}:\n{proc.stderr.strip()}")
+
+
+def index_tree(worktree: Path) -> str:
+    """Return the tree represented by the current index."""
+    return _git(worktree, "write-tree")
 
 
 def is_clean(worktree: Path) -> bool:
