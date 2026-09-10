@@ -230,13 +230,18 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     # 3. Decide the fan-out: which axes run, and the Tier-2 rule the PR body names. The
     #    `tier1_has_human` trigger cannot fire here (Tier-1 has not run yet — see the
-    #    module header), so it is passed False. `--full-review` overrides first.
+    #    module header), so it is passed False. Explicit full review overrides the
+    #    captured profile selection, which otherwise bounds the automatic fan-out.
     base_ref = ctx.run.base_ref or ctx.project.base_ref
-    trigger = _tier2_trigger(ctx, harness, tier1_has_human=False)
+    policy = ctx.store.runtime.policy(ctx.run.id) or {}
+    selected_axes = policy.get("effective", {}).get(".", {}).get("reviewAxes")
     if ctx.run.full_review:
         tier2_rule = FORCED
         run_full = True
-    elif trigger is None:
+    elif selected_axes == [label for label, _ in _TIER1_AXES]:
+        tier2_rule = "profile-axes"
+        run_full = False
+    elif (trigger := _tier2_trigger(ctx, harness, tier1_has_human=False)) is None:
         tier2_rule = "ran"
         run_full = True
     else:

@@ -329,6 +329,9 @@
                       }
                     }
                   }
+                },
+                "reviewAxes": {
+                  "$ref": "#/$defs/boundedReviewAxes"
                 }
               }
             },
@@ -366,6 +369,9 @@
                       }
                     }
                   }
+                },
+                "reviewAxes": {
+                  "$ref": "#/$defs/boundedReviewAxes"
                 }
               }
             },
@@ -403,6 +409,9 @@
                       }
                     }
                   }
+                },
+                "reviewAxes": {
+                  "$ref": "#/$defs/boundedReviewAxes"
                 }
               }
             }
@@ -438,6 +447,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "boundedReviewAxes": {
+      "description": "Optional bounded factory review: Standards and Specification only. Omit to retain the existing risk-triggered full suite. Deterministic gates and mandatory correctness/safety requirements still apply. An explicit --full-review overrides this selection.",
+      "enum": [["standards", "spec"]]
     }
   }
 }

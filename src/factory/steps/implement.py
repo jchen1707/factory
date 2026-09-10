@@ -554,6 +554,19 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
         "decides pass or fail. An honest `gates_run` with a failure in it is a better",
         "outcome than an optimistic one.",
     ]
+    snapshot_root = authority.current(ctx)
+    if snapshot_root and (snapshot := ctx.store.runtime.policy(ctx.run.id)):
+        sections.extend(
+            [
+                "",
+                "## Selected delivery authority",
+                "",
+                f"Authority root: `{snapshot_root}`; profile: `{snapshot['profile']}`.",
+                "Use this captured policy for the required scope and explicit deferrals.",
+                "Candidate policy edits do not change this run's authority.",
+                f"Effective policy: {json.dumps(snapshot['effective'])}",
+            ]
+        )
     handoff = ctx.factory_dir / "handoff.json"
     if handoff.exists():
         planning = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.PLANNING)
