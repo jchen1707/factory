@@ -40,6 +40,27 @@ test('Prototype retains correctness and makes engineering deferral visible', () 
   assert.equal(config.gates[0].enabled, false);
 });
 
+test('Only the selected profile narrows review, without changing correctness or gates', () => {
+  const declared = structuredClone(config);
+  declared.delivery.profiles.prototype.reviewAxes = ['standards', 'spec'];
+  const prototype = resolveDelivery(declared, null, 'prototype');
+  assert.deepEqual(prototype.reviewAxes, ['standards', 'spec']);
+  assert.ok(prototype.required.includes('acceptance'));
+  assert.equal(applyDelivery(declared, prototype).gates[0].enabled, true);
+  assert.equal(resolveDelivery(declared).reviewAxes, undefined);
+  assert.equal(resolveDelivery(declared, null, 'core').reviewAxes, undefined);
+  assert.equal(resolveDelivery(declared, null, 'hardening').reviewAxes, undefined);
+  assert.deepEqual(resolveDelivery({}, prototype).reviewAxes, ['standards', 'spec']);
+});
+
+test('Bounded review cannot omit either mandatory axis', () => {
+  for (const reviewAxes of [[], ['spec'], ['standards'], ['security']]) {
+    const declared = structuredClone(config);
+    declared.delivery.profiles.prototype.reviewAxes = reviewAxes;
+    assert.throws(() => resolveDelivery(declared, null, 'prototype'), /reviewAxes/);
+  }
+});
+
 test('Children cannot contradict or defer inherited requirements', () => {
   const parent = resolveDelivery(config);
   assert.throws(() => resolveDelivery(config, parent, 'prototype'), /cannot weaken/);

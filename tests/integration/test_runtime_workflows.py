@@ -572,3 +572,150 @@ def test_invocation_retains_selected_preset_when_operator_changes_future_routing
     assert retained is not None
     assert retained["metadata"]["preset"] == "volume"
     assert retained["metadata"]["model"] == "gpt-5.6-terra"
+
+
+@pytest.mark.parametrize(
+    ("profile", "forced", "expected_axes", "reason"),
+    [
+        ("prototype", False, ["standards", "spec"], "profile-axes"),
+        (
+            "core",
+            False,
+            ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
+            "ran",
+        ),
+        (
+            "hardening",
+            False,
+            ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
+            "ran",
+        ),
+        (
+            None,
+            False,
+            ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
+            "ran",
+        ),
+        (
+            "prototype",
+            True,
+            ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
+            "ran:forced",
+        ),
+    ],
+)
+def test_selected_profile_controls_the_actual_review_plan(
+    ctx: Context,
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str | None,
+    forced: bool,
+    expected_axes: list[str],
+    reason: str,
+) -> None:
+    from factory.machine import State
+    from factory.steps import review
+    from tests.integration.conftest import _seed_vendored_review_tree, advance_state, git
+    from tests.integration.test_phase3 import _stub_redphase, _to_reviewing
+    from tests.integration.test_pipeline import _fake
+
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(ctx.project.path)
+    # Exercise the current per-axis scheduler with the actual shared manifest.
+    manifest = Path(__file__).parents[2] / ".agents/vendor/harness/workflows/review-axes.json"
+    contract = ctx.project.path / ".agents/vendor/harness/workflows/review-axes.json"
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text(manifest.read_text())
+    for axis in json.loads(contract.read_text()):
+        frame = ctx.project.path / ".agents/vendor/harness/agents" / f"{axis['agent']}.md"
+        frame.write_text(f"# {axis['label']}\nFixture review frame\n")
+    # The context fixture's default is Core, and only Prototype narrows review.
+    path = ctx.project.path / "harness.config.json"
+    config = json.loads(path.read_text())
+    config["delivery"] = {
+        "default": "core",
+        "requirements": {},
+        "profiles": {
+            "prototype": {"required": [], "deferrals": [], "reviewAxes": ["standards", "spec"]},
+            "core": {"required": [], "deferrals": []},
+            "hardening": {"required": [], "deferrals": []},
+        },
+    }
+    path.write_text(json.dumps(config))
+    if profile:
+        ctx.store.runtime.configure("project", ctx.project.name, {"delivery_profile": profile})
+    snapshot = authority.snapshot(ctx)
+    assert snapshot is not None
+    assert snapshot["profile"] == (profile or "core")
+    # Prove the candidate cannot expand/reduce the captured review selection.
+    candidate = json.loads(path.read_text())
+    candidate["delivery"]["profiles"]["prototype"].pop("reviewAxes")
+    candidate["delivery"]["profiles"]["core"]["reviewAxes"] = ["standards", "spec"]
+    (ctx.worktree / "harness.config.json").write_text(json.dumps(candidate))
+    (ctx.worktree / "large-change.txt").write_text("changed\n" * 400)
+    git(ctx.worktree, "add", "large-change.txt")
+    git(ctx.worktree, "commit", "-m", "Large change triggers broad review by default")
+    if forced:
+        ctx.store.update_run(ctx.run.id, full_review=True)
+        ctx.refresh()
+    _fake(ctx).review_findings = {"findings": []}
+
+    advance_state(ctx)
+
+    plan = review._read_plan(ctx.state_dir / "review")
+    assert [axis["label"] for axis in plan["axes"]] == expected_axes
+    assert plan["tier2"] == reason
+    assert ctx.state is State.PR_READY
+    assert len(
+        [name for name, _ in _fake(ctx).detached if name == ctx.project.review_sandbox]
+    ) == len(expected_axes)
+
+
+def test_fresh_builder_receives_captured_requirements_and_deferrals(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory.steps import implement
+    from tests.integration.test_phase3 import _to_reviewing
+
+    _to_reviewing(ctx)
+    path = ctx.project.path / "harness.config.json"
+    config = json.loads(path.read_text())
+    config["delivery"] = {
+        "default": "prototype",
+        "requirements": {
+            "core": {"kind": "correctness", "description": "Retained functional scope"},
+            "later": {
+                "kind": "engineering",
+                "description": "Deferred engineering work",
+                "deferrableIn": ["prototype"],
+            },
+        },
+        "profiles": {
+            "prototype": {
+                "required": [],
+                "deferrals": [
+                    {
+                        "requirement": "later",
+                        "rationale": "Human scope decision",
+                        "revisit": "Later ticket",
+                    }
+                ],
+                "reviewAxes": ["standards", "spec"],
+            },
+        },
+    }
+    path.write_text(json.dumps(config))
+    captured = authority.snapshot(ctx)
+    assert captured is not None
+    # Proposed changes in the candidate cannot replace the worker's authority.
+    (ctx.worktree / "harness.config.json").write_text('{"delivery": {}}')
+    monkeypatch.setattr(implement, "_skill_text", lambda: ("Fixture implementation skill", "sha"))
+
+    prompt, _ = implement.build_prompt(ctx)
+
+    assert f"Effective policy: {json.dumps(captured['effective'])}" in prompt
+    assert "Retained functional scope" in prompt
+    assert "Human scope decision" in prompt
+    assert "Later ticket" in prompt
+    assert "Preserved candidate carried forward" not in prompt
+    assert not (ctx.state_dir / "handoffs" / "candidate").exists()

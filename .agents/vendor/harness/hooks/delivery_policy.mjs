@@ -50,7 +50,16 @@ export function resolveDelivery(config, parent = null, selected = '') {
     required.delete(deferral.requirement);
     deferrals.push(deferral);
   }
-  return { profile, requirements, required: [...required], deferrals };
+  const reviewAxes = declared.reviewAxes ?? parent?.reviewAxes;
+  if (reviewAxes && JSON.stringify(reviewAxes) !== JSON.stringify(['standards', 'spec']))
+    throw new Error('reviewAxes must select standards and spec');
+  return {
+    profile,
+    requirements,
+    required: [...required],
+    deferrals,
+    ...(reviewAxes ? { reviewAxes: [...reviewAxes] } : {}),
+  };
 }
 
 export function applyDelivery(config, policy) {

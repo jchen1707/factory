@@ -142,3 +142,16 @@ A consuming repository may receive vendored updates through CI-managed pull requ
 The shared files and discovery stubs remain generated: change their upstream source, not
 an automation branch. Required checks still apply to delivery PRs. A pin-only update with
 identical shared content needs no new vendor copy; comparing content prevents sync loops.
+
+## Profile-specific review selection
+
+A delivery profile may declare `reviewAxes: ["standards", "spec"]` to bound automatic
+Factory review to independent Standards and Specification reviewers. This is the only
+supported narrowing. Omission preserves the existing risk-triggered full suite; selecting
+Prototype alone does not implicitly narrow review. An explicit `--full-review` or direct
+`/full-review` still requests the full suite and needs the corresponding checklists.
+
+The selected profile resolves this declaration into `reviewAxes` in its effective policy.
+Factory reads that snapshotted policy, not the candidate's edits. It records the skip reason
+as `profile-axes`. The selection changes reviewer scheduling only: functional tests, declared
+gates, applicable correctness/safety boundaries and human decisions remain mandatory.
