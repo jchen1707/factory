@@ -11,14 +11,17 @@ architecture unless it changes behaviour.
 
 ## Inputs
 
-Resolve the spec yourself. In order of authority:
+Read the repository's `docs/agents/subagents/spec-checker.md` checklist and resolve the
+active authority using its policy. For work requested directly by the user, their actual
+request and accepted corrections are a specification; do not require a ticket for
+maintenance. For ticketed or planned work, resolve the source yourself:
 
 1. The **tracker issue** named by the branch (`<type>/<TEAM>-<num>-<slug>`) or by a commit
    trailer. Read it from the tracker — see `docs/agents/issue-tracker.md`.
 2. `.agents/plans/plan.md` and `.agents/plans/test-plan.md`, when the work came through the
    two-terminal flow.
 
-**Never accept a summary of the spec from the author or the caller.** A pasted summary lets
+**Never substitute an author's summary for the original spec.** A pasted summary lets
 the author's framing through the one gate whose job is checking the work against what was
 actually filed. If no spec resolves, report "no spec available" and stop — do not invent
 acceptance criteria so you have something to check.

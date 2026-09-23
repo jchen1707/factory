@@ -238,7 +238,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     if ctx.run.full_review:
         tier2_rule = FORCED
         run_full = True
-    elif selected_axes == [label for label, _ in _TIER1_AXES]:
+    elif selected_axes in (["spec"], [label for label, _ in _TIER1_AXES]):
         tier2_rule = "profile-axes"
         run_full = False
     elif (trigger := _tier2_trigger(ctx, harness, tier1_has_human=False)) is None:
@@ -252,6 +252,8 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     # the host admits the corresponding axis for an actual detached launch.
     axes: list[dict[str, Any]] = []
     for label, agent in _TIER1_AXES:
+        if tier2_rule == "profile-axes" and label not in selected_axes:
+            continue
         axes.append(
             {
                 "tier": "tier1",

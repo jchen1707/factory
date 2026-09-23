@@ -73,7 +73,9 @@ this command: what a design decision has to name here, and any extra pass this s
      its layer and is small enough to verify on its own. Terminal 2 turns this list into its
      task list.
    - **Verification** — the gates from `harness.config.json` that this change must pass, any
-     opt-in gate whose `when` clause applies, and any setup they need. Then `/code-review`.
+     opt-in gate whose `when` clause applies, and any setup they need. Review according to the
+     selected delivery profile's `reviewAxes` and repository instructions: `["spec"]` means
+     Specification review only, without invoking a multi-axis review skill.
    - **Open questions** — anything terminal 2 should confirm before or while implementing.
 
 6. **Write the test plan** — `test-plan.md`, beside `plan.md` in the same directory:
