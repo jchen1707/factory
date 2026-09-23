@@ -58,10 +58,13 @@ half: where code is allowed to land, and what this stack requires before a PR is
    **minimal** spec for it once, run it once to prove it, and move on.
 
 8. **Finish to the Definition of Done** in `AGENTS.md`. Run `/verify` for the evidence — paste
-   the real output rather than asserting the gates passed. Then `/code-review` with the
-   merge-base as the fixed point (`git merge-base HEAD <default-branch>`) and no Standards
-   findings outstanding. The `Stop` hook re-runs the gates independently, so a turn cannot end
-   on a failing gate over a gated path.
+   the real output rather than asserting the gates passed. Review the diff from the merge-base
+   against the active specification using the selected delivery profile's `reviewAxes` and
+   repository instructions. With `["spec"]`, use only the Specification frame/checklist;
+   do not invoke `/code-review` or `/full-review` for an automatic fan-out. With
+   `["standards", "spec"]`, use `/code-review`. If no selection is declared, retain the
+   existing review policy. Resolve applicable findings. The `Stop` hook re-runs the gates
+   independently, so a turn cannot end on a failing gate over a gated path.
 
 9. **Update the plans as you go** — tick off Steps in `plan.md` and cases in `test-plan.md` as
    they land, so an interrupted session can resume from the files. Keep the `Status:` line at

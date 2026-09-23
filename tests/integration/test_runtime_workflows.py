@@ -575,22 +575,29 @@ def test_invocation_retains_selected_preset_when_operator_changes_future_routing
 
 
 @pytest.mark.parametrize(
-    ("profile", "forced", "expected_axes", "reason"),
+    ("profile", "selection", "forced", "expected_axes", "reason"),
     [
-        ("prototype", False, ["standards", "spec"], "profile-axes"),
+        ("prototype", ["standards", "spec"], False, ["standards", "spec"], "profile-axes"),
+        ("prototype", ["spec"], False, ["spec"], "profile-axes"),
+        ("core", ["spec"], False, ["spec"], "profile-axes"),
+        ("hardening", ["spec"], False, ["spec"], "profile-axes"),
+        (None, ["spec"], False, ["spec"], "profile-axes"),
         (
             "core",
+            None,
             False,
             ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
             "ran",
         ),
         (
             "hardening",
+            None,
             False,
             ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
             "ran",
         ),
         (
+            None,
             None,
             False,
             ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
@@ -598,6 +605,14 @@ def test_invocation_retains_selected_preset_when_operator_changes_future_routing
         ),
         (
             "prototype",
+            ["standards", "spec"],
+            True,
+            ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
+            "ran:forced",
+        ),
+        (
+            "prototype",
+            ["spec"],
             True,
             ["standards", "spec", "security", "tests", "simplicity", "design", "speed", "cost"],
             "ran:forced",
@@ -608,6 +623,7 @@ def test_selected_profile_controls_the_actual_review_plan(
     ctx: Context,
     monkeypatch: pytest.MonkeyPatch,
     profile: str | None,
+    selection: list[str] | None,
     forced: bool,
     expected_axes: list[str],
     reason: str,
@@ -629,7 +645,7 @@ def test_selected_profile_controls_the_actual_review_plan(
     for axis in json.loads(contract.read_text()):
         frame = ctx.project.path / ".agents/vendor/harness/agents" / f"{axis['agent']}.md"
         frame.write_text(f"# {axis['label']}\nFixture review frame\n")
-    # The context fixture's default is Core, and only Prototype narrows review.
+    # Selection belongs to the captured profile, including the default profile.
     path = ctx.project.path / "harness.config.json"
     config = json.loads(path.read_text())
     config["delivery"] = {
@@ -641,6 +657,8 @@ def test_selected_profile_controls_the_actual_review_plan(
             "hardening": {"required": [], "deferrals": []},
         },
     }
+    if selection is not None:
+        config["delivery"]["profiles"][profile or "core"]["reviewAxes"] = selection
     path.write_text(json.dumps(config))
     if profile:
         ctx.store.runtime.configure("project", ctx.project.name, {"delivery_profile": profile})
@@ -649,8 +667,11 @@ def test_selected_profile_controls_the_actual_review_plan(
     assert snapshot["profile"] == (profile or "core")
     # Prove the candidate cannot expand/reduce the captured review selection.
     candidate = json.loads(path.read_text())
-    candidate["delivery"]["profiles"]["prototype"].pop("reviewAxes")
-    candidate["delivery"]["profiles"]["core"]["reviewAxes"] = ["standards", "spec"]
+    for candidate_profile in candidate["delivery"]["profiles"].values():
+        if selection is not None:
+            candidate_profile.pop("reviewAxes", None)
+        else:
+            candidate_profile["reviewAxes"] = ["spec"]
     (ctx.worktree / "harness.config.json").write_text(json.dumps(candidate))
     (ctx.worktree / "large-change.txt").write_text("changed\n" * 400)
     git(ctx.worktree, "add", "large-change.txt")

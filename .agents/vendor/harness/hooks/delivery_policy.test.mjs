@@ -53,8 +53,25 @@ test('Only the selected profile narrows review, without changing correctness or 
   assert.deepEqual(resolveDelivery({}, prototype).reviewAxes, ['standards', 'spec']);
 });
 
-test('Bounded review cannot omit either mandatory axis', () => {
-  for (const reviewAxes of [[], ['spec'], ['standards'], ['security']]) {
+test('Specification-only review is inherited and still runs mandatory gates', () => {
+  const declared = structuredClone(config);
+  declared.delivery.profiles.prototype.reviewAxes = ['spec'];
+  const policy = resolveDelivery(declared, null, 'prototype');
+  assert.deepEqual(policy.reviewAxes, ['spec']);
+  assert.deepEqual(resolveDelivery({}, policy).reviewAxes, ['spec']);
+  assert.ok(policy.required.includes('acceptance'));
+  assert.equal(applyDelivery(declared, policy).gates[0].enabled, true);
+  assert.equal(resolveDelivery(declared, null, 'core').reviewAxes, undefined);
+});
+
+test('Bounded review must include specification and reject unknown selections', () => {
+  for (const reviewAxes of [
+    [],
+    ['standards'],
+    ['security'],
+    ['spec', 'spec'],
+    ['spec', 'standards'],
+  ]) {
     const declared = structuredClone(config);
     declared.delivery.profiles.prototype.reviewAxes = reviewAxes;
     assert.throws(() => resolveDelivery(declared, null, 'prototype'), /reviewAxes/);

@@ -145,11 +145,13 @@ identical shared content needs no new vendor copy; comparing content prevents sy
 
 ## Profile-specific review selection
 
-A delivery profile may declare `reviewAxes: ["standards", "spec"]` to bound automatic
-Factory review to independent Standards and Specification reviewers. This is the only
-supported narrowing. Omission preserves the existing risk-triggered full suite; selecting
-Prototype alone does not implicitly narrow review. An explicit `--full-review` or direct
-`/full-review` still requests the full suite and needs the corresponding checklists.
+A delivery profile may declare `reviewAxes: ["spec"]` for Specification review only, or
+`reviewAxes: ["standards", "spec"]` for independent Standards and Specification reviewers.
+These selections also govern routine implementation and planning review instructions.
+Do not invoke a multi-axis review skill to satisfy a Specification-only selection.
+Omission preserves the existing risk-triggered full suite; selecting Prototype alone does
+not implicitly narrow review. An explicit `--full-review` or direct `/full-review` still
+requests the full suite and needs the corresponding checklists.
 
 The selected profile resolves this declaration into `reviewAxes` in its effective policy.
 Factory reads that snapshotted policy, not the candidate's edits. It records the skip reason
