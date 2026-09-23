@@ -51,9 +51,12 @@ export function resolveDelivery(config, parent = null, selected = '') {
     deferrals.push(deferral);
   }
   const reviewAxes = declared.reviewAxes ?? parent?.reviewAxes;
-  if (reviewAxes && ![['spec'], ['standards', 'spec']].some(
-    (selection) => JSON.stringify(reviewAxes) === JSON.stringify(selection),
-  ))
+  if (
+    reviewAxes &&
+    ![['spec'], ['standards', 'spec']].some(
+      (selection) => JSON.stringify(reviewAxes) === JSON.stringify(selection),
+    )
+  )
     throw new Error('reviewAxes must select spec, or standards and spec');
   return {
     profile,

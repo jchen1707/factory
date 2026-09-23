@@ -11,9 +11,9 @@ architecture unless it changes behaviour.
 
 ## Inputs
 
-Read the repository's `docs/agents/subagents/spec-checker.md` checklist and resolve the
-active authority using its policy. For work requested directly by the user, their actual
-request and accepted corrections are a specification; do not require a ticket for
+Follow the repository's instructions for resolving specification authority. For work
+requested directly by the user, their actual request and accepted corrections are a
+specification; do not require a ticket for
 maintenance. For ticketed or planned work, resolve the source yourself:
 
 1. The **tracker issue** named by the branch (`<type>/<TEAM>-<num>-<slug>`) or by a commit

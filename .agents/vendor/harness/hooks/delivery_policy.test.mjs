@@ -65,7 +65,13 @@ test('Specification-only review is inherited and still runs mandatory gates', ()
 });
 
 test('Bounded review must include specification and reject unknown selections', () => {
-  for (const reviewAxes of [[], ['standards'], ['security'], ['spec', 'spec'], ['spec', 'standards']]) {
+  for (const reviewAxes of [
+    [],
+    ['standards'],
+    ['security'],
+    ['spec', 'spec'],
+    ['spec', 'standards'],
+  ]) {
     const declared = structuredClone(config);
     declared.delivery.profiles.prototype.reviewAxes = reviewAxes;
     assert.throws(() => resolveDelivery(declared, null, 'prototype'), /reviewAxes/);
