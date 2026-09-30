@@ -43,8 +43,13 @@ Sonnet) on the same brief, and a Fable cross-judge scoring six criteria.
   block leaves a repository with no pstack until each machine runs
   `claude plugin install pstack@harness`.
 - **Base.** The measured-working shape: the upstream plugin id plus its marketplace
-  declaration. It loads after the trust prompt with no install step and does not double-load
-  for a user who already enables pstack globally.
+  declaration. On a machine that already has pstack it changes nothing and loads no second
+  copy. On an empty profile with the folder trusted, it registered and cloned the
+  marketplace and cached pstack 0.9.53 with no install command (measured). That an
+  authenticated session then lists the `pstack:` skills is documented, not measured, and
+  the fallback is one `claude plugin install pstack@pstack-claude`. The pinned shape would
+  need that same one-time install on every machine, and until then it switches off the
+  copy each machine already has.
 - **Grafted.** The one-owner-per-job table, from both candidates, with the Fable package's
   correction that `pstack:tdd` owns TDD. James's user settings turn `mattpocock-skills:tdd`
   off, so the Opus routing would have left no TDD owner. Also the `CLAUDE.md` import finding
@@ -54,9 +59,16 @@ Sonnet) on the same brief, and a Fable cross-judge scoring six criteria.
   sandboxed Codex reads that file. Switching `show-me-your-work` off, because James asks for
   decision logs in his unattended runs. A per-machine staleness hook that reads Claude Code's
   internal plugin records, which is more surface than one pin warrants today.
+- **Rerunnable.** The stack edits were made by `docs/audit/2026-09-30-settings_edit.py`, a
+  text edit that keeps each stack's main-transform blocks in step with its settings. Rerun it
+  with `python3 docs/audit/2026-09-30-settings_edit.py <stack checkout> --spec
+docs/audit/2026-09-30-pstack-consumer-spec.json`. A second run changes nothing.
 - **Verified.** Every stack's `main` generator still runs, and the generated `main` settings
   enable both `harness@harness` and `pstack@pstack-claude`. The exact new factory settings
-  file, placed in a scratch repository, reports `pstack@pstack-claude` enabled.
+  file, placed in a scratch repository on this machine, reports the existing user-scope
+  install enabled. That proves no conflict, not a fresh-machine load. A cross-model review
+  of the decision trail (Fable) caught that gap, and the empty-profile measurement above
+  answers most of it.
 
 ## Improvements, ranked
 

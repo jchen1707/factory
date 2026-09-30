@@ -29,8 +29,13 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/python_env.mjs uv sync
-      # The suite checks the vendored layer A tree against a sibling harness checkout.
-      - run: git clone --quiet --depth 1 --branch v2 https://github.com/jchen1707/harness.git ../harness
+      # The suite checks the vendored layer A tree against a sibling harness checkout, pinned
+      # to the commit the vendored MANIFEST.json records so another repo's branch cannot move it.
+      - run: |
+          sha="$(python3 -c 'import json; print(json.load(open(".agents/vendor/harness/MANIFEST.json"))["sha"])')"
+          git init --quiet ../harness
+          git -C ../harness fetch --quiet --depth 1 https://github.com/jchen1707/harness.git "$sha"
+          git -C ../harness checkout --quiet FETCH_HEAD
       - run: node scripts/python_env.mjs uv run ruff check .
       - run: node scripts/python_env.mjs uv run ruff format --check .
       - run: node scripts/python_env.mjs uv run mypy
@@ -49,6 +54,11 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/python_env.mjs uv sync
-      # The suite checks the vendored layer A tree against a sibling harness checkout.
-      - run: git clone --quiet --depth 1 --branch v2 https://github.com/jchen1707/harness.git ../harness
+      # The suite checks the vendored layer A tree against a sibling harness checkout, pinned
+      # to the commit the vendored MANIFEST.json records so another repo's branch cannot move it.
+      - run: |
+          sha="$(python3 -c 'import json; print(json.load(open(".agents/vendor/harness/MANIFEST.json"))["sha"])')"
+          git init --quiet ../harness
+          git -C ../harness fetch --quiet --depth 1 https://github.com/jchen1707/harness.git "$sha"
+          git -C ../harness checkout --quiet FETCH_HEAD
       - run: node scripts/python_env.mjs uv run pytest tests/integration
