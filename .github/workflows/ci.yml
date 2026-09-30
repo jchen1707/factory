@@ -29,6 +29,8 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/python_env.mjs uv sync
+      # The suite checks the vendored layer A tree against a sibling harness checkout.
+      - run: git clone --quiet --depth 1 --branch v2 https://github.com/jchen1707/harness.git ../harness
       - run: node scripts/python_env.mjs uv run ruff check .
       - run: node scripts/python_env.mjs uv run ruff format --check .
       - run: node scripts/python_env.mjs uv run mypy
@@ -47,4 +49,6 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/python_env.mjs uv sync
+      # The suite checks the vendored layer A tree against a sibling harness checkout.
+      - run: git clone --quiet --depth 1 --branch v2 https://github.com/jchen1707/harness.git ../harness
       - run: node scripts/python_env.mjs uv run pytest tests/integration

@@ -63,15 +63,18 @@ Sonnet) on the same brief, and a Fable cross-judge scoring six criteria.
 Ranked by value over cost. Evidence was measured this session unless marked otherwise. Vault
 paths are relative to `~/Documents/Obsidian Vault`.
 
-1. **`factory` main is red, and nothing noticed.** 25 integration tests error on a clean
-   origin/main (17705fe). `config/models.toml` routes `planner` and `builder` to `gpt-6-astra`
-   (also `src/factory/execution.py:24-28` and `config/prices.toml`). Neither the committed
-   model list nor this machine's Codex catalogue contains that model
-   (`src/factory/routing.py:192`). It entered with 25cf383 (PR #101, 2026-09-10). PRs #101
-   to #103 merged with zero status checks, because the repository had no CI. This pull
-   request adds CI. The model choice is James's, so the routing is left as it is and jchen1707/factory#104
-   tracks it. Expect the `integration` job to stay red until that is decided. Cost: 10 minutes
-   once a model is chosen.
+1. **`factory` main is red, and nothing noticed.** On a clean origin/main (17705fe), unit
+   measured 3 failed and 899 passed. Integration measured 2 failed, 57 passed, 12 skipped and
+   554 errors. `config/models.toml` routes `planner` and `builder` to `gpt-6-astra` (also
+   `src/factory/execution.py:24-28` and `config/prices.toml`). Neither the committed model list
+   nor this machine's Codex catalogue contains that model (`src/factory/routing.py:192`). The
+   three unit failures are the shipped-table tests in `tests/unit/test_routing.py`.
+   `tests/integration/conftest.py:917` loads the same routing into its shared fixture, and all
+   556 integration failures and errors raise that one `RoutingError` (measured). The
+   model entered with 25cf383 (PR #101, 2026-09-10). PRs #101 to #103 merged with zero status
+   checks, because the repository had no CI. This pull request adds CI. The model choice is
+   James's, so the routing is left as it is and jchen1707/factory#104 tracks it. Expect both CI
+   jobs to stay red until that is decided. Cost: 10 minutes once a model is chosen.
 2. **Claude Code sessions in `factory` never loaded `AGENTS.md`.** `CLAUDE.md` was a Markdown
    link, which Claude Code does not follow; only an `@` import loads a file. The binding rules
    (James merges, never write `~/.codex/config.toml`, never edit `.agents/vendor/`) reached a
