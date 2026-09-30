@@ -7,13 +7,13 @@ The decision trail is `docs/audit/2026-09-30-pstack-integration.tsv`.
 
 ## What shipped
 
-| Repository         | Pull request                         | Change                                                                                  |
-| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------- |
-| `harness` (v2)     | jchen1707/harness#48                 | Consumer block in the repo and both templates; `plugins/harness/docs/agents/pstack.md`. |
-| `python-harness`   | jchen1707/python-harness#86          | Consumer block; the main-transform block updated in step.                               |
-| `frontend-harness` | jchen1707/frontend-harness#65        | Consumer block.                                                                         |
-| `go-harness`       | jchen1707/go-harness#8               | Consumer block; transform block; `CLAUDE.md` importing `AGENTS.md`.                     |
-| `factory`          | the pull request that adds this file | Consumer block; `CLAUDE.md` imports `AGENTS.md`; first CI workflow; this report.        |
+| Repository         | Pull request                         | Change                                                                                                                                    |
+| ------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `harness` (v2)     | jchen1707/harness#48                 | Consumer block in the repo and both templates; `plugins/harness/docs/agents/pstack.md`; `CLAUDE.md` importing `AGENTS.md`; plugin 0.14.3. |
+| `python-harness`   | jchen1707/python-harness#86          | Consumer block; the main-transform block updated in step.                                                                                 |
+| `frontend-harness` | jchen1707/frontend-harness#65        | Consumer block.                                                                                                                           |
+| `go-harness`       | jchen1707/go-harness#8               | Consumer block; transform block; `CLAUDE.md` importing `AGENTS.md`.                                                                       |
+| `factory`          | the pull request that adds this file | Consumer block; `CLAUDE.md` imports `AGENTS.md`; first CI workflow; this report.                                                          |
 
 The consumer block, identical everywhere:
 
@@ -79,8 +79,7 @@ paths are relative to `~/Documents/Obsidian Vault`.
    link, which Claude Code does not follow; only an `@` import loads a file. The binding rules
    (James merges, never write `~/.codex/config.toml`, never edit `.agents/vendor/`) reached a
    session only when the agent chose to open the file. Fixed here. `go-harness` v2 had no
-   `CLAUDE.md` at all, fixed in go-harness#8. `harness` v2 itself still has none. Cost of that
-   last one: 5 minutes, after checking that its generator accepts an existing `CLAUDE.md`.
+   `CLAUDE.md` at all, fixed in go-harness#8. `harness` v2 had none either, fixed in harness#48.
 3. **A gate that ran nothing can report `pass`.** A gate passed with every test skipped
    (`Project Learnings/2026-09-11 nemoclaw-test 01a09125.md`), and a ticket reached Done with
    no commit (`Project Learnings/2026-09-18 nemoclaw-test 01a0abfd.md`). About 27 of 98
