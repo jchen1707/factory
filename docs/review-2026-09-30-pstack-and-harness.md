@@ -92,13 +92,16 @@ paths are relative to `~/Documents/Obsidian Vault`.
    (James merges, never write `~/.codex/config.toml`, never edit `.agents/vendor/`) reached a
    session only when the agent chose to open the file. Fixed here. `go-harness` v2 had no
    `CLAUDE.md` at all, fixed in go-harness#8. `harness` v2 had none either, fixed in harness#48.
-3. **A gate that ran nothing can report `pass`.** A gate passed with every test skipped
-   (`Project Learnings/2026-09-11 nemoclaw-test 01a09125.md`), and a ticket reached Done with
-   no commit (`Project Learnings/2026-09-18 nemoclaw-test 01a0abfd.md`). About 27 of 98
-   September retros cite missing acceptance evidence. Change: in layer A `gate_report.mjs`, a
-   `kind: test` gate that collected zero tests or skipped them all reports `incomplete`. The
-   factory already blocks on `incomplete`. Cost: 1 to 2 hours, mostly per-runner output
-   parsing.
+3. **A gate report that ran nothing can read `pass`.** `gate_report.mjs --json` returned the
+   verdict `pass` while all four gates were `skipped_unchanged`; only `--force` actually ran
+   Ruff, formatting, mypy and pytest (`Project Learnings/2026-09-11 nemoclaw-test 01a09125.md`,
+   read this session). A ticket also reached Done with no delivered commit
+   (`Project Learnings/2026-09-18 nemoclaw-test 01a0abfd.md`, read this session). The vault
+   explorer counted about 27 of 98 September retros citing missing acceptance evidence (its
+   tally, not rechecked). Change: in layer A `gate_report.mjs`, give a report whose gates were
+   all skipped a verdict other than `pass`, so a reader can tell "nothing ran" from "everything
+   passed". Check first whether the factory treats that verdict as success on purpose. Cost: 1
+   hour.
 4. **Installed plugins go stale in silence.** The installed `harness@harness` plugin is 0.1.1
    (`gitCommitSha` 118ba3b, installed 2026-08-19). Layer A is 0.14.2, and the `harness`
    marketplace clone has not refreshed since 2026-08-19 (`~/.claude/plugins/installed_plugins.json`,
@@ -116,7 +119,7 @@ paths are relative to `~/Documents/Obsidian Vault`.
    its source plugin and version, and the prompt list and doctor check derive from it. Cost:
    1 to 2 hours.
 7. **Session learnings are lost without a trace.** `Project Learnings/_hook.log` records 16
-   "claude exited 1" and 13 "transcript unavailable". The factory and python-harness wire
+   "claude exited 1" and 13 "transcript unavailable" (counted this session). The factory and python-harness wire
    `codex_session_learnings.mjs --claude` on SessionEnd with a 3-second timeout, while the
    agnostic template gives `session_learnings.mjs` 300 seconds. Unverified: whether the first
    script detaches before its timeout. Check that before changing a number. Cost: 1 hour.
