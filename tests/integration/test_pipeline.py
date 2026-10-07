@@ -404,8 +404,9 @@ def test_the_sandbox_is_created_with_the_measured_settings(ctx: Context) -> None
     assert spec.static_mcp == ()  # §13.1: nothing to leak, nothing to misuse
     assert spec.template is None  # P0-3: the stock image already has node 22 and uv
     assert spec.env["UV_PROJECT_ENVIRONMENT"] == "/home/agent/venvs/python-harness"
-    assert len(spec.workspaces) == 2  # the repo, and the vault read-write
-    assert not any(w.readonly for w in spec.workspaces)
+    # The repo, the doctrine read-only, and the vault read-write.
+    assert [w.readonly for w in spec.workspaces] == [False, True, False]
+    assert spec.workspaces[1].path == ctx.home / "state" / "doctrine"
 
 
 def test_a_second_writer_on_the_same_project_waits_without_claiming(ctx: Context) -> None:

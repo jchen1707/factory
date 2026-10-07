@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from factory import repo
+from factory import doctrine, repo
 from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
@@ -55,6 +55,11 @@ def build_spec(ctx: Context) -> SandboxSpec:
         # what the per-run version costs). See `steps/clone.py` for the whole shape.
         ctx.clone_mount.mkdir(parents=True, exist_ok=True)
         workspaces.append(Workspace(ctx.clone_mount))
+    # Read-only, and the root rather than one digest: a rebuilt doctrine lands beside the
+    # old one and the workspace set, fixed at creation, does not change.
+    doctrine_root = doctrine.root(ctx.home)
+    doctrine_root.mkdir(parents=True, exist_ok=True)
+    workspaces.append(Workspace(doctrine_root, readonly=True))
     if ctx.project.vault_mount == "rw":
         workspaces.append(Workspace(ctx.registry.vault.path))
     elif ctx.project.vault_mount == "ro":

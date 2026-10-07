@@ -6,9 +6,9 @@ filesystem. If the control plane dies at any moment, the next tick reads SQLite,
 the attempt, and learns what happened by looking at `heartbeat`, `exit` and
 `events.jsonl`.
 
-The prompt inlines `implement`'s SKILL.md rather than naming it: the sandbox loads no
-skill store (`--setting-sources project`, no plugin directory), so the only text the
-builder can follow is the text the prompt carries, and the record hashes exactly that.
+The prompt inlines `implement`'s SKILL.md rather than naming it: the only plugin a launch
+loads is the declared doctrine (`doctrine.py`), which does not carry it, so the only text
+the builder can follow is the text the prompt carries, and the record hashes exactly that.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from factory import (
     artifacts,
     authority,
     candidate_handoff,
+    doctrine,
     execution,
     policy,
     workflow_launches,
@@ -36,11 +37,11 @@ from factory.agent.claude import StructuredOutputMissing
 from factory.agent.stream import SessionId
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
-from factory.registry import IMPLEMENT_SKILL
+from factory.registry import IMPLEMENT_SKILL, PLUGIN_CACHE
 from factory.sandbox.base import RunHandle
 from factory.steps import Context, advance, attempt_files
 
-__all__ = ["IMPLEMENT_SKILL", "build_prompt", "collect", "start"]
+__all__ = ["IMPLEMENT_SKILL", "PLUGIN_CACHE", "build_prompt", "collect", "start"]
 
 STEP = "implement"
 
@@ -92,6 +93,7 @@ def start(
         schema=json.loads(attempt_dir.schema.read_text(encoding="utf-8")),
         session=session,
         resume=resume_session is not None,
+        plugins=_doctrine_plugin(ctx),
     )
     artifacts.write_json(
         attempt_dir.request,
@@ -391,6 +393,7 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
     # path would silently name nothing there, and the agent would start with no ticket.
     context_dir = ctx.factory_dir / "context"
 
+    skills = doctrine.prompt_sentence(_declared(ctx))
     sections = [
         f"# {ctx.issue.identifier} — {ctx.issue.title}",
         "",
@@ -400,13 +403,14 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
         "## The workflow you are running",
         "",
         "The text below is the `implement` skill, inlined verbatim. It is inlined rather",
-        "than invoked because this run loads no skill store, so nothing could reach it by",
-        "name. Follow it as though it had been invoked.",
+        "than invoked because no plugin this run loads carries it. Follow it as though it",
+        "had been invoked.",
         "",
         '<skill name="implement">',
         skill_body.strip(),
         "</skill>",
         "",
+        *([skills, ""] if skills else []),
         "## Context, already written for you",
         "",
         f"- `{context_dir}/ticket.md` — this ticket, in full",
@@ -503,6 +507,21 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
             continuation.strip(),
         ]
     return "\n".join(sections) + "\n", skill_sha
+
+
+def _declared(ctx: Context) -> doctrine.Doctrine:
+    try:
+        return doctrine.load(doctrine.config_path(ctx.home))
+    except doctrine.DoctrineError as exc:
+        raise Blocked("doctrine-invalid", str(exc)) from exc
+
+
+def _doctrine_plugin(ctx: Context) -> tuple[claude.PluginRef, ...]:
+    try:
+        plugin = doctrine.build(_declared(ctx), PLUGIN_CACHE, doctrine.root(ctx.home))
+    except doctrine.DoctrineError as exc:
+        raise Blocked("doctrine-invalid", str(exc)) from exc
+    return (plugin,) if plugin else ()
 
 
 def _skill_text() -> tuple[str, str]:

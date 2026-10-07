@@ -31,12 +31,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import repo
+from factory import doctrine, repo
 from factory.agent import claude, stream
 from factory.agent.claude import AttemptFiles, Effort, Invocation, Role
 from factory.agent.stream import Completed, Failed, FailureKind, Interrupted, Run, SessionId
 from factory.doctor import Result, Status
-from factory.harness import load_harness_config
+from factory.harness import CLAUDE_SETTINGS, load_harness_config
 from factory.registry import Project
 from factory.repo import GitError
 from factory.sandbox.base import RunHandle, SandboxAdapter, SandboxSpec, Workspace
@@ -264,6 +264,8 @@ class _Probe:
     builder_model: str
     #: Set by `_ping`; read by `_resume`.
     session: SessionId | None = None
+    #: What the clone's own settings enable, switched off as every factory launch does.
+    disabled_plugins: tuple[str, ...] = ()
 
     @property
     def repo(self) -> Path:
@@ -304,6 +306,7 @@ class _Probe:
             resume=session is not None,
             files=files,
             schema=SCHEMA,
+            disabled_plugins=self.disabled_plugins,
         )
 
     def launch(self, inv: Invocation) -> Run:
@@ -481,6 +484,10 @@ def run(
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True)
         repo.clone_at(project.path, project.base_ref, probe.repo)
+        settings = probe.repo / CLAUDE_SETTINGS
+        probe.disabled_plugins = doctrine.enabled_plugins(
+            settings.read_text(encoding="utf-8") if settings.exists() else None
+        )
         _discard(sandbox, name)
         sandbox.ensure(_spec(project, root, deny_network))
         results.append(Result("live: sandbox", Status.OK, f"{name} over a clone of {project.name}"))

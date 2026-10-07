@@ -13,6 +13,7 @@ from factory.machine import Blocked
 
 __all__ = [
     "IMPLEMENT_SKILL",
+    "PLUGIN_CACHE",
     "VENDOR_SYNC",
     "Defaults",
     "GarbageCollection",
@@ -33,6 +34,9 @@ class RegistryError(Exception):
 #: reads of the operator's home besides `doctor.py`; `tests/unit/test_boundaries.py` pins it.
 IMPLEMENT_SKILL = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
 VENDOR_SYNC = Path.home() / "harness" / "scripts" / "vendor_sync.py"
+#: Where `claude plugin install` keeps each plugin version; `config/doctrine.toml` names
+#: its skills from here.
+PLUGIN_CACHE = Path.home() / ".claude" / "plugins" / "cache"
 
 
 #: The forge names `delivery/forge.py` has an adapter for. Spelled here rather than

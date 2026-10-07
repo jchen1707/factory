@@ -144,6 +144,9 @@ class Launch:
     prompt: Path
     events: Path
     stderr: Path
+    plugin_dirs: tuple[Path, ...] = ()
+    #: `--settings`, parsed; `enabledPlugins` there switches a target's plugin off.
+    settings: dict[str, Any] | None = None
 
     @property
     def review(self) -> bool:
@@ -172,7 +175,27 @@ def parse_launch(script: str) -> Launch:
         prompt=Path(redirect["<"]),
         events=Path(redirect[">"]),
         stderr=Path(redirect["2>"]),
+        plugin_dirs=tuple(Path(argv[i + 1]) for i, arg in enumerate(argv) if arg == "--plugin-dir"),
+        settings=json.loads(flag["--settings"]) if "--settings" in flag else None,
     )
+
+
+def _with_plugins(lines: list[str], plugins: tuple[str, ...]) -> list[str]:
+    """The stream with `plugins` loaded in its `init`, as the CLI reports a `--plugin-dir`."""
+    out = []
+    for line in lines:
+        if plugins and '"subtype":"init"' in line:
+            event = json.loads(line)
+            event["plugins"] = [
+                *(
+                    {"name": name, "path": "/plugin", "source": f"{name}@inline"}
+                    for name in plugins
+                ),
+                *event["plugins"],
+            ]
+            line = claude_stream.line(event)
+        out.append(line)
+    return out
 
 
 @dataclass
@@ -488,7 +511,10 @@ class FakeSandbox:
                 # the CLI writes, long before the first turn ends. A fake that wrote only
                 # the heartbeat would model a sessionless agent that does not exist, and
                 # hide whether the resume switch reads the stream or the row.
-                self._write_stream(launch, [self._init_line(launch)], None, "")
+                loaded = self._loaded_plugins(handle.sandbox, launch)
+                self._write_stream(
+                    launch, _with_plugins([self._init_line(launch)], loaded), None, ""
+                )
             return
         clone = self.clone_dir(handle.sandbox)
         if clone is not None and not is_verify and not (launch and launch.review):
@@ -505,10 +531,24 @@ class FakeSandbox:
         scenario = self._scenario(launch)
         exit_code = scenario.exit_code if self.exit_code is None else self.exit_code
         stderr = scenario.stderr if self.stderr is None else self.stderr
-        self._write_stream(launch, scenario.lines, exit_code, stderr)
+        loaded = self._loaded_plugins(handle.sandbox, launch)
+        self._write_stream(launch, _with_plugins(scenario.lines, loaded), exit_code, stderr)
         (directory / "heartbeat").write_text("0")
         if exit_code is not None:
             (directory / handle.exit_name).write_text(str(exit_code))
+
+    def _loaded_plugins(self, sandbox: str, launch: Launch) -> tuple[str, ...]:
+        """The `--plugin-dir` plugins the VM can see, by `plugin.json` name. The CLI drops a
+        directory that does not exist (plugin-dir-missing), and in the VM only a mounted
+        workspace exists."""
+        spec = self._spec(sandbox)
+        mounted = [w.path for w in spec.workspaces] if spec else []
+        return tuple(
+            json.loads(manifest.read_text())["name"]
+            for directory in launch.plugin_dirs
+            if any(directory.is_relative_to(root) for root in mounted)
+            and (manifest := directory / ".claude-plugin" / "plugin.json").exists()
+        )
 
     def _init_line(self, launch: Launch) -> str:
         return claude_stream.line(

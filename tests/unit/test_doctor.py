@@ -16,6 +16,7 @@ import pytest
 
 from factory import doctor
 from factory.doctor import CHECKS, DoctorContext, Result, Status
+from tests.support import plugin_cache
 
 HOME = Path(__file__).resolve().parents[2]
 
@@ -283,3 +284,26 @@ def test_the_hooks_row_fails_a_project_whose_base_ref_does_not_wire_them(tmp_pat
     assert rows["layer-A hooks in unfetched"].status is Status.FAIL
     assert "origin/x does not resolve" in rows["layer-A hooks in unfetched"].detail
     ctx.store.close()
+
+
+@pytest.mark.parametrize(
+    ("version", "status", "detail"),
+    [
+        ("1.2.3", Status.OK, "2 skills from mattpocock-skills 1.2.3"),
+        ("9.9.9", Status.FAIL, "mattpocock-skills 9.9.9 is not installed"),
+    ],
+)
+def test_the_doctrine_row_checks_every_declared_skill_against_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, status: Status, detail: str
+) -> None:
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "doctrine.toml").write_text(
+        "[sources.mattpocock-skills]\nmarketplace = 'claude-plugins-official'\n"
+        f"version = '{version}'\nskills = ['tdd', 'code-review']\n"
+    )
+    monkeypatch.setattr(doctor, "PLUGIN_CACHE", plugin_cache.mattpocock(tmp_path / "cache"))
+
+    rows = {r.name: r for r in doctor.check("doctrine").run(DoctorContext(home=tmp_path))}
+
+    assert rows["doctrine"].status is status
+    assert detail in rows["doctrine"].detail
