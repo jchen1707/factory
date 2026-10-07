@@ -196,7 +196,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
             ctx.run.id,
             attempt,
             "gate_report",
-            "pass" if report["verdict"] == "pass" else "fail",
+            report["verdict"] if report["verdict"] in ("pass", "skipped") else "fail",
             detail=json.dumps(
                 {
                     "verdict": report["verdict"],
@@ -233,7 +233,10 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     ctx.store.finish_attempt(
         ctx.run.id, attempt, State.VERIFYING, exit_code=attempt_dir.exit_code(), outcome=verdict
     )
-    if verdict == "pass":
+    # `skipped` (no gate ran) advances like `pass` on purpose: a change no gate covers is
+    # one the implement prompt tells the agent to claim no gates for. The record above
+    # keeps it `skipped`, so nothing downstream can read it as a passing gate run.
+    if verdict in ("pass", "skipped"):
         ctx.store.runtime.configure("run", ctx.run.id, {"failure_episode": None})
         authority.record_evidence(ctx, STEP)
         advance(ctx, State.REVIEWING)

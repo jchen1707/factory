@@ -743,6 +743,29 @@ def test_a_pass_report_advances_to_reviewing(ctx: Context) -> None:
     assert _gates_json(ctx)["verdict"] == "pass"
 
 
+def test_a_report_that_ran_nothing_reaches_reviewing_recorded_as_skipped(ctx: Context) -> None:
+    # A change no gate covers (docs only) is allowed through on purpose: the implement
+    # prompt tells the agent its honest `gates_run` is then empty. What it must not do is
+    # leave a `pass` behind it, because nothing was verified.
+    _fake(ctx).result = {**GOOD_RESULT, "gates_run": []}
+    _fake(ctx).gate_report = {
+        **GOOD_GATE_REPORT,
+        "gates": [
+            {**gate, "status": "skipped_unchanged", "exit": None, "durationMs": None}
+            for gate in GOOD_GATE_REPORT["gates"]
+        ],
+        "verdict": "skipped",
+    }
+    _to_verifying(ctx)
+    advance_state(ctx)
+    assert ctx.run.state is State.REVIEWING
+    assert _gates_json(ctx)["verdict"] == "skipped"
+    statuses = [
+        r["status"] for r in ctx.store.checks(ctx.run.id) if r["check_name"] == "gate_report"
+    ]
+    assert statuses == ["skipped"]
+
+
 def test_a_fail_report_loops_back_to_implementing(ctx: Context) -> None:
     _to_verifying(ctx)
     _fake(ctx).gate_report = _fixture("gate-report-fail.json")

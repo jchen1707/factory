@@ -1205,7 +1205,9 @@ def create_app(
                 "</tr>"
                 for g in detail.gates
             )
-            verdict_cls = "pass" if detail.gate_verdict == "pass" else "fail"
+            verdict_cls = {"pass": "pass", "skipped": "muted"}.get(
+                detail.gate_verdict or "", "fail"
+            )
             gates_html = (
                 f'<h3>Verification · gate report — <span class="{verdict_cls}">{_e(detail.gate_verdict)}</span></h3>'
                 '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>status</th><th>gate</th>'
