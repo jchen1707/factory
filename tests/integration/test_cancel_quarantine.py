@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,7 @@ def test_cancel_after_a_secret_in_artifact_block_quarantines_the_attempt(
     assert (shared / ctx.run.linear_id / ctx.run.id / "0" / "notes.txt").is_file()
     quarantined = ctx.state_dir / "quarantine" / leaked.name / "leak.txt"
     assert secret in quarantined.read_text()
+    assert stat.S_IMODE((ctx.state_dir / "quarantine").stat().st_mode) == 0o700
     assert any("github-token" in line and str(quarantined.parent) in line for line in lines)
     assert not any(line.startswith(f"archived {leaked.name} ") for line in lines)
     assert not [path for path in scheduled if quarantined.parent in path.parents]

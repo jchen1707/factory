@@ -1232,7 +1232,7 @@ def _cancel_run(
                         quarantine = (
                             home / "state" / "runs" / run.id / "quarantine" / directory.name
                         )
-                        quarantine.parent.mkdir(parents=True, exist_ok=True)
+                        quarantine.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                         shutil.move(directory, quarantine)
                         lines.append(
                             f"quarantined attempt {directory.name} at {quarantine}: {exc.kind} "
