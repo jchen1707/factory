@@ -210,6 +210,9 @@ factory migrate --database /absolute/path/to/factory.db
 Schema 5 adds invocation telemetry, settings/audit events, policy snapshots, project slots,
 and failure episodes. Existing runs, attempts, and effects are retained. Existing schema 4
 stores require explicit migration. New temporary test stores initialize directly.
+Schema 8 drops `delegation_requests`, the retired delegation subsystem's request table, and
+deletes whatever rows it holds. `agent_leases.parent_id` stays as a column that is now
+always null. Every other table and row is retained.
 After James approves the displayed DDL, the operator can run:
 
 ```sh
