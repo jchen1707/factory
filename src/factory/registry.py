@@ -124,6 +124,9 @@ class Defaults:
     max_attempts: int
     max_total_attempts: int
     disk_min_free_gb: int
+    #: The same floor inside each build VM, which the host floor cannot see.
+    vm_min_free_gb: int
+    vm_min_free_inodes: int
     concurrency_per_project: int
     planning: Planning
     redphase: RedPhase
@@ -259,6 +262,8 @@ def _defaults(raw: Mapping[str, Any]) -> Defaults:
         max_attempts=int(raw.get("max_attempts", 3)),
         max_total_attempts=int(raw.get("max_total_attempts", 5)),
         disk_min_free_gb=int(raw.get("disk_min_free_gb", 20)),
+        vm_min_free_gb=int(raw.get("vm_min_free_gb", 2)),
+        vm_min_free_inodes=int(raw.get("vm_min_free_inodes", 50_000)),
         concurrency_per_project=int(raw.get("concurrency_per_project", 1)),
         planning=Planning(
             auto=bool(planning_raw.get("auto", False)),

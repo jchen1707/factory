@@ -55,7 +55,8 @@ from factory.registry import (
     load_registry,
 )
 from factory.routing import Routing, RoutingError, load_routing
-from factory.sandbox.sbx import SbxAdapter, sbx_available
+from factory.sandbox import vm_disk
+from factory.sandbox.sbx import SbxAdapter, SbxError, sbx_available
 from factory.steps import review as review_step
 from factory.steps.sandbox import layer_a_hooks_wired
 from factory.store import Store
@@ -322,6 +323,58 @@ def _sandbox_delivery(ctx: DoctorContext) -> list[Result]:
     return results
 
 
+def _build_vm_disk(ctx: DoctorContext) -> list[Result]:
+    """The preflight's `vm-disk-floor`, asked of every running build VM before a run.
+
+    A stopped VM is skipped, because `sbx exec` would start it (measured 2026-10-07) and
+    a doctor must not undo a `factory suspend`. The preflight measures it when a run
+    starts it. A VM not yet created passes: the factory creates it fresh.
+    """
+    registry = ctx.registry
+    if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
+        return []
+    projects = list(registry.projects.values())
+    adapter = SbxAdapter()
+    try:
+        existing = adapter.names()
+    except (SbxError, OSError, subprocess.TimeoutExpired) as exc:
+        return [
+            Result(f"build VM disk for {p.name}", Status.SKIPPED, f"sbx is not available: {exc}")
+            for p in projects
+        ]
+    defaults = registry.defaults
+    results: list[Result] = []
+    for project in projects:
+        name = f"build VM disk for {project.name}"
+        if project.build_sandbox not in existing:
+            results += _one(name, True, f"{project.build_sandbox} is not created yet")
+            continue
+        try:
+            stopped = adapter.inspect(project.build_sandbox).get("state") == "stopped"
+        except (SbxError, OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            results.append(Result(name, Status.SKIPPED, f"sbx inspect failed: {exc}"))
+            continue
+        if stopped:
+            results.append(
+                Result(name, Status.SKIPPED, f"{project.build_sandbox} is stopped; not started")
+            )
+            continue
+        try:
+            rows = vm_disk.measure(
+                adapter, project.build_sandbox, (str(project.path), vm_disk.VM_HOME)
+            )
+        except vm_disk.ProbeError as exc:
+            results += _one(name, False, str(exc))
+            continue
+        short = vm_disk.shortfalls(
+            rows,
+            min_free_gb=defaults.vm_min_free_gb,
+            min_free_inodes=defaults.vm_min_free_inodes,
+        )
+        results += _one(name, not short, "; ".join(short) or vm_disk.summary(rows))
+    return results
+
+
 def _hooks_wired(ctx: DoctorContext) -> list[Result]:
     """The preflight's `layer-a-hooks-wired`, asked before a run rather than by one."""
     registry = ctx.registry
@@ -411,6 +464,7 @@ CHECKS: tuple[Check, ...] = (
     Check("sensitive paths", _sensitive_paths, needs=("registry",)),
     Check("layer-A hooks", _hooks_wired, needs=("registry",)),
     Check("sandbox delivery", _sandbox_delivery, needs=("registry",)),
+    Check("build VM disk", _build_vm_disk, needs=("registry",)),
     Check("plan copy", _plan_copy),
     Check("claude live probe", _live, needs=("registry", "routing"), deep=True),
 )

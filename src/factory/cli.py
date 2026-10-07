@@ -2197,7 +2197,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--deep",
         action="store_true",
-        help="also run a live codex canary against a protected path (costs a model call)",
+        help="also run the live Claude probe in a disposable sandbox (costs model calls)",
     )
     doctor.set_defaults(func=cmd_doctor)
 

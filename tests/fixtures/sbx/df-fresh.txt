@@ -1,0 +1,6 @@
+Filesystem     1024-blocks      Used Available Capacity Mounted on
+host             482746452 356135332 126611120      74% /private/tmp/inode-probe-ws
+overlay           20466256     43416  19357880       1% /
+Filesystem         Inodes    IUsed      IFree IUse% Mounted on
+host           1303878528 37768248 1266110280    3% /private/tmp/inode-probe-ws
+overlay           1310720      100    1310620    1% /

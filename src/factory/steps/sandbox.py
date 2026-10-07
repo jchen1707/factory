@@ -17,6 +17,7 @@ from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
 from factory.registry import Project
+from factory.sandbox import vm_disk
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.steps import Context, advance
 
@@ -37,6 +38,7 @@ def run(ctx: Context) -> None:
     ctx.sandbox.ensure(spec)
     ctx.log("sandbox.ready", sandbox=spec.name, template=spec.template or "(agent default)")
 
+    _vm_disk_floor(ctx, spec)
     preflight(ctx, spec)
     advance(ctx, State.SANDBOX_READY)
 
@@ -89,6 +91,34 @@ def build_spec(ctx: Context) -> SandboxSpec:
         ),
         root_size_gib=ctx.project.root_size_gib,
     )
+
+
+def _vm_disk_floor(ctx: Context, spec: SandboxSpec) -> None:
+    """Refuse to launch into a VM whose workspace or home filesystem is below the floor.
+
+    Before the enforcement preflight, so a full VM blocks under its own reason rather
+    than as whichever enforcement probe it happened to break first.
+    """
+    defaults = ctx.registry.defaults
+    try:
+        rows = vm_disk.measure(ctx.sandbox, spec.name, (str(ctx.project.path), vm_disk.VM_HOME))
+    except vm_disk.ProbeError as exc:
+        ctx.store.record_check(
+            ctx.run.id, ctx.run.attempt, "preflight:vm-disk-floor", "fail", detail=str(exc)
+        )
+        raise Blocked("vm-disk-unmeasured", str(exc)) from exc
+    short = vm_disk.shortfalls(
+        rows, min_free_gb=defaults.vm_min_free_gb, min_free_inodes=defaults.vm_min_free_inodes
+    )
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        "preflight:vm-disk-floor",
+        "fail" if short else "pass",
+        detail="; ".join(short) or vm_disk.summary(rows),
+    )
+    if short:
+        raise Blocked("vm-disk-below-floor", "; ".join(short))
 
 
 def _capability_env(ctx: Context, spec: SandboxSpec) -> list[str]:
