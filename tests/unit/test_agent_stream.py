@@ -347,6 +347,24 @@ def test_a_null_rate_limit_window_is_an_unknown_window() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "seven_day", [{"utilization": None, "resetsAt": 1791403200}, {"utilization": 0.11}, {}]
+)
+def test_a_half_reported_window_is_unknown_and_the_run_keeps_its_result(
+    seven_day: dict[str, object],
+) -> None:
+    whole = lines("success-schema")
+    wire = next(json.loads(x) for x in whole if '"rate_limit_event"' in x)
+    wire["rate_limit_info"]["unifiedWindows"]["seven_day"] = seven_day
+    edited = [json.dumps(wire) if '"rate_limit_event"' in x else x for x in whole]
+
+    run = stream.fold(stream.events(edited))
+
+    assert isinstance(run.outcome, Completed)
+    assert run.rate_limit is not None
+    assert set(run.rate_limit.windows) == {"five_hour"}
+
+
 def test_a_wrongly_shaped_inner_event_is_corrupt_not_a_crash() -> None:
     whole = lines("success-schema")
     wire = next(json.loads(x) for x in whole if '"rate_limit_event"' in x)

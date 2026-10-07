@@ -7,11 +7,12 @@ two that end `subtype: success` with `is_error: true`.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
-from factory import recovery
+from factory import accounting, recovery
 from factory.execution import ProjectQueued
 from factory.machine import Blocked, Resumable, State
 from factory.recovery import Disposition
@@ -22,8 +23,9 @@ from factory.steps import plan as plan_step
 from factory.steps import reap as reap_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import KILLED, FakeSandbox, advance_state
+from tests.integration.conftest import KILLED, FakeLinear, FakeSandbox, advance_state
 from tests.integration.test_phase4 import _expire_the_backoff
+from tests.support import claude_stream
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -118,6 +120,36 @@ def test_a_refused_launch_holds_the_next_one_until_its_reset(ctx: Context) -> No
     assert len(_fake(ctx).launches) == launches
     assert ctx.state is State.RESUMABLE
     assert ctx.run.attempt == 1
+
+
+def test_a_full_window_reported_by_another_run_stops_intake_before_any_tracker_write(
+    ctx: Context, tmp_path: Path
+) -> None:
+    other = ctx.store.insert_run(linear_id="SYN-OTHER", project=ctx.project.name, team="SYN")
+    invocation = f"{other.id}:1:implement"
+    ctx.store.runtime.start_invocation(
+        invocation,
+        other.id,
+        1,
+        "implement",
+        {"model": claude_stream.MODEL, "cost_step": "implement"},
+    )
+    events = tmp_path / "other-events.jsonl"
+    report = claude_stream.rate_limit(five_hour=0.95, resets_at=int(time.time()) + 3600)
+    events.write_text(
+        "".join(f"{line}\n" for line in claude_stream.lines(claude_stream.init(), report))
+    )
+    accounting.collect_invocation(ctx.store, invocation, events)
+    linear = ctx.linear
+    assert isinstance(linear, FakeLinear)
+
+    with pytest.raises(ProjectQueued, match="five_hour window at 95%"):
+        claim_step.run(ctx)
+
+    assert linear.state_changes == []
+    assert linear.comments == []
+    assert ctx.state is State.APPROVED
+    assert ctx.store.runtime.admit(other.id, ctx.project.name, 1)  # the held run took no slot
 
 
 def test_a_refusal_that_reported_no_limits_leaves_the_retry_to_the_ladder(ctx: Context) -> None:

@@ -62,10 +62,7 @@ def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None 
         for row in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
     ):
         raise ProjectQueued("waiting for prior agent terminal reconciliation")
-    now = time.time()
-    held = rate_limit_hold(accounting.limits(ctx.store, now), ctx.routing.hold_at, now)
-    if held is not None:
-        raise ProjectQueued(held)
+    refuse_while_held(ctx)
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     previous = settings.get(f"launch:{attempt}:{step}", 0)
     wanted = attempt_key(attempt, step, previous + 1)
@@ -95,23 +92,23 @@ def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None 
     return wanted
 
 
-def rate_limit_hold(
-    limits: accounting.Limits, hold_at: Mapping[str, float], now: float
-) -> str | None:
-    """Why the subscription should take no new launch yet, or `None`.
+def refuse_while_held(ctx: Context) -> None:
+    """Keep the ticket queued while the subscription should take no new launch."""
+    held = rate_limit_hold(accounting.limits(ctx.store, time.time()), ctx.routing.hold_at)
+    if held is not None:
+        raise ProjectQueued(held)
 
-    A report is only as current as its reset: once a window's `resets_at` passes, its
-    utilisation describes a window that no longer exists, so the hold lifts without a
-    newer report. That matters because a hold starts no launch that could bring one.
-    """
+
+def rate_limit_hold(limits: accounting.Limits, hold_at: Mapping[str, float]) -> str | None:
+    """Why the subscription should take no new launch yet, or `None`."""
     for name, threshold in hold_at.items():
         window = limits.windows.get(name)
-        if window is not None and window.utilization >= threshold and window.resets_at > now:
+        if window is not None and window.utilization >= threshold:
             return (
                 f"subscription {name} window at {window.utilization:.0%} "
                 f"(hold at {threshold:.0%}) until {_utc(window.resets_at)}"
             )
-    if limits.refused_until is not None and limits.refused_until > now:
+    if limits.refused_until is not None:
         return f"subscription refused a launch (429) until {_utc(limits.refused_until)}"
     return None
 

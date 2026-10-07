@@ -7,6 +7,7 @@ ticks racing the same ticket end with exactly one claim and one log line.
 
 from __future__ import annotations
 
+from factory import execution
 from factory.machine import Blocked, State
 from factory.steps import Context, advance, effect_marker, record_effect
 
@@ -21,6 +22,9 @@ IN_PROGRESS = "In Progress"
 
 
 def run(ctx: Context) -> None:
+    # Before the slot and the tracker writes: a ticket claimed into a hold would sit
+    # "In Progress" holding a sandbox and a worktree until the subscription resets.
+    execution.refuse_while_held(ctx)
     _refuse_second_writer(ctx)
     from factory.isolation import prepare
 

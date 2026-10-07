@@ -306,3 +306,8 @@ def test_a_hold_threshold_the_guard_could_not_honour_is_refused(
 ) -> None:
     with pytest.raises(RoutingError, match=message):
         _load(tmp_path, _table() + f"\n[budget.hold_at]\n{table}\n")
+
+
+def test_a_scalar_hold_at_is_refused_by_name(tmp_path: Path) -> None:
+    with pytest.raises(RoutingError, match=r"\[budget.hold_at\]"):
+        _load(tmp_path, _table().replace("[budget]", "[budget]\nhold_at = 0.9"))

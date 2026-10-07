@@ -322,7 +322,11 @@ def _rate_limit(wire: _Wire) -> RateLimit:
             {
                 name: Window(utilization=float(each["utilization"]), resets_at=each["resetsAt"])
                 for name, each in windows.items()
-                if each is not None
+                # A window without both numbers is unknown; it must not cost the run its
+                # result by corrupting the stream, nor reach the guard half-formed.
+                if isinstance(each, dict)
+                and isinstance(each.get("utilization"), int | float)
+                and isinstance(each.get("resetsAt"), int)
             }
         ),
     )

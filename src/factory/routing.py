@@ -108,7 +108,10 @@ def _validated(raw: dict[str, Any]) -> Routing:
     usd_per_run = float(budget.get("usd_per_run", 0.0))
     usd_warn_at = float(budget.get("usd_warn_at", 0.0))
     max_turns = int(budget.get("max_turns", DEFAULT_MAX_TURNS))
-    hold_at = {**DEFAULT_HOLD_AT, **{k: float(v) for k, v in budget.get("hold_at", {}).items()}}
+    configured = budget.get("hold_at", {})
+    if not isinstance(configured, dict):
+        raise RoutingError("budget.hold_at must be a table: [budget.hold_at]")
+    hold_at = {**DEFAULT_HOLD_AT, **{k: float(v) for k, v in configured.items()}}
 
     roles = {
         name: Role(

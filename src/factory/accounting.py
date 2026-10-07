@@ -158,10 +158,14 @@ _LONGEST_WINDOW_SECONDS = 7 * 86400
 class Limits:
     """The subscription's windows as every retained report, from any run, describes them.
 
-    One subscription serves every run, so this is global. Utilisation only grows until a
-    window resets, so for each window the report with the latest reset, then the highest
-    utilisation, is current, whatever order the reports were collected in.
-    `refused_until` is the latest reset reported by a launch that ended on a 429.
+    One subscription serves every run, so this is global. A report whose window has not
+    reset yet describes the current window. Utilisation is assumed only to grow within a
+    window (a window accumulates usage until its reset; one report per stream is all that
+    was measured), so for each window the highest such report is current, whatever order
+    the reports were collected in. A report whose reset has passed describes a window that no longer
+    exists, so a hold lifts at the reset without a newer report; it has to, because a
+    hold starts no launch that could bring one. `refused_until` is the latest reset
+    reported by a launch that ended on a 429, while it is still ahead.
     """
 
     windows: Mapping[str, stream.Window]
@@ -173,16 +177,18 @@ def limits(store: Store, now: float) -> Limits:
     seen: dict[str, list[stream.Window]] = {}
     for report in reports:
         for name, raw in report["windows"].items():
-            seen.setdefault(name, []).append(stream.Window(**raw))
+            if raw["resets_at"] > now:
+                seen.setdefault(name, []).append(stream.Window(**raw))
     return Limits(
         windows=MappingProxyType(
-            {
-                name: max(each, key=lambda window: (window.resets_at, window.utilization))
-                for name, each in seen.items()
-            }
+            {name: max(each, key=lambda window: window.utilization) for name, each in seen.items()}
         ),
         refused_until=max(
-            (r["resets_at"] for r in reports if r["refused"] and r["resets_at"] is not None),
+            (
+                r["resets_at"]
+                for r in reports
+                if r["refused"] and r["resets_at"] is not None and r["resets_at"] > now
+            ),
             default=None,
         ),
     )

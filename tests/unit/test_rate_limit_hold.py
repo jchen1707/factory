@@ -31,7 +31,7 @@ def _collect(store: Store, tmp_path: Path, name: str, *events: claude_stream.Wir
 
 
 def _held(store: Store) -> str | None:
-    return rate_limit_hold(accounting.limits(store, NOW), DEFAULT_HOLD_AT, NOW)
+    return rate_limit_hold(accounting.limits(store, NOW), DEFAULT_HOLD_AT)
 
 
 @pytest.fixture
@@ -82,15 +82,15 @@ def test_a_window_at_its_threshold_holds_until_its_own_reset(
         assert held in (reason or "")
 
 
-def test_a_later_reset_is_a_new_window_whichever_report_was_collected_last(
+def test_a_full_window_that_has_reset_gives_way_to_the_current_one(
     store: Store, tmp_path: Path
 ) -> None:
-    fresh = claude_stream.rate_limit(five_hour=0.05, resets_at=SOON + 18000)
-    full = claude_stream.rate_limit(five_hour=0.95, resets_at=SOON)
-    _collect(store, tmp_path, "fresh", claude_stream.init(), fresh)
-    _collect(store, tmp_path, "full", claude_stream.init(), full)
+    last_window = claude_stream.rate_limit(five_hour=0.99, resets_at=PAST)
+    current = claude_stream.rate_limit(five_hour=0.91, resets_at=SOON)
+    _collect(store, tmp_path, "last-window", claude_stream.init(), last_window)
+    _collect(store, tmp_path, "current", claude_stream.init(), current)
 
-    assert _held(store) is None
+    assert "five_hour window at 91%" in (_held(store) or "")
 
 
 def test_a_stale_report_collected_late_does_not_hide_a_fuller_one(
@@ -131,6 +131,12 @@ def test_two_refusals_hold_until_the_later_reset(store: Store, tmp_path: Path) -
     _collect(store, tmp_path, "session", *_refused(resets_at=SOON))
 
     assert time.strftime("%Y-%m-%d %H:%M", time.gmtime(LATER)) in (_held(store) or "")
+
+
+def test_a_refusal_whose_reset_has_passed_holds_nothing(store: Store, tmp_path: Path) -> None:
+    _collect(store, tmp_path, "refused", *_refused(resets_at=PAST))
+
+    assert _held(store) is None
 
 
 def test_no_report_no_hold(store: Store) -> None:
