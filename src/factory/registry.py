@@ -329,10 +329,10 @@ def _root_size_gib(name: str, raw: Mapping[str, Any]) -> int | None:
     value = raw.get("root_size")
     if value is None:
         return None
-    if not isinstance(value, str) or not _ROOT_SIZE.fullmatch(value):
+    if not isinstance(value, str) or not _ROOT_SIZE.fullmatch(value) or int(value[:-1]) < 20:
         raise RegistryError(
-            f"project {name!r} sets root_size={value!r}; write whole GiB as a string, "
-            'such as root_size = "40g"'
+            f"project {name!r} sets root_size={value!r}; write whole GiB of at least sbx's "
+            'own 20g default as a string, such as root_size = "40g"'
         )
     return int(value[:-1])
 

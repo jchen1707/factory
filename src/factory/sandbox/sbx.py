@@ -269,6 +269,13 @@ class SbxAdapter:
         result = self._run(create_argv(spec), env=_create_env(spec, os.environ))
         if not result.ok:
             raise SbxError(f"sbx create for {spec.name} failed:\n{result.stdout}\n{result.stderr}")
+        if spec.root_size_gib is not None:
+            self._assert_root_size(
+                spec.name,
+                spec.root_size_gib,
+                remedy=f"sbx ignored {ROOT_SIZE_ENV}, so recreating it would not help: check "
+                "whether this sbx version still reads it.",
+            )
 
     def _assert_spec_matches(self, spec: SandboxSpec) -> None:
         # `sbx inspect` reports only the primary workspace. `sbx ls --json` lists every one
@@ -305,12 +312,18 @@ class SbxAdapter:
                 "it: the secret set is fixed at creation and cannot be narrowed later."
             )
         if spec.root_size_gib is not None:
-            self._assert_root_size(spec.name, spec.root_size_gib)
+            self._assert_root_size(
+                spec.name,
+                spec.root_size_gib,
+                remedy="The root size is fixed at creation: `sbx rm --force` it once no run "
+                f"is using it, and the next tick recreates it at {spec.root_size_gib}g.",
+            )
 
-    def _assert_root_size(self, name: str, gib: int) -> None:
+    def _assert_root_size(self, name: str, gib: int, *, remedy: str) -> None:
         # Neither `sbx inspect --json` nor `sbx ls --json` reports the root size, so it is
-        # measured from inside. Filesystem overhead leaves 97.4-97.9% of the requested
-        # size (measured at 10g, 20g, 30g and 40g on v0.38.0).
+        # measured from inside. Filesystem overhead leaves 96.8-97.9% of the requested
+        # size (measured from 5g to 100g on v0.38.0). The band holds the VM to the capacity
+        # declared; above about 50g it cannot tell sizes one GiB apart.
         declared = gib * 1024**3
         result = self._run(exec_argv(name, ["df", "-B1", "--output=size", "/"]), timeout=120)
         try:
@@ -319,11 +332,10 @@ class SbxAdapter:
             total = int(result.stdout.split()[-1])
         except (ValueError, IndexError) as exc:
             raise SbxError(f"sandbox {name}: cannot measure its root filesystem: {exc!r}") from exc
-        if not 0.95 * declared <= total <= declared:
+        if not 0.96 * declared <= total <= declared:
             raise SbxError(
                 f"sandbox {name} has a {total:,}-byte root, but the registry declares "
-                f'root_size = "{gib}g". The root size is fixed at creation: `sbx rm --force` '
-                f"it once no run is using it, and the next tick recreates it at {gib}g."
+                f'root_size = "{gib}g". {remedy}'
             )
 
     def git_daemon_url(self, name: str) -> str | None:
