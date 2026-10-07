@@ -628,21 +628,11 @@ class SbxAdapter:
             if isinstance(info, dict) and info.get("state") == "stopped":
                 return "sandbox-stopped"
             return None
-        listed = self._run(["sbx", "ls", "--json"], timeout=60)
-        if not listed.ok:
-            return None
         try:
-            listing = json.loads(listed.stdout)
-        except json.JSONDecodeError:
+            listed = self.names()
+        except SbxError:
             return None
-        sandboxes = listing.get("sandboxes") if isinstance(listing, dict) else None
-        if not isinstance(sandboxes, list) or not all(
-            isinstance(entry, dict) and isinstance(entry.get("name"), str) for entry in sandboxes
-        ):
-            return None
-        if any(entry["name"] == name for entry in sandboxes):
-            return None
-        return "sandbox-absent"
+        return None if name in listed else "sandbox-absent"
 
     def collect(self, handle: RunHandle) -> RunResult:
         attempt_dir = handle.attempt_dir
