@@ -212,7 +212,8 @@ and failure episodes. Existing runs, attempts, and effects are retained. Existin
 stores require explicit migration. New temporary test stores initialize directly.
 Schema 8 drops `delegation_requests`, the retired delegation subsystem's request table, and
 deletes whatever rows it holds. `agent_leases.parent_id` stays as a column that is now
-always null. Every other table and row is retained.
+always null. Schema 9 drops `runtime_certifications`, the retired certification job table,
+and deletes its rows. Every other table and row is retained.
 After James approves the displayed DDL, the operator can run:
 
 ```sh
@@ -224,51 +225,20 @@ No production database has been migrated during implementation.
 
 ## Runtime and model selection
 
-Existing runs retain `codex exec`. Project runtime selection affects new runs. An app-server
-run retains its selected adapter and compatibility-directory setting; each launch checks the
-executing sandbox's `codex --version` and the manifest named `<sandbox>.json` in that directory.
-The invocation retains the compatibility report, selected model, effort, preset, and usage.
-
-Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`,
-`worker_sha256`, and `checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
-The required checks are `hook_enforcement`, `schema_output`, `sandbox_isolation`,
-`detached_durability`, `recovery`, and `usage_semantics`. Capture actual runtime effects:
-protected-path denial, schema-valid output, reviewer write refusal, detached process survival,
-recovery after interruption, and observed usage/compaction semantics. Keep raw events.
-Build and review sandboxes need separate manifests. A changed runtime, sandbox or worker
-invalidates that evidence. The worker hash is checked during selection and again before
-copying the invocation worker. The manifest is operator-owned, outside candidate workspaces.
-
-The opt-in app-server worker disables native nested-agent launches on both thread start
-and resume using the measured invocation-local `agents.enabled=false` setting. Factory
-schedules each model role through its own approval, resource and budget checks; its
-independent reviews remain available. Legacy exec runs retain their adapter behavior.
-Historical nested usage remains visibly incomplete; it is not inferred or backfilled.
-This restriction is part of selecting the new adapter, not a production configuration
-change or an implementation of arbitrary nested-agent admission.
+Every run uses `codex exec`. The app-server adapter, its compatibility manifests and automatic
+certification were removed in schema 9; their settings are ignored if still stored.
 
 ```sh
-factory configure --project PROJECT --agent-adapter app-server --app-server-compatibility /absolute/evidence/directory
 factory configure --project PROJECT --model-preset volume
 ```
 
 Presets are `existing`, `volume`, and `high-confidence`, independent of delivery profiles.
-App-server validates each chosen model and effort against the executing `model/list` response.
-Legacy exec presets use a metadata-only executing-sandbox probe: initialize and model/list,
-without creating a thread or invoking a model. The actual attempt retains CodexAdapter.
-Existing routing remains usable without a probe. A switch back to `codex-exec` affects new runs only.
+A named preset is not probed in the executing sandbox before launch.
 
-Current context appears only from validated current-window observations. It warns at 70%,
-requests compaction at a completed-turn boundary at 80%, and becomes stale after 120 seconds.
-Compaction and model changes invalidate the prior context measurement. Thread usage is kept
-separate from invocation deltas; a resumed thread without a retained baseline stays incomplete.
-
-Spend is **API-equivalent estimated USD**, not Codex account charges. Cached input, cache writes,
-output, service tier, pricing date, and long-context treatment affect estimates. Unknown request
-attribution and compaction usage remain incomplete. Long-context classification is currently
-supported by retained documentation for Astra and Sol; Terra/Luna request bands remain unknown.
-Priced lower bounds still count toward the existing budget before the next agent attempt.
-Historical reviewer usage is never invented.
+`codex exec` reports no current-window context, so the console shows context as unavailable.
+Spend is **API-equivalent estimated USD**, not Codex account charges, and `codex exec` usage is
+recorded without the request detail pricing needs: estimates stay incomplete and the run
+ceiling cannot trip until a runtime reports priced usage. Historical usage is never invented.
 
 ## Delivery policy and workflow
 

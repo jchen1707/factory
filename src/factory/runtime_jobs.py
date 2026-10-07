@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from factory.store import Store
 
+#: Frozen schema steps 6 and 7, replayed on every store by `store._MIGRATIONS`. Steps 8 and 9
+#: drop the retired tables and column they create, so editing them forks the ladder.
 SCHEMA = (
     "CREATE TABLE runtime_certifications (id TEXT PRIMARY KEY, "
     "run_id TEXT NOT NULL REFERENCES runs(id), fingerprint TEXT NOT NULL UNIQUE, "
@@ -129,7 +131,7 @@ class RuntimeJobs:
             if len(self.active_agents(run.project)) + 1 > limit:
                 return False
             self.runtime.db.execute(
-                "INSERT INTO agent_leases VALUES (?,?,?,'active',NULL)",
+                "INSERT INTO agent_leases (invocation_id,run_id,project,status) VALUES (?,?,?,'active')",
                 (invocation_id, run.id, run.project),
             )
             self.runtime.audit("run", run.id, "agent-admitted", {"invocation": invocation_id})

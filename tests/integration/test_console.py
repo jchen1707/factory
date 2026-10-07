@@ -955,8 +955,8 @@ def test_current_invocations_remain_before_large_history(ctx: Context) -> None:
         ctx.store.runtime.start_invocation(identity, ctx.run.id, index + 1, role, {})
         if index < 2:
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (identity, ctx.run.id, ctx.run.project, "active", None),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (identity, ctx.run.id, ctx.run.project, "active"),
             )
     ctx.store.runtime.configure(
         "run", ctx.run.id, {"waiting_invocation": "invocation-56", "mode": "approval"}

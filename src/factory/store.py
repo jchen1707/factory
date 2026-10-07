@@ -30,7 +30,7 @@ from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -107,7 +107,41 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     6: RUNTIME_JOBS_SCHEMA,
     7: RETRY_SCHEMA,
     8: ("DROP TABLE delegation_requests",),
+    9: ("DROP TABLE runtime_certifications", "ALTER TABLE agent_leases DROP COLUMN parent_id"),
 }
+
+#: A step that retires a subsystem refuses while that subsystem still owns live work,
+#: because no code after the step can signal, reconcile or validate it. Each query lists
+#: that work on a store at any version from 6, where the runtime job tables begin.
+_LIVE_WORK: dict[int, tuple[str, str]] = {
+    8: (
+        "SELECT group_concat(id, ', ') FROM delegation_requests "
+        "WHERE status NOT IN ('completed','failed','cancelled')",
+        "delegation requests",
+    ),
+    9: (
+        "SELECT group_concat(i.id, ', ') FROM invocations i JOIN runs r ON r.id=i.run_id "  # noqa: S608 - states from TERMINAL
+        f"WHERE r.state NOT IN ({', '.join(chr(39) + str(s) + chr(39) for s in sorted(TERMINAL))}) "
+        "AND (EXISTS (SELECT 1 FROM agent_leases a WHERE a.invocation_id=i.id "
+        "AND a.status='active' AND (a.parent_id IS NOT NULL OR i.role='certification' "
+        "OR json_extract(i.metadata,'$.adapter')='app-server')) "
+        "OR (json_extract(i.metadata,'$.adapter')='app-server' AND EXISTS (SELECT 1 FROM effects e "
+        "WHERE e.step=i.id AND e.system='agent-preparation' AND e.status='intended')))",
+        "child, certification or app-server invocations",
+    ),
+}
+
+
+def live_work(conn: sqlite3.Connection, version: int) -> str:
+    """The live work the steps after `version` would strand, or an empty string."""
+    if version < 6:
+        return ""
+    found = (
+        (work, conn.execute(query).fetchone()[0])
+        for target, (query, work) in _LIVE_WORK.items()
+        if target > version
+    )
+    return "; ".join(f"{work} {ids}" for work, ids in found if ids)
 
 
 def migration_statements(version: int) -> tuple[str, ...]:
@@ -262,6 +296,13 @@ class Store:
             raise Blocked(
                 "schema-approval-required",
                 f"Review docs/runtime-rollout.md before applying schema version {SCHEMA_VERSION}",
+            )
+        if 0 < current < SCHEMA_VERSION and (live := live_work(self._conn, current)):
+            self._conn.close()
+            raise Blocked(
+                "migration-live-work",
+                f"{live}; finish or cancel their runs with the code that opens "
+                f"schema {current}, then migrate again",
             )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")

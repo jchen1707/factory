@@ -973,7 +973,7 @@ def test_changed_mirror_waits_for_active_readers(clone_ctx: Context) -> None:
     original = repo.head_sha(mirror)
     clone_ctx.store.runtime.start_invocation("reader", clone_ctx.run.id, 1, "reviewer", {})
     clone_ctx.store.runtime.db.execute(
-        "INSERT INTO agent_leases VALUES (?, ?, ?, 'active', NULL)",
+        "INSERT INTO agent_leases (invocation_id, run_id, project, status) VALUES (?, ?, ?, 'active')",
         ("reader", clone_ctx.run.id, clone_ctx.project.name),
     )
     # Unchanged polling is safe while a reviewer holds the mirror.

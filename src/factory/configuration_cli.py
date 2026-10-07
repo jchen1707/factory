@@ -13,12 +13,15 @@ from factory.store import Store
 
 
 def migrate(args: argparse.Namespace) -> int:
-    from factory.store import SCHEMA_VERSION, migration_statements
+    from factory.store import SCHEMA_VERSION, live_work, migration_statements
 
+    live = ""
     if args.database.is_file():
         connection = sqlite3.connect(args.database.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                live = live_work(connection, version)
         finally:
             connection.close()
     elif args.apply:
@@ -29,6 +32,8 @@ def migrate(args: argparse.Namespace) -> int:
     if not args.apply:
         print(f"Schema {version} -> {SCHEMA_VERSION}; existing run and effects rows are preserved.")
         print("\n".join(statement + ";" for statement in statements))
+        if live:
+            print(f"--apply refuses until no work is live: {live}.")
         print(
             "Review before applying with --apply. Stop factory writers and back up the database first."
         )

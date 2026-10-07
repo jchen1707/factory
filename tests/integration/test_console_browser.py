@@ -325,19 +325,13 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
                 },
             )
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (invocation, ctx.run.id, ctx.project.name, "active", None),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (invocation, ctx.run.id, ctx.project.name, "active"),
             )
         if index:
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (
-                    invocation,
-                    ctx.run.id,
-                    ctx.project.name,
-                    "completed",
-                    "fixture-invocation-000-" + "abcdef0123456789" * 4,
-                ),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (invocation, ctx.run.id, ctx.project.name, "completed"),
             )
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path

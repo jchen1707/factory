@@ -550,7 +550,8 @@ def _database_at(path: Path, version: int) -> str:
         (now,),
     )
     conn.execute(
-        "INSERT INTO agent_leases VALUES ('builder', 'run', 'python-harness', 'completed', NULL)"
+        "INSERT INTO agent_leases (invocation_id, run_id, project, status) "
+        "VALUES ('builder', 'run', 'python-harness', 'completed')"
     )
     conn.execute(f"PRAGMA user_version={version}")
     conn.close()
@@ -584,4 +585,137 @@ def test_migration_7_to_8_drops_delegation_requests_and_keeps_the_ledger(tmp_pat
     assert [row["invocation_id"] for row in store._conn.execute("SELECT * FROM agent_leases")] == [
         "builder"
     ]
+    store.close()
+
+
+def test_migration_8_to_9_drops_runtime_certifications_and_keeps_the_ledger(
+    tmp_path: Path,
+) -> None:
+    from factory.store import migration_statements
+
+    path = tmp_path / "factory.db"
+    run_id = _database_at(path, 8)
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute(
+        "INSERT INTO runtime_certifications(id, run_id, fingerprint, identity, status) "
+        "VALUES ('job', 'run', 'fingerprint', '{}', 'passed')"
+    )
+    conn.execute(
+        "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
+        "VALUES ('child', 'run', 1, 'child', '{}', 0, 0)"
+    )
+    conn.execute(
+        "INSERT INTO agent_leases VALUES ('child', 'run', 'python-harness', 'failed', 'builder')"
+    )
+    conn.close()
+
+    with pytest.raises(Blocked, match="schema-approval-required"):
+        Store(path)
+    assert "DROP TABLE runtime_certifications" in migration_statements(8)
+
+    store = Store(path, migrate=True)
+    tables = {row[0] for row in store._conn.execute("SELECT name FROM sqlite_master")}
+    assert "runtime_certifications" not in tables
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert store.integrity_ok()[0]
+    assert store.run_by_id(run_id) is not None
+    assert len(store.effects(run_id)) == 1
+    assert store.runtime.invocation("builder") is not None
+    assert [dict(row) for row in store._conn.execute("SELECT * FROM agent_leases")] == [
+        {
+            "invocation_id": "builder",
+            "run_id": "run",
+            "project": "python-harness",
+            "status": "completed",
+        },
+        {
+            "invocation_id": "child",
+            "run_id": "run",
+            "project": "python-harness",
+            "status": "failed",
+        },
+    ]
+    assert store._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    store.close()
+
+
+_ACTIVE_LEASE = "INSERT INTO agent_leases VALUES ('live', 'run', 'python-harness', 'active', NULL)"
+_PREPARED_LAUNCH = (
+    "INSERT INTO effects (run_id, attempt, step, system, key, status, external_id, at) "
+    "VALUES ('run', 1, 'live', 'agent-preparation', 'launch', 'intended', '{}', 0)"
+)
+
+
+@pytest.mark.parametrize(
+    ("version", "role", "adapter", "live"),
+    [
+        (
+            7,
+            "child",
+            "app-server",
+            "INSERT INTO delegation_requests VALUES "
+            "('request', 'builder', 'call', 'run', '{}', 'prepared', NULL, NULL)",
+        ),
+        (7, "certification", "app-server", _ACTIVE_LEASE),
+        (
+            8,
+            "child",
+            "app-server",
+            "INSERT INTO agent_leases VALUES ('live', 'run', 'python-harness', 'active', 'builder')",
+        ),
+        (8, "certification", "app-server", _ACTIVE_LEASE),
+        (8, "implement", "app-server", _ACTIVE_LEASE),
+        (8, "implement", "app-server", _PREPARED_LAUNCH),
+    ],
+)
+def test_a_retiring_step_refuses_while_its_subsystem_owns_live_work(
+    tmp_path: Path, version: int, role: str, adapter: str, live: str
+) -> None:
+    path = tmp_path / "factory.db"
+    _database_at(path, version)
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute(
+        "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
+        "VALUES ('live', 'run', 1, ?, json_object('adapter', ?), 0, 0)",
+        (role, adapter),
+    )
+    conn.execute(live)
+    before = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    conn.close()
+
+    blocking = "request" if "delegation_requests" in live else "live"
+    with pytest.raises(Blocked, match=f"migration-live-work: .*{blocking}; .*schema {version}"):
+        Store(path, migrate=True)
+
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == version
+    assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master")} == before
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    ("state", "adapter", "live"),
+    [
+        ("cancelled", "app-server", _PREPARED_LAUNCH),
+        ("implementing", "codex-exec", _PREPARED_LAUNCH),
+        ("implementing", "codex-exec", _ACTIVE_LEASE),
+    ],
+)
+def test_schema_9_migrates_past_work_it_does_not_retire(
+    tmp_path: Path, state: str, adapter: str, live: str
+) -> None:
+    path = tmp_path / "factory.db"
+    _database_at(path, 8)
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute("UPDATE runs SET state=?", (state,))
+    conn.execute(
+        "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
+        "VALUES ('live', 'run', 1, 'implement', json_object('adapter', ?), 0, 0)",
+        (adapter,),
+    )
+    conn.execute(live)
+    conn.close()
+
+    store = Store(path, migrate=True)
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     store.close()

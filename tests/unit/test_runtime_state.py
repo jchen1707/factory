@@ -61,7 +61,6 @@ def test_existing_database_requires_explicit_migration(tmp_path: Path) -> None:
     store = Store(path)
     for name in (
         "agent_leases",
-        "runtime_certifications",
         "invocations",
         "operator_settings",
         "operator_events",
