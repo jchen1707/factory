@@ -124,7 +124,6 @@
       "Bash(git reset --hard:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
-      "Bash(gh pr merge:*)",
       "Bash(gh pr review:*)",
       "Bash(security find-generic-password:*)",
       "Bash(security add-generic-password:*)",
