@@ -109,7 +109,7 @@ each one as `doctrine:<skill>`.
 | You want | Type | What it does |
 | --- | --- | --- |
 | Park a run, keep its work and session | `factory suspend <TICKET> --reason "…"` | Signals the agent, waits for a real `exit`, stops the build sandbox if nothing else uses it, records `suspended`. Resume with `factory resume <TICKET>`. |
-| Abandon a run and clean up | `factory cancel <TICKET>` | Removes the worktree, deletes the **unpushed** branch, releases the lease, stops the sandbox, moves Linear back to `Todo` and removes `needs-info`. A pushed branch is never deleted. |
+| Abandon a run and clean up | `factory cancel <TICKET>` | Removes the worktree, deletes the **unpushed** branch, releases the lease, stops the sandbox, moves Linear back to `Todo` and removes `needs-info`. A pushed branch is never deleted. An attempt directory that holds a secret is never copied to `artifacts/`; a worktree run's moves to `state/runs/<run-id>/quarantine/`. Rotate the value. |
 | Stop the daemon | `launchctl bootout gui/$(id -u)/com.jchen.factory` | The daemon is stateless between ticks, so stopping it is safe at any instant. In-flight leases expire on their own. |
 
 `cancel` is irreversible for the worktree; `suspend` is not. When in doubt, suspend.
