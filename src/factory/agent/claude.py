@@ -77,13 +77,7 @@ class Invocation:
     plugins: tuple[PluginRef, ...] = ()
 
     def __post_init__(self) -> None:
-        # CLAUDE_CODE_EFFORT_LEVEL beats --effort, ANTHROPIC_API_KEY beats the OAuth login
-        # (auth-retry), and CLAUDE_CONFIG_DIR loses the login (not-logged-in).
-        forbidden = [
-            key
-            for key in self.env
-            if key.startswith(("ANTHROPIC_", "CLAUDE_CODE_")) or key == "CLAUDE_CONFIG_DIR"
-        ]
+        forbidden = [key for key in self.env if overrides_cli(key)]
         if forbidden:
             raise ValueError(f"env must not override the Claude CLI: {', '.join(forbidden)}")
         # The CLI warns about an unknown effort and runs at the default instead of refusing.
@@ -111,6 +105,15 @@ class Invocation:
 
 class StructuredOutputMissing(Exception):
     pass
+
+
+def overrides_cli(env_key: str) -> bool:
+    """Whether an environment variable would override what the argv asks for.
+
+    CLAUDE_CODE_EFFORT_LEVEL beats --effort, ANTHROPIC_API_KEY beats the OAuth login
+    (auth-retry), and CLAUDE_CONFIG_DIR loses the login (not-logged-in).
+    """
+    return env_key.startswith(("ANTHROPIC_", "CLAUDE_CODE_")) or env_key == "CLAUDE_CONFIG_DIR"
 
 
 def new_session() -> SessionId:

@@ -487,12 +487,19 @@ def result_error(kind: FailureKind, *, session: str = SESSION, model: str = MODE
 
 
 def success(
-    structured_output: Mapping[str, object] = ANSWER, *, session: str = SESSION, model: str = MODEL
+    structured_output: Mapping[str, object] | None = ANSWER,
+    *,
+    text: str | None = None,
+    session: str = SESSION,
+    model: str = MODEL,
+    tools: Iterable[str] = TOOLS,
 ) -> Scenario:
+    """A run that ended `success`. With an answer it goes through the StructuredOutput
+    tool; without one (`schema-unsatisfiable`) the model only talks, and the result
+    carries `structured_output: null`."""
     use_id = _id("toolu")
-    return Scenario(
-        lines(
-            init(session=session, model=model),
+    answered = (
+        [
             assistant_tool_use(
                 "StructuredOutput",
                 structured_output,
@@ -501,8 +508,16 @@ def success(
                 model=model,
             ),
             tool_result(use_id, "Structured output provided successfully", session=session),
+        ]
+        if structured_output is not None
+        else [assistant_text(text or "done", session=session, model=model)]
+    )
+    return Scenario(
+        lines(
+            init(session=session, model=model, tools=tools),
+            *answered,
             rate_limit(session=session),
-            result_success(structured_output, session=session, model=model),
+            result_success(structured_output, text=text, session=session, model=model),
         ),
         0,
         "",
@@ -510,13 +525,17 @@ def success(
 
 
 def denial(
-    *, path: str = "/work/repo/denied.txt", session: str = SESSION, model: str = MODEL
+    *,
+    path: str = "/work/repo/denied.txt",
+    session: str = SESSION,
+    model: str = MODEL,
+    tools: Iterable[str] = TOOLS,
 ) -> Scenario:
     use_id = _id("toolu")
     write = {"file_path": path, "content": "x"}
     return Scenario(
         lines(
-            init(session=session, model=model),
+            init(session=session, model=model, tools=tools),
             assistant_tool_use("Write", write, tool_use_id=use_id, session=session, model=model),
             rate_limit(session=session),
             permission_denied("Write", use_id, session=session),
@@ -536,11 +555,13 @@ def denial(
     )
 
 
-def max_turns(*, session: str = SESSION, model: str = MODEL) -> Scenario:
+def max_turns(
+    *, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
     use_id = _id("toolu")
     return Scenario(
         lines(
-            init(session=session, model=model),
+            init(session=session, model=model, tools=tools),
             assistant_tool_use(
                 "Bash",
                 {"command": "echo hello-from-bash", "description": "Echo"},
@@ -557,10 +578,10 @@ def max_turns(*, session: str = SESSION, model: str = MODEL) -> Scenario:
     )
 
 
-def budget(*, session: str = SESSION, model: str = MODEL) -> Scenario:
+def budget(*, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS) -> Scenario:
     return Scenario(
         lines(
-            init(session=session, model=model),
+            init(session=session, model=model, tools=tools),
             assistant_text("# Rivers", session=session, model=model),
             result_error(FailureKind.BUDGET, session=session, model=model),
         ),
@@ -569,10 +590,12 @@ def budget(*, session: str = SESSION, model: str = MODEL) -> Scenario:
     )
 
 
-def not_logged_in(*, session: str = SESSION, model: str = MODEL) -> Scenario:
+def not_logged_in(
+    *, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
     return Scenario(
         lines(
-            init(session=session, model=model),
+            init(session=session, model=model, tools=tools),
             assistant_api_error(_NOT_LOGGED_IN, "authentication_failed", session=session),
             result_error(FailureKind.AUTH, session=session, model=model),
         ),
@@ -581,10 +604,28 @@ def not_logged_in(*, session: str = SESSION, model: str = MODEL) -> Scenario:
     )
 
 
-def auth_retrying(*, retries: int = 2, session: str = SESSION, model: str = MODEL) -> Scenario:
+def model_unavailable(
+    *, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
     return Scenario(
         lines(
-            init(session=session, model=model),
+            init(session=session, model=model, tools=tools),
+            assistant_api_error(
+                _MODEL_UNKNOWN.format(model=model), "model_not_found", session=session
+            ),
+            result_error(FailureKind.MODEL_UNAVAILABLE, session=session, model=model),
+        ),
+        1,
+        "",
+    )
+
+
+def auth_retrying(
+    *, retries: int = 2, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
+    return Scenario(
+        lines(
+            init(session=session, model=model, tools=tools),
             *(api_retry(attempt, session=session) for attempt in range(1, retries + 1)),
         ),
         None,
@@ -592,8 +633,10 @@ def auth_retrying(*, retries: int = 2, session: str = SESSION, model: str = MODE
     )
 
 
-def truncated(*, session: str = SESSION, model: str = MODEL) -> Scenario:
-    whole = success(session=session, model=model).lines
+def truncated(
+    *, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
+    whole = success(session=session, model=model, tools=tools).lines
     return Scenario([*whole[:-1], whole[-1][: len(whole[-1]) // 2]], None, "")
 
 

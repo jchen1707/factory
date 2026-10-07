@@ -34,6 +34,12 @@ PLAN_EXIT_NAME = "plan-exit"
 #: timeout in one phase signal a process group the other phase started.
 PLAN_PGID_NAME = "plan-pgid"
 
+PLAN_PROMPT_NAME = "plan-prompt.md"
+PLAN_EVENTS_NAME = "plan-events.jsonl"
+PLAN_STDERR_NAME = "plan-stderr.log"
+PLAN_LAST_MESSAGE_NAME = "plan-last-message.json"
+PLAN_REQUEST_NAME = "plan-request.json"
+
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
     """Is this ticket large or ambiguous enough to plan first?

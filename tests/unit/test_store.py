@@ -719,3 +719,29 @@ def test_schema_9_migrates_past_work_it_does_not_retire(
     store = Store(path, migrate=True)
     assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     store.close()
+
+
+def test_schema_ten_nulls_every_session_id_recorded_before_it(tmp_path: Path) -> None:
+    """Every id on disk before this version is a Codex thread id, which `--resume` cannot
+    open; nulling them makes recovery restart those attempts instead of spending a rung on
+    `session-lost`. An id pinned after the migration is kept across a reopen."""
+    path = tmp_path / "factory.db"
+    _database_at(path, 9)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "INSERT INTO attempts (run_id, attempt, state, sandbox, session_id, started_at, artifact_dir) "
+        "VALUES ('run', 1, 'implementing', 'factory-build-python-harness', '01a0-thread', 1, '/a')"
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(path, migrate=True)
+
+    assert store.session_id("run", 1, State.IMPLEMENTING) is None
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    store.set_session_id("run", 1, State.IMPLEMENTING, "5b0c2a4e-8f7d-4c1a-9e3b-2d6f1a7c9e40")
+    store.close()
+    reopened = Store(path, migrate=True)
+    assert (
+        reopened.session_id("run", 1, State.IMPLEMENTING) == "5b0c2a4e-8f7d-4c1a-9e3b-2d6f1a7c9e40"
+    )

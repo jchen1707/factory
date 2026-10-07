@@ -273,6 +273,9 @@ deletes whatever rows it holds. Schema 9 drops `runtime_certifications`, the ret
 certification job table, and the `agent_leases.parent_id` column. Every other table, row and
 column is retained. The apply command refuses a store older than schema 4, whose upgrade needs
 its own review.
+Schema 10 nulls `attempts.session_id` on every existing row: those ids are Codex thread ids,
+which `claude --resume` cannot open, so recovery restarts those attempts fresh instead of
+spending a ladder rung on `session-lost`. Attempts pinned after the migration keep their ids.
 
 Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
 subsystem still owns live work, and names each item. Live work is any of these:

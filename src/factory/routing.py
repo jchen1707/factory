@@ -40,12 +40,19 @@ class ModelFacts:
     default_effort: str | None
 
 
+#: Turns one launch may take before the CLI stops it with `error_max_turns`. The ladder
+#: resumes the session with a fresh allowance, so a cap that is too low costs a rung, not
+#: the work; one that is too high lets a looping agent run until the budget does.
+DEFAULT_MAX_TURNS = 200
+
+
 @dataclass(frozen=True)
 class Role:
     name: str
     model: str
     effort: str | None
     preset: str = "existing"
+    max_turns: int = DEFAULT_MAX_TURNS
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,7 @@ class Routing:
     models: Mapping[str, ModelFacts]
     usd_per_run: float
     usd_warn_at: float
+    max_turns: int = DEFAULT_MAX_TURNS
 
     def role(self, name: str) -> Role:
         try:
@@ -87,11 +95,17 @@ def _validated(raw: dict[str, Any]) -> Routing:
     Split out of `load_routing` so `validate` can run it against text that is not on disk
     yet, with exactly one copy of the rules.
     """
+    budget = dict(raw.get("budget", {}))
+    usd_per_run = float(budget.get("usd_per_run", 0.0))
+    usd_warn_at = float(budget.get("usd_warn_at", 0.0))
+    max_turns = int(budget.get("max_turns", DEFAULT_MAX_TURNS))
+
     roles = {
         name: Role(
             name=name,
             model=str(body["model"]),
             effort=None if body.get("effort") is None else str(body["effort"]),
+            max_turns=int(body.get("max_turns", max_turns)),
         )
         for name, body in dict(raw.get("roles", {})).items()
     }
@@ -101,10 +115,6 @@ def _validated(raw: dict[str, Any]) -> Routing:
     catalogue = _models_from_file(raw)
     if not catalogue:
         raise RoutingError("models.toml declares no [models.*] catalogue")
-
-    budget = dict(raw.get("budget", {}))
-    usd_per_run = float(budget.get("usd_per_run", 0.0))
-    usd_warn_at = float(budget.get("usd_warn_at", 0.0))
 
     # Rule 1. A reviewer sharing the builder's model carries the builder's bias, which
     # is the entire reason the roles are split. Two efforts of one model share priors.
@@ -145,12 +155,16 @@ def _validated(raw: dict[str, Any]) -> Routing:
         raise RoutingError(
             f"budget.usd_warn_at ({usd_warn_at}) must be below usd_per_run ({usd_per_run})"
         )
+    for role in roles.values():
+        if role.max_turns < 1:
+            raise RoutingError(f"role {role.name!r} max_turns must be at least 1")
 
     return Routing(
         roles=roles,
         models=catalogue,
         usd_per_run=usd_per_run,
         usd_warn_at=usd_warn_at,
+        max_turns=max_turns,
     )
 
 
