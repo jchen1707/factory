@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from factory import cli, recovery, repo
+from factory import cli, execution, recovery, repo
+from factory.artifacts import AttemptDir
 from factory.delivery import github, gitlab, sandbox_gitlab
 from factory.machine import Blocked, Resumable, State
 from factory.registry import SandboxDelivery
@@ -1032,6 +1033,59 @@ def test_a_review_launch_cannot_write_another_runs_review_files(
     assert writable, "the review sandbox has no writable mount at all"
     reachable = [p for p in first_files if any(p.is_relative_to(root) for root in writable)]
     assert not reachable, f"{other.run.id}'s reviewer can write {ctx.run.id}'s files: {reachable}"
+
+
+def _first_axis_in_flight(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+    review_step.start(ctx)
+    return fake.detached_dirs[-1]
+
+
+def _finish_axis(ctx: Context, attempt_dir: Path) -> None:
+    fake = _fake(ctx)
+    launch = fake.launches[-1]
+    assert launch is not None
+    fake._write_stream(launch, fake._scenario(launch).lines, 0, "")
+    (attempt_dir / "exit").write_text("0")
+
+
+def test_the_host_never_writes_through_a_link_planted_in_the_review_scratch(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "outside-every-mount"
+    victim.write_text("untouched\n")
+    next_launch = execution.attempt_key(ctx.run.attempt, "review", 2).replace(":", "-")
+    planted = first.with_name(next_launch)
+    planted.mkdir()
+    (planted / "prompt.md").symlink_to(victim)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert victim.read_text() == "untouched\n"
+
+
+def test_a_stream_the_reviewer_replaced_with_a_link_is_never_landed(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    _finish_axis(ctx, first)
+    host_file = tmp_path / "outside-every-mount.jsonl"
+    (first / "events.jsonl").replace(host_file)
+    (first / "events.jsonl").symlink_to(host_file)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert not any(p.is_symlink() for p in (ctx.state_dir / "review").rglob("*"))
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(

@@ -288,6 +288,25 @@ def test_exec_detached_returns_without_waiting_for_the_command(
     assert started[0][:3] == ["sbx", "exec", "-d"]
 
 
+def test_exec_detached_never_writes_its_pid_through_a_link_the_sandbox_planted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    victim = tmp_path / "outside-every-mount"
+    victim.write_text("untouched\n")
+    attempt = tmp_path / "attempt"
+
+    def fake_popen(argv, **kwargs):  # type: ignore[no-untyped-def]
+        # The wrapper is already running in the VM when the host writes the holder pid.
+        (attempt / sbx_module.SBX_EXEC_PID).symlink_to(victim)
+        return _FakePopen(argv, heartbeat=attempt / "heartbeat", rc=None)
+
+    monkeypatch.setattr(sbx_module.subprocess, "Popen", fake_popen)
+    with pytest.raises(OSError, match="symbolic links"):
+        SbxAdapter().exec_detached(replace(_handle(tmp_path), attempt_dir=attempt), "claude", {})
+
+    assert victim.read_text() == "untouched\n"
+
+
 def test_exec_detached_holds_the_process_handle_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
