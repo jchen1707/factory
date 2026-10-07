@@ -1,0 +1,1 @@
+[claude-code:unrecognized_model] {"model":"bogus-model-x","query_source":"sdk"}
