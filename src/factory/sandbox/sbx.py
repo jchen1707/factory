@@ -251,15 +251,26 @@ class SbxAdapter:
             raise SbxError(f"sbx create for {spec.name} failed:\n{result.stdout}\n{result.stderr}")
 
     def _assert_spec_matches(self, spec: SandboxSpec) -> None:
-        info = self.inspect(spec.name)
-        workspace = str(info.get("workspace", ""))
-        wanted = [str(w.path) for w in spec.workspaces]
-        if wanted and not any(w in workspace for w in wanted):
+        # `sbx inspect` reports only the primary workspace. `sbx ls --json` lists every one
+        # in `Workspace.as_argument`'s spelling, `:ro` included (measured on v0.38.0).
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        try:
+            if not result.ok:
+                raise ValueError(result.stderr.strip())
+            (row,) = (s for s in json.loads(result.stdout)["sandboxes"] if s["name"] == spec.name)
+            listed = row["workspaces"]
+            if not isinstance(listed, list) or not all(isinstance(w, str) for w in listed):
+                raise ValueError(f"workspaces is {listed!r}")
+        except (ValueError, LookupError, TypeError) as exc:
+            raise SbxError(f"sandbox {spec.name}: sbx ls gave no workspace list: {exc!r}") from exc
+        missing = [w.as_argument() for w in spec.workspaces if w.as_argument() not in listed]
+        if missing:
             raise SbxError(
-                f"sandbox {spec.name} exists with workspace {workspace!r}, which does "
-                f"not include {wanted}. The workspace set is fixed at creation: use a "
-                "new sandbox name rather than expecting this one to change."
+                f"sandbox {spec.name} lacks workspaces {missing} (it has {listed}). The "
+                "workspace set is fixed at creation: `sbx rm --force` it once no run is "
+                "using it, and the next tick recreates it with the full set."
             )
+        info = self.inspect(spec.name)
         # §8.7: no capability-granting credential inside a factory sandbox. Read from
         # the sandbox rather than assumed from how it was made — a sandbox created
         # while a secret was still global keeps it, because `sbx` fixes the secret set

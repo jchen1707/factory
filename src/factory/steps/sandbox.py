@@ -31,7 +31,9 @@ _BLOCKING_EXIT = 2
 def run(ctx: Context) -> None:
     spec = build_spec(ctx)
 
-    advance(ctx, State.SANDBOX_CREATING)
+    # A failed `ensure` leaves the run here; the next tick retries it from this state.
+    if ctx.state is not State.SANDBOX_CREATING:
+        advance(ctx, State.SANDBOX_CREATING)
     ctx.sandbox.ensure(spec)
     ctx.log("sandbox.ready", sandbox=spec.name, template=spec.template or "(agent default)")
 
