@@ -72,8 +72,26 @@ def sweep(
     """One garbage-collection pass. §16.5's steps, in its order."""
     clock = time.time() if now is None else now
     actions: list[Action] = []
-    for run in store.all_runs():
+    runs = store.all_runs()
+    # A rerun recreates its ticket's worktree and branch at the cancelled run's path, so
+    # the path belongs to the newest run that records it.
+    owners: dict[str, Run] = {}
+    for run in runs:
+        if run.worktree:
+            owners.setdefault(run.worktree, run)
+    for run in runs:
         if run.state not in COLLECTABLE:
+            continue
+        owner = owners.get(run.worktree or "", run)
+        if owner is not run:
+            actions.append(
+                Action(
+                    "worktree-remove",
+                    str(run.worktree),
+                    f"retained: run {owner.id} ({owner.state}) now uses it",
+                    False,
+                )
+            )
             continue
         actions += _collect_run(home, registry, store, run, dry_run=dry_run, now=clock)
     actions += _sweep_sandboxes(registry, store, sandbox, dry_run=dry_run, now=clock)
