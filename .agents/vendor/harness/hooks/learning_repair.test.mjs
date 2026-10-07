@@ -164,3 +164,77 @@ test('a live capture has a retryable failure outcome and a dead local worker can
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('a distiller that exits nonzero leaves its own reason in the log', () => {
+  const root = mkdtempSync(join(tmpdir(), 'learning-distiller-failure-'));
+  try {
+    const vault = join(root, 'vault');
+    mkdirSync(vault);
+    const transcript = join(root, 'session.jsonl');
+    writeFileSync(
+      transcript,
+      JSON.stringify({
+        message: { role: 'user', content: 'Retain the distiller failure reason. '.repeat(25) },
+      }) + '\n',
+    );
+    const cases = [
+      // Measured: an unauthenticated `claude -p` exits 1 with the reason on stdout only.
+      {
+        backend: 'claude',
+        result: { status: 1, stdout: 'Not logged in · Please run /login\n', stderr: '' },
+        reason: 'claude exited 1: Not logged in · Please run /login',
+      },
+      // `codex exec` opens stderr with a banner, so the reason is the last line, not the first.
+      {
+        backend: 'codex',
+        result: {
+          status: 1,
+          stdout: '',
+          stderr: 'OpenAI Codex v0.155.1\n--------\nERROR: unexpected status 401 Unauthorized\n',
+        },
+        reason: 'codex exited 1: ERROR: unexpected status 401 Unauthorized',
+      },
+    ];
+    for (const { backend, result, reason } of cases) {
+      const preload = join(root, `${backend}-fixture.mjs`);
+      writeFileSync(
+        preload,
+        `import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const original = childProcess.spawnSync;
+childProcess.spawnSync = (command, ...args) => command === ${JSON.stringify(backend)}
+  ? ${JSON.stringify(result)}
+  : original(command, ...args);
+syncBuiltinESMExports();
+`,
+      );
+      const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, hook], {
+        env: {
+          ...fixtureEnv,
+          OBSIDIAN_VAULT_DIRECTORY: vault,
+          LEARNINGS_DISTILLER: backend,
+          CLAUDE_LEARNINGS_OFF: '0',
+          CLAUDE_LEARNINGS_SKIP: '0',
+        },
+        input: JSON.stringify({
+          cwd: root,
+          session_id: `failure-${backend}`,
+          transcript_path: transcript,
+        }),
+        encoding: 'utf8',
+      });
+      assert.equal(run.status, 0, run.stderr);
+      const log = readFileSync(join(vault, 'Project Learnings', '_hook.log'), 'utf8');
+      assert.equal(
+        log
+          .trimEnd()
+          .split('\n')
+          .at(-1)
+          .replace(/^.*?: /, ''),
+        `failed: ${reason}`,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

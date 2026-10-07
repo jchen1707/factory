@@ -58,6 +58,8 @@ The report never runs the config's `install`. Run it first yourself if dependenc
 For each gate: the command, its exit status, and the tail of its output. Then one of:
 
 - **PASS** — every gate green. State which gates ran and which were skipped.
+- **SKIPPED** — the report's verdict is `skipped`: no gate ran, so nothing was verified. Say
+  that in those words. It is not a PASS.
 - **FAIL** — name the first failing gate, quote the failure, and state the root cause if you
   can see it. **Do not attempt the fix inside this skill** — report, and let the caller decide.
 
@@ -108,8 +110,10 @@ they are what the summary is telling you in words:
   a different instruction to whoever reads it.
 - The `verdict` is `incomplete` — **never `pass`** — when a gate could not start or a monorepo
   app had no config of its own, because a green exit code alone does not prove every relevant
-  gate ran. The exit codes keep the three apart for a caller that reads only the code: `0`
-  pass, `1` fail, `3` incomplete.
+  gate ran. It is `skipped` — also never `pass` — when no gate ran at all, for example every
+  gate `skipped_unchanged` because the change touched no gated path. The exit code answers
+  only whether to stop: `0` pass or skipped, `1` fail, `3` incomplete. Read the verdict to
+  know what was proven.
 
 > **Image-input consent (hard rule).** A screenshot or a screencast feeds an image into the
 > model. **Stop and ask the user for permission first, and do not proceed until they

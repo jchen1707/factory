@@ -62,7 +62,7 @@
  * most turns touch nothing it gates -- but it is wrong for a caller who asked. A human
  * typing `/lint` on a clean tree means "lint this repository", not "lint it if git says
  * something moved", and without this they would get a screen of `skipped_unchanged` and a
- * green verdict, which is the vacuous green this document exists to refuse. The Stop hook leaves it off.
+ * `skipped` verdict: honest, but not the lint they asked for. The Stop hook leaves it off.
  * Cross-stack CI uses it after independently detecting changed vendored content, since
  * shared instructions and schemas may be outside a consumer's Stop-hook filters.
  *
@@ -83,15 +83,24 @@
  *
  * ## The verdict
  *
- * `verdict` is `pass`, `fail` or `incomplete`. It is **`incomplete` — never `pass`** when any
- * gate is `unavailable`, or when any app named in a root config had no config of its own.
- * That single rule is the whole answer to "a green exit code does not prove every relevant
- * gate ran": a gate that could not start is reported, never rounded to green.
+ * `verdict` is one of `VERDICTS`, first match wins:
  *
- * Exit codes are distinct so a caller that reads only the exit code still cannot mistake
- * incomplete for pass: `0` pass, `1` fail, `3` incomplete. A real `fail` outranks
- * `incomplete`, because a failing gate is the more actionable signal; the exit code is the
- * verdict's, with that precedence.
+ * | verdict | Meaning | exit |
+ * | --- | --- | --- |
+ * | `fail` | a gate failed | `1` |
+ * | `incomplete` | a gate was `unavailable`, or an app in a root config had no config of its own | `3` |
+ * | `skipped` | no gate ran: every row is `skipped_unchanged`, `not_applicable`, `disabled` or `deferred` | `0` |
+ * | `pass` | at least one gate ran, and every gate that ran passed | `0` |
+ *
+ * `incomplete` and `skipped` are the two ways a report refuses to round "unproven" to green.
+ * A gate that could not start is `incomplete`. A report where nothing ran at all is
+ * `skipped`: measured on nemoclaw-test 2026-09-11, an unforced run whose four gates were all
+ * `skipped_unchanged` said `pass`, and the agent reading it took that for evidence.
+ *
+ * The exit code answers a narrower question, "should the caller stop?", so `skipped` shares
+ * `0` with `pass`: nothing failed and nothing went missing. A pre-commit hook on a docs-only
+ * commit relies on that (go-harness runs this unforced on every commit). A caller that needs
+ * to know what was proven reads the verdict, never the exit code.
  */
 
 import { performance } from 'node:perf_hooks';
@@ -109,8 +118,10 @@ const PROBE_TIMEOUT = 30_000;
 /** Schema version of the emitted document. Bumped only on a breaking shape change. */
 export const REPORT_SCHEMA_VERSION = 1;
 
-/** Exit codes, distinct so an exit-code-only caller cannot mistake incomplete for pass. */
-export const EXIT = { pass: 0, fail: 1, incomplete: 3 };
+/** Every verdict the report can carry, mapped to its exit code. */
+export const EXIT = { pass: 0, skipped: 0, fail: 1, incomplete: 3 };
+
+/** @typedef {keyof typeof EXIT} Verdict */
 
 /**
  * The run result a gate produced, plus how long it took.
@@ -218,23 +229,20 @@ function gateEntry(gate, status, run, app = '') {
 }
 
 /**
- * The verdict for a set of gate entries and the apps that had no config of their own.
- *
- * `fail` outranks `incomplete`: a failing gate is more actionable than a missing one, and the
- * exit code follows the verdict. `incomplete` — never `pass` — when anything was
- * `unavailable` or an app was missing, so a green exit code can never stand in for "every
- * relevant gate ran." Everything else is `pass`, including the `not_applicable` and
- * `skipped_unchanged` rows: those are documented dispatch decisions, not checks that failed
- * to run.
+ * The verdict for a set of gate entries and the apps that had no config of their own, by the
+ * table in the header. `fail` outranks `incomplete` because a failing gate is the more
+ * actionable signal. A `skipped_unchanged` or `not_applicable` row beside a gate that passed
+ * does not stop the report reading `pass`: those are dispatch decisions, and one gate ran.
  *
  * @param {GateEntry[]} gates
  * @param {string[]} missing
- * @returns {'pass'|'fail'|'incomplete'}
+ * @returns {Verdict}
  */
 export function computeVerdict(gates, missing) {
   if (gates.some((gate) => gate.status === 'fail')) return 'fail';
   if (gates.some((gate) => gate.status === 'unavailable') || missing.length > 0)
     return 'incomplete';
+  if (!gates.some((gate) => gate.status === 'pass')) return 'skipped';
   return 'pass';
 }
 
@@ -326,8 +334,8 @@ export function buildReport({
       // the reader the gate exists and is off, which is the difference between a suite
       // that does not check something and a suite that never claimed to. It is not a
       // `pass` — nothing ran — but it is not `incomplete` either, because nothing failed
-      // to start that was meant to start. `computeVerdict` special-cases only `fail` and
-      // `unavailable`, so this falls through to `pass` on its own.
+      // to start that was meant to start. A report of nothing but `disabled` rows is
+      // `skipped`.
       if (gate.enabled === false) {
         gates.push(gateEntry(gate, 'disabled', null, target.name));
         continue;

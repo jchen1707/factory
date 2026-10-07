@@ -30,7 +30,8 @@ never installs.
 Report the pass/fail summary and every failure **verbatim**, with `file:line`. Report any gate
 the report marked `unavailable` — a missing browser or container is not a failing test, and
 handing an agent "the test failed" for a gate that never started sends it to fix code that was
-never wrong.
+never wrong. A verdict of `skipped` means no test gate ran at all; say so rather than
+reporting a pass.
 
 **Do not modify tests or source to make a failing test pass.** Diagnose the root cause and
 propose a fix. A test edited until it agrees with the code has stopped being evidence — that
