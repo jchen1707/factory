@@ -10,7 +10,7 @@ import pytest
 
 from factory import cli, recovery
 from factory.machine import Blocked, State
-from factory.sandbox.base import Completed
+from factory.sandbox.base import Completed, RunHandle
 from factory.steps import Context
 from tests.integration.conftest import advance_state, git
 
@@ -105,6 +105,9 @@ def test_cancel_stops_recorded_attempt_before_cleanup_and_preserves_busy_sandbox
     calls: list[tuple[str, object]] = []
 
     class SandboxEffects:
+        def confirm_gone(self, handle: RunHandle) -> None:
+            return None
+
         def kill_group(self, name: str, pgid: int) -> None:
             calls.append(("signal", (name, pgid)))
             (attempt / "exit").write_text("143")
@@ -152,6 +155,9 @@ def test_cancel_refuses_cleanup_when_attempt_stop_is_unproven(
     ctx.refresh()
 
     class SandboxEffects:
+        def confirm_gone(self, handle: RunHandle) -> None:
+            return None
+
         def kill_group(self, name: str, pgid: int) -> None:
             pass  # Signal delivery alone does not prove that the writer stopped.
 
@@ -238,6 +244,9 @@ def test_cancel_uses_planners_terminal_record(
     signalled = []
 
     class SandboxEffects:
+        def confirm_gone(self, handle: RunHandle) -> None:
+            return None
+
         def kill_group(self, name: str, pgid: int) -> None:
             signalled.append(pgid)
             (attempt / "plan-exit").write_text("143")
@@ -277,6 +286,9 @@ def test_cancel_protects_another_project_using_the_same_physical_vm(
     ctx.refresh()
 
     class SandboxEffects:
+        def confirm_gone(self, handle: RunHandle) -> None:
+            return None
+
         def kill_group(self, name: str, pgid: int) -> None:
             (attempt / "exit").write_text("143")
 

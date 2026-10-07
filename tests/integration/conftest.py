@@ -25,7 +25,7 @@ from factory.intake.linear import Issue
 from factory.machine import State
 from factory.registry import load_registry
 from factory.routing import load_routing
-from factory.sandbox.base import Completed, RunHandle, RunResult, RunStatus, SandboxSpec
+from factory.sandbox.base import Completed, Gone, RunHandle, RunResult, RunStatus, SandboxSpec
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
@@ -617,6 +617,11 @@ class FakeSandbox:
             if (handle.attempt_dir / handle.exit_name).exists()
             else RunStatus.RUNNING
         )
+
+    def confirm_gone(self, handle: RunHandle) -> Gone | None:
+        if (handle.attempt_dir / handle.exit_name).exists() or handle.sandbox in self.running:
+            return None
+        return "sandbox-stopped" if self.exists(handle.sandbox) else "sandbox-absent"
 
     def collect(self, handle: RunHandle) -> RunResult:
         return RunResult(

@@ -7,12 +7,12 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from factory.execution import ProjectQueued
 from factory.policy import assert_factory_sandbox
 from factory.runtime_jobs import RuntimeJobs
-from factory.sandbox.base import RunHandle, RunStatus
+from factory.sandbox.base import Gone, RunHandle, RunStatus
 from factory.store import Store
 
 
@@ -20,6 +20,8 @@ class DetachedExecution(Protocol):
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None: ...
 
     def poll(self, handle: RunHandle) -> RunStatus: ...
+
+    def confirm_gone(self, handle: RunHandle) -> Gone | None: ...
 
 
 class AgentLaunches:
@@ -140,15 +142,21 @@ class AgentLaunches:
         return self.sandbox.poll(self.handle(invocation_id))
 
     def reconcile(self, invocation_id: str, *, collect: Callable[[], None]) -> bool:
-        """Retain terminal accounting before releasing a confirmed exited invocation.
+        """Retain terminal accounting before releasing an invocation that cannot run.
 
         The caller's collector must be idempotent and keep missing usage visibly
-        incomplete. Orphaned holders require targeted recovery, not automatic release.
+        incomplete.
         """
         handle = self.handle(invocation_id)
-        if not (handle.attempt_dir / handle.exit_name).exists():
+        exit_file = handle.attempt_dir / handle.exit_name
+        evidence: Literal["exit"] | Gone
+        if exit_file.exists():
+            code = int(exit_file.read_text().strip())
+            status, evidence = ("completed" if code == 0 else "failed"), "exit"
+        elif (gone := self.sandbox.confirm_gone(handle)) is not None:
+            status, evidence = "failed", gone
+        else:
             return False
-        code = int((handle.attempt_dir / handle.exit_name).read_text().strip())
         collect()
-        self.jobs.finish_agent(invocation_id, status="completed" if code == 0 else "failed")
+        self.jobs.finish_agent(invocation_id, status=status, evidence=evidence)
         return True

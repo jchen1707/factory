@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from factory.sandbox.base import Gone
     from factory.store import Store
 
 #: Frozen schema steps 6 and 7, replayed on every store by `store._MIGRATIONS`. Steps 8 and 9
@@ -54,7 +55,9 @@ class RuntimeJobs:
             )
         ]
 
-    def finish_agent(self, invocation_id: str, *, status: str) -> None:
+    def finish_agent(
+        self, invocation_id: str, *, status: str, evidence: Literal["exit"] | Gone
+    ) -> None:
         if status not in {"completed", "failed", "cancelled", "suspended"}:
             raise ValueError("invalid terminal agent status")
         with self.runtime.transaction():
@@ -74,7 +77,7 @@ class RuntimeJobs:
                 "run",
                 row["run_id"],
                 "agent-finished",
-                {"invocation": invocation_id, "status": status},
+                {"invocation": invocation_id, "status": status, "evidence": evidence},
             )
 
     def schedule_agent(

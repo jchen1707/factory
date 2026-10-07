@@ -158,7 +158,7 @@ def test_prepared_builder_requires_its_exact_approval_after_mode_changes(ctx: Co
     driver.step(ctx)
     identifier = ctx.store.runtime.invocations(ctx.run.id)[0]["id"]
     ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     result = driver.step(ctx)
     assert result.outcome == driver.Outcome.NEEDS_HUMAN
     assert identifier in result.detail
@@ -226,7 +226,7 @@ def test_queue_wait_does_not_consume_execution_timeout(
     driver.step(ctx)
     later = time.time() + ctx.timeout_for(State.IMPLEMENTING) + 10
     monkeypatch.setattr(time, "time", lambda: later)
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     _fake(ctx).detach_without_finishing = True
     driver.step(ctx)
     result = driver.step(ctx)
@@ -256,7 +256,7 @@ def test_queued_launch_refuses_changed_input(ctx: Context, changed: str) -> None
         (ctx.worktree / "changed.txt").write_text("Changed candidate while queued")
         git(ctx.worktree, "add", "changed.txt")
         git(ctx.worktree, "commit", "-m", "Change candidate")
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     with pytest.raises(Blocked, match="launch-preparation-stale"):
         driver.step(ctx)
     assert _fake(ctx).detached == []
@@ -339,7 +339,7 @@ def test_queued_builder_survives_controller_restart_without_a_new_attempt(ctx: C
     ctx.store.close()
     ctx.store = Store(database)
     jobs = RuntimeJobs(ctx.store)
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     driver.step(ctx)
     assert len(_fake(ctx).detached) == 1
     assert ctx.run.attempt == 1

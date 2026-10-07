@@ -116,9 +116,9 @@ def test_agent_capacity_counts_invocations_in_one_run_and_drains(tmp_path: Path)
     store.runtime.configure("project", "synthetic", {"max_active_agents": 1})
     assert jobs.schedule_agent("first", usd_limit=10, max_attempts=2)
     assert len(jobs.active_agents("synthetic")) == 2
-    jobs.finish_agent("second", status="cancelled")
+    jobs.finish_agent("second", status="cancelled", evidence="exit")
     assert not jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
-    jobs.finish_agent("first", status="completed")
+    jobs.finish_agent("first", status="completed", evidence="exit")
     assert jobs.schedule_agent("reviewer", usd_limit=10, max_attempts=2)
     store.close()
 

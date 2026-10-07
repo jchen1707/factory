@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -502,6 +503,105 @@ def test_poll_without_a_pid_file_falls_back_to_the_heartbeat(tmp_path: Path) -> 
     (tmp_path / "heartbeat").write_text(str(int(time.time())))
 
     assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
+
+
+_Answer = tuple[int, str] | BaseException
+
+_SANDBOX = "factory-build-python-harness"
+_FAILED: _Answer = (1, "")
+_LISTED: _Answer = (0, json.dumps({"sandboxes": [{"name": _SANDBOX, "status": "running"}]}))
+_UNLISTED: _Answer = (0, json.dumps({"sandboxes": [{"name": "factory-build-other"}]}))
+
+
+def _inspected(state: object) -> _Answer:
+    return (0, json.dumps({"name": _SANDBOX, "state": state}))
+
+
+def _record_dead_holder(attempt_dir: Path) -> None:
+    dead = subprocess.Popen(["/usr/bin/true"])
+    dead.wait()
+    (attempt_dir / sbx_module.SBX_EXEC_PID).write_text(f"{dead.pid}\n")
+
+
+def _adapter_answering(
+    inspect: _Answer, ls: _Answer, calls: list[tuple[str, ...]] | None = None
+) -> SbxAdapter:
+    adapter = SbxAdapter()
+    answers = {("sbx", "inspect", _SANDBOX, "--json"): inspect, ("sbx", "ls", "--json"): ls}
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        if calls is not None:
+            calls.append(tuple(argv))
+        answer = answers[tuple(argv)]
+        if isinstance(answer, BaseException):
+            raise answer
+        return Completed(tuple(argv), answer[0], answer[1], "")
+
+    adapter._run = run  # type: ignore[method-assign]
+    return adapter
+
+
+@pytest.mark.parametrize(
+    ("inspect", "ls", "expected"),
+    [
+        pytest.param(_inspected("stopped"), _UNLISTED, "sandbox-stopped", id="stopped"),
+        pytest.param(_inspected("running"), _UNLISTED, None, id="running"),
+        pytest.param(_inspected("paused"), _UNLISTED, None, id="unknown-state"),
+        pytest.param(_inspected(None), _UNLISTED, None, id="no-state"),
+        pytest.param((0, "not json"), _UNLISTED, None, id="inspect-bad-json"),
+        pytest.param((0, '["stopped"]'), _UNLISTED, None, id="inspect-not-an-object"),
+        pytest.param(_FAILED, _UNLISTED, "sandbox-absent", id="absent"),
+        pytest.param(_FAILED, (0, '{"sandboxes": []}'), "sandbox-absent", id="absent-empty"),
+        pytest.param(_FAILED, _LISTED, None, id="listed"),
+        pytest.param(_FAILED, _FAILED, None, id="ls-fails"),
+        pytest.param(_FAILED, (0, "not json"), None, id="ls-bad-json"),
+        pytest.param(_FAILED, (0, "[]"), None, id="ls-bare-list"),
+        pytest.param(_FAILED, (0, '{"sandboxes": null}'), None, id="ls-null"),
+        pytest.param(_FAILED, (0, '{"sandboxes": ["factory-build-x"]}'), None, id="ls-entry-text"),
+        pytest.param(_FAILED, (0, '{"sandboxes": [{"Name": "x"}]}'), None, id="ls-entry-unnamed"),
+        pytest.param(subprocess.TimeoutExpired(["sbx"], 60), _UNLISTED, None, id="inspect-timeout"),
+        pytest.param(_FAILED, subprocess.TimeoutExpired(["sbx"], 60), None, id="ls-timeout"),
+        pytest.param(FileNotFoundError("sbx"), _UNLISTED, None, id="sbx-missing"),
+    ],
+)
+def test_confirm_gone_accepts_only_a_vm_proven_stopped_or_absent(
+    tmp_path: Path, inspect: _Answer, ls: _Answer, expected: str | None
+) -> None:
+    _record_dead_holder(tmp_path)
+
+    assert _adapter_answering(inspect, ls).confirm_gone(_handle(tmp_path)) == expected
+
+
+@pytest.mark.parametrize("holder", ["alive", "unrecorded"])
+def test_confirm_gone_asks_sbx_nothing_until_the_holder_is_recorded_and_dead(
+    tmp_path: Path, holder: str
+) -> None:
+    if holder == "alive":
+        (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    calls: list[tuple[str, ...]] = []
+
+    assert (
+        _adapter_answering(_inspected("stopped"), _UNLISTED, calls).confirm_gone(_handle(tmp_path))
+        is None
+    )
+    assert calls == []
+
+
+def test_confirm_gone_defers_to_an_exit_that_lands_while_sbx_answers(tmp_path: Path) -> None:
+    _record_dead_holder(tmp_path)
+    handle = _handle(tmp_path)
+    adapter = SbxAdapter()
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        (tmp_path / handle.exit_name).write_text("0")
+        return Completed(tuple(argv), 0, json.dumps({"state": "stopped"}), "")
+
+    adapter._run = run  # type: ignore[method-assign]
+    assert adapter.confirm_gone(handle) is None
 
 
 def test_a_read_only_primary_workspace_is_refused_before_sbx_sees_it() -> None:

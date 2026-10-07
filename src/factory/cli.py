@@ -1187,9 +1187,21 @@ def _cancel_run(
     from factory.runtime_jobs import RuntimeJobs
 
     workflow_launches.reconcile_run(store, sbx, run.id, project.name)
-    if any(row["run_id"] == run.id for row in RuntimeJobs(store).active_agents(project.name)):
+    held = [
+        row["invocation_id"]
+        for row in RuntimeJobs(store).active_agents(project.name)
+        if row["run_id"] == run.id
+    ]
+    if held:
+        from factory.agent_launches import AgentLaunches
+
+        launches = AgentLaunches(store, sbx)
+        named = ", ".join(f"{held_id} in {launches.handle(held_id).sandbox}" for held_id in held)
         raise Blocked(
-            "cancellation-stop-unverified", "Owned agents still need terminal reconciliation"
+            "cancellation-stop-unverified",
+            f"Owned agents still need terminal reconciliation: {named}. A lease is released "
+            "once its sandbox is stopped or removed; stop the sandbox if no other run uses "
+            "it, then cancel again",
         )
 
     for path in paths:
@@ -1265,8 +1277,13 @@ def _cancel_run(
 def _cancel_attempt(
     store: Store, project: Project, run: Run, sbx: SbxAdapter, busy: set[str]
 ) -> str | None:
-    """Require the writer's terminal record before touching its worktree or clone."""
+    """Require the writer's terminal record before touching its worktree or clone.
+
+    `confirm_gone` is asked before any signal, because a signal is an `sbx exec`, which
+    starts a stopped VM and finds no process in it.
+    """
     from factory import workflow_launches
+    from factory.sandbox.base import RunHandle
     from factory.steps import plan, reap, signal_run_attempt
 
     if workflow_launches.retire_pending(store, run.id, run.attempt, run.state):
@@ -1290,6 +1307,17 @@ def _cancel_attempt(
     directory = Path(str(row["artifact_dir"]))
     filename = plan.PLAN_EXIT_NAME if run.state is State.PLANNING else "exit"
     if not (directory / filename).exists():
+        handle = RunHandle(
+            run.id,
+            run.attempt,
+            name,
+            run.worktree or str(project.path),
+            directory,
+            exit_name=filename,
+        )
+        if sbx.confirm_gone(handle) is not None:
+            store.finish_attempt(run.id, run.attempt, run.state, exit_code=None, outcome="orphaned")
+            return name
         signal_run_attempt(
             store,
             project,

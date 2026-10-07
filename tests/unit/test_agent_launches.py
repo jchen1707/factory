@@ -1,11 +1,12 @@
 """Durable paid launch ownership through isolated stores and the sandbox boundary."""
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 
 from factory.agent_launches import AgentLaunches
 from factory.runtime_jobs import RuntimeJobs
-from factory.sandbox.base import RunHandle, RunStatus
+from factory.sandbox.base import Gone, RunHandle, RunStatus
 from factory.store import Store
 
 
@@ -13,12 +14,16 @@ class Sandbox:
     def __init__(self) -> None:
         self.launches = 0
         self.status = RunStatus.RUNNING
+        self.gone: Gone | None = None
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
         self.launches += 1
 
     def poll(self, handle: RunHandle) -> RunStatus:
         return self.status
+
+    def confirm_gone(self, handle: RunHandle) -> Gone | None:
+        return self.gone
 
 
 def test_reopened_controller_observes_existing_launch_without_spawning(tmp_path: Path) -> None:
@@ -93,6 +98,45 @@ def test_terminal_observation_releases_only_after_usage_collection(tmp_path: Pat
     assert collected == ["usage"]
     assert RuntimeJobs(store).active_agents("synthetic") == []
     assert not launches.start("builder", handle, "script", {}, usd_limit=10, max_attempts=2)
+    store.close()
+
+
+def test_a_sandbox_confirmed_gone_releases_its_lease_as_failed_after_collection(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("builder", run.id, 1, "builder", {})
+    handle = RunHandle(run.id, 1, "factory-build-synthetic", str(tmp_path), tmp_path / "attempt")
+    sandbox = Sandbox()
+    launches = AgentLaunches(store, sandbox)
+    launches.start("builder", handle, "script", {}, usd_limit=10, max_attempts=2)
+    collected: list[str] = []
+
+    sandbox.status = RunStatus.ORPHANED
+    assert not launches.reconcile("builder", collect=lambda: collected.append("usage"))
+    assert collected == []
+    assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
+
+    def broken_collection() -> None:
+        raise OSError("usage temporarily unreadable")
+
+    sandbox.gone = "sandbox-absent"
+    with pytest.raises(OSError, match="usage temporarily unreadable"):
+        launches.reconcile("builder", collect=broken_collection)
+    assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
+    assert launches.reconcile("builder", collect=lambda: collected.append("usage"))
+    assert collected == ["usage"]
+    assert RuntimeJobs(store).active_agents("synthetic") == []
+    assert launches.reconcile("builder", collect=lambda: None)
+    assert [
+        json.loads(row["payload"])
+        for row in store.runtime.db.execute(
+            "SELECT payload FROM operator_events WHERE action='agent-finished'"
+        )
+    ] == [{"invocation": "builder", "status": "failed", "evidence": "sandbox-absent"}]
     store.close()
 
 
