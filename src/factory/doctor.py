@@ -34,7 +34,6 @@ decisions, and the console has its own plan.
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
@@ -50,7 +49,7 @@ from factory import machine
 from factory.harness import load_harness_config, vendor_check
 from factory.intake.linear import LinearError, keychain_secret
 from factory.registry import Project, Registry, RegistryError, load_registry
-from factory.routing import MODEL_CACHE, RoutingError, load_routing
+from factory.routing import RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, sbx_available
 from factory.steps import review as review_step
 from factory.store import Store
@@ -176,10 +175,6 @@ def load_context(home: Path, *, deep: bool = False) -> tuple[DoctorContext, list
 # --------------------------------------------------------------------------------
 # the checks themselves
 # --------------------------------------------------------------------------------
-
-
-def _model_cache(_ctx: DoctorContext) -> list[Result]:
-    return _from_triple(_model_cache_check())
 
 
 def _tools(_ctx: DoctorContext) -> list[Result]:
@@ -319,7 +314,6 @@ def _canary(ctx: DoctorContext) -> list[Result]:
 #: Every check, in report order. The config four are not here — they run first, in
 #: `load_context`, because they produce what the rest are handed.
 CHECKS: tuple[Check, ...] = (
-    Check("model cache", _model_cache),
     Check("external tools", _tools),
     Check("sbx", _sbx),
     Check("openai credential (sbx)", _openai_secret),
@@ -526,28 +520,6 @@ def _openai_secret_check() -> tuple[str, bool, str]:
         "openai credential (sbx)",
         False,
         "no global openai oauth — run `sbx secret set openai --oauth`",
-    )
-
-
-def _model_cache_check() -> tuple[str, bool, str]:
-    """A routing table pinned to a model the CLI no longer offers fails at the worst
-    moment, so `doctor` compares the cache's `client_version` with the installed CLI."""
-    if not MODEL_CACHE.exists():
-        return "model cache", False, f"{MODEL_CACHE} is missing"
-    try:
-        cache = json.loads(MODEL_CACHE.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        return "model cache", False, str(exc)
-    proc = subprocess.run(
-        ["codex", "--version"], capture_output=True, text=True, check=False, timeout=60
-    )
-    cli = proc.stdout.strip().split()[-1] if proc.returncode == 0 else "unknown"
-    cached = cache.get("client_version", "unknown")
-    return (
-        "model cache",
-        cached == cli,
-        f"cache {cached} (fetched {cache.get('fetched_at', '?')}) vs CLI {cli}"
-        + ("" if cached == cli else " — open the TUI's /model picker once to refresh"),
     )
 
 

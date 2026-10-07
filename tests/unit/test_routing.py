@@ -1,52 +1,39 @@
-"""§21.1 / §4.5 — the three validation rules, and the ultra prohibition."""
+"""§21.1 / §4.5 — the three validation rules over the shipped, file-only catalogue."""
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
 
-from factory.routing import ModelFacts, RoutingError, load_routing, rewrite, validate
+from factory.execution import PRESETS
+from factory.routing import RoutingError, load_routing, rewrite, validate
 
 HOME = Path(__file__).resolve().parents[2]
-
-CACHE = {
-    slug: ModelFacts(
-        slug=slug,
-        display=slug,
-        default_effort="medium",
-        supported_efforts=efforts,
-        context_window=272000,
-        effective_percent=95,
-        hidden=hidden,
-    )
-    for slug, efforts, hidden in [
-        ("gpt-5.6-sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
-        # Terra is what the shipped table routes the reviewer at, so the stand-in cache
-        # has to carry it: these two tests load `config/models.toml` itself, and a
-        # fixture missing a model the real cache has fails the shipped table for a fact
-        # about the fixture. `~/.codex/models_cache.json` lists it at low..ultra.
-        ("gpt-5.6-terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
-        ("gpt-5.6-luna", ("low", "medium", "high", "xhigh", "max"), False),
-        ("gpt-5.5", ("low", "medium", "high", "xhigh"), False),
-        ("gpt-5.4-mini", ("low", "medium", "high", "xhigh"), False),
-    ]
-}
+SHIPPED = HOME / "config" / "models.toml"
+#: The shipped `[models.*]` tables, so every test validates against the real catalogue
+#: rather than a stand-in that can drift from it.
+MODELS = SHIPPED.read_text(encoding="utf-8").partition("\n[models.")[2]
+BUDGET = "[budget]\nusd_per_run = 20.0\nusd_warn_at = 12.0\n"
 
 
 def _table(**overrides: str) -> str:
     values = {
-        "builder_model": "gpt-5.6-sol",
-        "builder_effort": "xhigh",
-        "reviewer_model": "gpt-5.5",
+        "builder_model": "claude-opus-5-5",
+        "builder_effort": "medium",
+        "reviewer_model": "claude-fable-5-1",
         "usd_per_run": "20.0",
         "usd_warn_at": "12.0",
     }
     values.update(overrides)
     return f"""
 [roles.planner]
-model = "gpt-5.6-sol"
+model = "claude-opus-5-5"
 effort = "max"
 
 [roles.builder]
@@ -58,61 +45,136 @@ model = "{values["reviewer_model"]}"
 effort = "high"
 
 [roles.synthesiser]
-model = "gpt-5.6-luna"
+model = "claude-sonnet-5-5"
 effort = "medium"
 
 [roles.documenter]
-model = "gpt-5.4-mini"
+model = "claude-sonnet-4-6"
 effort = "low"
 
 [budget]
 usd_per_run = {values["usd_per_run"]}
 usd_warn_at = {values["usd_warn_at"]}
-"""
+
+[models.{MODELS}"""
 
 
 def _load(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
     path = tmp_path / "models.toml"
     path.write_text(body)
-    return load_routing(path, cache=CACHE)
+    return load_routing(path)
 
 
 def test_the_shipped_table_validates() -> None:
-    routing = load_routing(HOME / "config" / "models.toml", cache=CACHE)
-    assert routing.roles["builder"].model != routing.roles["reviewer"].model
+    routing = load_routing(SHIPPED)
+    assert {name: (r.model, r.effort) for name, r in routing.roles.items()} == {
+        "planner": ("claude-opus-5-5", "high"),
+        "builder": ("claude-opus-5-5", "medium"),
+        "reviewer": ("claude-fable-5-1", "high"),
+        "synthesiser": ("claude-sonnet-5-5", "medium"),
+        "documenter": ("claude-sonnet-5-5", "medium"),
+    }
     assert routing.usd_per_run == 50.0
 
 
-def test_the_shipped_table_records_all_eight_measured_models() -> None:
-    # p0-12 correction 1: eight, not seven. `gpt-reserve` is hidden but real, and a
-    # table that omitted a model the validation would accept has drifted.
-    routing = load_routing(HOME / "config" / "models.toml", cache=CACHE)
-    assert len(routing.models) == 8
-    assert routing.models["gpt-reserve"].hidden
-    assert routing.models["codex-auto-review"].hidden
+def test_the_shipped_catalogue_is_the_measured_claude_models() -> None:
+    routing = load_routing(SHIPPED)
+    assert {
+        slug: (facts.context_window, facts.supported_efforts)
+        for slug, facts in routing.models.items()
+    } == {
+        "claude-fable-5-1": (1000000, ("low", "medium", "high", "xhigh", "max")),
+        "claude-opus-5-5": (1000000, ("low", "medium", "high", "xhigh", "max")),
+        "claude-sonnet-5-5": (1000000, ("low", "medium", "high", "xhigh", "max")),
+        "claude-opus-4-7": (1000000, ("low", "medium", "high", "xhigh", "max")),
+        "claude-sonnet-4-6": (200000, ("low", "medium", "high", "max")),
+        "claude-haiku-4-5-20251001": (200000, ()),
+    }
+
+
+def test_routing_reads_only_the_file_it_is_given(tmp_path: Path) -> None:
+    """The catalogue is the file. A home directory carrying a Codex model cache and a
+    Claude Code model catalog that list none of the shipped models must change nothing,
+    and no file other than `models.toml` may be opened."""
+    home = tmp_path / "home"
+    poison = json.dumps({"models": [{"slug": "not-a-shipped-model"}]})
+    for relative in (".codex/models_cache.json", ".claude/cache/model-catalog/cc.json"):
+        (home / relative).parent.mkdir(parents=True)
+        (home / relative).write_text(poison)
+    probe = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from factory.routing import load_routing\n"
+        "opened = []\n"
+        "sys.addaudithook(lambda event, args: event == 'open' and opened.append(str(args[0])))\n"
+        "roles = load_routing(Path(sys.argv[1])).roles\n"
+        "print(roles['builder'].model)\n"
+        "print(*opened, sep='\\n')\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe, str(SHIPPED)],
+        env={**os.environ, "HOME": str(home), "CODEX_HOME": str(home / ".codex")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    builder, *opened = done.stdout.splitlines()
+    assert builder == "claude-opus-5-5"
+    assert opened == [str(SHIPPED)]
+
+
+@pytest.mark.parametrize("preset", sorted(PRESETS))
+def test_every_preset_passes_the_rules_the_roles_pass(preset: str) -> None:
+    roles = "".join(
+        f'[roles.{name}]\nmodel = "{model}"\neffort = "{effort}"\n\n'
+        for name, (model, effort) in PRESETS[preset].items()
+    )
+    routing = validate(f"{roles}{BUDGET}\n[models.{MODELS}")
+    assert {name: (r.model, r.effort) for name, r in routing.roles.items()} == PRESETS[preset]
 
 
 def test_reviewer_sharing_the_builders_model_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RoutingError, match="must differ"):
-        _load(tmp_path, _table(reviewer_model="gpt-5.6-sol"))
+        _load(tmp_path, _table(reviewer_model="claude-opus-5-5"))
 
 
-def test_ultra_is_refused_for_the_builder(tmp_path: Path) -> None:
-    with pytest.raises(RoutingError, match="ultra"):
-        _load(tmp_path, _table(builder_effort="ultra"))
-
-
-def test_an_unmeasured_model_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(RoutingError, match="measured model list"):
-        _load(tmp_path, _table(builder_model="gpt-9-imaginary"))
+@pytest.mark.parametrize("model", ["claude-9-imaginary", "opus", "sonnet"])
+def test_a_model_outside_the_catalogue_is_refused(tmp_path: Path, model: str) -> None:
+    # Aliases are refused too: `opus` resolves to whatever Anthropic ships next.
+    with pytest.raises(RoutingError, match=r"not in models.toml's \[models\.\*\] catalogue"):
+        _load(tmp_path, _table(builder_model=model))
 
 
 def test_an_unsupported_effort_is_refused(tmp_path: Path) -> None:
-    # gpt-5.5 offers low..xhigh and no `max`. Naming one it does not have is as broken
-    # as naming a model that does not exist.
+    # claude-sonnet-4-6 offers no `xhigh`. Naming an effort a model does not have is as
+    # broken as naming a model that does not exist, and Claude Code silently falls back.
+    with pytest.raises(RoutingError, match="supports"):
+        _load(tmp_path, _table(builder_model="claude-sonnet-4-6", builder_effort="xhigh"))
+
+
+def test_a_role_on_a_model_without_efforts_must_name_none(tmp_path: Path) -> None:
+    haiku = _table().replace(
+        'model = "claude-sonnet-4-6"\neffort = "low"\n', 'model = "claude-haiku-4-5-20251001"\n'
+    )
+    assert _load(tmp_path, haiku).roles["documenter"].effort is None
+    with pytest.raises(RoutingError, match="takes no effort"):
+        _load(
+            tmp_path,
+            haiku.replace(
+                'model = "claude-haiku-4-5-20251001"\n',
+                'model = "claude-haiku-4-5-20251001"\neffort = "low"\n',
+            ),
+        )
+
+
+def test_a_role_must_name_an_effort_its_model_offers(tmp_path: Path) -> None:
     with pytest.raises(RoutingError, match="supports"):
         _load(
-            tmp_path, _table(reviewer_model="gpt-5.5").replace('effort = "high"', 'effort = "max"')
+            tmp_path,
+            _table().replace(
+                'model = "claude-sonnet-4-6"\neffort = "low"\n', 'model = "claude-sonnet-4-6"\n'
+            ),
         )
 
 
@@ -121,13 +183,6 @@ def test_budget_rules(tmp_path: Path) -> None:
         _load(tmp_path, _table(usd_per_run="0.0"))
     with pytest.raises(RoutingError, match="must be below"):
         _load(tmp_path, _table(usd_warn_at="25.0"))
-
-
-def test_the_context_denominator_uses_context_window_not_the_larger_figure() -> None:
-    # p0-12 correction 2: max_context_window differs per model (272k/872k/1M) while
-    # context_window is uniformly 272k. Using the larger one would understate pressure.
-    routing = load_routing(HOME / "config" / "models.toml", cache=CACHE)
-    assert routing.facts("gpt-5.6-sol").usable_context == 272000 * 95 // 100
 
 
 # --------------------------------------------------------------------------------
@@ -146,9 +201,9 @@ def test_validate_and_load_routing_agree_on_every_table(tmp_path: Path) -> None:
     """
     tables = [
         _table(),
-        _table(reviewer_model="gpt-5.6-sol"),  # rule 1: reviewer shares the builder
-        _table(builder_model="gpt-5.9-nope"),  # rule 2: not in the catalogue
-        _table(builder_effort="ultra"),  # the ultra prohibition
+        _table(reviewer_model="claude-opus-5-5"),  # rule 1: reviewer shares the builder
+        _table(builder_model="claude-9-nope"),  # rule 2: not in the catalogue
+        _table(builder_effort="ultra"),  # rule 2: not an effort the model offers
         _table(usd_per_run="0.0"),  # rule 3
         _table(usd_warn_at="99.0"),  # rule 3, the other half
     ]
@@ -165,7 +220,7 @@ def test_validate_and_load_routing_agree_on_every_table(tmp_path: Path) -> None:
 def _outcome(call, argument):  # type: ignore[no-untyped-def]
     """The verdict as a comparable value: the roles on success, the message on refusal."""
     try:
-        routing = call(argument, cache=CACHE)
+        routing = call(argument)
     except RoutingError as exc:
         return ("refused", str(exc))
     return ("accepted", {name: (r.model, r.effort) for name, r in routing.roles.items()})
@@ -173,7 +228,7 @@ def _outcome(call, argument):  # type: ignore[no-untyped-def]
 
 def test_validate_rejects_a_syntax_error_before_it_reaches_the_rules() -> None:
     with pytest.raises(tomllib.TOMLDecodeError):
-        validate("[roles.builder\nmodel = ", cache=CACHE)
+        validate("[roles.builder\nmodel = ")
 
 
 def test_rewrite_changes_only_the_values_the_form_owns(tmp_path: Path) -> None:
@@ -191,8 +246,8 @@ def test_rewrite_changes_only_the_values_the_form_owns(tmp_path: Path) -> None:
 
     text = rewrite(path, {"effort.builder": "max", "usd_warn_at": "13"})
 
-    assert validate(text, cache=CACHE).roles["builder"].effort == "max"
-    assert validate(text, cache=CACHE).usd_warn_at == 13.0
+    assert validate(text).roles["builder"].effort == "max"
+    assert validate(text).usd_warn_at == 13.0
     # Everything the form did not name is untouched, comments included.
     before = [line for line in body.splitlines() if line.strip()]
     after = [line for line in text.splitlines() if line.strip()]

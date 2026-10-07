@@ -178,7 +178,7 @@ def test_intermediate_context_is_shown_without_waiting_for_a_completed_turn(ctx:
     _to_implementing(ctx)
     attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     attempt_dir.mkdir(parents=True, exist_ok=True)
-    usable = ctx.routing.models[ctx.routing.role("builder").model].usable_context
+    usable = ctx.routing.models[ctx.routing.role("builder").model].context_window
     (attempt_dir / "events.jsonl").write_text(
         json.dumps({"type": "thread.started", "thread_id": "01a0"})
         + "\n"
@@ -382,7 +382,7 @@ def _form(ctx: Context, **overrides: str) -> dict[str, str]:
     body: dict[str, str] = {}
     for name, role in ctx.routing.roles.items():
         body[f"model.{name}"] = role.model
-        body[f"effort.{name}"] = role.effort
+        body[f"effort.{name}"] = role.effort or ""
     body["usd_per_run"] = str(ctx.routing.usd_per_run)
     body["usd_warn_at"] = str(ctx.routing.usd_warn_at)
     body.update(overrides)
@@ -424,10 +424,11 @@ def test_a_valid_config_edit_is_written_and_touches_only_that_line(ctx: Context)
     # one-field edit has to arrive as a one-line diff.
     path = _models_toml(ctx)
     before = path.read_text(encoding="utf-8").splitlines()
+    effort = "low" if ctx.routing.role("documenter").effort != "low" else "medium"
 
     response = _client(ctx).post(
         "/config/models",
-        data=_form(ctx, **{"effort.documenter": "medium"}),
+        data=_form(ctx, **{"effort.documenter": effort}),
         follow_redirects=False,
     )
 
@@ -436,7 +437,7 @@ def test_a_valid_config_edit_is_written_and_touches_only_that_line(ctx: Context)
     after = path.read_text(encoding="utf-8").splitlines()
     changed = [(a, b) for a, b in zip(before, after, strict=True) if a != b]
     assert len(changed) == 1
-    assert changed[0][1].strip() == 'effort = "medium"'
+    assert changed[0][1].strip() == f'effort = "{effort}"'
 
 
 def test_projects_are_rendered_read_only_with_the_reason(ctx: Context) -> None:

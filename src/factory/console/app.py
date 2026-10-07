@@ -645,7 +645,7 @@ def _cards_html(cards: list[console_views.AgentCard]) -> str:
         items.append(
             f'<div class="card lane-{c.role}">'
             f'<div class="cardhead"><span><b>{_e(c.role)}</b> '
-            f'<span class="muted">{_e(c.model)} · {_e(c.effort)}</span></span>'
+            f'<span class="muted">{_e(c.model)} · {_e(c.effort or "no effort")}</span></span>'
             f'<span class="status st-{c.status}">{_e(c.status)}</span></div>'
             f"{ctx}{act}{hb}</div>"
         )
@@ -1506,7 +1506,7 @@ def create_app(
                 "<tr>"
                 f'<th scope="row">{_e(role.name.replace("_", " ").capitalize())}</th>'
                 f'<td><input aria-label="{_e(role.name)} model" name="model.{_e(role.name)}" value="{_e(role.model)}"{description}>{inline_error}</td>'
-                f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort)}"{description}></td>'
+                f'<td><input aria-label="{_e(role.name)} effort" name="effort.{_e(role.name)}" value="{_e(role.effort or "")}"{description}></td>'
                 "</tr>"
             )
         role_rows = "".join(rows)

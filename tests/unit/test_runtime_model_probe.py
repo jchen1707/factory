@@ -20,8 +20,8 @@ from factory.steps import Context
 from factory.store import Store
 
 MODELS = [
-    {"model": "gpt-5.6-terra", "supportedReasoningEfforts": [{"reasoningEffort": "medium"}]},
-    {"model": "gpt-5.6-sol", "supportedReasoningEfforts": [{"reasoningEffort": "high"}]},
+    {"model": "claude-sonnet-5-5", "supportedReasoningEfforts": [{"reasoningEffort": "medium"}]},
+    {"model": "claude-opus-5-5", "supportedReasoningEfforts": [{"reasoningEffort": "high"}]},
 ]
 
 
@@ -64,7 +64,7 @@ def probe_context(tmp_path: Path) -> Any:
 
 @pytest.mark.parametrize(
     ("role", "model", "effort"),
-    [("builder", "gpt-5.6-terra", "medium"), ("reviewer", "gpt-5.6-sol", "high")],
+    [("builder", "claude-sonnet-5-5", "medium"), ("reviewer", "claude-opus-5-5", "high")],
 )
 def test_presets_validate_executing_runtime_and_keep_legacy_exec(
     probe_context: Any, role: str, model: str, effort: str

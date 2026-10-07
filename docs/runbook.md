@@ -121,7 +121,8 @@ Common causes:
   database and artifacts before recovery, and follow the
   [backup and rollback procedure](runtime-certification-rollout.md).
 - **A bad `models.toml`** — the tick refuses and names the rule (F25): the reviewer sharing
-  the builder's model, an unknown model, `ultra` on the builder, or a bad budget. Fix
+  the builder's model, a model outside the `[models.*]` catalogue, an effort that model
+  does not offer, or a bad budget. Fix
   `config/models.toml`; the next tick succeeds. The daemon never falls back to a default.
 - **Disk below the floor** — the tick prints `disk below the floor`, claims no new work,
   and keeps advancing existing runs. Run `factory gc --dry-run` to see what it would

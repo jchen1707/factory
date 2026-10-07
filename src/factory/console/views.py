@@ -5,7 +5,7 @@ One producer so the terminal and the page cannot disagree about what a run is â€
 shape of defect that cost FRO-6 a stale verdict when two functions read the same input
 differently. Every view is read-only and builds no adapter: it reads the SQLite file the
 daemon writes, the `events.jsonl`/`gates.json`/`review-summary.json` the steps write, and
-the model cache the routing reads. Nothing here holds a credential or writes a transition
+the routing table. Nothing here holds a credential or writes a transition
 â€” controls go through `recovery`/`policy` in the app layer, never here.
 """
 
@@ -714,7 +714,7 @@ def runtimes(
 class ConfigRole:
     name: str
     model: str
-    effort: str
+    effort: str | None
 
 
 @dataclass(frozen=True)
@@ -797,7 +797,7 @@ class AgentCard:
 
     role: str
     model: str
-    effort: str
+    effort: str | None
     status: str
     context_pct: float | None
     context_reason: str | None
