@@ -41,7 +41,7 @@ def role_for(ctx: Context, name: str) -> Role:
     if preset not in PRESETS:
         raise Blocked("model-preset-unknown", preset)
     model, effort = PRESETS[preset][name]
-    return Role(name, model, effort, preset=preset)
+    return Role(name, model, effort, preset=preset, max_turns=ctx.routing.max_turns)
 
 
 def attempt_key(attempt: int, step: str, launch: int = 1) -> str:

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from factory import agent_run
-from factory.machine import AUTOMATIC, Blocked, State, requires_human_rule
+from factory.machine import AUTOMATIC, Blocked, Resumable, State, requires_human_rule
 
 if TYPE_CHECKING:
     from factory.steps import Context
@@ -239,8 +239,8 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
     if not skip_backoff and waited < wait_for:
         return Verdict(Disposition.RESTART, "backoff", ladder_rung(spent))
 
-    if died_in in (State.VERIFYING, State.REVIEWING):
-        # A verify/review that orphaned or timed out re-runs the step fresh. There is no
+    if died_in in (State.PLANNING, State.VERIFYING, State.REVIEWING):
+        # A plan, verify or review that died re-runs its own step fresh. There is no
         # agent session to resume (verify is a node gate report; review.start re-runs
         # Tier-1/Tier-2 fresh), so `decide()`'s RESUME/RESTART/REWIND dispositions all
         # collapse to "re-run" — and its `attempts_in_state` ceiling is decorative here,
@@ -316,15 +316,18 @@ def next_attempt_disposition(ctx: Context) -> Verdict:
 
 
 def _rerun_detached(ctx: Context, died_in: State) -> Verdict:
-    """Re-run an orphaned/timed-out verify or review, bounded by a re-run ceiling.
+    """Re-run a dead plan, verify or review, bounded by a re-run ceiling.
 
-    `resume_run`'s branch for `died_in in (verifying, reviewing)`. The step's `start`
-    advances `resumable -> {verifying,reviewing}` (a valid automatic edge) and spawns
-    the detached run; no attempt counter changes, so verify/review keep reading the
-    implement attempt's evidence at `run/<attempt>`. The `resumable_reentries` count
-    escalates to `failed` at `max_attempts`, which the `attempts_in_state` ceiling
-    could not do for a same-attempt re-run.
+    `resume_run`'s branch for `died_in in (planning, verifying, reviewing)`. The step's
+    `start` advances `resumable -> <state>` (a valid automatic edge) and spawns the
+    detached run. Verify and review keep their attempt number and read the implement
+    attempt's evidence at `run/<attempt>`; a plan re-run is a new attempt, as every
+    `plan.start` is. A dead planner must never fall through to `implement.start`: the
+    builder would open the planner's session with no plan collected. The
+    `resumable_reentries` count escalates to `failed` at `max_attempts`, which the
+    `attempts_in_state` ceiling could not do for a same-attempt re-run.
     """
+    from factory.steps import plan as plan_step
     from factory.steps import review as review_step
     from factory.steps import verify as verify_step
 
@@ -350,6 +353,8 @@ def _rerun_detached(ctx: Context, died_in: State) -> Verdict:
 
     if died_in is State.VERIFYING:
         verify_step.start(ctx)
+    elif died_in is State.PLANNING:
+        plan_step.start(ctx)
     else:
         review_step.start(ctx)
     ctx.log("recovery.rerun", state=str(died_in), reentries=reentries)
@@ -561,7 +566,12 @@ def _recollect_readiness(ctx: Context) -> None:
     # Collection validates exit, transcript, schema, ready status, and declared files.
     # It must finish before the transition: reap treats an ended planning row as ready
     # for implementation, including rows whose former outcome was plan-incomplete.
-    plan_step.collect(ctx, attempt)
+    try:
+        plan_step.collect(ctx, attempt)
+    except Resumable as exc:
+        # The run is parked at `blocked`, which has no edge to `resumable`; the operator
+        # asked for a recollection and gets the answer as a block they can act on.
+        raise Blocked("readiness-recollection-unavailable", f"{exc.reason}: {exc.detail}") from exc
 
 
 def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
@@ -677,10 +687,9 @@ def suspend(ctx: Context, *, reason: str) -> State:
             raise Blocked("suspend-stop-unverified", "The active attempt has no artifact directory")
         if row and row["artifact_dir"] and not retired:
             attempt_dir = Path(str(row["artifact_dir"]))
-            from factory.steps import signal_attempt
-            from factory.steps.plan import PLAN_EXIT_NAME
+            from factory.steps import attempt_names, signal_attempt
 
-            filename = PLAN_EXIT_NAME if origin is State.PLANNING else "exit"
+            filename = attempt_names(origin).exit
             if not (attempt_dir / filename).exists():
                 signal_attempt(
                     ctx,

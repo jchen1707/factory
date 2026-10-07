@@ -4,8 +4,8 @@ Legacy exec streams carry billed usage without current-window occupancy. Only va
 normalized context observations produce a percentage; unavailable and stale measurements
 remain explicit. Compaction and model changes invalidate the previous measurement.
 
-This is a display parser, not the state machine's. `agent.codex.parse_events` advances on
-evidence and raises on a truncated line; this one only displays, so a half-flushed trailing
+This is a display parser, not the state machine's. `agent.stream.parse` advances on
+evidence and judges a torn line; this one only displays, so a half-flushed trailing
 line (the normal case for a file a live process is writing) is skipped, not fatal.
 """
 

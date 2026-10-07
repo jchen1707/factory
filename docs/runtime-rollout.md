@@ -274,8 +274,12 @@ certification job table, and the `agent_leases.parent_id` column. Every other ta
 column is retained. The apply command refuses a store older than schema 4, whose upgrade needs
 its own review.
 Schema 10 nulls `attempts.session_id` on every existing row: those ids are Codex thread ids,
-which `claude --resume` cannot open, so recovery restarts those attempts fresh instead of
-spending a ladder rung on `session-lost`. Attempts pinned after the migration keep their ids.
+which `claude --resume` cannot open. Attempts pinned after the migration keep their ids. The
+apply command refuses while a live run still holds an invocation launched before the cutover
+(no attestation in its record); finish or cancel those runs first. Every `factory-build-*` and
+`factory-review-*` sandbox created before the cutover was made with `sbx create codex` and
+carries no `claude`; remove them (`sbx rm`) so the next run recreates them as `claude`
+sandboxes. `ensure` does not compare the agent kind of an existing sandbox.
 
 Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
 subsystem still owns live work, and names each item. Live work is any of these:

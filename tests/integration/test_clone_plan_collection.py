@@ -11,7 +11,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import Completed
 from factory.steps import Context, plan
-from tests.integration.conftest import plan_finished
+from tests.integration.conftest import plan_finished, planner_invocation
 from tests.integration.test_clone import _fake, _to_worktree_ready
 
 
@@ -31,6 +31,7 @@ def prepare(ctx: Context, structured: bool) -> AttemptDir:
     if structured:
         attempt.path("plan-request.json").write_text('{"diagnosis": false}')
         attempt.schema.write_text((ctx.home / "schemas/handoff_result.schema.json").read_text())
+        planner_invocation(ctx, attempt)
         plan_finished(
             ctx,
             attempt,

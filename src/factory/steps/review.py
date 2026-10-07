@@ -1,9 +1,9 @@
 """`reviewing -> pr_ready | awaiting_human` — the two-tier review (§15.2).
 
 Tier 1 is always run: Standards and Spec, independently, in a second, read-only sandbox
-whose workspace is the project mounted `:ro` and whose agent gets the reviewer's tool
-set (no Write, no Edit). Two enforcement layers, neither of them a prompt. The prompt is
-**assembled, not authored** — frame plus checklist, concatenated
+whose workspace is the project mounted `:ro`. The mount is the enforcement; the reviewer's
+tool set (no Write, no Edit, but Bash) only keeps the obvious edits off the table. The
+prompt is **assembled, not authored** — frame plus checklist, concatenated
 exactly the way layer A's `full-review.js` `axisPrompt()` does it — so a review that runs
 here and a review that runs through the workflow cannot drift apart.
 
@@ -48,6 +48,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +60,7 @@ from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, SandboxSpec, Workspace
-from factory.steps import Context, advance, redphase
+from factory.steps import Context, advance, attempt_files, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
 
@@ -383,18 +384,9 @@ def _launch_next(
 
 
 def _axis_files(attempt_dir: AttemptDir, out_path: Path) -> AttemptFiles:
-    """Every file one axis touches lives in its attempt directory inside the scratch
-    mount, the reviewer's only writable ground, except the findings, which the host
-    writes into the run's own directory from the stream."""
-    return AttemptFiles(
-        prompt=attempt_dir.prompt,
-        events=attempt_dir.events,
-        stderr=attempt_dir.stderr,
-        exit=attempt_dir.exit_file,
-        heartbeat=attempt_dir.heartbeat,
-        pgid=attempt_dir.pgid_file,
-        last_message=out_path,
-    )
+    # The findings are the one file the host writes, into the run's own directory;
+    # everything the reviewer touches stays inside the scratch mount.
+    return replace(attempt_files(State.REVIEWING, attempt_dir.root), last_message=out_path)
 
 
 def _axis_entry(
@@ -407,10 +399,6 @@ def _axis_entry(
     prompt: str,
 ) -> tuple[dict[str, Any], claude.Invocation]:
     """One axis's start-time bookkeeping: write its prompt, choose its paths, build the launch."""
-    # Every path the *sandbox* touches is in the attempt directory under the scratch;
-    # every path the *host* reads the evidence from is in the run directory. The prompt
-    # is read by the reviewer, the event stream and stderr are written by it, and
-    # `collect` lands the last two beside the findings.
     launch = ctx.store.runtime.settings("run", ctx.run.id).get(
         f"launch:{ctx.run.attempt}:review", 1
     )
@@ -478,13 +466,13 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     """Collect one axis, then return to host admission before launching the next."""
     plan = _read_plan(ctx.state_dir / "review")
     if plan.get("schemaVersion") != 2:
-        _collect_legacy(ctx, attempt_dir, attempt)
+        _collect_legacy(ctx, attempt_dir, attempt, record_axes=not _already_recorded(ctx, attempt))
         return
     axis = next((a for a in plan["axes"] if a.get("artifact_dir") == str(attempt_dir.root)), None)
     if axis is None:
         raise Blocked("review-plan-mismatch", "The finished process is absent from its review plan")
     if not axis.get("complete"):
-        _collect_axis(ctx, axis, attempt)
+        _collect_axis(ctx, axis, attempt, record=True)
         axis["complete"] = True
         _save_plan(ctx, plan)
     if any(not a.get("complete") for a in plan["axes"]):
@@ -492,14 +480,17 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         return
     plan["complete"] = True
     _save_plan(ctx, plan)
-    _collect_legacy(ctx, attempt_dir, attempt)
+    _collect_legacy(ctx, attempt_dir, attempt, record_axes=False)
 
 
-def _collect_axis(ctx: Context, axis: dict[str, Any], attempt: int) -> list[dict[str, Any]]:
+def _collect_axis(
+    ctx: Context, axis: dict[str, Any], attempt: int, *, record: bool
+) -> list[dict[str, Any]]:
     """Land one axis's stream, read it, and return its findings or raise its stop.
 
-    The landed stream is read rather than the scratch copy, so a re-collection after the
-    move (the final pass over every axis) reads the same evidence the first one did.
+    The landed stream is read rather than the scratch copy, so the final pass over every
+    axis reads the same evidence the first one did. `record` is true on that first pass
+    only: the check rows are append-only and one axis is one attestation.
     """
     from factory import accounting
 
@@ -510,39 +501,29 @@ def _collect_axis(ctx: Context, axis: dict[str, Any], attempt: int) -> list[dict
     accounting.collect(
         ctx, attempt, f"review:{label}", events_path, invocation_id=axis["invocation_id"]
     )
-    from factory import learning
+    if record:
+        from factory import learning
 
-    learning.collect(ctx, events_path, invocation_id=axis["invocation_id"])
+        learning.collect(ctx, events_path)
     attempt_dir = AttemptDir(Path(str(axis["artifact_dir"])))
-    landed = _axis_files(attempt_dir, out_path)
-    files = AttemptFiles(
-        prompt=landed.prompt,
-        events=events_path,
-        stderr=stderr_path,
-        exit=landed.exit,
-        heartbeat=landed.heartbeat,
-        pgid=landed.pgid,
-        last_message=out_path,
+    files = replace(_axis_files(attempt_dir, out_path), events=events_path, stderr=stderr_path)
+    run = agent_run.conclude(
+        ctx,
+        attempt=attempt,
+        state=State.REVIEWING,
+        invocation_id=str(axis["invocation_id"]),
+        files=files,
+        record=record,
+        label=f"the {label} review",
     )
-    run = agent_run.read(ctx, str(axis["invocation_id"]), files)
-    if not _already_recorded(ctx, attempt):
-        agent_run.record_checks(ctx, attempt, run)
-    stop = agent_run.stop_for(run)
-    if stop is not None:
-        ctx.store.finish_attempt(
-            ctx.run.id,
-            attempt,
-            State.REVIEWING,
-            exit_code=attempt_dir.exit_code(),
-            outcome=stop.reason,
-        )
-        raise type(stop)(stop.reason, f"the {label} review: {stop.detail}")
     findings = _validated_findings(ctx, run, out_path, label)
     artifacts.scan_for_secrets(_read_text(events_path) + _read_text(stderr_path), f"review {label}")
     return findings
 
 
-def _collect_legacy(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
+def _collect_legacy(
+    ctx: Context, attempt_dir: AttemptDir, attempt: int, *, record_axes: bool
+) -> None:
     """Land and validate the fan-out's findings, write the summary, and advance.
 
     Called by `run` after the fan-out exits, or by `reap` on a later tick — possibly in a
@@ -558,7 +539,7 @@ def _collect_legacy(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None
     tier1_has_human = False
     for axis in plan.get("axes", []):
         label = str(axis["label"])
-        axis_findings = _collect_axis(ctx, axis, attempt)
+        axis_findings = _collect_axis(ctx, axis, attempt, record=record_axes)
         findings += axis_findings
         if axis.get("tier") == "tier1":
             tier1_has_human = tier1_has_human or any(
@@ -792,13 +773,11 @@ def _body(path: Path) -> str:
 def _validated_findings(
     ctx: Context, run: stream.Run, out_path: Path, label: str
 ) -> list[dict[str, Any]]:
-    """Write the axis's structured answer to its findings file, validate it against the
-    layer-A schema, and return the list.
+    """Write the axis's structured answer to its findings file and validate it.
 
     A missing or invalid answer blocks rather than rounding to "no findings": an axis
     that produced nothing the schema recognises is not the same as an axis that found
-    nothing. The agent's own failures were raised before this by `agent_run.stop_for`,
-    so what reaches here is a run that completed and either answered or did not.
+    nothing.
     """
     try:
         payload = claude.materialize_final(run, out_path)

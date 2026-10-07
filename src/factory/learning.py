@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,15 +19,19 @@ if TYPE_CHECKING:
     from factory.steps import Context
 
 
-def collect(ctx: Context, events: Path, *, invocation_id: str | None = None) -> None:
+def collect(ctx: Context, events: Path) -> None:
     """Dispatch nonblocking host distillation of the attempt's stream.
 
-    The stream is the evidence: every line the CLI wrote, on the host, with the session
-    id in its first event, so layer A can keep one note per session. Each changed
-    snapshot can be retried by recollection; the worker serializes repeats and leaves a
-    receipt.
+    The session id in the stream's first event is what lets layer A keep one note per
+    session. A `--resume` stream holds only the session's new turns (measured), so it is
+    handed over as partial evidence and cannot replace the note a full stream wrote.
     """
-    schedule(ctx.project.path, ctx.registry.vault.path, events)
+    resumed = any(
+        (invocation.get("metadata") or {}).get("resume") is True
+        for invocation in ctx.store.runtime.invocations(ctx.run.id)
+        if (invocation.get("metadata") or {}).get("events") == str(events)
+    )
+    schedule(ctx.project.path, ctx.registry.vault.path, events, resumed=resumed)
 
 
 def collect_invocation(ctx: Context, invocation: dict) -> None:
@@ -35,10 +40,10 @@ def collect_invocation(ctx: Context, invocation: dict) -> None:
     if not isinstance(events, str) or not events:
         ctx.log("learning.unavailable", level="warning", reason="invocation-has-no-events")
         return
-    collect(ctx, Path(events), invocation_id=invocation["id"])
+    collect(ctx, Path(events))
 
 
-def schedule(project: Path, vault: Path, events: Path) -> None:
+def schedule(project: Path, vault: Path, events: Path, *, resumed: bool = False) -> None:
     """Dispatch from a retained artifact, including cancellation's archived copies."""
     outcome = events.with_suffix(".learning.json")
     script = project / ".agents/vendor/harness/hooks/session_learnings.mjs"
@@ -58,6 +63,7 @@ def schedule(project: Path, vault: Path, events: Path) -> None:
                 str(events),
                 str(project),
                 str(vault),
+                "resumed" if resumed else "fresh",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -78,20 +84,26 @@ def _write_text(path: Path, text: str) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w") as stream:
-            stream.write(text)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(text)
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def evidence(events: Path) -> tuple[str, str, str | None, bool]:
-    """The complete event lines, their digest, the session, and whether the run ended.
+@dataclass(frozen=True)
+class Evidence:
+    text: str
+    sha256: str
+    session: str | None
+    #: The stream holds its `result` event. Layer A keeps an existing note when it does
+    #: not, so a run killed mid-stream cannot overwrite what a finished one wrote.
+    ended: bool
 
-    A writer that was killed, or is still running, leaves a torn last line; it is dropped
-    rather than interpreted. The run "ended" when the stream holds its `result` event,
-    which is what tells the distiller whether a partial note may be overwritten.
-    """
+
+def evidence(events: Path) -> Evidence:
+    """The complete event lines of the stream. A killed or still-running writer leaves a
+    torn last line; it is dropped, not interpreted."""
     lines = []
     for line in events.read_text(errors="replace").splitlines():
         try:
@@ -101,5 +113,10 @@ def evidence(events: Path) -> tuple[str, str, str | None, bool]:
         if isinstance(value, dict):
             lines.append(line)
     text = "\n".join(lines) + "\n"
-    ended = any(isinstance(event, stream.Result) for event in stream.events(lines))
-    return text, hashlib.sha256(text.encode()).hexdigest(), stream.session_id(events), ended
+    try:
+        ended = any(isinstance(event, stream.Result) for event in stream.events(lines))
+    except stream.CorruptStream:
+        ended = False
+    return Evidence(
+        text, hashlib.sha256(text.encode()).hexdigest(), stream.session_id(events), ended
+    )

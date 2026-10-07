@@ -91,7 +91,6 @@ def snapshot(
         dst = staging / relative
         dst.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / "harness.config.json", dst / "harness.config.json")
-        # The layer-A hook wiring, which is what makes the snapshot a usable authority.
         wiring = src / ".claude" / "settings.json"
         _safe_tree(wiring, source)
         if wiring.is_file():

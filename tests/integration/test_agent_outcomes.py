@@ -14,9 +14,10 @@ import pytest
 from factory import recovery
 from factory.machine import Blocked, Resumable, State
 from factory.recovery import Disposition
-from factory.steps import Context
+from factory.steps import Context, record_stop
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
+from factory.steps import plan as plan_step
 from factory.steps import reap as reap_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
@@ -162,3 +163,49 @@ def test_a_stream_from_another_session_fails_attestation(ctx: Context) -> None:
 
     assert caught.value.reason == "isolation-attestation-failed"
     assert "session" in caught.value.detail
+
+
+def test_a_dead_planner_re_runs_the_planner_never_the_builder(ctx: Context) -> None:
+    # Before the cutover a planner stream failure blocked; now it goes to the ladder, and
+    # the ladder must re-run `plan.start`, not `implement.start` with the planner's
+    # session: the builder would open the planner's conversation with no plan collected.
+    _fake(ctx).outcome = "max_turns"
+    _to_worktree(ctx)
+    assert plan_step.start(ctx) is not None
+    dead = _fake(ctx).launches[-1]
+    assert dead is not None
+    with pytest.raises(Resumable) as caught:
+        reap_step.reap(ctx)
+    assert caught.value.reason == "max-turns"
+    record_stop(ctx, State.RESUMABLE, rule=caught.value.reason, detail=caught.value.detail)
+    _fake(ctx).outcome = "success"
+    _expire_the_backoff(ctx)
+
+    verdict = recovery.resume_run(ctx)
+
+    assert verdict.reason == "rerun-planning"
+    assert ctx.state is State.PLANNING
+    rerun = _fake(ctx).launches[-1]
+    assert rerun is not None
+    assert not rerun.resume
+    assert rerun.session != dead.session
+    assert "classification" in rerun.schema["required"]  # the handoff contract, not the builder's
+
+
+def test_reap_stops_a_planner_whose_credential_keeps_failing(ctx: Context) -> None:
+    # The plan phase writes `plan-exit`; the kill must wait on that file, or a blocked
+    # credential turns into a 60-second stall and a resumable orphan.
+    _fake(ctx).outcome = "auth_retrying"
+    _to_worktree(ctx)
+    started = plan_step.start(ctx)
+    assert started is not None
+    attempt_dir = started[0]
+
+    with pytest.raises(Blocked) as caught:
+        reap_step.reap(ctx)
+
+    assert caught.value.reason == "agent-auth"
+    assert attempt_dir.path("plan-exit").read_text() == str(KILLED)
+    row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.PLANNING)
+    assert row is not None
+    assert row["outcome"] == "agent-auth"

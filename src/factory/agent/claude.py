@@ -108,11 +108,8 @@ class StructuredOutputMissing(Exception):
 
 
 def overrides_cli(env_key: str) -> bool:
-    """Whether an environment variable would override what the argv asks for.
-
-    CLAUDE_CODE_EFFORT_LEVEL beats --effort, ANTHROPIC_API_KEY beats the OAuth login
-    (auth-retry), and CLAUDE_CONFIG_DIR loses the login (not-logged-in).
-    """
+    """CLAUDE_CODE_EFFORT_LEVEL beats --effort, ANTHROPIC_API_KEY beats the OAuth login
+    (auth-retry), and CLAUDE_CONFIG_DIR loses the login (not-logged-in)."""
     return env_key.startswith(("ANTHROPIC_", "CLAUDE_CODE_")) or env_key == "CLAUDE_CONFIG_DIR"
 
 

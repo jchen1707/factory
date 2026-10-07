@@ -541,7 +541,7 @@ def _database_at(path: Path, version: int) -> str:
     )
     conn.execute(
         "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
-        "VALUES ('builder', 'run', 1, 'builder', '{}', ?, ?)",
+        "VALUES ('builder', 'run', 1, 'builder', '{\"expected\": {}}', ?, ?)",
         (now, now),
     )
     conn.execute(
@@ -602,7 +602,7 @@ def test_migration_8_to_9_drops_runtime_certifications_and_keeps_the_ledger(
     )
     conn.execute(
         "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
-        "VALUES ('child', 'run', 1, 'child', '{}', 0, 0)"
+        "VALUES ('child', 'run', 1, 'child', '{\"expected\": {}}', 0, 0)"
     )
     conn.execute(
         "INSERT INTO agent_leases VALUES ('child', 'run', 'python-harness', 'failed', 'builder')"
@@ -701,9 +701,11 @@ def test_a_retiring_step_refuses_while_its_subsystem_owns_live_work(
         ("implementing", "codex-exec", _ACTIVE_LEASE),
     ],
 )
-def test_schema_9_migrates_past_work_it_does_not_retire(
+def test_schema_9_migrates_past_work_it_does_not_retire_and_schema_10_retires_it(
     tmp_path: Path, state: str, adapter: str, live: str
 ) -> None:
+    """Schema 9 let a live `codex-exec` run through; the cutover (schema 10) retires that
+    runtime, so the same live work now refuses until the run is finished or cancelled."""
     path = tmp_path / "factory.db"
     _database_at(path, 8)
     conn = sqlite3.connect(path, isolation_level=None)
@@ -716,9 +718,15 @@ def test_schema_9_migrates_past_work_it_does_not_retire(
     conn.execute(live)
     conn.close()
 
-    store = Store(path, migrate=True)
-    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-    store.close()
+    if state == "cancelled":
+        store = Store(path, migrate=True)
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        return
+    with pytest.raises(Blocked, match="agent invocations launched before the Claude cutover"):
+        Store(path, migrate=True)
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    conn.close()
 
 
 def test_schema_ten_nulls_every_session_id_recorded_before_it(tmp_path: Path) -> None:
@@ -732,6 +740,8 @@ def test_schema_ten_nulls_every_session_id_recorded_before_it(tmp_path: Path) ->
         "INSERT INTO attempts (run_id, attempt, state, sandbox, session_id, started_at, artifact_dir) "
         "VALUES ('run', 1, 'implementing', 'factory-build-python-harness', '01a0-thread', 1, '/a')"
     )
+    # A finished run: the cutover refuses while a Codex-era run is still live.
+    conn.execute("UPDATE runs SET state='completed'")
     conn.commit()
     conn.close()
 

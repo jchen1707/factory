@@ -149,6 +149,11 @@ class Launch:
     def review(self) -> bool:
         return "findings" in self.schema.get("properties", {})
 
+    @property
+    def init_tools(self) -> tuple[str, ...]:
+        # `--json-schema` adds `StructuredOutput` to `init.tools` (measured e5).
+        return (*self.tools, "StructuredOutput")
+
 
 def parse_launch(script: str) -> Launch:
     """The `claude ...` line of a detached script, or raise: the fake answers only what the
@@ -242,9 +247,12 @@ class FakeSandbox:
     #: a gate report.
     launches: list[Launch | None] = field(default_factory=list)
     #: The attempt directory of each detached invocation, parallel to `detached`. The real
-    #: wrapper writes `exit` into the attempt dir it was handed; the fake's `kill_agent` has
-    #: only the sandbox name, so it reads the dir back from here.
+    #: wrapper writes its exit file into the attempt dir it was handed; the fake's
+    #: `kill_agent` has only the sandbox name, so it reads the dir back from here.
     detached_dirs: list[Path] = field(default_factory=list)
+    #: The exit file each detached wrapper writes (`exit`, or `plan-exit` for the plan
+    #: phase), parallel to `detached`.
+    detached_exit_names: list[str] = field(default_factory=list)
     #: When true (default), `kill_agent` writes the `exit` file, modelling the wrapper's
     #: graceful-exit-on-signal — the real `kill_agent` only signals; the wrapper traps it and
     #: writes `exit` last. This is what gives a suspended attempt a real terminal record
@@ -457,6 +465,7 @@ class FakeSandbox:
         self._start(handle.sandbox)
         self.detached.append((handle.sandbox, script))
         self.detached_dirs.append(handle.attempt_dir)
+        self.detached_exit_names.append(handle.exit_name)
         is_verify = "gate_report.mjs" in script
         launch = None if is_verify else parse_launch(script)
         self.launches.append(launch)
@@ -503,7 +512,7 @@ class FakeSandbox:
 
     def _init_line(self, launch: Launch) -> str:
         return claude_stream.line(
-            claude_stream.init(session=launch.session, model=launch.model, tools=launch.tools)
+            claude_stream.init(session=launch.session, model=launch.model, tools=launch.init_tools)
         )
 
     def _scenario(self, launch: Launch) -> claude_stream.Scenario:
@@ -512,7 +521,7 @@ class FakeSandbox:
         kwargs: dict[str, Any] = {
             "session": launch.session,
             "model": launch.model,
-            "tools": launch.tools,
+            "tools": launch.init_tools,
         }
         if self.outcome == "success":
             answer = self.review_findings if launch.review else self.result
@@ -600,7 +609,7 @@ class FakeSandbox:
             return
         if proc != self.detached_procs[-1]:
             return
-        (self.detached_dirs[-1] / "exit").write_text(str(KILLED))
+        (self.detached_dirs[-1] / self.detached_exit_names[-1]).write_text(str(KILLED))
 
     def kill_group(self, name: str, pgid: int) -> None:
         """Signal exactly the attempt that published this pgid, and nothing else.
@@ -616,7 +625,9 @@ class FakeSandbox:
             return
         for index, published in enumerate(self.detached_pgids):
             if published == pgid:
-                (self.detached_dirs[index] / "exit").write_text(str(KILLED))
+                (self.detached_dirs[index] / self.detached_exit_names[index]).write_text(
+                    str(KILLED)
+                )
                 return
 
     def stop(self, name: str) -> None:
@@ -624,6 +635,29 @@ class FakeSandbox:
 
     def remove(self, name: str) -> None:
         return None
+
+
+def planner_invocation(ctx: Context, attempt: Any, *, attempt_number: int = 1) -> str:
+    """The invocation record a `plan.start` would have written, with the attestation the
+    stream fake echoes by default, for tests that stage a finished plan by hand."""
+    from factory import accounting
+
+    return accounting.begin(
+        ctx,
+        attempt_number,
+        ctx.routing.role("planner"),
+        "plan",
+        attempt.path("plan-events.jsonl"),
+        extra_metadata={
+            "expected": {
+                "session": claude_stream.SESSION,
+                "model": claude_stream.MODEL,
+                "tools": sorted(claude_stream.TOOLS),
+                "plugins": [],
+                "permission_mode": "default",
+            }
+        },
+    )
 
 
 def plan_finished(

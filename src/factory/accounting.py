@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict
+import json
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -68,7 +69,6 @@ def begin(
 def collect(
     ctx: Context, attempt: int, step: str, events: Path, *, invocation_id: str | None = None
 ) -> None:
-    """Legacy aggregate usage cannot establish request-level tier or context pricing."""
     invocation_id = invocation_id or key(ctx, attempt, step)
     collect_invocation(ctx.store, invocation_id, events)
 
@@ -76,23 +76,32 @@ def collect(
 def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     """Reconcile retained usage without loading workflow, routing or tracker dependencies.
 
-    The cost is the run's own `total_cost_usd`: the CLI prices every model it used at
-    list price, which is notional under a subscription and billed under an API key, and
-    either way it is the number the budget ceiling is measured in. A stream with no
-    `result` event yet has usage but no price, and stays an incomplete estimate.
+    The CLI prices every model it used at list price: notional under a subscription,
+    billed under an API key, the ceiling's number either way. Until the `result` event
+    lands there is neither price nor per-model usage, so the estimate stays incomplete.
+
+    A resumed session reports the whole session's cost and usage, not this launch's
+    (measured: the `--resume` of a $0.0165 session ended at $0.0177). The row for this
+    attempt is the difference from the session's last priced launch, so the run's spend
+    is summed once however many times the ladder resumed.
     """
     invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
         return
     text = events.read_text(errors="replace")
-    sequence = sum(1 for line in text.splitlines() if line.strip())
+    # Only complete lines count toward the sequence: a torn last line that completes on
+    # the next read must advance it, or that read's cost would never be retained.
+    sequence = sum(1 for line in text.splitlines() if _parses(line))
     run = stream.parse(events)
     priced = run.by_model != {}
-    usage = _total_usage(run)
+    cumulative_usage = _total_usage(run)
+    before_usage, before_usd = _session_baseline(store, invocation, run.session)
+    usage = cumulative_usage - before_usage
     payload: dict[str, Any] = {
         "evidence_sha256": hashlib.sha256(text.encode()).hexdigest(),
         "session_id": run.session,
         "usage": asdict(usage),
+        "cumulative": {"usage": asdict(cumulative_usage), "usd": run.notional_usd},
         "by_model": {
             model: {"usage": asdict(each.usage), "notional_usd": each.notional_usd}
             for model, each in run.by_model.items()
@@ -101,8 +110,8 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
         "rate_limit": asdict(run.rate_limit) if run.rate_limit else None,
         "estimate": {
             "complete": priced,
-            "usd": run.notional_usd if priced else None,
-            "reason": None if priced else "the stream has no result event yet",
+            "usd": run.notional_usd - before_usd if priced else None,
+            "reason": None if priced else "the stream has no priced result event",
         },
     }
     store.runtime.observe(invocation_id, sequence, payload)
@@ -112,6 +121,10 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     if retained is None or retained["sequence"] > sequence:
         return
     payload = retained["telemetry"]
+    if set(payload.get("usage") or {}) != {field.name for field in fields(stream.Usage)}:
+        # A record retained before the cutover carries the Codex usage shape; its stream
+        # is unreadable here and its cost row stays what that collector wrote.
+        return
     usage = stream.Usage(**payload["usage"])
     store.reconcile_cost(
         invocation["run_id"],
@@ -125,22 +138,43 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     )
 
 
+def _parses(line: str) -> bool:
+    try:
+        json.loads(line)
+    except ValueError:
+        return False
+    return True
+
+
+_NO_USAGE = stream.Usage(input=0, cache_read=0, cache_write=0, output=0, thinking=0)
+
+
 def _total_usage(run: stream.Run) -> stream.Usage:
-    total = stream.Usage(input=0, cache_read=0, cache_write=0, output=0, thinking=0)
-    for each in run.by_model.values():
-        used = each.usage
-        total = stream.Usage(
-            input=total.input + used.input,
-            cache_read=total.cache_read + used.cache_read,
-            cache_write=total.cache_write + used.cache_write,
-            output=total.output + used.output,
-            thinking=total.thinking + used.thinking,
-        )
-    return total
+    return sum((each.usage for each in run.by_model.values()), _NO_USAGE)
+
+
+def _session_baseline(
+    store: Store, invocation: dict[str, Any], session: str | None
+) -> tuple[stream.Usage, float]:
+    """What the session had already cost before this launch: the latest priced
+    cumulative an earlier invocation of the same session retained, or nothing."""
+    if session is None:
+        return _NO_USAGE, 0.0
+    earlier = [
+        other["telemetry"]["cumulative"]
+        for other in store.runtime.invocations(invocation["run_id"])
+        if other["id"] != invocation["id"]
+        and other["started_at"] <= invocation["started_at"]
+        and (other.get("metadata") or {}).get("expected", {}).get("session") == session
+        and (other.get("telemetry") or {}).get("cumulative")
+    ]
+    if not earlier:
+        return _NO_USAGE, 0.0
+    latest = max(earlier, key=lambda cumulative: float(cumulative["usd"]))
+    return stream.Usage(**latest["usage"]), float(latest["usd"])
 
 
 def _window(run: stream.Run) -> int | None:
-    """The context window the run's own model reported, or None before a result event."""
     if run.init is None:
         return None
     reported = run.by_model.get(run.init.model)

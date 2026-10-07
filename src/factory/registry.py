@@ -29,11 +29,8 @@ class RegistryError(Exception):
     """A configuration error the daemon must refuse to start on."""
 
 
-#: The two things the operator installs beside this checkout: the pinned execution set
-#: (§24.11, symlinked into `~/.agents/skills`) and the layer-A checkout whose
-#: `vendor_sync.py` checks a target repository's vendored tree. These and `doctor.py` are
-#: the only places `src/` reads the operator's home; `tests/unit/test_boundaries.py`
-#: proves nothing else does, which is what keeps the suite hermetic.
+#: The two things the operator installs beside this checkout (§24.11). The only `src/`
+#: reads of the operator's home besides `doctor.py`; `tests/unit/test_boundaries.py` pins it.
 IMPLEMENT_SKILL = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
 VENDOR_SYNC = Path.home() / "harness" / "scripts" / "vendor_sync.py"
 

@@ -14,46 +14,21 @@ from pathlib import Path
 from factory import accounting, agent_run, artifacts, execution, handoffs
 from factory.agent import claude
 from factory.agent.base import SchemaInvalid, validate_against_schema
-from factory.agent.claude import AttemptFiles, StructuredOutputMissing
+from factory.agent.claude import StructuredOutputMissing
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle
-from factory.steps import Context, advance
+from factory.steps import PLAN_NAMES, Context, advance, attempt_files
 
-__all__ = ["collect", "files", "plan_dir", "should_plan", "start"]
+__all__ = ["collect", "plan_dir", "should_plan", "start"]
 
 STEP = "plan"
 
 PLAN_FILES = ("plan.md", "test-plan.md")
 
-#: Retain the plan terminal filename for legacy attempts that shared the builder's
-#: directory. New preparations use a separate planning directory; all readers still
-#: use the recorded handle and this filename when collecting either layout.
-PLAN_EXIT_NAME = "plan-exit"
-
-#: The plan phase's own pgid file: legacy rewind phases shared one attempt directory,
-#: and a single `pgid` there would let a
-#: timeout in one phase signal a process group the other phase started.
-PLAN_PGID_NAME = "plan-pgid"
-
-PLAN_PROMPT_NAME = "plan-prompt.md"
-PLAN_EVENTS_NAME = "plan-events.jsonl"
-PLAN_STDERR_NAME = "plan-stderr.log"
-PLAN_LAST_MESSAGE_NAME = "plan-last-message.json"
+PLAN_EXIT_NAME = PLAN_NAMES.exit
+PLAN_PGID_NAME = PLAN_NAMES.pgid
 PLAN_REQUEST_NAME = "plan-request.json"
-
-
-def files(attempt_dir: AttemptDir) -> AttemptFiles:
-    """The plan phase's files, named apart from the builder's so a rewind can share a dir."""
-    return AttemptFiles(
-        prompt=attempt_dir.path(PLAN_PROMPT_NAME),
-        events=attempt_dir.path(PLAN_EVENTS_NAME),
-        stderr=attempt_dir.path(PLAN_STDERR_NAME),
-        exit=attempt_dir.path(PLAN_EXIT_NAME),
-        heartbeat=attempt_dir.heartbeat,
-        pgid=attempt_dir.path(PLAN_PGID_NAME),
-        last_message=attempt_dir.path(PLAN_LAST_MESSAGE_NAME),
-    )
 
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
@@ -120,10 +95,10 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     handoffs.write(ctx, ctx.factory_dir / "handoff.json")
     prompt = _prompt(ctx, plans)
-    attempt_files = files(attempt_dir)
+    plan_files = attempt_files(State.PLANNING, attempt_dir.root)
     session = claude.new_session()
 
-    attempt_files.prompt.write_text(prompt, encoding="utf-8")
+    plan_files.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
     reproduction = handoffs.reproduction_binding(ctx) if ctx.run.attempt else {}
     schema = json.loads(attempt_dir.schema.read_text())
@@ -135,7 +110,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         ctx,
         role=claude.Role(role_name),
         routed=role,
-        files=attempt_files,
+        files=plan_files,
         schema=schema,
         session=session,
         resume=False,
@@ -177,7 +152,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             attempt,
             role,
             STEP,
-            attempt_files.events,
+            plan_files.events,
             semantic_role=role_name,
             extra_metadata={
                 "handoff_contract": request,
@@ -185,23 +160,23 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             },
         )
         inputs: tuple[Path, ...] = (
-            attempt_files.prompt,
+            plan_files.prompt,
             attempt_dir.schema,
             attempt_dir.path(PLAN_REQUEST_NAME),
         )
         workflow_launches.prepare(ctx, identifier, handle, claude.script(invocation), inputs=inputs)
     workflow_launches.resume(ctx)
     ctx.log("plan.started", model=role.model, effort=role.effort, session=session)
-    return attempt_dir, handle, attempt_files.exit
+    return attempt_dir, handle, plan_files.exit
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     """Validate new structured handoffs; retain file-based collection for legacy attempts."""
-    attempt_files = files(attempt_dir)
-    accounting.collect(ctx, ctx.run.attempt, STEP, attempt_files.events)
+    plan_files = attempt_files(State.PLANNING, attempt_dir.root)
+    accounting.collect(ctx, ctx.run.attempt, STEP, plan_files.events)
     from factory import learning
 
-    learning.collect(ctx, attempt_files.events)
+    learning.collect(ctx, plan_files.events)
     request_path = attempt_dir.path(PLAN_REQUEST_NAME)
     invocation_id = accounting.key(ctx, ctx.run.attempt, STEP)
     recorded = ctx.store.runtime.invocation(invocation_id)
@@ -219,19 +194,16 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     diagnosis = False
     required_outputs: tuple[str, ...] = ()
     if request is not None:
-        run = agent_run.read(ctx, invocation_id, attempt_files)
-        stop = agent_run.stop_for(run)
-        if stop is not None:
-            ctx.store.finish_attempt(
-                ctx.run.id,
-                ctx.run.attempt,
-                State.PLANNING,
-                exit_code=_exit_code(attempt_dir),
-                outcome=stop.reason,
-            )
-            raise stop
+        run = agent_run.conclude(
+            ctx,
+            attempt=ctx.run.attempt,
+            state=State.PLANNING,
+            invocation_id=invocation_id,
+            files=plan_files,
+            record=not _already_recorded(ctx),
+        )
         try:
-            result = dict(claude.materialize_final(run, attempt_files.last_message))
+            result = dict(claude.materialize_final(run, plan_files.last_message))
             validate_against_schema(result, json.loads(attempt_dir.schema.read_text()))
         except (StructuredOutputMissing, SchemaInvalid) as exc:
             raise Blocked("handoff-schema-invalid", str(exc)) from exc
@@ -293,6 +265,11 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
         outcome="planned",
     )
     ctx.log("plan.finished", plan_dir=str(plans))
+
+
+def _already_recorded(ctx: Context) -> bool:
+    row = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, State.PLANNING)
+    return row is not None and row["ended_at"] is not None
 
 
 def _read_plan(ctx: Context, path: Path) -> str:

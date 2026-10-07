@@ -6,7 +6,7 @@ import pytest
 
 from factory import accounting, driver, recovery
 from factory.artifacts import AttemptDir
-from factory.machine import Blocked, Resumable, State
+from factory.machine import Blocked, State
 from factory.steps import Context, advance, record_stop
 from tests.integration.conftest import plan_finished
 from tests.integration.test_clone_plan_collection import prepare
@@ -84,7 +84,7 @@ def test_resume_rechecks_failed_evidence_before_unblocking(ctx: Context, damage:
         request.update(role="test_designer", required_artifacts=["test-plan.md"])
         attempt.path("plan-request.json").write_text(json.dumps(request))
 
-    with pytest.raises((Blocked, Resumable)):
+    with pytest.raises(Blocked):
         recovery.resume(ctx)
     assert ctx.state is State.BLOCKED
     assert ctx.run.attempt == 1

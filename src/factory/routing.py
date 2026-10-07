@@ -15,7 +15,9 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
+
+from factory.agent.claude import Effort
 
 __all__ = [
     "ModelFacts",
@@ -129,6 +131,13 @@ def _validated(raw: dict[str, Any]) -> Routing:
     # Rule 2, plus the effort half of it: a model that does not offer the effort named
     # is as broken as one that does not exist. Only full ids are keys, so an alias such
     # as `opus`, which moves when a new model ships, is refused here.
+    for model_facts in catalogue.values():
+        unknown = sorted(set(model_facts.supported_efforts) - set(get_args(Effort)))
+        if unknown:
+            raise RoutingError(
+                f"model {model_facts.slug!r} lists efforts {unknown} the Claude CLI does not "
+                f"take; the levels are {list(get_args(Effort))}"
+            )
     for role in roles.values():
         facts = catalogue.get(role.model)
         if facts is None:

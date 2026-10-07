@@ -14,6 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, assert_never, cast
 
+from factory import artifacts
 from factory.agent import stream
 from factory.agent.claude import AttemptFiles, Effort, Invocation, Role
 from factory.agent.stream import (
@@ -26,6 +27,7 @@ from factory.agent.stream import (
     SessionId,
 )
 from factory.machine import Blocked, Resumable, State
+from factory.steps import attempt_names
 
 if TYPE_CHECKING:
     from factory.routing import Role as RoutedRole
@@ -36,7 +38,7 @@ __all__ = [
     "AUTH_FAILED",
     "DISPOSITION",
     "TRUNCATED",
-    "events_name",
+    "conclude",
     "expected_from",
     "expected_json",
     "invocation",
@@ -52,11 +54,10 @@ ATTESTATION_FAILED = "isolation-attestation-failed"
 AUTH_FAILED = "agent-auth"
 TRUNCATED = "transcript-truncated"
 
-#: What the control plane does with each failure the stream can report. `Blocked` needs
-#: a human: a credential, a model, the money, or a launch the CLI refused outright.
-#: `Resumable` goes to the §16.4 ladder, which restarts, resumes or rewinds. A lost
-#: session is resumable because `resumable_session` finds no `init` in its stream and
-#: the ladder restarts with a fresh one.
+#: `Blocked` needs a human: a credential, a model, the money, or a launch the CLI refused
+#: outright. `Resumable` goes to the §16.4 ladder. A lost session is resumable because
+#: `resumable_session` finds no `init` in its stream, so the ladder moves on (a fresh
+#: session or a rewind) instead of replaying the id.
 DISPOSITION: Mapping[FailureKind, tuple[type[Blocked] | type[Resumable], str]] = MappingProxyType(
     {
         FailureKind.AUTH: (Blocked, AUTH_FAILED),
@@ -77,9 +78,7 @@ DISPOSITION: Mapping[FailureKind, tuple[type[Blocked] | type[Resumable], str]] =
 def stop_for(run: Run) -> Stop | None:
     """The exception a step raises for this run, or `None` when the run completed.
 
-    Attestation comes first: a run whose `init` disagrees with the launch (another
-    session, another model, a tool or MCP server the role was not given) is not evidence
-    of anything, whatever its result says.
+    A run whose `init` disagrees with the launch is not evidence, whatever its result says.
     """
     if run.violations:
         observed = "; ".join(
@@ -111,7 +110,6 @@ def invocation(
     session: SessionId,
     resume: bool,
 ) -> Invocation:
-    """The launch for `role` as routing configured it, capped at the run's remaining budget."""
     remaining = ctx.routing.usd_per_run - ctx.store.known_spend(ctx.run.id)
     try:
         return Invocation(
@@ -131,7 +129,6 @@ def invocation(
 
 
 def expected_json(inv: Invocation) -> dict[str, object]:
-    """The attestation, as the invocation record stores it for collect time."""
     expected = inv.expected
     return {
         "session": expected.session,
@@ -155,26 +152,66 @@ def expected_from(payload: Mapping[str, Any]) -> Expected:
 def read(ctx: Context, invocation_id: str, files: AttemptFiles) -> Run:
     """The run as the filesystem recorded it, attested against what was launched.
 
-    An invocation with no stored attestation (one started before sessions were pinned)
-    is read without one rather than refused: its evidence is still worth collecting.
+    Every launch records its attestation; a record without one is not a run this code
+    launched, and reading it unattested would be the silent pass this check exists to
+    refuse.
     """
     record = ctx.store.runtime.invocation(invocation_id)
     payload = (record or {}).get("metadata", {}).get("expected")
+    if not payload:
+        raise Blocked("launch-record-missing", f"{invocation_id} recorded no attestation")
     return stream.parse(
         files.events,
         exit_path=files.exit,
         stderr_path=files.stderr,
-        expected=expected_from(payload) if payload else None,
+        expected=expected_from(payload),
     )
 
 
+def conclude(
+    ctx: Context,
+    *,
+    attempt: int,
+    state: State,
+    invocation_id: str,
+    files: AttemptFiles,
+    record: bool,
+    label: str | None = None,
+) -> Run:
+    """Read the run back, record its checks, and raise its stop; return it when it completed.
+
+    The one collect tail for every role. `record` is false when the attempt's evidence
+    rows were already written by an earlier pass (a re-entered collect, or the review
+    fan-out's final pass over axes it already landed). The stop carries the exit code and
+    the last 40 lines of stderr, which is where the CLI's own refusals are written.
+    """
+    run = read(ctx, invocation_id, files)
+    if record:
+        record_checks(ctx, attempt, run)
+    stop = stop_for(run)
+    if stop is None:
+        return run
+    try:
+        exit_code: int | None = int(files.exit.read_text().strip())
+    except (OSError, ValueError):
+        exit_code = None
+    ctx.store.finish_attempt(ctx.run.id, attempt, state, exit_code=exit_code, outcome=stop.reason)
+    prefix = f"{label}: " if label else ""
+    tail = artifacts.tail_lines(files.stderr, 40)
+    raise type(stop)(stop.reason, f"{prefix}exit {exit_code}; {stop.detail}\n{tail}")
+
+
 def record_checks(ctx: Context, attempt: int, run: Run) -> None:
-    """The attestation and every refused tool call, as check rows beside the attempt."""
+    if run.init is None:
+        status, reason = "skip", "the stream has no init event to attest"
+    else:
+        status, reason = ("fail" if run.violations else "pass"), None
     ctx.store.record_check(
         ctx.run.id,
         attempt,
         "isolation_attestation",
-        "fail" if run.violations else "pass",
+        status,
+        reason=reason,
         detail="; ".join(f"{v.what}: {v.observed}" for v in run.violations)[:2000] or None,
     )
     if run.denials:
@@ -191,23 +228,14 @@ def record_checks(ctx: Context, attempt: int, run: Run) -> None:
         ctx.log("agent.tool-denied", level="warning", count=len(run.denials))
 
 
-def events_name(state: State) -> str:
-    """The stream file a detached agent state writes into its attempt directory."""
-    from factory.steps.plan import PLAN_EVENTS_NAME
-
-    return PLAN_EVENTS_NAME if state is State.PLANNING else "events.jsonl"
-
-
 def resumable_session(ctx: Context, attempt: int, state: State) -> SessionId | None:
     """The session the next attempt can `--resume`, or `None` for a fresh one.
 
     The id is pinned on the row before launch, so the row alone does not say whether the
-    CLI ever opened the session. Only a stream holding an `init` event can be resumed:
-    one killed before it (or refused outright, or resumed into a sandbox that lost it)
-    makes the ladder start a fresh session instead of spending a rung on `session-lost`.
+    CLI ever opened the session; only a stream holding an `init` event can be resumed.
     """
     row = ctx.store.attempt_row(ctx.run.id, attempt, state)
     if row is None or not row["session_id"] or not row["artifact_dir"]:
         return None
-    events = Path(str(row["artifact_dir"])) / events_name(state)
+    events = Path(str(row["artifact_dir"])) / attempt_names(state).events
     return SessionId(str(row["session_id"])) if stream.has_session(events) else None

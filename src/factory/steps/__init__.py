@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, policy
+from factory.agent.claude import AttemptFiles
 from factory.harness import HarnessConfig
 from factory.intake.linear import Issue, LinearClient
 from factory.machine import AUTOMATIC, Blocked, State, can
@@ -28,8 +29,11 @@ from factory.sandbox.base import SandboxAdapter
 from factory.store import Run, Store, marker
 
 __all__ = [
+    "AttemptNames",
     "Context",
     "advance",
+    "attempt_files",
+    "attempt_names",
     "factory_dir_for",
     "kill_target",
     "record_effect",
@@ -39,12 +43,65 @@ __all__ = [
 LEASE_TTL_SECONDS = 900
 
 
+@dataclass(frozen=True)
+class AttemptNames:
+    """The files a detached agent state's wrapper writes into its attempt directory.
+
+    The plan phase names its own, because a rewind is one attempt with two phases that
+    share a directory, and one `exit` or `pgid` there would let one phase's poller read
+    the other's terminal record, or its timeout signal the other's process group.
+    """
+
+    prompt: str
+    events: str
+    stderr: str
+    exit: str
+    pgid: str
+    last_message: str
+    heartbeat: str = "heartbeat"
+
+
+AGENT_NAMES = AttemptNames(
+    prompt="prompt.md",
+    events="events.jsonl",
+    stderr="stderr.log",
+    exit="exit",
+    pgid="pgid",
+    last_message="last-message.json",
+)
+PLAN_NAMES = AttemptNames(
+    prompt="plan-prompt.md",
+    events="plan-events.jsonl",
+    stderr="plan-stderr.log",
+    exit="plan-exit",
+    pgid="plan-pgid",
+    last_message="plan-last-message.json",
+)
+
+
+def attempt_names(state: State) -> AttemptNames:
+    return PLAN_NAMES if state is State.PLANNING else AGENT_NAMES
+
+
+def attempt_files(state: State, attempt_dir: Path) -> AttemptFiles:
+    names = attempt_names(state)
+    return AttemptFiles(
+        prompt=attempt_dir / names.prompt,
+        events=attempt_dir / names.events,
+        stderr=attempt_dir / names.stderr,
+        exit=attempt_dir / names.exit,
+        heartbeat=attempt_dir / names.heartbeat,
+        pgid=attempt_dir / names.pgid,
+        last_message=attempt_dir / names.last_message,
+    )
+
+
 def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) -> str:
     """Stop one attempt's body, and say how it was stopped.
 
     The process group first, the process name only as a fallback. Both sandboxes are
     named once per project (`steps/sandbox.py`), so `pkill -x <name>` reaches every
-    concurrent run in the same repository — which is why `KILL_TARGET` below cannot be
+    concurrent run in the same repository — which is why `kill_target` below cannot be
     the primary mechanism once a project runs more than one ticket at a time.
 
     The fallback is for a body that lost its `pgid` file, and it is narrower than it
@@ -75,7 +132,7 @@ def signal_run_attempt(
     allow_name_fallback: bool = True,
 ) -> str:
     """Signal a recorded attempt without loading model or tracker configuration."""
-    pgid = read_pgid(attempt_dir / _pgid_name(state))
+    pgid = read_pgid(attempt_dir / attempt_names(state).pgid)
     if pgid is not None:
         adapter.kill_group(sandbox, pgid)
         return f"group {pgid}"
@@ -107,12 +164,6 @@ def other_run_sandboxes(registry: Registry, store: Store, run: Run) -> set[str]:
     return names
 
 
-def _pgid_name(state: State) -> str:
-    from factory.steps.plan import PLAN_PGID_NAME
-
-    return PLAN_PGID_NAME if state is State.PLANNING else "pgid"
-
-
 def read_pgid(path: Path) -> int | None:
     """The published process group, or `None` when there is nothing safe to signal.
 
@@ -127,15 +178,19 @@ def read_pgid(path: Path) -> int | None:
     return pgid if pgid > 0 else None
 
 
-def kill_target(state: State) -> str:
-    """The in-VM process name a detached state's body runs under.
+#: `kill_agent` is `pkill -x`, and the verify gate is a `node` process, not the agent.
+#: Indexed, never defaulted: a detached state with no entry raises on the spot instead
+#: of signalling a name nothing runs under.
+_KILL_TARGET: Mapping[State, str] = {
+    State.PLANNING: "claude",
+    State.IMPLEMENTING: "claude",
+    State.VERIFYING: "node",
+    State.REVIEWING: "claude",
+}
 
-    `SbxAdapter.kill_agent` is `pkill -x <proc>`: it matches the process name exactly, so
-    a caller that names the wrong one signals nothing at all, no `exit` file lands, and
-    the attempt is orphaned after the whole kill grace. Phase 5 defect 3 was `reap`
-    signalling the agent's name at a `verifying` gate report, which is a `node` process.
-    """
-    return "node" if state is State.VERIFYING else "claude"
+
+def kill_target(state: State) -> str:
+    return _KILL_TARGET[state]
 
 
 @dataclass
@@ -231,8 +286,7 @@ class Context:
             key: value.replace("{run}", self.run.linear_id)
             for key, value in self.project.env.items()
         }
-        # The vault's in-VM name (§9.2): layer A's hooks and the learning distiller read
-        # it, and the vault is mounted at its host path, so the value is that path.
+        # Mounted at its host path, so the in-VM value is the host path (§9.2).
         environment["OBSIDIAN_VAULT_DIRECTORY"] = str(self.registry.vault.path)
         snapshot = self.store.runtime.policy(self.run.id)
         if snapshot:

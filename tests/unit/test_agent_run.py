@@ -226,3 +226,15 @@ def test_no_row_or_no_pin_means_fresh() -> None:
     assert agent_run.resumable_session(_ctx(None), 1, State.IMPLEMENTING) is None
     row = {"session_id": None, "artifact_dir": "/nowhere"}
     assert agent_run.resumable_session(_ctx(row), 1, State.IMPLEMENTING) is None
+
+
+def test_an_invocation_without_an_attestation_is_refused_not_read_unattested(
+    tmp_path: Path,
+) -> None:
+    ctx = SimpleNamespace(
+        store=SimpleNamespace(runtime=SimpleNamespace(invocation=lambda _: {"metadata": {}})),
+        run=SimpleNamespace(id="r"),
+    )
+    with pytest.raises(Blocked) as caught:
+        agent_run.read(ctx, "r:1:implement", _invocation(tmp_path).files)  # type: ignore[arg-type]
+    assert caught.value.reason == "launch-record-missing"

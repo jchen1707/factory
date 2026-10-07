@@ -13,7 +13,7 @@ from factory.artifacts import SecretFound
 from factory.learning import _write, _write_text, evidence
 
 
-def run(script: Path, events: Path, project: Path, vault: Path) -> None:
+def run(script: Path, events: Path, project: Path, vault: Path, *, resumed: bool = False) -> None:
     receipt = events.with_suffix(".learning.json")
     lock = events.with_suffix(".learning.lock")
     with lock.open("a") as stream:
@@ -31,11 +31,11 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
             )
             from factory.artifacts import scan_for_secrets
 
-            text, digest, session, ended = evidence(events)
+            retained = evidence(events)
+            text, digest, session = retained.text, retained.sha256, retained.session
             scan_for_secrets(text, str(events), extra_names=extra_names)
-            # Layer A keeps an existing note when the evidence is partial, so a run that
-            # was killed mid-stream cannot overwrite the note its finished predecessor wrote.
-            evidence_kind = "retained-events" if ended else "retained-events-partial"
+            complete = retained.ended and not resumed
+            evidence_kind = "retained-events" if complete else "retained-events-partial"
             old = json.loads(receipt.read_text()) if receipt.exists() else {}
             if (
                 old.get("sha256") == digest
@@ -85,4 +85,10 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]))
+    run(
+        Path(sys.argv[1]),
+        Path(sys.argv[2]),
+        Path(sys.argv[3]),
+        Path(sys.argv[4]),
+        resumed=len(sys.argv) > 5 and sys.argv[5] == "resumed",
+    )

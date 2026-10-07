@@ -69,10 +69,10 @@ def test_preview_names_the_live_work_that_apply_would_refuse(
     before = path.read_bytes()
 
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
-    assert (
-        "--apply refuses until no work is live: child, certification or app-server "
-        "invocations probe." in capsys.readouterr().out
-    )
+    preview = capsys.readouterr().out
+    assert "--apply refuses until no work is live: " in preview
+    assert "child, certification or app-server invocations probe" in preview
+    assert "agent invocations launched before the Claude cutover probe" in preview
     with pytest.raises(Blocked, match="migration-live-work"):
         migrate(argparse.Namespace(database=path, apply=True))
     assert path.read_bytes() == before

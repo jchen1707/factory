@@ -95,20 +95,19 @@ def _home_reads(tree: ast.AST) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr == "expanduser":
             hits.append("expanduser")
+        if isinstance(node, ast.Name) and node.id == "expanduser":
+            hits.append("expanduser")
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "home"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "Path"
         ):
             hits.append("Path.home()")
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and ("~/.claude" in node.value or "~/.codex" in node.value)
-        ):
-            hits.append(node.value[:60])
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if "~/.claude" in node.value or "~/.codex" in node.value:
+                hits.append(node.value[:60])
+            if node.value == "HOME":
+                hits.append("HOME")
     return hits
 
 
@@ -121,6 +120,20 @@ def test_only_doctor_and_registry_read_the_operators_home() -> None:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         assert not _home_reads(tree), f"{path} reaches the operator's home"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import pathlib\na = pathlib.Path.home()\n",
+        "from pathlib import Path as P\na = P.home()\n",
+        "from os.path import expanduser\na = expanduser('~')\n",
+        "import os\na = os.environ['HOME']\n",
+        "import os\na = os.getenv('HOME')\n",
+    ],
+)
+def test_the_home_guard_sees_the_spelled_out_reaches(source: str) -> None:
+    assert _home_reads(ast.parse(source))
 
 
 def test_the_home_guard_catches_each_way_of_reaching_home() -> None:

@@ -18,7 +18,7 @@ def _stream(path: Path, lines: list[str], *, tail: str = "") -> None:
 
 @pytest.mark.parametrize("truncated", [False, True])
 def test_handoff_sends_the_raw_claude_stream_and_deduplicates(
-    tmp_path: Path, truncated: bool
+    tmp_path: Path, truncated: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     script = tmp_path / "capture.mjs"
     script.write_text(
@@ -35,14 +35,11 @@ console.log(JSON.stringify({target:null,outcome:'wrote fixture',retryable:false}
     lines = claude_stream.success(None, text="lesson").lines
     # A killed writer leaves a torn tail; a stream with no result event is partial.
     _stream(events, lines[:-1] if truncated else lines, tail='{"partial":' if truncated else "")
-    import os
-
-    os.environ["EXPECTED_EVIDENCE"] = "retained-events-partial" if truncated else "retained-events"
-    try:
-        for _ in range(2):
-            run(script, events, tmp_path, tmp_path / "isolated-vault")
-    finally:
-        del os.environ["EXPECTED_EVIDENCE"]
+    monkeypatch.setenv(
+        "EXPECTED_EVIDENCE", "retained-events-partial" if truncated else "retained-events"
+    )
+    for _ in range(2):
+        run(script, events, tmp_path, tmp_path / "isolated-vault")
     result = json.loads(events.with_suffix(".learning.json").read_text())
     assert result["outcome"] == "wrote fixture"
     assert result["evidence"] == ("retained-events-partial" if truncated else "retained-events")
@@ -54,10 +51,40 @@ console.log(JSON.stringify({target:null,outcome:'wrote fixture',retryable:false}
 def test_the_session_comes_from_the_stream_not_from_a_guess(tmp_path: Path) -> None:
     events = tmp_path / "events.jsonl"
     _stream(events, claude_stream.success(session=SESSION).lines)
-    text, _, session, ended = evidence(events)
-    assert session == SESSION
-    assert ended is True
-    assert text.count("\n") == len(claude_stream.success().lines)
+    retained = evidence(events)
+    assert retained.session == SESSION
+    assert retained.ended is True
+    assert retained.text.count("\n") == len(claude_stream.success().lines)
+
+
+def test_a_resumed_launch_is_handed_over_as_partial_evidence(tmp_path: Path) -> None:
+    # A `--resume` stream holds only the session's new turns, so layer A must keep the
+    # note the full stream wrote rather than replace it with the tail's.
+    events = tmp_path / "events.jsonl"
+    _stream(events, claude_stream.success(None, text="lesson").lines)
+    script = tmp_path / "capture.mjs"
+    script.write_text(
+        """import fs from 'node:fs';
+const p=JSON.parse(fs.readFileSync(0,'utf8'));
+if(p.evidence!=='retained-events-partial') process.exit(1);
+console.log(JSON.stringify({outcome:'kept the note',retryable:false}));
+"""
+    )
+    run(script, events, tmp_path, tmp_path / "vault", resumed=True)
+    result = json.loads(events.with_suffix(".learning.json").read_text())
+    assert result["outcome"] == "kept the note"
+    assert result["evidence"] == "retained-events-partial"
+
+
+def test_a_corrupt_stream_leaves_a_receipt_instead_of_a_silent_death(tmp_path: Path) -> None:
+    events = tmp_path / "events.jsonl"
+    lines = claude_stream.success().lines
+    _stream(events, [lines[0], '{"type": "system", "subtype": "init"}', *lines[1:]])
+    script = tmp_path / "capture.mjs"
+    script.write_text('console.log(JSON.stringify({outcome:"fixture",retryable:false}))')
+    run(script, events, tmp_path, tmp_path / "vault")
+    result = json.loads(events.with_suffix(".learning.json").read_text())
+    assert result["evidence"] == "retained-events-partial"
 
 
 def test_a_stream_without_a_session_is_not_handed_off(tmp_path: Path) -> None:

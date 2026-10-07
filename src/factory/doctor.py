@@ -178,7 +178,7 @@ def load_context(home: Path, *, deep: bool = False) -> tuple[DoctorContext, list
 
 def _tools(_ctx: DoctorContext) -> list[Result]:
     results: list[Result] = []
-    for argv in (["git", "--version"], ["gh", "auth", "status"], ["codex", "--version"]):
+    for argv in (["git", "--version"], ["gh", "auth", "status"]):
         results += _from_triple(_tool_check(argv))
     return results
 
@@ -186,10 +186,6 @@ def _tools(_ctx: DoctorContext) -> list[Result]:
 def _sbx(_ctx: DoctorContext) -> list[Result]:
     ok, detail = sbx_available()
     return _one("sbx", ok, detail.splitlines()[0] if detail else "")
-
-
-def _openai_secret(_ctx: DoctorContext) -> list[Result]:
-    return _from_triple(_openai_secret_check())
 
 
 def _global_gitignore(_ctx: DoctorContext) -> list[Result]:
@@ -311,7 +307,6 @@ def _canary(ctx: DoctorContext) -> list[Result]:
 CHECKS: tuple[Check, ...] = (
     Check("external tools", _tools),
     Check("sbx", _sbx),
-    Check("openai credential (sbx)", _openai_secret),
     Check("global gitignore", _global_gitignore),
     Check("linear credential", _keychain),
     Check("mattpocock execution set", _skills),
@@ -476,45 +471,6 @@ def _tool_check(argv: Sequence[str]) -> tuple[str, bool, str]:
         return name, False, str(exc)
     output = (proc.stdout or proc.stderr).strip().splitlines()
     return name, proc.returncode == 0, output[0] if output else ""
-
-
-def _openai_secret_check() -> tuple[str, bool, str]:
-    """The sbx-stored, *globally held* OpenAI OAuth token — not `codex login`.
-
-    This is the single point that silently disables the entire factory (Phase 5
-    handoff): a sandboxed agent authenticates through `sbx`'s proxy against a token
-    stored at `(global) service openai`, and when it expires or is removed every
-    sandboxed run of both stacks fails with `401 token_expired` while the host looks
-    healthy and `codex login` fixes nothing. The fix is `sbx secret set openai --oauth`.
-
-    This check verifies **presence**, not validity. `sbx secret ls` reports
-    `(oauth configured)` whether the token is live or expired, so expiry still needs a
-    live probe — but absence (a fresh machine, a reset, a removed secret) is the case
-    that took a transcript dive to find, and it is free to catch here.
-    """
-    try:
-        proc = subprocess.run(
-            ["sbx", "secret", "ls"], capture_output=True, text=True, check=False, timeout=60
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return "openai credential (sbx)", False, f"sbx unusable: {exc}"
-    if proc.returncode != 0:
-        return "openai credential (sbx)", False, (proc.stderr or proc.stdout).strip()[:120]
-    # The row of interest is `(global)  service  openai  (oauth configured)`. Match on
-    # the scope and the service name so a reordering of columns cannot fool it.
-    for line in proc.stdout.splitlines():
-        fields = line.split()
-        if "(global)" in fields and "openai" in fields and "oauth" in line.lower():
-            return (
-                "openai credential (sbx)",
-                True,
-                "global openai oauth configured — expiry needs a live probe",
-            )
-    return (
-        "openai credential (sbx)",
-        False,
-        "no global openai oauth — run `sbx secret set openai --oauth`",
-    )
 
 
 def _global_gitignore_check() -> tuple[str, bool, str]:

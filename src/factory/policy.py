@@ -188,10 +188,8 @@ def assert_no_skip_verify(env: Mapping[str, str]) -> None:
 #: hardcoded credential value.
 GATEWAY_CREDENTIAL = "mcpgateway"
 
-#: The agent's own model credential, the one secret that must reach the VM for any run
-#: to happen. It grants the model, not a capability over James's accounts: `sbx` proxies
-#: it onto api.anthropic.com and nowhere else. Named like `GATEWAY_CREDENTIAL` for the
-#: same ruff reason.
+#: The agent's model credential: the one secret every run needs in the VM. It grants the
+#: model, not a capability over James's accounts. Not `..._SECRET`: ruff S105.
 MODEL_CREDENTIAL = "anthropic"
 
 
@@ -209,10 +207,9 @@ def capability_secrets(secrets: Iterable[Any], *, declared: Iterable[str] = ()) 
     scan "finds nothing and looks green" is measured false — see `capability_env_names`,
     which reads the other.
 
-    Everything is a capability except `GATEWAY_CREDENTIAL` and `MODEL_CREDENTIAL`, whose
-    exclusions are argued at their definitions, and the names in `declared`. An `openai`
-    secret stays a capability: nothing in the factory runs on it any more, so its only
-    effect in a VM would be a credential the agent was never meant to hold. Returned
+    Everything is a capability except `GATEWAY_CREDENTIAL`, `MODEL_CREDENTIAL` and the
+    names in `declared`. An `openai` secret stays a capability: nothing runs on it any
+    more, so in a VM it is only a credential the agent was never meant to hold. Returned
     sorted so a failure message is stable.
 
     `declared` is the project's own `[sandbox_delivery] placeholder_env` and nothing else. It

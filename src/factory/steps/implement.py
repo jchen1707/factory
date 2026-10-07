@@ -32,15 +32,15 @@ from factory import (
 )
 from factory.agent import claude, stream
 from factory.agent.base import SchemaInvalid, validate_against_schema
-from factory.agent.claude import AttemptFiles, StructuredOutputMissing
+from factory.agent.claude import StructuredOutputMissing
 from factory.agent.stream import SessionId
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.registry import IMPLEMENT_SKILL
 from factory.sandbox.base import RunHandle
-from factory.steps import Context, advance
+from factory.steps import Context, advance, attempt_files
 
-__all__ = ["IMPLEMENT_SKILL", "build_prompt", "collect", "files", "start"]
+__all__ = ["IMPLEMENT_SKILL", "build_prompt", "collect", "start"]
 
 STEP = "implement"
 
@@ -56,10 +56,9 @@ def start(
 
     `None` means a dry run, which walks the states and executes nothing.
 
-    `resume_session` is §16.3's resume branch: the same worktree, a new attempt
-    directory, and `--resume <id>` into the session the previous attempt pinned instead
-    of a fresh `--session-id`. The caller found the id through
-    `agent_run.resumable_session`, so its stream is known to hold an `init` event.
+    `resume_session` is §16.3's resume branch: `--resume <id>` into the session the
+    previous attempt pinned, in a new attempt directory. The caller found the id through
+    `agent_run.resumable_session`, so its stream holds an `init` event.
     `continuation` is the ladder's rung-2 addition: what the previous attempt already
     changed and how it failed, which is the only thing that makes a second attempt
     different from the first.
@@ -89,7 +88,7 @@ def start(
         ctx,
         role=claude.Role.BUILDER,
         routed=role,
-        files=files(attempt_dir),
+        files=attempt_files(State.IMPLEMENTING, attempt_dir.root),
         schema=json.loads(attempt_dir.schema.read_text(encoding="utf-8")),
         session=session,
         resume=resume_session is not None,
@@ -148,7 +147,10 @@ def start(
             role,
             STEP,
             attempt_dir.events,
-            extra_metadata={"expected": agent_run.expected_json(invocation)},
+            extra_metadata={
+                "expected": agent_run.expected_json(invocation),
+                "resume": resume_session is not None,
+            },
         )
         inputs: tuple[Path, ...] = (attempt_dir.prompt, attempt_dir.schema, attempt_dir.request)
         workflow_launches.prepare(ctx, identifier, handle, claude.script(invocation), inputs=inputs)
@@ -162,19 +164,6 @@ def start(
         resumed=bool(resume_session),
     )
     return attempt_dir, handle
-
-
-def files(attempt_dir: AttemptDir) -> AttemptFiles:
-    """The builder's files, by the names the rest of the factory reads them under."""
-    return AttemptFiles(
-        prompt=attempt_dir.prompt,
-        events=attempt_dir.events,
-        stderr=attempt_dir.stderr,
-        exit=attempt_dir.exit_file,
-        heartbeat=attempt_dir.heartbeat,
-        pgid=attempt_dir.pgid_file,
-        last_message=attempt_dir.last_message,
-    )
 
 
 def _schema_path(ctx: Context) -> Path:
@@ -238,19 +227,15 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     # append-only tables are not written twice, because two cost rows for one model
     # call is a spend report that is quietly wrong.
     recorded = _already_recorded(ctx, attempt)
-    run = agent_run.read(ctx, accounting.key(ctx, attempt, STEP), files(attempt_dir))
-    if not recorded:
-        agent_run.record_checks(ctx, attempt, run)
-
     _check_vault(ctx, attempt, vault_before)
-
-    stop = agent_run.stop_for(run)
-    if stop is not None:
-        ctx.store.finish_attempt(
-            ctx.run.id, attempt, State.IMPLEMENTING, exit_code=exit_code, outcome=stop.reason
-        )
-        tail = artifacts.tail_lines(attempt_dir.stderr, 40)
-        raise type(stop)(stop.reason, f"exit {exit_code}; {stop.detail}\n{tail}")
+    run = agent_run.conclude(
+        ctx,
+        attempt=attempt,
+        state=State.IMPLEMENTING,
+        invocation_id=accounting.key(ctx, attempt, STEP),
+        files=attempt_files(State.IMPLEMENTING, attempt_dir.root),
+        record=not recorded,
+    )
 
     result = _validated_result(ctx, run, attempt_dir, attempt, recorded=recorded)
     artifacts.write_manifest(attempt_dir.root, produced_by=str(State.IMPLEMENTING))
@@ -287,10 +272,8 @@ def _validated_result(
 ) -> dict[str, Any]:
     """Schema-valid or the state does not advance. F6 — the raw file is kept either way.
 
-    The answer is the run's `structured_output`, written to `last-message.json` here on
-    the host (the agent writes nothing outside its stream). The CLI validates against the
-    schema it was given, but a schema the model cannot satisfy ends with no answer at
-    all, which is the case the first check is for.
+    A schema the model cannot satisfy ends `success` with `structured_output: null`; the
+    first check is that case.
     """
     try:
         payload = claude.materialize_final(run, attempt_dir.last_message)

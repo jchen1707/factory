@@ -89,7 +89,7 @@ replacement requires a paused run. Project changes do not rewrite existing run s
 
 ## Runtimes
 
-`codex exec` is the only agent adapter. Named model presets are not probed in the executing
+`claude -p` is the only agent launch. Named model presets are not probed in the executing
 sandbox before launch. A preset model that the sandbox cannot run fails in the attempt.
 
 ```sh
@@ -241,7 +241,6 @@ its proxy boundary are documented in [AGENTS.md](../AGENTS.md).
 
 - `config/projects.toml`: project registry, layout, environment, isolation and retention defaults.
 - `config/models.toml`: validated role routing, model catalogue and budgets.
-- `config/prices.toml`: a price table that `factory doctor` checks. No estimate reads it.
 - Target `harness.config.json`: delivery policy, components, capabilities and gate commands.
 - Runtime database settings: explicit project/run operator controls and frozen run selections.
 

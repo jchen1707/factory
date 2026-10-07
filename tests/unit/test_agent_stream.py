@@ -425,3 +425,27 @@ def test_permission_denied_event_and_result_denials_dedupe_in_stream_order() -> 
         ("toolu_a", "async"),
         ("toolu_b", ""),
     ]
+
+
+def test_a_real_answer_after_a_401_retry_clears_auth_failing() -> None:
+    # One transient 401 followed by work is a run that recovered; the CLI's own synthetic
+    # "Not logged in" line is not an answer and keeps the flag (the measured auth-retry).
+    from tests.support import claude_stream as fake
+
+    recovered = stream.fold(
+        stream.events(
+            fake.lines(fake.init(), fake.api_retry(1), fake.assistant_text("working again"))
+        )
+    )
+    assert recovered.outcome == Interrupted(exit_code=None, auth_failing=False)
+
+    failing = stream.fold(
+        stream.events(
+            fake.lines(
+                fake.init(),
+                fake.api_retry(1),
+                fake.assistant_api_error("Not logged in", "authentication_failed"),
+            )
+        )
+    )
+    assert failing.outcome == Interrupted(exit_code=None, auth_failing=True)

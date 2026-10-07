@@ -461,9 +461,9 @@ class SbxAdapter:
         after the kill, which is what turns "we gave up" into a recorded exit code.
 
         **The match is on the process name, never the command line.** This read
-        `pkill -f "<agent> exec"` until 2026-08-22, and that pattern selects three
+        `pkill -f "codex exec"` until 2026-08-22, and that pattern selects three
         processes inside the sandbox, not one — measured on
-        `factory-build-python-harness-2`:
+        `factory-build-python-harness-2` with the Codex binary:
 
             305 /bin/sh -lc set -u ( while :; do date -u +%s > …/heartbeat; …
             309 /bin/sh -lc set -u ( while :; do date -u +%s > …/heartbeat; …
@@ -476,9 +476,10 @@ class SbxAdapter:
         `3f03240cd3bc4bd0` was suspended from `implementing`, waited out
         `KILL_GRACE_SECONDS`, and recorded `exit_code = NULL`.
 
-        `-x <proc>` selects the agent alone (`claude.argv` puts `claude` at argv[0]);
-        the wrapper, named `sh`, survives to write `143`. Measured both ways on the same
-        sandbox with the real envelope.
+        `-x codex` selected the agent alone; the wrapper, named `sh`, survived to write
+        `143`. Measured both ways on the same sandbox with the real envelope. The Claude
+        default assumes the in-image binary runs as a process named `claude` (true of
+        the host's Mach-O build); the live probe (P6) confirms the in-VM name.
 
         ``proc`` is the in-VM process name to kill, because not every step runs the
         agent. The ``verifying`` step runs ``node gate_report.mjs`` (Phase 5 defect 3):

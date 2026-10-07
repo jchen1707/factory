@@ -133,6 +133,12 @@ _LIVE_WORK: dict[int, tuple[str, str]] = {
         "WHERE e.step=i.id AND e.system='agent-preparation' AND e.status='intended')))",
         "child, certification or app-server invocations",
     ),
+    10: (
+        "SELECT group_concat(i.id, ', ') FROM invocations i JOIN runs r ON r.id=i.run_id "  # noqa: S608 - states from TERMINAL
+        f"WHERE r.state NOT IN ({', '.join(chr(39) + str(s) + chr(39) for s in sorted(TERMINAL))}) "
+        "AND json_extract(i.metadata,'$.expected') IS NULL",
+        "agent invocations launched before the Claude cutover",
+    ),
 }
 
 
