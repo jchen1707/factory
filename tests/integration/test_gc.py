@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -244,6 +245,30 @@ def test_a_live_run_is_never_collected(ctx: Context) -> None:
     actions = _sweep(ctx, dry_run=False)
 
     assert _kinds(actions, "worktree-remove") == []
+
+
+def test_collecting_a_cancelled_run_leaves_its_reruns_worktree_alone(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import cli
+
+    _finished_run(ctx)
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "rerun")
+    rerun_row = ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+    ctx.store.acquire_lease(rerun_row.id, ttl_seconds=600)
+    rerun = replace(ctx, run=rerun_row)
+    for step in (claim_step, context_step, sandbox_step, worktree_step):
+        step.run(rerun)
+    live = Path(rerun.run.worktree or "")
+    assert live == Path(ctx.run.worktree or "")
+
+    _sweep(ctx, dry_run=False)
+
+    assert live.is_dir()
+    assert repo.local_branch_exists(ctx.project.path, rerun.run.branch or "")
 
 
 # --------------------------------------------------------------------------------
