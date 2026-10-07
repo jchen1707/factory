@@ -79,7 +79,8 @@ def start(
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
     role = execution.role_for(ctx, "builder")
 
-    prompt, skill_sha = build_prompt(ctx, continuation=continuation)
+    declared = _declared(ctx)
+    prompt, skill_sha = build_prompt(ctx, continuation=continuation, declared=declared)
     schema_source = _schema_path(ctx)
     session = SessionId(resume_session) if resume_session else claude.new_session()
 
@@ -93,7 +94,7 @@ def start(
         schema=json.loads(attempt_dir.schema.read_text(encoding="utf-8")),
         session=session,
         resume=resume_session is not None,
-        plugins=_doctrine_plugin(ctx),
+        plugins=_doctrine_plugin(declared, ctx.home),
     )
     artifacts.write_json(
         attempt_dir.request,
@@ -369,7 +370,12 @@ def _check_vault(ctx: Context, attempt: int, before: dict[str, tuple[int, int, s
         )
 
 
-def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str, str]:
+def build_prompt(
+    ctx: Context,
+    *,
+    continuation: str | None = None,
+    declared: doctrine.Doctrine | None = None,
+) -> tuple[str, str]:
     """`(prompt, sha256 of the inlined skill)`.
 
     The prompt is assembled from files the control plane already wrote, plus one skill
@@ -393,7 +399,7 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
     # path would silently name nothing there, and the agent would start with no ticket.
     context_dir = ctx.factory_dir / "context"
 
-    skills = doctrine.prompt_sentence(_declared(ctx))
+    skills = doctrine.prompt_sentence(declared or _declared(ctx))
     sections = [
         f"# {ctx.issue.identifier} — {ctx.issue.title}",
         "",
@@ -516,10 +522,10 @@ def _declared(ctx: Context) -> doctrine.Doctrine:
         raise Blocked("doctrine-invalid", str(exc)) from exc
 
 
-def _doctrine_plugin(ctx: Context) -> tuple[claude.PluginRef, ...]:
+def _doctrine_plugin(declared: doctrine.Doctrine, home: Path) -> tuple[claude.PluginRef, ...]:
     try:
-        plugin = doctrine.build(_declared(ctx), PLUGIN_CACHE, doctrine.root(ctx.home))
-    except doctrine.DoctrineError as exc:
+        plugin = doctrine.build(declared, PLUGIN_CACHE, doctrine.root(home))
+    except (doctrine.DoctrineError, OSError) as exc:
         raise Blocked("doctrine-invalid", str(exc)) from exc
     return (plugin,) if plugin else ()
 

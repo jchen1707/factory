@@ -113,11 +113,15 @@ def _skill_dirs(source: Source, cache: Path) -> dict[str, Path]:
     root = source.root(cache)
     manifest = root / ".claude-plugin" / "plugin.json"
     try:
-        listed = json.loads(manifest.read_text(encoding="utf-8")).get("skills") or []
+        listed = json.loads(manifest.read_text(encoding="utf-8")).get("skills")
     except (OSError, ValueError) as exc:
         raise DoctrineError(f"{source.plugin} {source.version} is not installed: {exc}") from exc
+    if not isinstance(listed, list):
+        raise DoctrineError(f"{manifest} lists no skills")
     by_name = {Path(str(entry)).name: (root / str(entry)).resolve() for entry in listed}
-    missing = [skill for skill in source.skills if skill not in by_name]
+    missing = [
+        skill for skill in source.skills if skill not in by_name or not by_name[skill].is_dir()
+    ]
     if missing:
         raise DoctrineError(f"{source.plugin} {source.version} has no skill {', '.join(missing)}")
     return {skill: by_name[skill] for skill in source.skills}
@@ -161,7 +165,11 @@ def build(doctrine: Doctrine, cache: Path, into: Path) -> PluginRef | None:
             manifest = {"name": NAME, "version": f"0.0.0+{digest[:12]}"}
             (staging / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest) + "\n")
             for skill, directory in dirs.items():
-                shutil.copytree(directory, staging / "skills" / skill)
+                # Links stay links, so the copy is exactly the tree `_digest` hashed.
+                shutil.copytree(directory, staging / "skills" / skill, symlinks=True)
+            for path in staging.rglob("*"):
+                if path.is_file() and not path.is_symlink():
+                    path.chmod(0o444)
             os.rename(staging, target)
         except FileExistsError:
             pass

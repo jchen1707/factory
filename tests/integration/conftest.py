@@ -465,6 +465,12 @@ class FakeSandbox:
                 json.dumps(self.gate_report, indent=2),
                 "",
             )
+        if list(argv[:2]) == ["test", "-d"]:
+            # In the VM only a mounted workspace exists.
+            spec = self._spec(name)
+            target = Path(argv[2])
+            seen = spec is not None and any(target.is_relative_to(w.path) for w in spec.workspaces)
+            return Completed(tuple(argv), 0 if seen and target.is_dir() else 1, "", "")
         if argv and argv[0] == "curl":
             # The in-VM GitLab adapter's `/api/v4` calls. Canned in order rather than
             # routed by URL: what these tests are about is the *lifecycle* around the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -74,6 +75,7 @@ def test_the_builder_loads_the_declared_skills_and_nothing_the_target_enables(
     prompt = launch.prompt.read_text()
     assert "`doctrine:tdd`, `doctrine:code-review`" in prompt
     checks = {row["check_name"]: row["status"] for row in ctx.store.checks(ctx.run.id)}
+    assert checks["preflight:doctrine-mounted"] == "pass"
     assert checks["isolation_attestation"] == "pass"
 
 
@@ -87,27 +89,29 @@ def test_no_declaration_launches_no_plugin_and_names_no_skill(ctx: Context) -> N
     assert "Skill tool" not in launch.prompt.read_text()
 
 
-def test_a_sandbox_without_the_doctrine_mount_fails_attestation(declared: Context) -> None:
-    # A sandbox created before the mount existed: `ensure` attaches to it as it is, the CLI
-    # drops the `--plugin-dir` it cannot see, and attestation is what notices.
+def test_a_sandbox_made_before_the_doctrine_mount_is_refused_before_any_launch(
+    declared: Context,
+) -> None:
+    # `ensure` attaches to an existing sandbox as it is, and the CLI drops a `--plugin-dir`
+    # it cannot see without a word; the preflight is what notices, before any spend.
     ctx = declared
     claim_step.run(ctx)
     context_step.run(ctx)
-    sandbox_step.run(ctx)
-    created = _fake(ctx).created[0]
-    _fake(ctx).created[0] = type(created)(
-        **{
-            **created.__dict__,
-            "workspaces": tuple(w for w in created.workspaces if w.path != doctrine.root(ctx.home)),
-        }
+    spec = sandbox_step.build_spec(ctx)
+    _fake(ctx).created.append(
+        dataclasses.replace(
+            spec,
+            workspaces=tuple(w for w in spec.workspaces if w.path != doctrine.root(ctx.home)),
+        )
     )
-    worktree_step.run(ctx)
 
     with pytest.raises(Blocked) as caught:
-        advance_state(ctx, until=State.VERIFYING)
+        sandbox_step.run(ctx)
 
-    assert caught.value.reason == "isolation-attestation-failed"
-    assert "plugins: expected 'doctrine', observed ''" in caught.value.detail
+    assert caught.value.reason == "enforcement-disabled"
+    assert "doctrine-mounted" in caught.value.detail
+    assert "predates the doctrine mount" in caught.value.detail
+    assert _fake(ctx).launches == []
 
 
 def test_a_declared_skill_the_cache_lacks_blocks_before_launch(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,42 @@ def test_build_is_a_lookup_until_a_source_skill_changes(tmp_path: Path) -> None:
     assert [p.name for p in (tmp_path / "built").iterdir() if p.name.startswith(".")] == []
 
 
+def test_the_built_tree_is_read_only_and_keeps_links_as_hashed(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    skill = cache / "claude-plugins-official/mattpocock-skills/1.2.3/skills/engineering/tdd"
+    (skill / "shared.md").symlink_to("SKILL.md")
+
+    plugin = doctrine.build(Doctrine((MATT,)), cache, tmp_path / "built")
+
+    assert plugin is not None
+    built = plugin.path / "skills" / "tdd"
+    assert (built / "shared.md").is_symlink()
+    assert not os.access(built / "SKILL.md", os.W_OK)
+
+
+def test_a_skill_listed_but_absent_from_the_cache_is_a_problem_not_a_crash(
+    tmp_path: Path,
+) -> None:
+    cache = _cache(tmp_path)
+    (
+        cache / "claude-plugins-official/mattpocock-skills/1.2.3/skills/engineering/tdd/SKILL.md"
+    ).unlink()
+    (cache / "claude-plugins-official/mattpocock-skills/1.2.3/skills/engineering/tdd").rmdir()
+
+    assert doctrine.problems(Doctrine((MATT,)), cache) == [
+        "mattpocock-skills 1.2.3 has no skill tdd"
+    ]
+
+
+def test_a_plugin_manifest_without_a_skill_list_is_refused(tmp_path: Path) -> None:
+    cache = _cache(tmp_path)
+    manifest = cache / "claude-plugins-official/mattpocock-skills/1.2.3/.claude-plugin/plugin.json"
+    manifest.write_text(json.dumps({"name": "mattpocock-skills", "skills": "./skills"}))
+
+    with pytest.raises(DoctrineError, match="lists no skills"):
+        doctrine.build(Doctrine((MATT,)), cache, tmp_path / "built")
+
+
 @pytest.mark.parametrize(
     ("source", "problem"),
     [
@@ -111,9 +148,12 @@ def test_the_prompt_names_each_skill_as_the_plugin_exposes_it() -> None:
         (None, ()),
         ("{not json", ()),
         ('{"enabledPlugins": {"b@m": true, "a@m": true, "off@m": false}}', ("a@m", "b@m")),
-        ((HOME / ".claude" / "settings.json").read_text(), ("pstack@pstack-claude",)),
+        (
+            '{"hooks": {}, "enabledPlugins": {"pstack@pstack-claude": true}}',
+            ("pstack@pstack-claude",),
+        ),
     ],
-    ids=["absent", "not-json", "mixed", "this-repo"],
+    ids=["absent", "not-json", "mixed", "beside-hooks"],
 )
 def test_enabled_plugins_are_read_off_the_target_settings(
     settings: str | None, enabled: tuple[str, ...]

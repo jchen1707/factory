@@ -54,8 +54,8 @@ interactive and only the operator can do them.
 4. Remove every `factory-build-*` and `factory-review-*` sandbox created before the cutover.
    They were made with `sbx create codex` and carry no `claude`, and `ensure` attaches to an
    existing sandbox without comparing its agent kind. A build sandbox made before the
-   doctrine mount also lacks `state/doctrine`, and every builder launch in it fails
-   attestation with `plugins: expected 'doctrine', observed ''`. Leave `codex-*` sandboxes alone: they
+   doctrine mount also lacks `state/doctrine`; while a doctrine is declared, the preflight
+   blocks it with `doctrine-mounted` before any launch. Leave `codex-*` sandboxes alone: they
    are James's interactive sessions.
 
    ```sh

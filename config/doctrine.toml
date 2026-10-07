@@ -4,9 +4,11 @@
 # `factory doctor` checks every one is installed at the pinned version.
 #
 # Nothing else loads in the sandbox. pstack stays out: add it here as one more source to
-# change that. `implement` is not listed: the builder's prompt inlines it.
+# change that. `implement` is not listed: the builder's prompt inlines it. Nor is a skill
+# whose core step spawns an agent (`code-review`, `research`): the builder holds no spawn
+# tool, so it could not run as written.
 
 [sources.mattpocock-skills]
 marketplace = "claude-plugins-official"
 version     = "1.2.3"
-skills      = ["tdd", "code-review", "codebase-design", "diagnosing-bugs", "research", "resolving-merge-conflicts"]
+skills      = ["tdd", "codebase-design", "diagnosing-bugs", "resolving-merge-conflicts"]

@@ -205,6 +205,23 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     #     a hook no agent calls.
     checks.append(("layer-a-hooks-wired", *layer_a_hooks_wired(ctx.project)))
 
+    # 4c. The doctrine mount. `ensure` attaches to a sandbox made before the mount
+    #     existed, and the CLI drops a `--plugin-dir` it cannot see without a word, so
+    #     without this the first sign is attestation failing after a whole paid run.
+    root = doctrine.root(ctx.home)
+    if doctrine.load(doctrine.config_path(ctx.home)).skills:
+        mounted = ctx.sandbox.exec_sync(spec.name, ["test", "-d", str(root)], timeout=60)
+        checks.append(
+            (
+                "doctrine-mounted",
+                mounted.ok,
+                f"{root} is mounted"
+                if mounted.ok
+                else f"{spec.name} predates the doctrine mount ({root} is not visible in it); "
+                "`sbx rm` it and let the factory recreate it",
+            )
+        )
+
     # 5. The canary. §9.3's rule is that enforcement is proved by producing a refusal,
     #    not by observing the absence of a flag.
     canary_ok, canary_detail = _protect_paths_canary(ctx, spec)
