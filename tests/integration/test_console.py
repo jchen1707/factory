@@ -424,10 +424,11 @@ def test_a_valid_config_edit_is_written_and_touches_only_that_line(ctx: Context)
     # one-field edit has to arrive as a one-line diff.
     path = _models_toml(ctx)
     before = path.read_text(encoding="utf-8").splitlines()
+    effort = "low" if ctx.routing.role("documenter").effort != "low" else "medium"
 
     response = _client(ctx).post(
         "/config/models",
-        data=_form(ctx, **{"effort.documenter": "medium"}),
+        data=_form(ctx, **{"effort.documenter": effort}),
         follow_redirects=False,
     )
 
@@ -436,7 +437,7 @@ def test_a_valid_config_edit_is_written_and_touches_only_that_line(ctx: Context)
     after = path.read_text(encoding="utf-8").splitlines()
     changed = [(a, b) for a, b in zip(before, after, strict=True) if a != b]
     assert len(changed) == 1
-    assert changed[0][1].strip() == 'effort = "medium"'
+    assert changed[0][1].strip() == f'effort = "{effort}"'
 
 
 def test_projects_are_rendered_read_only_with_the_reason(ctx: Context) -> None:
