@@ -47,7 +47,9 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import shutil
+import stat
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -425,8 +427,7 @@ def _axis_entry(
         prompt += f"Candidate worktree: {ctx.worktree}\nPolicy: {json.dumps(snapshot)}\n"
     out_path = review_dir / f"review-{label}.json"
     files = _axis_files(attempt_dir, out_path)
-    with files.prompt.open("x", encoding="utf-8") as handle:
-        handle.write(prompt)
+    _write_prompt(files.prompt, prompt)
     from factory import accounting, execution
 
     role = execution.role_for(ctx, "reviewer")
@@ -489,18 +490,22 @@ def _collect_axis(
 ) -> list[dict[str, Any]]:
     """Land one axis's stream, read it, and return its findings or raise its stop.
 
-    The landed stream is read rather than the scratch copy, so the final pass over every
-    axis reads the same evidence the first one did. `record` is true on that first pass
-    only: the check rows are append-only and one axis is one attestation.
+    The landed copy is read rather than the scratch, which later axes of the run can
+    write, so the final pass over every axis reads the same evidence the first one did.
+    Accounting reads the scratch stream, the one the invocation record names. `record`
+    is true on that first pass only: the check rows are append-only and one axis is one
+    attestation.
     """
     from factory import accounting
 
     label = str(axis["label"])
     out_path, events_path, stderr_path = (Path(axis[key]) for key in ("out", "events", "stderr"))
-    _land(Path(axis["scratch_events"]), events_path)
-    _land(Path(axis["scratch_stderr"]), stderr_path)
+    recorded = Path(axis["scratch_events"])
+    if record:
+        _land(recorded, events_path)
+        _land(Path(axis["scratch_stderr"]), stderr_path)
     accounting.collect(
-        ctx, attempt, f"review:{label}", events_path, invocation_id=axis["invocation_id"]
+        ctx, attempt, f"review:{label}", recorded, invocation_id=axis["invocation_id"]
     )
     if record:
         from factory import learning
@@ -609,16 +614,50 @@ def _read_text(path: Path) -> str:
 # --------------------------------------------------------------------------------
 
 
+def _open_launch(directory: Path) -> int:
+    """A launch directory, refusing a link: the reviewer can write the scratch, and a
+    directory it swapped for a link would aim the host at another run's files."""
+    try:
+        return os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise Blocked("review-scratch-tampered", f"{directory}: {exc}") from exc
+
+
+def _write_prompt(path: Path, text: str) -> None:
+    launch = _open_launch(path.parent)
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        descriptor = os.open(path.name, flags, 0o644, dir_fd=launch)
+    except FileExistsError as exc:
+        raise Blocked("review-scratch-tampered", f"{path} was there before the host") from exc
+    finally:
+        os.close(launch)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
 def _land(scratch_out: Path, out_path: Path) -> None:
-    """Move one of the reviewer's outputs from the scratch into this run's own
-    directory, where the evidence belongs. The event stream and stderr both come home
-    this way; a missing file is silent, because an axis that never started has nothing
-    to land and the stream reader is what judges that."""
-    if scratch_out.is_symlink():
-        raise Blocked("review-scratch-tampered", f"{scratch_out} is a link")
-    if scratch_out.exists():
+    """Copy one of the reviewer's outputs into this run's own directory, where the
+    evidence belongs. The event stream and stderr both come home this way; a missing
+    file is silent, because an axis that never started has nothing to land and the stream
+    reader is what judges that. Anything but a regular file was planted: a FIFO would
+    hang every later read."""
+    launch = _open_launch(scratch_out.parent)
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        descriptor = os.open(scratch_out.name, flags, dir_fd=launch)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise Blocked("review-scratch-tampered", f"{scratch_out}: {exc}") from exc
+    finally:
+        os.close(launch)
+    with os.fdopen(descriptor, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise Blocked("review-scratch-tampered", f"{scratch_out} is not a regular file")
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(scratch_out), out_path)
+        with out_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
 
 
 def _review_scratch(ctx: Context) -> Path:

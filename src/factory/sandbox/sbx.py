@@ -12,8 +12,10 @@ the caller. A guard the caller can forget to call is not a guard.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import stat
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -139,11 +141,16 @@ def exec_argv(
     return out
 
 
-def _open_no_follow(path: Path) -> TextIO:
-    """Open for writing without following a link: the sandbox can write the attempt
-    directory too, and a link it planted would aim this host write anywhere."""
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
-    return os.fdopen(os.open(path, flags, 0o644), "w", encoding="utf-8")
+def _create_in(directory: int, name: str) -> TextIO:
+    """Open `name` for writing in an attempt directory the sandbox can also write,
+    refusing a link or a FIFO it planted there: either would aim this host write
+    somewhere else, or block it."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptor = os.open(name, flags, 0o644, dir_fd=directory)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise OSError(errno.EINVAL, "not a regular file", name)
+    return os.fdopen(descriptor, "w", encoding="utf-8")
 
 
 def holder_pid(attempt_dir: Path) -> int | None:
@@ -214,8 +221,10 @@ class SbxAdapter:
         result = self._run(["sbx", "ls", "--json"], timeout=60)
         if not result.ok:
             raise SbxError(f"sbx ls failed: {result.stderr.strip()}")
-        listing = json.loads(result.stdout).get("sandboxes") or []
-        return {str(entry["name"]) for entry in listing}
+        try:
+            return {str(entry["name"]) for entry in json.loads(result.stdout)["sandboxes"]}
+        except (ValueError, LookupError, TypeError) as exc:
+            raise SbxError(f"sbx ls returned a listing it cannot read: {exc!r}") from exc
 
     def inspect(self, name: str) -> dict[str, Any]:
         result = self._run(["sbx", "inspect", name, "--json"], timeout=60)
@@ -431,23 +440,39 @@ class SbxAdapter:
         stderr_path = handle.attempt_dir / SBX_EXEC_STDERR
         from contextlib import ExitStack
 
-        with ExitStack() as files:
-            stderr_file = files.enter_context(_open_no_follow(stderr_path))
-            stdout_file = (
-                files.enter_context(stdout_path.open("x", encoding="utf-8"))
-                if stdout_path is not None
-                else subprocess.DEVNULL
-            )
-            process = subprocess.Popen(
-                list(argv),
-                stdout=stdout_file,
-                stderr=stderr_file,
-                text=True,
-                start_new_session=True,
-            )
-        self._detached[handle.sandbox] = process
-        with _open_no_follow(handle.attempt_dir / SBX_EXEC_PID) as pid_file:
-            pid_file.write(f"{process.pid}\n")
+        try:
+            directory = os.open(handle.attempt_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError as exc:
+            raise SbxError(f"{handle.attempt_dir} is a link the sandbox planted: {exc}") from exc
+        try:
+            with ExitStack() as files:
+                try:
+                    stderr_file = files.enter_context(_create_in(directory, SBX_EXEC_STDERR))
+                except OSError as exc:
+                    raise SbxError(f"{stderr_path} is a link the sandbox planted: {exc}") from exc
+                stdout_file = (
+                    files.enter_context(stdout_path.open("x", encoding="utf-8"))
+                    if stdout_path is not None
+                    else subprocess.DEVNULL
+                )
+                process = subprocess.Popen(
+                    list(argv),
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    text=True,
+                    start_new_session=True,
+                )
+            self._detached[handle.sandbox] = process
+            try:
+                with _create_in(directory, SBX_EXEC_PID) as pid_file:
+                    pid_file.write(f"{process.pid}\n")
+            except OSError as exc:
+                process.terminate()
+                raise SbxError(
+                    f"{handle.attempt_dir / SBX_EXEC_PID} is a link the sandbox planted: {exc}"
+                ) from exc
+        finally:
+            os.close(directory)
 
         # "Started" is the heartbeat appearing, not the call returning — the wrapper
         # writes its first beat before the agent is reached. A process that has
