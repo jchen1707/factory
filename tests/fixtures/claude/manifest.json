@@ -1,0 +1,74 @@
+{
+  "claude_version": "2.1.292 (Claude Code)",
+  "fixtures": {
+    "success-schema": {
+      "events": "success-schema.jsonl",
+      "exit": 0,
+      "source": "measure-n/e5"
+    },
+    "build-tools": {
+      "events": "build-tools.jsonl",
+      "exit": 0,
+      "source": "measure-n/c1"
+    },
+    "denied": {
+      "events": "denied.jsonl",
+      "exit": 0,
+      "source": "measure-n/c2"
+    },
+    "schema-retry": {
+      "events": "schema-retry.jsonl",
+      "exit": 0,
+      "source": "measure-n/e2b"
+    },
+    "schema-unsatisfiable": {
+      "events": "schema-unsatisfiable.jsonl",
+      "exit": 0,
+      "source": "measure-n/e3b"
+    },
+    "model-unknown": {
+      "events": "model-unknown.jsonl",
+      "exit": 1,
+      "source": "measure-n/g1",
+      "stderr": "model-unknown.stderr.txt"
+    },
+    "resume-unknown": {
+      "events": "resume-unknown.jsonl",
+      "exit": 1,
+      "source": "measure-n/d3",
+      "stderr": "resume-unknown.stderr.txt"
+    },
+    "max-turns": {
+      "events": "max-turns.jsonl",
+      "exit": 1,
+      "source": "measure/34"
+    },
+    "budget": {
+      "events": "budget.jsonl",
+      "exit": 1,
+      "source": "measure/78"
+    },
+    "not-logged-in": {
+      "events": "not-logged-in.jsonl",
+      "exit": 1,
+      "source": "measure/36"
+    },
+    "auth-retry": {
+      "events": "auth-retry.jsonl",
+      "exit": 1,
+      "source": "measure/37"
+    },
+    "session-in-use": {
+      "events": "session-in-use.jsonl",
+      "stderr": "session-in-use.stderr.txt",
+      "exit": 1,
+      "source": "measure-n/d2"
+    },
+    "schema-rejected": {
+      "events": "schema-rejected.jsonl",
+      "stderr": "schema-rejected.stderr.txt",
+      "exit": 1,
+      "source": "measure-n/e1"
+    }
+  }
+}
