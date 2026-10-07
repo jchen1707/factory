@@ -51,7 +51,7 @@ def schedule(project: Path, vault: Path, events: Path, *, resumed: bool = False)
         if not script.is_file():
             _write(outcome, {"outcome": "unavailable:script"})
             return
-        if not events.is_file():
+        if events.is_symlink() or not events.is_file():
             _write(outcome, {"outcome": "unavailable:transcript"})
             return
         subprocess.Popen(  # noqa: S603 — controller-owned module and registry argv
