@@ -654,6 +654,8 @@ class FakeSandbox:
         # exactly, so naming the wrong one signals nothing at all and no `exit` ever
         # lands. Returning early here is that world, and it is the one a `verifying`
         # attempt lived in until `reap` learned to name `node`.
+        if not self._exec(name):
+            return
         if not self.kill_writes_exit or not self.detached_dirs:
             return
         if proc != self.detached_procs[-1]:
@@ -670,7 +672,7 @@ class FakeSandbox:
         behaviours is the difference between a timeout on one run and a wrong terminal
         record on the other.
         """
-        if not self.kill_writes_exit:
+        if not self._exec(name) or not self.kill_writes_exit:
             return
         for index, published in enumerate(self.detached_pgids):
             if published == pgid:
@@ -679,11 +681,20 @@ class FakeSandbox:
                 )
                 return
 
+    def _exec(self, name: str) -> bool:
+        """Start the VM, as `sbx exec` does. True when it was already running, so the
+        processes that were inside it are still there to signal."""
+        alive = name in self.running
+        if self.exists(name):
+            self._start(name)
+        return alive
+
     def stop(self, name: str) -> None:
         self.stop_sandbox(name)
 
     def remove(self, name: str) -> None:
-        return None
+        self.created = [spec for spec in self.created if spec.name != name]
+        self.stop_sandbox(name)
 
 
 def planner_invocation(ctx: Context, attempt: Any, *, attempt_number: int = 1) -> str:
