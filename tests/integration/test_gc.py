@@ -131,11 +131,12 @@ def test_every_attempt_is_archived_after_delivery_archived_the_last_one(ctx: Con
         )
     delivered = ctx.artifact_root / "2"
     delivered.mkdir(parents=True)
-    (delivered / "events.jsonl").write_text('{"attempt":2}\n')
+    (delivered / "events.jsonl").write_text("scanned with the project's secret names\n")
 
     _sweep(ctx, dry_run=False)
 
     assert (ctx.artifact_root / "1" / "events.jsonl").read_text() == '{"attempt":1}\n'
+    assert (delivered / "events.jsonl").read_text() == "scanned with the project's secret names\n"
 
 
 def test_evidence_seeded_before_run_scoping_is_archived_where_it_was_written(
@@ -258,6 +259,11 @@ def test_collecting_a_cancelled_run_leaves_its_reruns_worktree_alone(
     rerun_row = ctx.store.insert_run(
         linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
     )
+    with ctx.store.transaction() as conn:
+        # Created in the same second, which `created_at` cannot order.
+        conn.execute(
+            "UPDATE runs SET created_at = ? WHERE id = ?", (ctx.run.created_at, rerun_row.id)
+        )
     ctx.store.acquire_lease(rerun_row.id, ttl_seconds=600)
     rerun = replace(ctx, run=rerun_row)
     for step in (claim_step, context_step, sandbox_step, worktree_step):
