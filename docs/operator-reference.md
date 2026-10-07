@@ -130,8 +130,9 @@ and gets no sandbox. The hold lifts at the reset without a new report.
 ### Agent slots
 
 An agent holds its slot until the factory has proof that it ended. The proof is the agent's exit
-file, or `sbx` reporting the agent's sandbox stopped or absent after the `sbx exec` process that
-held its session has exited. A stopped VM runs nothing, so that agent never writes an exit file.
+file, or `sbx` reporting the agent's sandbox stopped or absent once the `sbx exec` process that
+held its session has exited or the agent's heartbeat is 90 s old. A stopped VM runs nothing, so
+that agent never writes an exit file.
 A tick on a run in an agent state, the run's next launch and `factory cancel` each look for this
 proof. The first to find it frees the slot and records an `agent-finished` event whose
 `evidence` is `exit`, `sandbox-stopped` or `sandbox-absent`.

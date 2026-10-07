@@ -343,7 +343,7 @@ class SbxAdapter:
     def stop(self, name: str) -> None:
         assert_factory_sandbox(name)
         result = self._run(["sbx", "stop", name], timeout=120)
-        if not result.ok:
+        if not result.ok and self._vm_gone(name) is None:
             raise SbxError(f"sbx stop {name} failed (exit {result.returncode})")
 
     def remove(self, name: str) -> None:
@@ -603,13 +603,12 @@ class SbxAdapter:
         """Proof that a run with no `exit` can no longer run, or None.
 
         A stopping VM takes every process inside it (`exec_detached`, measured), so
-        `stopped` is proof. A live holder may be booting a stopped VM for this run, and a
-        dead holder alone proves nothing, because another run's session can keep the VM
-        and the agent running. Absence needs a well-formed `sbx ls` that omits the name:
-        `inspect` also fails when `sbx` does.
+        `stopped` is proof. A live holder with a beating wrapper may be booting a stopped
+        VM for this run, and a dead holder alone proves nothing, because another run's
+        session can keep the VM and the agent running. Absence needs a well-formed
+        `sbx ls` that omits the name: `inspect` also fails when `sbx` does.
         """
-        holder = holder_pid(handle.attempt_dir)
-        if holder is None or pid_alive(holder):
+        if not _went_quiet(handle.attempt_dir):
             return None
         try:
             gone = self._vm_gone(handle.sandbox)
@@ -654,6 +653,22 @@ class SbxAdapter:
             stderr_path=attempt_dir / "stderr.log",
             last_message_path=attempt_dir / "last-message.json",
         )
+
+
+def _went_quiet(attempt_dir: Path) -> bool:
+    """The holder is recorded and dead, or the wrapper's heartbeat is stale.
+
+    The heartbeat covers a holder pid that still answers: an exited child its parent
+    never reaped, which is every holder `factory run` starts, or a reused pid.
+    """
+    holder = holder_pid(attempt_dir)
+    if holder is not None and not pid_alive(holder):
+        return True
+    try:
+        age = time.time() - int((attempt_dir / "heartbeat").read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return age >= ORPHAN_AFTER_SECONDS
 
 
 def sbx_available() -> tuple[bool, str]:

@@ -7,12 +7,12 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Protocol
 
 from factory.execution import ProjectQueued
 from factory.policy import assert_factory_sandbox
 from factory.runtime_jobs import RuntimeJobs
-from factory.sandbox.base import Gone, RunHandle, RunStatus
+from factory.sandbox.base import Evidence, Gone, RunHandle, RunStatus
 from factory.store import Store
 
 
@@ -149,7 +149,7 @@ class AgentLaunches:
         """
         handle = self.handle(invocation_id)
         exit_file = handle.attempt_dir / handle.exit_name
-        evidence: Literal["exit"] | Gone
+        evidence: Evidence
         if exit_file.exists():
             code = int(exit_file.read_text().strip())
             status, evidence = ("completed" if code == 0 else "failed"), "exit"

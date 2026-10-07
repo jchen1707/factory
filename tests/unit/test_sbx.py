@@ -574,12 +574,14 @@ def test_confirm_gone_accepts_only_a_vm_proven_stopped_or_absent(
     assert _adapter_answering(inspect, ls).confirm_gone(_handle(tmp_path)) == expected
 
 
-@pytest.mark.parametrize("holder", ["alive", "unrecorded"])
+@pytest.mark.parametrize("holder", ["alive", "alive-beating", "unrecorded"])
 def test_confirm_gone_asks_sbx_nothing_until_the_holder_is_recorded_and_dead(
     tmp_path: Path, holder: str
 ) -> None:
-    if holder == "alive":
+    if holder.startswith("alive"):
         (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    if holder == "alive-beating":
+        (tmp_path / "heartbeat").write_text(str(int(time.time())))
     calls: list[tuple[str, ...]] = []
 
     assert (
@@ -587,6 +589,62 @@ def test_confirm_gone_asks_sbx_nothing_until_the_holder_is_recorded_and_dead(
         is None
     )
     assert calls == []
+
+
+def test_confirm_gone_trusts_a_stale_heartbeat_over_a_holder_pid_that_looks_alive(
+    tmp_path: Path,
+) -> None:
+    """An exited holder still answers `kill(pid, 0)` until its parent reaps it, which in
+    `factory run` is never, and a pid can be reused. The wrapper's heartbeat stops with
+    its VM whatever the pid says."""
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    (tmp_path / "heartbeat").write_text(str(int(time.time()) - sbx_module.ORPHAN_AFTER_SECONDS - 1))
+
+    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    assert adapter.confirm_gone(_handle(tmp_path)) == "sandbox-stopped"
+
+
+def test_a_verify_launch_does_not_inherit_the_implementers_dead_holder(tmp_path: Path) -> None:
+    """Verify reuses the implement attempt's directory. Until its own `sbx exec` writes a
+    pid, a leftover one names a dead holder while verify may be booting the VM."""
+    from factory.artifacts import AttemptDir
+
+    _record_dead_holder(tmp_path)
+    AttemptDir(tmp_path).clear_liveness()
+
+    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    assert adapter.confirm_gone(_handle(tmp_path)) is None
+
+
+@pytest.mark.parametrize(
+    ("inspect", "ls", "raises"),
+    [
+        pytest.param(_FAILED, _UNLISTED, False, id="absent"),
+        pytest.param(_inspected("stopped"), _UNLISTED, False, id="stopped"),
+        pytest.param(_inspected("running"), _UNLISTED, True, id="running"),
+        pytest.param(_FAILED, _LISTED, True, id="listed"),
+        pytest.param(_FAILED, _FAILED, True, id="sbx-fails"),
+    ],
+)
+def test_stop_converges_on_a_sandbox_that_is_already_down(
+    inspect: _Answer, ls: _Answer, raises: bool
+) -> None:
+    adapter = _adapter_answering(inspect, ls)
+    answer = adapter._run
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        if argv[:2] == ["sbx", "stop"]:
+            return Completed(tuple(argv), 1, "", "ERROR: sandbox not found")
+        return answer(argv, timeout=timeout, stdin=stdin)
+
+    adapter._run = run  # type: ignore[method-assign]
+    if raises:
+        with pytest.raises(SbxError, match="sbx stop"):
+            adapter.stop(_SANDBOX)
+    else:
+        adapter.stop(_SANDBOX)
 
 
 def test_confirm_gone_defers_to_an_exit_that_lands_while_sbx_answers(tmp_path: Path) -> None:
@@ -753,9 +811,12 @@ def test_kill_agent_defaults_to_the_agent(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize("operation", ["stop", "remove"])
 def test_cleanup_reports_command_failure(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    # `remove` runs only on a stopped sandbox; a failed `stop` matters only on a running one.
+    state = "stopped" if operation == "remove" else "running"
+
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+            return subprocess.CompletedProcess(argv, 0, f'{{"state":"{state}"}}', "")
         return subprocess.CompletedProcess(argv, 1, "", "cleanup refused")
 
     monkeypatch.setattr(subprocess, "run", run)

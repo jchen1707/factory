@@ -306,7 +306,7 @@ then record the lease as failed:
 sqlite3 state/factory.db "UPDATE agent_leases SET status='failed' WHERE invocation_id='ID'"
 ```
 
-Current code releases such a lease itself, so a migrated store never needs this statement. See
+Current code releases such a lease itself once `sbx` reports the sandbox stopped or absent. See
 "Agent slots" in `docs/operator-reference.md`.
 
 After schema 8, nothing removes `factory-build-child-*` or `factory-review-child-*`

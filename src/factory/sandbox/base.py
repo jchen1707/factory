@@ -15,6 +15,7 @@ from typing import Any, Literal, Protocol
 
 __all__ = [
     "Completed",
+    "Evidence",
     "Gone",
     "RunHandle",
     "RunResult",
@@ -207,6 +208,7 @@ class RunStatus(StrEnum):
 
 
 Gone = Literal["sandbox-stopped", "sandbox-absent"]
+Evidence = Literal["exit"] | Gone
 
 
 @dataclass(frozen=True)
