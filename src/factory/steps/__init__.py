@@ -18,9 +18,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import artifacts, policy
+from factory import artifacts, doctrine, policy, repo
 from factory.agent.claude import AttemptFiles
-from factory.harness import HarnessConfig
+from factory.harness import CLAUDE_SETTINGS, HarnessConfig
 from factory.intake.linear import Issue, LinearClient
 from factory.machine import AUTOMATIC, Blocked, State, can
 from factory.registry import Project, Registry
@@ -293,6 +293,15 @@ class Context:
             environment["HARNESS_AUTHORITY_ROOT"] = snapshot["root"]
             environment["HARNESS_DELIVERY_PROFILE"] = snapshot["profile"]
         return environment
+
+    @property
+    def target_plugins(self) -> tuple[str, ...]:
+        """What the base ref's `.claude/settings.json` enables, which every launch disables."""
+        try:
+            settings = repo.file_at_ref(self.project.path, self.project.base_ref, CLAUDE_SETTINGS)
+        except repo.GitError as exc:
+            raise Blocked("launch-invalid", str(exc)) from exc
+        return doctrine.enabled_plugins(settings)
 
     @property
     def factory_dir(self) -> Path:

@@ -92,6 +92,18 @@
       "exit": 0,
       "session": "3347b149-ed66-4d8c-ba01-29b0d57a8136",
       "source": "scratchpad f2/out/m4-protected-write"
+    },
+    "doctrine-skill": {
+      "events": "doctrine-skill.jsonl",
+      "exit": 0,
+      "session": "be507cbe-f33e-4d46-a826-c538f881d80d",
+      "source": "scratchpad f3/out/p6-built-doctrine"
+    },
+    "plugin-dir-missing": {
+      "events": "plugin-dir-missing.jsonl",
+      "exit": 0,
+      "session": "fdcef998-a03e-48cd-a400-847acc270c12",
+      "source": "scratchpad f3/out/p3-plugin-dir-missing"
     }
   },
   "transcripts": {

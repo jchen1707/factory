@@ -492,12 +492,12 @@ def attest(init: Init, expected: Expected) -> tuple[Violation, ...]:
         violations.append(
             Violation("tools", ",".join(sorted(expected.tools)), ",".join(sorted(extra_tools)))
         )
-    stray_plugins = [
-        p.name for p in init.plugins if not p.builtin and p.name not in expected.plugins
-    ]
-    if stray_plugins:
+    loaded = [p.name for p in init.plugins if not p.builtin]
+    # A `--plugin-dir` that does not exist is dropped without error (plugin-dir-missing),
+    # so a missing plugin is a violation as much as a stray one.
+    if set(loaded) != expected.plugins:
         violations.append(
-            Violation("plugins", ",".join(sorted(expected.plugins)), ",".join(stray_plugins))
+            Violation("plugins", ",".join(sorted(expected.plugins)), ",".join(sorted(loaded)))
         )
     if init.mcp_servers:
         violations.append(Violation("mcp_servers", "", ",".join(init.mcp_servers)))

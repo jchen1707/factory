@@ -194,6 +194,7 @@ class ProbeSandbox:
     transcript: str = '{"type":"assistant","perTurnEffort":"low"}\n'
     kill_dir: Path = field(default_factory=Path)
     stopping: int = 0
+    settings: list[dict[str, object]] = field(default_factory=list)
 
     def exists(self, name: str) -> bool:
         return name in self.alive
@@ -248,6 +249,7 @@ class ProbeSandbox:
         return Completed(tuple(argv), 0, out, "")
 
     def _launch(self, argv: list[str], cwd: Path) -> None:
+        self.settings.append(json.loads(argv[argv.index("--settings") + 1]))
         resume = "--resume" in argv
         session = argv[argv.index("--resume" if resume else "--session-id") + 1]
         model = argv[argv.index("--model") + 1]
@@ -298,6 +300,10 @@ def _project(tmp_path: Path) -> Project:
         )
     )
     (repo / "uv.lock").write_text("version = 1\n")
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"pstack@pstack-claude": True}})
+    )
     for args in (
         ["init", "-q", "-b", "main"],
         ["add", "-A"],
@@ -347,6 +353,9 @@ def test_every_probe_reports_a_row_and_the_sandbox_and_clone_are_removed(tmp_pat
     assert sandbox.specs[0].template == "claude-python:v1"
     assert sandbox.specs[0].workspaces[0].path == tmp_path / "doctor"
     assert sandbox.stopped[0] == "factory-doctor-demo"  # before the resume
+    # The clone's own plugins are off on every launch, as on every factory launch.
+    assert sandbox.settings
+    assert all(s == {"enabledPlugins": {"pstack@pstack-claude": False}} for s in sandbox.settings)
     assert not sandbox.alive
     assert not (tmp_path / "doctor").exists()
 

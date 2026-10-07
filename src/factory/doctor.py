@@ -34,7 +34,6 @@ decisions, and the console has its own plan.
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -44,10 +43,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from factory import machine
+from factory import doctrine, machine
 from factory.harness import vendor_check
 from factory.intake.linear import LinearError, keychain_secret
-from factory.registry import Project, Registry, RegistryError, load_registry
+from factory.registry import (
+    IMPLEMENT_SKILL,
+    PLUGIN_CACHE,
+    Project,
+    Registry,
+    RegistryError,
+    load_registry,
+)
 from factory.routing import Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, sbx_available
 from factory.steps import review as review_step
@@ -202,8 +208,27 @@ def _keychain(_ctx: DoctorContext) -> list[Result]:
     return _from_triple(_keychain_check())
 
 
-def _skills(_ctx: DoctorContext) -> list[Result]:
-    return _from_triple(_skills_check())
+def _doctrine(ctx: DoctorContext) -> list[Result]:
+    """`config/doctrine.toml` against the plugin cache, and the inlined `implement` skill."""
+    results = _one(
+        "implement skill (inlined)",
+        IMPLEMENT_SKILL.exists(),
+        str(IMPLEMENT_SKILL) if IMPLEMENT_SKILL.exists() else f"{IMPLEMENT_SKILL} is missing",
+    )
+    try:
+        declared = doctrine.load(doctrine.config_path(ctx.home))
+    except doctrine.DoctrineError as exc:
+        return results + _one("doctrine", False, str(exc))
+    problems = doctrine.problems(declared, PLUGIN_CACHE)
+    sources = ", ".join(f"{s.plugin} {s.version}" for s in declared.sources)
+    return results + _one(
+        "doctrine",
+        not problems,
+        "; ".join(problems)
+        or (
+            f"{len(declared.skills)} skills from {sources}" if declared.skills else "none declared"
+        ),
+    )
 
 
 def _factory_home_absent(_ctx: DoctorContext) -> list[Result]:
@@ -379,7 +404,7 @@ CHECKS: tuple[Check, ...] = (
     Check("global gitignore", _global_gitignore),
     Check("anthropic credential (sbx)", _anthropic),
     Check("linear credential", _keychain),
-    Check("mattpocock execution set", _skills),
+    Check("doctrine", _doctrine),
     Check("~/.factory absent", _factory_home_absent),
     Check("disk", _disk),
     Check("vendored layer A", _vendored_layer_a, needs=("registry",)),
@@ -579,34 +604,3 @@ def _keychain_check() -> tuple[str, bool, str]:
     except LinearError as exc:
         return "linear credential", False, str(exc)
     return "linear credential", True, "factory-linear present (value not read into any log)"
-
-
-def _skills_check() -> tuple[str, bool, str]:
-    """The execution set, and the version it is pinned to.
-
-    `implement` is inlined rather than invoked (P0-15), so its *file* has to be there
-    even though Codex will never list it. The pinned version directory is compared with
-    what the plugin cache holds, because the factory should move between skill versions
-    on purpose.
-    """
-    skill = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
-    if not skill.exists():
-        return "mattpocock execution set", False, f"{skill} is missing"
-    pinned = skill.resolve()
-    match = re.search(r"mattpocock-skills/([^/]+)/", str(pinned))
-    version = match.group(1) if match else "unknown"
-    cache = (
-        Path.home()
-        / ".claude"
-        / "plugins"
-        / "cache"
-        / "claude-plugins-official"
-        / "mattpocock-skills"
-    )
-    installed = sorted(p.name for p in cache.iterdir() if p.is_dir()) if cache.is_dir() else []
-    drifted = installed and version not in installed
-    return (
-        "mattpocock execution set",
-        not drifted,
-        f"pinned {version}, installed {installed or 'unknown'}",
-    )

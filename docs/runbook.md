@@ -53,7 +53,9 @@ interactive and only the operator can do them.
 
 4. Remove every `factory-build-*` and `factory-review-*` sandbox created before the cutover.
    They were made with `sbx create codex` and carry no `claude`, and `ensure` attaches to an
-   existing sandbox without comparing its agent kind. Leave `codex-*` sandboxes alone: they
+   existing sandbox without comparing its agent kind. A build sandbox made before the
+   doctrine mount also lacks `state/doctrine`; while a doctrine is declared, the preflight
+   blocks it with `doctrine-mounted` before any launch. Leave `codex-*` sandboxes alone: they
    are James's interactive sessions.
 
    ```sh
@@ -84,6 +86,23 @@ interactive and only the operator can do them.
 
    A failed `live: image` or `live: ping` skips every later row. A ping that fails on
    authentication names both credential routes from step 2.
+
+## The skills a builder can invoke
+
+`config/doctrine.toml` declares them: each source plugin, the version it is pinned to, and
+the skills taken from it. Before each builder launch the factory copies those skills out of
+`~/.claude/plugins/cache/` into `state/doctrine/<digest>/`. The build sandbox mounts that
+directory read-only, and the launch passes it as `--plugin-dir`. The builder's prompt names
+each one as `doctrine:<skill>`.
+
+- To add or drop a skill, edit the list. The next launch builds a new digest directory. A
+  run already in flight keeps reading the old one.
+- To move to a new plugin version, run `claude plugin install` (or update) on the host,
+  then change `version`. `factory doctor`'s `doctrine` row fails until the cache has every
+  declared skill at that version, and a launch blocks with `doctrine-invalid`.
+- Nothing else loads. A plugin the target repository enables in its own
+  `.claude/settings.json` is switched off on every launch with `--settings`, and pstack is
+  never declared.
 
 ## I want it to stop right now
 

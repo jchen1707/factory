@@ -79,6 +79,8 @@ EXPECTED_OUTCOME = {
     "ping": "Completed",
     "resume-known": "Completed",
     "protected-write": "Completed",
+    "doctrine-skill": "Completed",
+    "plugin-dir-missing": "Completed",
 }
 
 
@@ -336,6 +338,37 @@ def test_attest_admits_declared_plugins_and_a_tool_subset() -> None:
     expected = replace(SUCCESS_EXPECTED, plugins=frozenset({"doctrine"}))
 
     assert stream.attest(init, expected) == ()
+
+
+def _expected(name: str, *, plugins: frozenset[str]) -> Expected:
+    init = init_of(name)
+    return replace(SUCCESS_EXPECTED, session=init.session, tools=init.tools, plugins=plugins)
+
+
+def test_the_built_doctrine_loads_as_the_one_declared_plugin() -> None:
+    # A builder launch with `--plugin-dir <built doctrine>` and the target's own
+    # `enabledPlugins` switched off by `--settings`, read-only, measured on the host.
+    init = init_of("doctrine-skill")
+
+    assert stream.attest(init, _expected("doctrine-skill", plugins=frozenset({"doctrine"}))) == ()
+    used = [
+        use.input
+        for event in stream.events(lines("doctrine-skill"))
+        if isinstance(event, stream.Message)
+        for use in event.tool_uses
+        if use.name == "Skill"
+    ]
+    assert used == [{"skill": "doctrine:diagnosing-bugs"}]
+
+
+def test_a_declared_plugin_that_did_not_load_is_a_violation() -> None:
+    # The CLI drops a `--plugin-dir` that does not exist without a word.
+    expected = _expected("plugin-dir-missing", plugins=frozenset({"doctrine"}))
+
+    violations = {v.what: v for v in stream.attest(init_of("plugin-dir-missing"), expected)}
+
+    assert violations["plugins"].expected == "doctrine"
+    assert violations["plugins"].observed == ""
 
 
 def test_fold_attests_only_when_given_an_expectation(tmp_path: Path) -> None:

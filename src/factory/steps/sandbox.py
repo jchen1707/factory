@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from factory import repo
+from factory import doctrine, repo
 from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
@@ -55,6 +55,11 @@ def build_spec(ctx: Context) -> SandboxSpec:
         # what the per-run version costs). See `steps/clone.py` for the whole shape.
         ctx.clone_mount.mkdir(parents=True, exist_ok=True)
         workspaces.append(Workspace(ctx.clone_mount))
+    # Read-only, and the root rather than one digest: a rebuilt doctrine lands beside the
+    # old one and the workspace set, fixed at creation, does not change.
+    doctrine_root = doctrine.root(ctx.home)
+    doctrine_root.mkdir(parents=True, exist_ok=True)
+    workspaces.append(Workspace(doctrine_root, readonly=True))
     if ctx.project.vault_mount == "rw":
         workspaces.append(Workspace(ctx.registry.vault.path))
     elif ctx.project.vault_mount == "ro":
@@ -199,6 +204,23 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     #     the only place a launch's hooks come from. Without them the canary below proves
     #     a hook no agent calls.
     checks.append(("layer-a-hooks-wired", *layer_a_hooks_wired(ctx.project)))
+
+    # 4c. The doctrine mount. `ensure` attaches to a sandbox made before the mount
+    #     existed, and the CLI drops a `--plugin-dir` it cannot see without a word, so
+    #     without this the first sign is attestation failing after a whole paid run.
+    root = doctrine.root(ctx.home)
+    if doctrine.load(doctrine.config_path(ctx.home)).skills:
+        mounted = ctx.sandbox.exec_sync(spec.name, ["test", "-d", str(root)], timeout=60)
+        checks.append(
+            (
+                "doctrine-mounted",
+                mounted.ok,
+                f"{root} is mounted"
+                if mounted.ok
+                else f"{spec.name} predates the doctrine mount ({root} is not visible in it); "
+                "`sbx rm` it and let the factory recreate it",
+            )
+        )
 
     # 5. The canary. §9.3's rule is that enforcement is proved by producing a refusal,
     #    not by observing the absence of a flag.
