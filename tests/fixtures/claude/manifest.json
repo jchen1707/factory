@@ -69,6 +69,11 @@
       "stderr": "schema-rejected.stderr.txt",
       "exit": 1,
       "source": "measure-n/e1"
+    },
+    "tool-output-nel": {
+      "events": "tool-output-nel.jsonl",
+      "exit": 0,
+      "source": "host claude -p, Bash printf 'x\\302\\205y\\n'"
     }
   }
 }
