@@ -591,16 +591,26 @@ def test_confirm_gone_asks_sbx_nothing_until_the_holder_is_recorded_and_dead(
     assert calls == []
 
 
+@pytest.mark.parametrize("holder", ["unreaped-child", "reused-pid"])
 def test_confirm_gone_trusts_a_stale_heartbeat_over_a_holder_pid_that_looks_alive(
-    tmp_path: Path,
+    tmp_path: Path, holder: str
 ) -> None:
     """An exited holder still answers `kill(pid, 0)` until its parent reaps it, which in
     `factory run` is never, and a pid can be reused. The wrapper's heartbeat stops with
     its VM whatever the pid says."""
-    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    if holder == "unreaped-child":
+        exited = subprocess.Popen(["/usr/bin/true"], stdout=subprocess.PIPE, text=True)
+        assert exited.stdout is not None
+        assert exited.stdout.read() == ""
+        adapter._detached[_SANDBOX] = exited
+        pid = exited.pid
+    else:
+        pid = os.getpid()
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{pid}\n")
     (tmp_path / "heartbeat").write_text(str(int(time.time()) - sbx_module.ORPHAN_AFTER_SECONDS - 1))
 
-    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    assert sbx_module.pid_alive(pid)
     assert adapter.confirm_gone(_handle(tmp_path)) == "sandbox-stopped"
 
 
