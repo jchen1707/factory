@@ -134,8 +134,49 @@ def test_a_torn_last_line_and_a_corrupt_middle_line_do_not_raise(tmp_path: Path)
     assert [c.tool for c in corrupt.tool_calls] == ["Write", "Edit"]
 
 
+def test_a_line_separator_inside_a_tool_result_does_not_cut_the_stream(tmp_path: Path) -> None:
+    # Claude Code's JSON leaves U+2028 unescaped inside strings; it is not a line break.
+    lines = _lines("build-tools")
+    first_result = next(i for i, text in enumerate(lines) if '"type":"tool_result"' in text)
+    wire = json.loads(lines[first_result])
+    wire["message"]["content"][0]["content"] = "line one\u2028line two"
+    lines[first_result] = json.dumps(wire, ensure_ascii=False)
+
+    view = read_stream(_write(tmp_path, lines))
+
+    assert view is not None
+    assert [c.outcome for c in view.tool_calls] == ["ok", "ok", "ok"]
+
+
+def test_a_timestamp_that_is_not_a_string_leaves_the_duration_unknown(tmp_path: Path) -> None:
+    lines = _lines("build-tools")
+    first_result = next(i for i, text in enumerate(lines) if '"type":"tool_result"' in text)
+    wire = json.loads(lines[first_result])
+    wire["timestamp"] = 1791346300
+    lines[first_result] = json.dumps(wire)
+
+    view = read_stream(_write(tmp_path, lines))
+
+    assert view is not None
+    assert view.tool_calls[0].duration_s is None
+
+
+def test_a_tool_input_that_is_not_an_object_is_summarised_by_name(tmp_path: Path) -> None:
+    lines = _lines("build-tools")
+    first_use = next(i for i, text in enumerate(lines) if '"name":"Write"' in text)
+    wire = json.loads(lines[first_use])
+    wire["message"]["content"][0]["input"] = ["not", "an", "object"]
+    lines[first_use] = json.dumps(wire)
+
+    view = read_stream(_write(tmp_path, lines))
+
+    assert view is not None
+    assert view.tool_calls[0].summary == "Write"
+
+
 def test_a_missing_stream_is_none(tmp_path: Path) -> None:
     assert read_stream(tmp_path / "absent.jsonl") is None
+    assert read_stream(tmp_path) is None
 
 
 def test_the_percentage_is_hidden_with_its_reason() -> None:

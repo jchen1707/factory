@@ -208,6 +208,34 @@ def test_a_captured_claude_stream_renders_on_every_console_view(ctx: Context) ->
         assert '<td class="mono exit ok">ok</td>' in row_html
 
 
+def test_a_review_whose_stream_was_collected_does_not_blank_the_run(ctx: Context) -> None:
+    # A review's collect moves its stream out of the scratch its launch record names, so
+    # that record points at nothing; the console falls back to the newest stream present.
+    _to_implementing(ctx)
+    fixtures = Path(__file__).parents[1] / "fixtures" / "claude"
+    _launch_events(ctx).write_text((fixtures / "build-tools.jsonl").read_text())
+    review_events = ctx.home / "review-scratch" / "events.jsonl"
+    review_events.parent.mkdir()
+    review_events.write_text((fixtures / "denied.jsonl").read_text())
+    ctx.store.runtime.start_invocation(
+        f"{ctx.run.id}:{ctx.run.attempt}:review:spec",
+        ctx.run.id,
+        ctx.run.attempt,
+        "review:spec",
+        {"model": ctx.routing.role("reviewer").model, "events": str(review_events), "expected": {}},
+    )
+
+    def tools() -> list[str]:
+        timeline = console_views.run_timeline(
+            ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run
+        )
+        return [call.tool for call in timeline.tool_calls]
+
+    assert tools() == ["Write"]
+    review_events.unlink()
+    assert tools() == ["Write", "Edit", "Bash"]
+
+
 def test_a_pre_claude_attempt_is_named_not_parsed(ctx: Context) -> None:
     # An invocation recorded before the cutover has no stored attestation; its stream is
     # Codex's, which the console no longer reads.

@@ -176,7 +176,7 @@ def _invocation_context_counts(store: Store, run: Run, routing: Routing) -> tupl
             continue
         if "expected" not in invocation["metadata"]:
             continue
-        tokens = (invocation["telemetry"] or {}).get("context", {}).get("tokens")
+        tokens = ((invocation["telemetry"] or {}).get("context") or {}).get("tokens")
         model = invocation["metadata"].get("model", "")
         measured += context_fraction(tokens, model, routing)[0] is not None
     return len(active_ids), measured
@@ -194,9 +194,15 @@ def _activity(launch: StreamView | str) -> str | None:
 
 
 def current_launch(store: Store, run: Run) -> dict[str, Any] | None:
-    """The run's most recently started agent launch in its current attempt, if any."""
+    """The run's most recently started agent launch in its current attempt whose stream is
+    still where the launch record says, else the most recent one.
+
+    A review's collect moves its stream out of the shared scratch into the run's own
+    directory, so the record of a finished review names a file that is gone."""
     launches = [i for i in store.runtime.invocations(run.id) if i["attempt"] == run.attempt]
-    return launches[-1] if launches else None
+    present = [i for i in launches if Path(str(i["metadata"].get("events", ""))).is_file()]
+    chosen = present or launches
+    return chosen[-1] if chosen else None
 
 
 def launch_stream(store: Store, run: Run) -> tuple[StreamView | str, str]:
@@ -210,7 +216,7 @@ def launch_stream(store: Store, run: Run) -> tuple[StreamView | str, str]:
     model = str(launch["metadata"].get("model", ""))
     if "expected" not in launch["metadata"]:
         return PRE_CLAUDE, model
-    view = read_stream(Path(launch["metadata"]["events"]))
+    view = read_stream(Path(str(launch["metadata"].get("events", ""))))
     return view if view is not None else "no event stream for this launch yet", model
 
 

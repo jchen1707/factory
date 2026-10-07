@@ -18,7 +18,7 @@ export function renderFixtureReference({name, fixture}) {
     const complete = fixture.runs.length > 0 && fixture.runs.every(r => r.spend_status === 'complete');
     const values = name === 'runs' ? [
       ['Open runs', fixture.runs.length, 'Displayed runs'],
-      ['Context availability', fixture.runs.reduce((sum, r) => sum + r.fresh_context_invocations, 0), 'Live invocations with fresh context observations'],
+      ['Context availability', fixture.runs.reduce((sum, r) => sum + r.fresh_context_invocations, 0), 'Live invocations with a context measurement'],
       ['Cumulative tokens', observed.length ? observed.reduce((sum, r) => sum + r.tokens_in + r.tokens_out, 0).toLocaleString('en-US') : 'Unavailable', `Displayed runs · ${fixture.runs.every(r => r.usage_status === 'complete') ? 'complete' : 'incomplete'}`],
       ['Estimated cost', costs.length ? `${complete ? '' : '≥ '}$${costs.reduce((sum, r) => sum + r.known_spend_usd, 0).toFixed(2)}` : 'Unavailable', `Displayed runs · API-equivalent USD · ${complete ? 'complete' : 'incomplete / lower bound'}`],
     ] : [

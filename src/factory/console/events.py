@@ -6,7 +6,7 @@ raises: a stream that turns corrupt mid-file shows what was read before the bad 
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -86,8 +86,8 @@ class StreamView:
     tool_calls: tuple[ToolCall, ...]
 
 
-def _epoch(timestamp: str | None) -> float | None:
-    if timestamp is None:
+def _epoch(timestamp: object) -> float | None:
+    if not isinstance(timestamp, str):
         return None
     try:
         return datetime.fromisoformat(timestamp).timestamp()
@@ -104,7 +104,8 @@ _SUMMARY_KEYS = ("command", "file_path", "notebook_path", "pattern", "skill", "u
 
 
 def _summary(use: stream.ToolUse) -> str:
-    value = next((use.input[k] for k in _SUMMARY_KEYS if isinstance(use.input.get(k), str)), "")
+    inputs = use.input if isinstance(use.input, Mapping) else {}
+    value = next((inputs[k] for k in _SUMMARY_KEYS if isinstance(inputs.get(k), str)), "")
     return _clip(str(value)) or use.name
 
 
@@ -125,16 +126,18 @@ def _tolerant(lines: Iterable[str]) -> Iterator[stream.Event]:
 
 def read_stream(events_path: Path) -> StreamView | None:
     """Fold a launch's stream for the console, or `None` when the file is absent."""
-    if not events_path.exists():
-        return None
+    try:
+        text = events_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None  # absent, or moved by a review's collect between ticks
     activity: str | None = None
     context_tokens: int | None = None
     context_at: float | None = None
     issued: dict[str, tuple[stream.ToolUse, float | None]] = {}
     results: dict[str, tuple[bool, float | None]] = {}
     denied: set[str] = set()
-    text = events_path.read_text(encoding="utf-8", errors="replace")
-    for event in _tolerant(text.splitlines()):
+    # `splitlines` would also split on U+2028, which JSON leaves unescaped inside strings.
+    for event in _tolerant(text.split("\n")):
         match event:
             case stream.Message():
                 if event.model != stream.SYNTHETIC:

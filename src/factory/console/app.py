@@ -272,7 +272,7 @@ def _invocation_cards(invocations: list[dict[str, Any]], routing: Routing) -> st
         telemetry = invocation.get("telemetry") or {}
         if "expected" in metadata:
             fraction, reason = context_fraction(
-                telemetry.get("context", {}).get("tokens"), metadata.get("model", ""), routing
+                (telemetry.get("context") or {}).get("tokens"), metadata.get("model", ""), routing
             )
         else:
             fraction, reason = None, console_views.PRE_CLAUDE
@@ -397,7 +397,7 @@ def _usage_cards(rows: list[console_views.RunRow]) -> str:
         + _metric(
             "Context availability",
             str(sum(r.fresh_context_invocations for r in rows)),
-            "Live invocations with fresh context observations",
+            "Live invocations with a context measurement",
         )
         + _metric("Cumulative tokens", tokens, f"Displayed runs · {token_status}")
         + _metric(
