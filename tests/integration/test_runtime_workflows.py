@@ -315,13 +315,17 @@ def test_isolated_delivery_requires_verification_against_current_base(
 
 
 def test_per_run_writable_protocol_mounts_do_not_include_another_run(ctx: Context) -> None:
+    from factory.isolation import project_for_run
     from factory.steps.review import _review_scratch
 
+    registered = ctx.project
     first = ctx.run
     ctx.store.runtime.configure("run", first.id, {"isolation": "per-run"})
+    ctx.project = project_for_run(registered, ctx.run, ctx.store)
     clone_mount, review_mount = ctx.clone_mount, _review_scratch(ctx)
     ctx.run = replace(first, id="another-run")
     ctx.store.runtime.configure("run", ctx.run.id, {"isolation": "per-run"})
+    ctx.project = project_for_run(registered, ctx.run, ctx.store)
     assert not ctx.clone_mount.is_relative_to(clone_mount)
     assert not _review_scratch(ctx).is_relative_to(review_mount)
 

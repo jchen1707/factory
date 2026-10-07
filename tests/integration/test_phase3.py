@@ -1013,10 +1013,6 @@ def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
 def test_a_review_launch_cannot_write_another_runs_review_files(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reviewer holds Bash, and Claude Code does not confine Bash to its cwd (measured
-    c4-default-outside-cwd), so the review sandbox's `rw` mounts are its whole write wall.
-    A second run's reviewer must not be able to reach the first run's live stream, exit or
-    pgid file: a forged `exit` or stream is read as that run's own verdict."""
     fake = _fake(ctx)
     _to_reviewing(ctx)
     other = _second_run_in(ctx, "BAC-9")

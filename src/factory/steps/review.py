@@ -614,32 +614,18 @@ def _land(scratch_out: Path, out_path: Path) -> None:
 
 
 def _review_scratch(ctx: Context) -> Path:
-    """The reviewer's writable ground, and its only one: one directory per **run**.
-
-    Everything the sandbox must read or write lives here. `state/runs/<run>/`, where the
-    review's evidence belongs and where `collect` reads its plan, is **not a workspace of
-    the review sandbox**, so a prompt written there cannot be read and an events file
-    pointed there cannot be written.
-
-    Per run because the reviewer holds Bash and nothing else confines it: Claude Code
-    does not scope a tool to its cwd (measured, c4-default-outside-cwd), so a per-project
-    scratch let one run's reviewer rewrite a sibling run's stream, `exit` or `pgid`. The
-    sandbox is per run for the same reason (`isolation.project_for_run`), and the two
-    must move together: §9.1 fixes a workspace set at creation, so a per-run scratch on a
-    sandbox named per project is refused by `_assert_spec_matches`, as BAC-4 measured.
-    """
-    scratch = ctx.home / "state" / "review" / ctx.project.name / ctx.run.id
+    """Named after the sandbox, because §9.1 fixes a sandbox's mounts at creation: a
+    scratch that varied apart from the name is the spec `_assert_spec_matches` refused on
+    BAC-4."""
+    scratch = ctx.home / "state" / "review" / ctx.project.review_sandbox
     scratch.mkdir(parents=True, exist_ok=True)
     return scratch
 
 
 def _review_spec(ctx: Context, scratch: Path) -> SandboxSpec:
-    """The read-only review sandbox: the project `:ro` + this run's `rw` scratch.
-
-    The read-only mount is the **project root**, not the worktree, because a worktree's
+    """The read-only mount is the **project root**, not the worktree, because a worktree's
     git directory lives in the root (`.git/worktrees/<TICKET>`, objects in `.git`), and a
-    reviewer that cannot run `git diff` cannot review. The worktree sits inside the root
-    at `.factory/worktrees/<TICKET>`, and the sandbox's `-w` puts the reviewer in it.
+    reviewer that cannot run `git diff` cannot review.
 
     `--no-share-skills` (§19 Phase 3 checklist): the reviewer has no skills store, so the
     portable `full-review` skill is reached by inlining it (Tier 2), not by loading a shared

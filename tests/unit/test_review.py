@@ -265,7 +265,7 @@ def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
     project = SimpleNamespace(
         name="python-harness",
         path=tmp_path / "python-harness",
-        review_sandbox="factory-review-python-harness",
+        review_sandbox=f"factory-review-python-harness-{run_id}",
         template="",
     )
     return SimpleNamespace(
@@ -279,8 +279,6 @@ def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
 
 
 def test_the_reviewer_can_write_only_its_own_runs_scratch(tmp_path: Path) -> None:
-    """The reviewer holds Bash, so its one `rw` mount is everything it can write. Two runs
-    of one project must get disjoint ones, and the code under review stays `:ro`."""
     first = _ctx_for_spec(tmp_path, run_id="1effc543d83a459a", ticket="BAC-4")
     second = _ctx_for_spec(tmp_path, run_id="73f500d22e894d9a", ticket="BAC-9")
 

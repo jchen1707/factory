@@ -145,7 +145,6 @@ class Project:
     kits: tuple[str, ...]
     static_mcp: tuple[str, ...]
     build_sandbox: str
-    #: A prefix: each run reviews in `<review_sandbox>-<run id>` (`isolation.project_for_run`).
     review_sandbox: str
     vault_mount: str
     network_allow: tuple[str, ...]

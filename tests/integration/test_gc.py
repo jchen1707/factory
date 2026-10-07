@@ -291,8 +291,6 @@ def test_the_factory_never_touches_a_sandbox_it_does_not_own(ctx: Context) -> No
 def test_the_sandbox_a_run_reviewed_in_is_collected_with_it(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Each run reviews in its own sandbox and the registry names only the prefix, so gc
-    # finds it through the run or every review leaves a VM behind for good.
     _to_reviewing(ctx)
     _stub_redphase(monkeypatch)
     _seed_vendored_review_tree(Path(ctx.run.worktree or ""))

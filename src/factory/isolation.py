@@ -18,8 +18,6 @@ def project_for_run(project: Project, run: Run, store: Store) -> Project:
     return replace(
         project,
         build_sandbox=build or project.build_sandbox,
-        # Per run in every isolation mode: the reviewer holds Bash, so its sandbox's
-        # writable mount is the only wall between it and a sibling run's review files.
         review_sandbox=review or f"{project.review_sandbox}-{run.id}",
     )
 

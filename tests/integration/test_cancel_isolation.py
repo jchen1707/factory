@@ -121,9 +121,8 @@ def test_cancel_stops_recorded_attempt_before_cleanup_and_preserves_busy_sandbox
     monkeypatch.setattr(cli, "_release_local_debris", cleanup)
     cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
     assert calls[0] == ("signal", (own, 321))
-    # Review sandboxes are per run, so a reviewing sibling never holds this run's one.
-    busy = shared and state is State.IMPLEMENTING
-    assert ("stop", own) not in calls if busy else ("stop", own) in calls
+    shares_build_sandbox = shared and state is State.IMPLEMENTING
+    assert ("stop", own) not in calls if shares_build_sandbox else ("stop", own) in calls
     assert ("stop", ctx.project.build_sandbox) not in calls
     row = ctx.store.attempt_row(ctx.run.id, 1, state)
     assert row is not None
