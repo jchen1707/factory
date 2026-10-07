@@ -27,6 +27,7 @@ from pathlib import Path
 
 from factory import (
     artifacts,
+    blocker_resolution,
     candidate_handoff,
     doctor,
     driver,
@@ -1836,6 +1837,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     linear = LinearClient()
     ctx = _context_for(home, registry, routing, store, linear, run)
 
+    if args.blocker_resolution is not None:
+        try:
+            blocker_resolution.record(ctx, args.blocker_resolution, from_state=args.from_state)
+        except Blocked as exc:
+            store.release_lease(ctx.run.id)
+            print(f"{ticket}: [{exc.reason}] {exc.detail}")
+            return 2
+
     if args.prerequisite_evidence:
         try:
             prerequisite_evidence.record(ctx, Path(args.prerequisite_evidence))
@@ -2287,6 +2296,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "ticket/run-bound JSON with James's disposition of every current review finding; "
             "requires --from implementing"
+        ),
+    )
+    resume.add_argument(
+        "--blocker-resolution",
+        metavar="TEXT",
+        help=(
+            "James's answer to the worker's current agent-blocked stop, added to the next "
+            "implementation prompt; plain resume or --from implementing only"
         ),
     )
     resume.set_defaults(func=cmd_resume)

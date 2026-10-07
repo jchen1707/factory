@@ -177,6 +177,31 @@ step 3.
 3. Run `factory cancel <TICKET>`, then `factory run <TICKET>`. `factory resume` cannot
    re-enter `sandbox_creating`, the state this block is raised in (#141).
 
+### `blocked: agent-blocked` — answer the builder
+
+The implementation worker stopped and asked a question; its `blocked_reason` is the
+question. Answer it on the resume:
+
+```
+factory resume <TICKET> --blocker-resolution "Use the existing settings module."
+factory resume <TICKET> --from implementing --blocker-resolution "..."
+```
+
+A plain resume continues the worker's own session when that session can be resumed, so
+the agent that asked reads the answer with its context intact. Otherwise, and always with
+`--from implementing`, a fresh session gets the question and the answer in its prompt. Any
+other `--from` is refused, because those states never prompt the worker. The answer is
+limited to 16 KiB.
+
+The answer is direction. It does not mark the blocker resolved, and it waives no gate,
+test, review finding or policy. If the resume is held for approval or a project slot, or
+the launch fails before the worker starts, the answer is kept and the next resume delivers
+it, with or without the flag. While the run is still `blocked`, rerunning with corrected
+text replaces it. A resume queued for an agent slot has already written its prompt, so the
+answer can no longer be changed until that launch starts or fails. Once a worker has
+started with the answer, or the run is resumed into any state other than `implementing`,
+the answer is spent: if the worker blocks again, the new block needs a new answer.
+
 ### `blocked` with any other reason — a judgement call
 
 Every other `blocked` reason is a human judgement: `evidence-mismatch`, `gates-incomplete`,

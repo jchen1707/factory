@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from factory import agent_run
+from factory import agent_run, blocker_resolution
 from factory.machine import AUTOMATIC, Blocked, Resumable, State, requires_human_rule
 
 if TYPE_CHECKING:
@@ -765,6 +765,8 @@ def continuation_prompt(ctx: Context) -> str:
             if row["detail"]:
                 lines += ["```", str(row["detail"])[:2000], "```", ""]
             break
+
+    lines += blocker_resolution.prompt_section(ctx)
 
     # A later host repair does not rewrite the frozen ticket/specification or a historical
     # transition.  It is a separately audited fact, scoped to this run, whose retained
