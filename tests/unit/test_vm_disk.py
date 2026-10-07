@@ -51,14 +51,42 @@ def test_the_byte_floor_is_checked_on_its_own() -> None:
     ]
 
 
-def test_a_clone_workspace_on_the_root_mount_is_reported_once() -> None:
+def test_a_clone_workspace_on_the_root_mount_is_reported_once_at_its_lowest() -> None:
+    # Two reads of one live filesystem can differ; the lower one is the truth that matters.
     lines = _fixture("df-inodes-exhausted.txt").splitlines()
-    lines[1], lines[4] = lines[2], lines[5]
+    lines[1] = lines[2].replace("19325276", "19325300")
+    lines[4] = lines[5].replace("1310720          0", "1310720         12")
     rows = vm_disk.parse("\n".join(lines), ("/Users/x/project", vm_disk.VM_HOME))
     assert vm_disk.shortfalls(rows, min_free_gb=2, min_free_inodes=50_000) == [
-        "/Users/x/project on /: 0 inodes free, floor 50,000"
+        "/home/agent on /: 0 inodes free, floor 50,000"
     ]
     assert vm_disk.summary(rows) == "/: 19.8 GB and 0 inodes free"
+
+
+@pytest.mark.parametrize(("floor", "short"), [(1310620, False), (1310621, True)])
+def test_the_inode_floor_is_a_minimum_that_may_be_met_exactly(floor: int, short: bool) -> None:
+    rows = vm_disk.parse(_fixture("df-fresh.txt"), PATHS)
+    assert bool(vm_disk.shortfalls(rows, min_free_gb=0, min_free_inodes=floor)) is short
+
+
+def test_a_filesystem_without_an_inode_count_is_not_out_of_inodes() -> None:
+    untracked = _fixture("df-fresh.txt").replace(
+        "host           1303878528 37768248 1266110280    3%",
+        "host                    0        0          0     -",
+    )
+    rows = vm_disk.parse(untracked, PATHS)
+    assert rows[0].inodes_free is None
+    assert vm_disk.shortfalls(rows, min_free_gb=2, min_free_inodes=50_000) == []
+    assert vm_disk.summary(rows).startswith(
+        "/private/tmp/inode-probe-ws: 129.6 GB and no inode count"
+    )
+
+
+def test_lines_sbx_prints_before_the_tables_are_ignored() -> None:
+    # Measured on 2026-10-07: an exec that starts a stopped sandbox prints this line ahead of
+    # the command's output. Which stream it is on was not captured, so stdout is assumed.
+    started = "Sandbox factory-build-x started successfully\n" + _fixture("df-fresh.txt")
+    assert vm_disk.parse(started, PATHS) == vm_disk.parse(_fixture("df-fresh.txt"), PATHS)
 
 
 @pytest.mark.parametrize(

@@ -140,7 +140,8 @@ the `df` probe itself failed.
    2026-10-07; `sbx rm` is then the only way out. Read the preservation boundary in
    [the incident archive](archive/codex-era-build-runtime-incidents.md) before removing
    any VM that holds a run's source.
-3. Run `factory resume <TICKET>`.
+3. Run `factory cancel <TICKET>`, then `factory run <TICKET>`. `factory resume` cannot
+   re-enter `sandbox_creating`, the state this block is raised in.
 
 ### `blocked` with any other reason — a judgement call
 

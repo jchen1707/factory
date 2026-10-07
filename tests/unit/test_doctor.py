@@ -326,13 +326,18 @@ class _BuildVMs:
         return Completed(tuple(argv), self.returncode, self.stdout, "")
 
 
-def _vm_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vms: _BuildVMs) -> dict[str, Result]:
+def _vm_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vms: _BuildVMs, *, inode_floor: int = 50_000
+) -> dict[str, Result]:
     ctx, _ = doctor.load_context(_home(tmp_path))
     assert ctx.registry is not None
     assert ctx.store is not None
     first = next(iter(ctx.registry.projects.values()))
     registry = dataclasses.replace(
         ctx.registry,
+        defaults=dataclasses.replace(
+            ctx.registry.defaults, vm_min_free_gb=2, vm_min_free_inodes=inode_floor
+        ),
         projects={
             "full": dataclasses.replace(first, name="full", build_sandbox="factory-build-full"),
             "new": dataclasses.replace(first, name="new", build_sandbox="factory-build-new"),
@@ -383,3 +388,14 @@ def test_the_build_vm_row_is_skipped_without_sbx(
     assert rows
     assert {r.status for r in rows} == {Status.SKIPPED}
     assert "not signed in" in rows[0].detail
+
+
+@pytest.mark.parametrize(("inode_floor", "status"), [(50_000, Status.OK), (2_000_000, Status.FAIL)])
+def test_the_build_vm_row_judges_a_fresh_vm_by_the_registry_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inode_floor: int, status: Status
+) -> None:
+    fresh = (HOME / "tests" / "fixtures" / "sbx" / "df-fresh.txt").read_text()
+    rows = _vm_rows(
+        tmp_path, monkeypatch, _BuildVMs({"factory-build-full"}, fresh), inode_floor=inode_floor
+    )
+    assert rows["build VM disk for full"].status is status
