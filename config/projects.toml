@@ -69,7 +69,8 @@ inconclusive_alarm_pct = 40
 worktree_days = 7
 sandbox_idle_hours = 12
 # Far above the idle hours on purpose: stopping a sandbox costs a restart, removing
-# one costs rebuilding the image cache.
+# one costs rebuilding the image cache. gc never removes a build VM while a run that
+# used it is neither completed nor cancelled: the run's Claude session lives there.
 sandbox_rm_days = 14
 artifact_days = 60
 

@@ -34,15 +34,19 @@ def _fake(ctx: Context) -> FakeSandbox:
     return ctx.sandbox
 
 
-def _finished_run(ctx: Context, state: State = State.CANCELLED) -> None:
-    """A run with a real worktree and branch, parked in a collectable state and aged."""
+def _finished_run(
+    ctx: Context, state: State = State.CANCELLED, via: tuple[State, ...] = ()
+) -> None:
+    """A run with a real worktree and branch, parked in `state` by way of `via` and aged."""
     claim_step.run(ctx)
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
-    ctx.store.record_transition(
-        ctx.run.id, from_state=ctx.state, to_state=state, actor="human", rule="test"
-    )
+    for hop in (*via, state):
+        ctx.store.record_transition(
+            ctx.run.id, from_state=ctx.state, to_state=hop, actor="human", rule="test"
+        )
+        ctx.refresh()
     # Both clocks, because §16.5's floor now counts from the transition that parked the
     # run rather than from the row's last write. Ageing `updated_at` alone is what these
     # tests used to do, and it stopped ageing anything the moment the clock moved.
@@ -426,3 +430,35 @@ def test_sandbox_cleanup_failure_is_reported_without_claiming_removal(
     assert removals
     assert any("failed (exit 1)" in action.why for action in removals)
     assert all(not action.done for action in removals)
+
+
+@pytest.mark.parametrize(
+    ("state", "via"),
+    [
+        (State.SUSPENDED, (State.IMPLEMENTING,)),
+        (State.RESUMABLE, (State.IMPLEMENTING,)),
+        (State.BLOCKED, (State.IMPLEMENTING,)),
+        (State.FAILED, (State.IMPLEMENTING, State.RESUMABLE)),
+    ],
+)
+def test_a_vm_a_run_can_still_resume_in_is_never_removed(
+    ctx: Context, state: State, via: tuple[State, ...]
+) -> None:
+    # The run's Claude session lives in its build VM, and the next attempt resumes it with
+    # `--resume`. Removing the VM turns that resume into `session-lost` (#130). Stopping it
+    # keeps the disk, so only removal is refused.
+    _finished_run(ctx, state, via)
+    build = ctx.project.build_sandbox
+    fake = _fake(ctx)
+    [spec] = fake.created
+    review = ctx.project.review_sandbox
+    fake.created.append(replace(spec, name=review))
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert build in fake.names()
+    assert review not in fake.names()
+    removals = [a for a in _kinds(actions, "sandbox-remove") if a.target == build]
+    assert [a.done for a in removals] == [False]
+    assert f"({state}) can still resume in it" in removals[0].why
+    assert [a.done for a in _kinds(actions, "sandbox-stop") if a.target == build] == [True]

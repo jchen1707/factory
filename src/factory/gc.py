@@ -272,11 +272,13 @@ def _sweep_sandboxes(
     for project in registry.projects.values():
         active = store.active_runs_for_project(project.name)
         users_of: dict[str, list[Run]] = {project.build_sandbox: [], project.review_sandbox: []}
+        builders: dict[str, list[Run]] = {}
         for run in store.all_runs():
             if run.project == project.name:
                 resolved = project_for_run(project, run, store)
                 for used in {resolved.build_sandbox, resolved.review_sandbox}:
                     users_of.setdefault(used, []).append(run)
+                builders.setdefault(resolved.build_sandbox, []).append(run)
         for name in sorted(users_of.keys() & existing):
             if not name or not policy.sandbox_is_factory_owned(name):
                 continue
@@ -291,7 +293,12 @@ def _sweep_sandboxes(
                 (run.updated_at for run in users), default=_last_activity(store, project.name)
             )
             idle = now - last_activity
-            if idle >= rm_floor:
+            # A stopped build VM keeps its disk; a removed one loses the Claude session the
+            # run's next attempt resumes with `--resume` (#130). Review launches never resume.
+            resumer = next(
+                (run for run in builders.get(name, []) if run.state not in TERMINAL), None
+            )
+            if idle >= rm_floor and resumer is None:
                 actions += _act_on_sandbox(
                     sandbox,
                     "sandbox-remove",
@@ -300,6 +307,9 @@ def _sweep_sandboxes(
                     dry_run=dry_run,
                 )
             elif idle >= idle_floor:
+                if idle >= rm_floor and resumer is not None:
+                    why = f"kept: run {resumer.id} ({resumer.state}) can still resume in it"
+                    actions.append(Action("sandbox-remove", name, why, False))
                 actions += _act_on_sandbox(
                     sandbox, "sandbox-stop", name, f"idle {idle / 3600:.0f}h", dry_run=dry_run
                 )
