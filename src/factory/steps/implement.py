@@ -312,6 +312,7 @@ def _check_vault(ctx: Context, attempt: int, before: dict[str, tuple[int, int, s
 
     - Inside the allowlist the writer is known — layer A's distiller hook, which only adds
       or rewrites its own dated note — so a **deletion** there is the run's, and blocks.
+      The hook's own capture-lock cleanup is the exception, recorded like the next case.
     - Outside it, nothing identifies the writer. Those changes are recorded as a `warn` and
       the attempt continues.
 
@@ -348,7 +349,8 @@ def _check_vault(ctx: Context, attempt: int, before: dict[str, tuple[int, int, s
         # The reason names which half fired, so a `warn` row is not read as a near-miss
         # of the blocking rule. They are different findings about different evidence.
         reason=(
-            f"{len(unattributable)} change(s) outside the allowlist, attributed to nobody"
+            f"{len(unattributable)} change(s) outside the allowlist or transient-lock "
+            "cleanup, attributed to nobody"
             if status == "warn"
             else None
         ),

@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -336,6 +337,17 @@ def vault_writes_outside_allowlist(
     return sorted(set(offending), key=lambda c: (c.kind, c.path))
 
 
+# The distiller hook (`session_learnings.mjs`, `distilTranscript`) holds
+# `Project Learnings/._capture-<sha256 of session id>.lock/owner.json` while it captures and
+# removes it on exit. A capture by another session that straddles the snapshot shows up as
+# that file deleted, by the hook rather than by the run.
+_CAPTURE_LOCK_OWNER = re.compile(r"Project Learnings/\._capture-[0-9a-f]{64}\.lock/owner\.json")
+
+
+def _capture_lock_cleanup(change: VaultChange) -> bool:
+    return change.kind == "deleted" and _CAPTURE_LOCK_OWNER.fullmatch(change.path) is not None
+
+
 def disallowed_vault_writes(
     changes: Sequence[VaultChange], allowlist: Sequence[str]
 ) -> list[VaultChange]:
@@ -345,10 +357,15 @@ def disallowed_vault_writes(
     but seeing a change and attributing one are different things, and only inside the
     allowlist are they the same. There, the factory knows who the writer is: layer A's
     distiller hook, which only ever adds or rewrites its own dated note. A deletion is
-    therefore not the hook's work and belongs to the run that was executing.
+    therefore not the hook's work and belongs to the run that was executing, with one
+    exception: the hook's own capture-lock cleanup (`_CAPTURE_LOCK_OWNER`).
     """
     return sorted(
-        {c for c in changes if _matches(c.path, allowlist) and c.kind == "deleted"},
+        {
+            c
+            for c in changes
+            if _matches(c.path, allowlist) and c.kind == "deleted" and not _capture_lock_cleanup(c)
+        },
         key=lambda c: (c.kind, c.path),
     )
 
@@ -356,7 +373,8 @@ def disallowed_vault_writes(
 def unattributable_vault_changes(
     changes: Sequence[VaultChange], allowlist: Sequence[str]
 ) -> list[VaultChange]:
-    """Everything that moved outside the allowlist during the attempt window.
+    """Everything that moved outside the allowlist during the attempt window, plus the
+    hook's capture-lock cleanup inside it.
 
     Recorded, never blocking, and the distinction cost a real attempt to learn. BAC-10
     attempt 1 was failed for `Getting Promoted/Daily takeaways/Raw notes.md` — a file the
@@ -373,6 +391,6 @@ def unattributable_vault_changes(
     running when it happened — which is where someone would look.
     """
     return sorted(
-        {c for c in changes if not _matches(c.path, allowlist)},
+        {c for c in changes if not _matches(c.path, allowlist) or _capture_lock_cleanup(c)},
         key=lambda c: (c.kind, c.path),
     )
