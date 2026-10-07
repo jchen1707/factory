@@ -17,7 +17,7 @@ from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
 from factory.registry import Project
-from factory.sandbox import vm_disk
+from factory.sandbox import authority_probe, vm_disk
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.steps import Context, advance
 
@@ -39,6 +39,7 @@ def run(ctx: Context) -> None:
     ctx.log("sandbox.ready", sandbox=spec.name, template=spec.template or "(agent default)")
 
     _vm_disk_floor(ctx, spec)
+    _authority_read_only(ctx, spec)
     preflight(ctx, spec)
     advance(ctx, State.SANDBOX_READY)
 
@@ -119,6 +120,40 @@ def _vm_disk_floor(ctx: Context, spec: SandboxSpec) -> None:
     )
     if short:
         raise Blocked("vm-disk-below-floor", "; ".join(short))
+
+
+def _authority_read_only(ctx: Context, spec: SandboxSpec) -> None:
+    """Refuse to launch unless the VM itself refuses a write to this run's captured authority.
+
+    `ensure` proved sbx lists the authority mount as `:ro`; only a write attempt from inside
+    the VM proves the write is refused. Before the enforcement preflight, so a writable
+    capture blocks under its own reason.
+    """
+    snapshot = ctx.store.runtime.policy(ctx.run.id)
+    if snapshot is None:
+        return
+    paths = authority_probe.targets([*snapshot["files"], "snapshot.json"])
+    try:
+        observed = authority_probe.observe(ctx.sandbox, spec.name, snapshot["root"], paths)
+    except authority_probe.ProbeError as exc:
+        ctx.store.record_check(
+            ctx.run.id, ctx.run.attempt, "preflight:authority-read-only", "fail", detail=str(exc)
+        )
+        raise Blocked("authority-unverified", str(exc)) from exc
+    unprotected = authority_probe.unprotected(observed)
+    ctx.store.record_check(
+        ctx.run.id,
+        ctx.run.attempt,
+        "preflight:authority-read-only",
+        "fail" if unprotected else "pass",
+        detail=("; ".join(unprotected) or f"{len(paths)} paths refused writes with EROFS")[:2000],
+    )
+    if unprotected:
+        raise Blocked(
+            "authority-not-read-only",
+            f"{len(unprotected)} of {len(paths)} paths under {snapshot['root']} in {spec.name} "
+            "did not refuse a write: " + "; ".join(unprotected)[:500],
+        )
 
 
 def _capability_env(ctx: Context, spec: SandboxSpec) -> list[str]:

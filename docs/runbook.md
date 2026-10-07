@@ -143,6 +143,34 @@ the `df` probe itself failed.
 3. Run `factory cancel <TICKET>`, then `factory run <TICKET>`. `factory resume` cannot
    re-enter `sandbox_creating`, the state this block is raised in.
 
+### `blocked: authority-not-read-only` — the build VM can write the run's captured authority
+
+Before any agent launch, the preflight tries to write every file of the run's captured
+authority from inside the build VM, and to create a directory in each folder that holds one.
+Only `EROFS`, a read-only file system, passes. The check row `preflight:authority-read-only`
+lists each path that did not refuse, with what it answered instead.
+
+`authority-unverified` means the `node` probe itself failed, for example because the VM has
+no `node` or the exec timed out. The check row holds the error. Fix what it names, then go to
+step 3.
+
+1. Read the outcome on each listed path.
+   - `writable` means a mount inside the VM does not enforce read-only, for example a
+     writable mount nested under `state/authority/<project>`. sbx's own `:ro` share refused
+     every write in the 2026-10-07 measurement, even after a remount inside the VM.
+   - `EACCES` means the captured file has no owner write bit. The permission check runs
+     before the read-only one, so the probe cannot see the mount. Restore the write bit on
+     that file in the project's checkout. The capture copies the vendored and review trees
+     with their modes.
+   - `ENOENT`, `not-a-file` or `not-a-directory` means the VM does not see what the host
+     published at that path. Either the mount is missing or something inside the VM covers it.
+2. For every outcome except `EACCES`, stop the build VM and `sbx rm` it; the factory
+   creates a fresh one with the `:ro` mount. Read the preservation boundary in
+   [the incident archive](archive/codex-era-build-runtime-incidents.md) before removing any VM
+   that holds a run's source.
+3. Run `factory cancel <TICKET>`, then `factory run <TICKET>`. `factory resume` cannot
+   re-enter `sandbox_creating`, the state this block is raised in (#141).
+
 ### `blocked` with any other reason — a judgement call
 
 Every other `blocked` reason is a human judgement: `evidence-mismatch`, `gates-incomplete`,

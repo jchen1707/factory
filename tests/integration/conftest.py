@@ -25,7 +25,7 @@ from factory.intake.linear import Issue
 from factory.machine import State
 from factory.registry import load_registry
 from factory.routing import load_routing
-from factory.sandbox import vm_disk
+from factory.sandbox import authority_probe, vm_disk
 from factory.sandbox.base import Completed, Gone, RunHandle, RunResult, RunStatus, SandboxSpec
 from factory.steps import Context
 from factory.steps import implement as implement_step
@@ -242,6 +242,9 @@ class FakeSandbox:
     vm_df: str = field(
         default_factory=lambda: (FIXTURES / "sbx" / "df-fresh.txt").read_text(encoding="utf-8")
     )
+    #: What the in-VM write probe answers for a path that exists on the host; a missing one
+    #: answers `ENOENT`. `EROFS` everywhere is a `:ro` mount, as measured on 2026-10-07.
+    authority_writes: dict[str, str] = field(default_factory=dict)
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -490,6 +493,15 @@ class FakeSandbox:
             return Completed(tuple(argv), code, body, "")
         if list(argv[:3]) == vm_disk.probe_argv(())[:3]:
             return Completed(tuple(argv), 0, self.vm_df, "")
+        if list(argv) == authority_probe.probe_argv():
+            request = json.loads(stdin or "{}")
+            answer = {
+                path: self.authority_writes.get(path, "EROFS")
+                if (Path(request["root"]) / path).exists()
+                else "ENOENT"
+                for path in request["paths"]
+            }
+            return Completed(tuple(argv), 0, json.dumps(answer) + "\n", "")
         if argv and argv[-1].endswith("protect_paths.mjs"):
             return Completed(
                 tuple(argv), self.canary_exit, "", "Refusing to edit uv.lock - regenerate it."
