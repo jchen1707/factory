@@ -232,6 +232,7 @@ All commands below use `uv run factory`:
 | `review-disposition-check BAC-6 PATH` | Validate a completed decision document without writing Factory state |
 | `resume BAC-6 --from implementing --review-disposition PATH` | Retain James's ticket/run/review-bound finding decisions and render them into a fresh repair prompt; see the [review disposition handoff](review-disposition-handoff.md) |
 | `resume BAC-6 --prerequisite-evidence PATH` | Retain fresh, ticket-bound proof that a host prerequisite was repaired and add it to the next implementer prompt; see the [prerequisite resolution handoff](prerequisite-resolution-handoff.md) |
+| `resume BAC-6 --blocker-resolution "TEXT"` | Answer the builder's current `agent-blocked` question in the next implementation prompt; plain resume or `--from implementing` |
 | `resume BAC-6 --authorise` | Explicitly re-authorize an exhausted run |
 | `accept BAC-6 --note "decision"` | Record a human review-escalation decision |
 | `cancel BAC-6 --reason "duplicate"` | Cancel owned work and retain anything unsafe to clean |
