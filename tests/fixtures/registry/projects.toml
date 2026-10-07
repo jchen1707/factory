@@ -1,0 +1,36 @@
+# A synthetic registry for the parser tests. Not host configuration and not the live
+# project inventory, so adding or removing a live project never touches it.
+[vault]
+path = "/disposable/vault"
+
+[defaults]
+deny_network = ["mcp.linear.app"]
+concurrency_per_project = 1
+
+[projects.gitlab-app]
+team = "GLA"
+path = "/disposable/gitlab-app"
+remote = "git@example.invalid:group/gitlab-app.git"
+base_branch = "example-branch"
+stack = "python"
+forge = "gitlab"
+build_sandbox = "factory-build-gitlab-app"
+review_sandbox = "factory-review-gitlab-app"
+concurrency_per_project = 2
+
+[projects.gitlab-app.env]
+UV_PROJECT_ENVIRONMENT = "/home/agent/venvs/gitlab-app/{run}"
+
+[projects.gitlab-app.sandbox_delivery]
+api_url = "https://example.invalid"
+project_path = "group/gitlab-app"
+placeholder_env = "FACTORY_GITLAB_TOKEN"
+
+[projects.github-app]
+team = "GHA"
+path = "/disposable/github-app"
+remote = "https://github.com/example/github-app.git"
+base_branch = "main"
+stack = "frontend"
+build_sandbox = "factory-build-github-app"
+review_sandbox = "factory-review-github-app"

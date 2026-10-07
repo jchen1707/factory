@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,11 @@ from factory.machine import Blocked
 from factory.registry import RegistryError, load_registry
 
 HOME = Path(__file__).resolve().parents[2]
+#: The parser tests read this synthetic registry. Only the `test_the_shipped_registry_*`
+#: guards read `config/projects.toml`, and each asserts a policy every project must meet,
+#: so retiring a project never fails a test.
+EXAMPLE = HOME / "tests/fixtures/registry/projects.toml"
+SHIPPED = HOME / "config/projects.toml"
 
 TWO_TEAMS = """
 [vault]
@@ -46,10 +52,10 @@ build_sandbox = "factory-build-python-harness"
 """
 
 
-def test_the_shipped_registry_loads() -> None:
-    registry = load_registry(HOME / "config" / "projects.toml")
-    assert set(registry.projects) == {"nemoclaw-dev", "factory-crud-verification"}
-    assert registry.projects["nemoclaw-dev"].base_ref == "origin/james/feat/prototype"
+def test_the_example_registry_loads() -> None:
+    registry = load_registry(EXAMPLE)
+    assert set(registry.projects) == {"gitlab-app", "github-app"}
+    assert registry.projects["gitlab-app"].base_ref == "origin/example-branch"
 
 
 def test_two_projects_claiming_one_team_refuse_to_load(tmp_path: Path) -> None:
@@ -69,32 +75,36 @@ def test_main_is_refused_as_a_base_branch_for_the_harness_repos(tmp_path: Path) 
 
 
 def test_unknown_team_is_not_eligible_rather_than_an_error() -> None:
-    registry = load_registry(HOME / "config" / "projects.toml")
+    registry = load_registry(EXAMPLE)
     with pytest.raises(Blocked) as caught:
         registry.resolve("ZZZ-1")
     assert caught.value.reason == "unknown-team"
 
 
 def test_resolution_uses_the_identifier_prefix() -> None:
-    registry = load_registry(HOME / "config" / "projects.toml")
-    # BAC was python-harness's until 2026-08-31; the retired block is commented out in
-    # `projects.toml` and the team key handed over, because two projects cannot claim one.
-    assert registry.resolve("BAC-4").name == "nemoclaw-dev"
-    assert registry.resolve("FRO-7").name == "factory-crud-verification"
+    registry = load_registry(EXAMPLE)
+    assert registry.resolve("GLA-4").name == "gitlab-app"
+    assert registry.resolve("GHA-7").name == "github-app"
 
 
-def test_python_project_carries_the_measured_uv_environment_fix() -> None:
+def test_the_shipped_registry_gives_every_python_project_the_uv_environment_fix() -> None:
     # p0-3: a sandbox `uv sync` against the bind-mounted workspace destroyed the host
-    # venv. This env var is the measured mitigation, so its absence is a regression.
-    project = load_registry(HOME / "config" / "projects.toml").projects["nemoclaw-dev"]
-    assert project.env["UV_PROJECT_ENVIRONMENT"].startswith("/home/agent/")
+    # venv. This env var is the measured mitigation, so its absence is a regression. Two
+    # writers share one build VM, so above one writer the path must also be per run.
+    registry = load_registry(SHIPPED)
+    for project in registry.projects.values():
+        if project.stack == "python":
+            uv_env = project.env["UV_PROJECT_ENVIRONMENT"]
+            assert uv_env.startswith("/home/agent/"), project.name
+            if registry.concurrency_for(project) > 1:
+                assert "{run}" in uv_env, project.name
 
 
 def test_the_shipped_registry_denies_the_mcp_gateway_endpoint() -> None:
     # §8.7's compensating control for `mcpgateway`, which `sbx` uploads into every
     # sandbox and which no per-sandbox flag can remove. Losing this row would leave the
     # narrowed secret check with nothing behind it.
-    registry = load_registry(HOME / "config" / "projects.toml")
+    registry = load_registry(SHIPPED)
     assert "mcp.linear.app" in registry.defaults.deny_network
 
 
@@ -155,12 +165,11 @@ def test_a_project_that_declares_no_sensitive_paths_gets_an_empty_tuple(tmp_path
     assert registry.projects["silent"].sensitive_paths == ()
 
 
-def test_the_real_registry_declares_sensitive_paths_that_match_something() -> None:
+def test_the_shipped_registry_declares_well_formed_sensitive_paths() -> None:
     # The regression this whole change exists for. `doctor` runs the same check against the
-    # working copies; this one asserts the far cheaper half — that the globs are at least
-    # well-formed and non-empty for the two projects that declare them — without needing
-    # either repository to be checked out.
-    registry = load_registry(HOME / "config" / "projects.toml")
+    # working copies; this one asserts the far cheaper half, that the globs are at least
+    # well-formed, without needing any repository to be checked out.
+    registry = load_registry(SHIPPED)
 
     for project in registry.projects.values():
         for glob in project.sensitive_paths:
@@ -177,19 +186,18 @@ def test_a_project_that_omits_the_forge_key_still_delivers_to_github() -> None:
     # Every project predating the GitLab adapter omits the key, and the delivery path must
     # not change under them. A default that had to be written out in `projects.toml` would
     # have made this a migration.
-    registry = load_registry(HOME / "config" / "projects.toml")
+    registry = load_registry(EXAMPLE)
 
-    assert registry.projects["factory-crud-verification"].forge == "github"
+    assert registry.projects["github-app"].forge == "github"
 
 
-def test_the_shipped_registry_routes_nemoclaw_to_gitlab() -> None:
-    # The first non-GitHub project. Pinned because `forge` decides which CLI's keyring
-    # credential a push authenticates with, and a silent revert to the default would push
-    # to a GitHub remote that does not exist rather than failing.
-    registry = load_registry(HOME / "config" / "projects.toml")
-
-    assert registry.projects["nemoclaw-dev"].forge == "gitlab"
-    assert registry.projects["nemoclaw-dev"].remote.startswith("git@172.18.194.183:")
+def test_the_shipped_registry_names_a_forge_for_every_non_github_remote() -> None:
+    # `forge` decides which CLI's keyring credential a push authenticates with, and a
+    # silent revert to the default would push to a GitHub remote that does not exist
+    # rather than failing.
+    for project in load_registry(SHIPPED).projects.values():
+        if project.forge == "github":
+            assert re.match(r"(https://|git@)github\.com[/:]", project.remote), project.name
 
 
 def test_a_project_can_name_gitlab(tmp_path: Path) -> None:
@@ -256,17 +264,23 @@ def _sandbox_delivery(tmp_path: Path, *, table: str = _FULL_TABLE, extra: str = 
 
 
 def test_sandbox_delivery_is_absent_for_every_project_that_does_not_declare_it() -> None:
+    registry = load_registry(EXAMPLE)
+    assert registry.projects["github-app"].sandbox_delivery is None
+    declared = registry.projects["gitlab-app"].sandbox_delivery
+    assert declared is not None
+    assert declared.placeholder_env == "FACTORY_GITLAB_TOKEN"
+
+
+def test_the_shipped_registry_grants_in_vm_delivery_to_no_new_project() -> None:
     """The strong default, asserted on the shipped file rather than on a fixture.
 
     `None` is what keeps §13.2 true: `forge.for_delivery` returns the host adapter and
     `policy.capability_secrets` admits nothing. A project acquiring this table by accident
-    would be a boundary change with no diff in `src/`.
+    would be a boundary change with no diff in `src/`, so a new one has to be named here.
     """
-    registry = load_registry(HOME / "config" / "projects.toml")
-    assert registry.projects["factory-crud-verification"].sandbox_delivery is None
-    declared = registry.projects["nemoclaw-dev"].sandbox_delivery
-    assert declared is not None
-    assert declared.placeholder_env == "FACTORY_GITLAB_TOKEN"
+    registry = load_registry(SHIPPED)
+    declared = {p.name for p in registry.projects.values() if p.sandbox_delivery is not None}
+    assert declared <= {"nemoclaw-dev"}
 
 
 def test_the_sandbox_delivery_table_is_normalised(tmp_path: Path) -> None:
@@ -397,7 +411,7 @@ def test_a_zero_writer_limit_refuses_to_load(tmp_path: Path) -> None:
         load_registry(path)
 
 
-def test_the_shipped_registry_gives_nemoclaw_two_writers() -> None:
-    registry = load_registry(HOME / "config" / "projects.toml")
-    assert registry.concurrency_for(registry.projects["nemoclaw-dev"]) == 2
-    assert registry.concurrency_for(registry.projects["factory-crud-verification"]) == 1
+def test_a_project_raise_and_the_default_both_reach_concurrency_for() -> None:
+    registry = load_registry(EXAMPLE)
+    assert registry.concurrency_for(registry.projects["gitlab-app"]) == 2
+    assert registry.concurrency_for(registry.projects["github-app"]) == 1
