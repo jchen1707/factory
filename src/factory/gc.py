@@ -7,13 +7,15 @@ the cost of keeping them is disk and the cost of removing one is somebody's work
 
 Two properties hold everywhere in this module.
 
-**`--dry-run` executes nothing.** Every step returns the same `Action` list either way
+**`--dry-run` changes nothing.** Every step returns the same `Action` list either way
 and only the `done` flag differs, so the plan a dry run prints is the plan the real
 sweep performs rather than a second implementation of it that could drift.
 
-**It never removes a directory tree itself.** `git worktree remove` — with `unlock`
+**It never removes a host directory tree itself.** `git worktree remove` — with `unlock`
 then `--force` when git refuses (F15) — is the only path, and `shutil.rmtree` appears
 here exactly once: on an artifact directory the factory wrote and owns end to end.
+Inside a build VM it removes only the per-ticket directories a project's env names
+with `{run}`, and only by their literal path.
 """
 
 from __future__ import annotations
@@ -21,19 +23,23 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from factory import artifacts, policy, repo
 from factory.delivery import forge as forge_dispatch
+from factory.isolation import project_for_run
 from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
+from factory.sandbox import vm_disk
 from factory.sandbox.base import SandboxAdapter
 from factory.sandbox.sbx import SbxError
 from factory.steps import bind_factory_dir
 from factory.store import Run, Store
 
-__all__ = ["Action", "sweep"]
+__all__ = ["Action", "sweep", "vm_dir_argv"]
 
 #: The states whose leftovers are collectable. `failed` joins §5.1's two terminal states
 #: because §16.5 names it explicitly: a run out of budget is finished in every sense that
@@ -47,7 +53,8 @@ DAY_SECONDS = 86_400
 @dataclass(frozen=True)
 class Action:
     #: A stable slug — `worktree-remove`, `branch-delete`, `artifact-archive`,
-    #: `sandbox-stop`, `sandbox-remove`, `artifact-delete`, `distil-backlog`.
+    #: `vm-dir-remove`, `vm-disk`, `sandbox-stop`, `sandbox-remove`, `artifact-delete`,
+    #: `distil-backlog`.
     kind: str
     target: str
     #: Why this was done, or — when `done` is False — why it was not. A refusal that
@@ -94,7 +101,14 @@ def sweep(
             )
             continue
         actions += _collect_run(home, registry, store, run, dry_run=dry_run, now=clock)
-    actions += _sweep_sandboxes(registry, store, sandbox, dry_run=dry_run, now=clock)
+    try:
+        existing = sandbox.names()
+    except SbxError as exc:
+        actions.append(Action("sandbox-list", "sbx ls", f"refused: {exc}", False))
+    else:
+        # Before the sandbox step, which may stop the VM this one needs running.
+        actions += _sweep_vm_dirs(registry, store, sandbox, existing, dry_run=dry_run)
+        actions += _sweep_sandboxes(registry, store, sandbox, existing, dry_run=dry_run, now=clock)
     actions += _distil(registry, dry_run=dry_run)
     actions += _trim_artifacts(home, registry, dry_run=dry_run, now=clock)
     return actions
@@ -238,6 +252,134 @@ def _delete_branch(project: Project, run: Run, why: str, *, dry_run: bool) -> li
 
 
 # --------------------------------------------------------------------------------
+# Per-ticket directories inside a build VM
+# --------------------------------------------------------------------------------
+
+#: Prints `<status> <path>` for each candidate directory that exists. A path that resolves
+#: elsewhere, through a symlink or `..` anywhere along it, is refused: the bind-mounted
+#: workspace is writable from inside the VM, and a link must not aim the removal at it.
+#: `rm` runs from inside the checked parent, so a link swapped in after the check is
+#: removed itself rather than followed.
+_VM_DIR_SCRIPT = """mode=$1; shift
+for p; do
+  [ -d "$p" ] || continue
+  parent=${p%/*}
+  if [ "$(realpath -e -- "$p")" != "$p" ]; then echo "refused $p"
+  elif [ "$mode" = list ]; then echo "present $p"
+  elif (cd -P -- "$parent" && [ "$(pwd -P)" = "$parent" ] &&
+        rm -rf --one-file-system -- "./${p##*/}"); then echo "removed $p"
+  else echo "failed $p"; fi
+done"""
+
+_VM_DIR_STATUS: dict[str, tuple[str, bool]] = {
+    "present": ("would remove: every run of its ticket is terminal", False),
+    "removed": ("every run of its ticket is terminal", True),
+    "refused": ("refused: the path resolves elsewhere", False),
+    "failed": ("refused: rm -rf failed", False),
+}
+
+
+def vm_dir_argv(mode: Literal["list", "remove"], paths: Sequence[str]) -> list[str]:
+    return ["/bin/sh", "-c", _VM_DIR_SCRIPT, "sh", mode, *paths]
+
+
+def _sweep_vm_dirs(
+    registry: Registry,
+    store: Store,
+    sandbox: SandboxAdapter,
+    existing: set[str],
+    *,
+    dry_run: bool,
+) -> list[Action]:
+    """Remove the VM-local directory a project's env gives each ticket through `{run}`.
+
+    `UV_PROJECT_ENVIRONMENT=/home/agent/venvs/<project>/{run}` is the live case. A shared
+    build VM outlives every ticket it serves, so these accumulate on its root filesystem,
+    the one that ran out of inodes on 2026-09-13. A ticket's directory goes only when every
+    run of that ticket is terminal; `failed` is not, because it can be re-authorised. There
+    is no age floor: the directory holds no work, and removing it costs one `uv sync`.
+    """
+    tickets: dict[tuple[str, str], list[Run]] = {}
+    for run in store.all_runs():
+        tickets.setdefault((run.project, run.linear_id), []).append(run)
+    by_vm: dict[str, set[str]] = {}
+    for (project_name, ticket), runs in tickets.items():
+        project = registry.projects.get(project_name)
+        if project is None or any(run.state not in TERMINAL for run in runs):
+            continue
+        for run in runs:
+            vm = project_for_run(project, run, store).build_sandbox
+            by_vm.setdefault(vm, set()).update(_ticket_dirs(project, ticket))
+    actions: list[Action] = []
+    for vm, dirs in sorted(by_vm.items()):
+        if dirs and vm in existing and policy.sandbox_is_factory_owned(vm):
+            actions += _clear_vm_dirs(sandbox, vm, sorted(dirs), dry_run=dry_run)
+    return actions
+
+
+def _ticket_dirs(project: Project, ticket: str) -> list[str]:
+    """Only an env value under the agent's home whose last component is `{run}` names one
+    directory per ticket. Any other value is not the factory's to remove."""
+    # `PurePosixPath` drops a `.` or empty component, which would name every ticket's
+    # directory at once.
+    if ticket in ("", ".", "..") or "/" in ticket:
+        return []
+    dirs = []
+    for value in project.env.values():
+        template = PurePosixPath(value)
+        if (
+            template.name == "{run}"
+            and value.count("{run}") == 1
+            and template.parent.is_relative_to(vm_disk.VM_HOME)
+            and ".." not in template.parts
+        ):
+            dirs.append(str(template.parent / ticket))
+    return dirs
+
+
+def _clear_vm_dirs(
+    sandbox: SandboxAdapter, vm: str, dirs: list[str], *, dry_run: bool
+) -> list[Action]:
+    # `sbx exec` starts a stopped VM, and a sweep must not undo a `factory suspend`; the
+    # doctor's VM disk check skips one for the same reason.
+    try:
+        state = sandbox.inspect(vm).get("state")
+    except (SbxError, OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        return [Action("vm-dir-remove", vm, f"refused: {exc}", False)]
+    if state != "running":
+        why = f"{state}; gc does not start a VM to clean it"
+        return [Action("vm-dir-remove", vm, why, False)]
+    before = None if dry_run else _home_free(sandbox, vm)
+    try:
+        done = sandbox.exec_sync(
+            vm, vm_dir_argv("list" if dry_run else "remove", dirs), timeout=600
+        )
+    except subprocess.TimeoutExpired as exc:
+        return [Action("vm-dir-remove", vm, f"refused: timed out after {exc.timeout}s", False)]
+    actions: list[Action] = []
+    for line in done.stdout.splitlines():
+        status, _, path = line.partition(" ")
+        if status in _VM_DIR_STATUS:
+            why, did = _VM_DIR_STATUS[status]
+            actions.append(Action("vm-dir-remove", f"{vm}:{path}", why, did))
+    if not done.ok:
+        first = (done.stderr or done.stdout).strip().splitlines()
+        why = f"refused: exit {done.returncode}: {first[0] if first else ''}"
+        actions.append(Action("vm-dir-remove", vm, why, False))
+    if before is not None and any(action.done for action in actions):
+        why = f"before {before}; after {_home_free(sandbox, vm)}"
+        actions.append(Action("vm-disk", vm, why, True))
+    return actions
+
+
+def _home_free(sandbox: SandboxAdapter, vm: str) -> str:
+    try:
+        return vm_disk.summary(vm_disk.measure(sandbox, vm, (vm_disk.VM_HOME,)))
+    except vm_disk.ProbeError as exc:
+        return f"unmeasured ({exc})"
+
+
+# --------------------------------------------------------------------------------
 # Step 4 — sandboxes
 # --------------------------------------------------------------------------------
 
@@ -246,6 +388,7 @@ def _sweep_sandboxes(
     registry: Registry,
     store: Store,
     sandbox: SandboxAdapter,
+    existing: set[str],
     *,
     dry_run: bool,
     now: float,
@@ -263,20 +406,16 @@ def _sweep_sandboxes(
     idle_floor = registry.defaults.gc.sandbox_idle_hours * 3600
     rm_floor = registry.defaults.gc.sandbox_rm_days * DAY_SECONDS
 
-    from factory.isolation import project_for_run
-
-    try:
-        existing = sandbox.names()
-    except SbxError as exc:
-        return [Action("sandbox-list", "sbx ls", f"refused: {exc}", False)]
     for project in registry.projects.values():
         active = store.active_runs_for_project(project.name)
         users_of: dict[str, list[Run]] = {project.build_sandbox: [], project.review_sandbox: []}
+        builders: dict[str, list[Run]] = {}
         for run in store.all_runs():
             if run.project == project.name:
                 resolved = project_for_run(project, run, store)
                 for used in {resolved.build_sandbox, resolved.review_sandbox}:
                     users_of.setdefault(used, []).append(run)
+                builders.setdefault(resolved.build_sandbox, []).append(run)
         for name in sorted(users_of.keys() & existing):
             if not name or not policy.sandbox_is_factory_owned(name):
                 continue
@@ -291,7 +430,12 @@ def _sweep_sandboxes(
                 (run.updated_at for run in users), default=_last_activity(store, project.name)
             )
             idle = now - last_activity
-            if idle >= rm_floor:
+            # A stopped build VM keeps its disk; a removed one loses the Claude session the
+            # run's next attempt resumes with `--resume` (#130). Review launches never resume.
+            resumer = next(
+                (run for run in builders.get(name, []) if run.state not in TERMINAL), None
+            )
+            if idle >= rm_floor and resumer is None:
                 actions += _act_on_sandbox(
                     sandbox,
                     "sandbox-remove",
@@ -300,6 +444,9 @@ def _sweep_sandboxes(
                     dry_run=dry_run,
                 )
             elif idle >= idle_floor:
+                if idle >= rm_floor and resumer is not None:
+                    why = f"kept: run {resumer.id} ({resumer.state}) can still resume in it"
+                    actions.append(Action("sandbox-remove", name, why, False))
                 actions += _act_on_sandbox(
                     sandbox, "sandbox-stop", name, f"idle {idle / 3600:.0f}h", dry_run=dry_run
                 )

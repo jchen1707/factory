@@ -23,7 +23,7 @@ from factory.steps import context as context_step
 from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import FakeSandbox, _seed_vendored_review_tree, git
+from tests.integration.conftest import FIXTURES, FakeSandbox, _seed_vendored_review_tree, git
 from tests.integration.test_phase3 import _stub_redphase, _to_reviewing
 
 WEEKS_AGO = time.time() - 30 * gc.DAY_SECONDS
@@ -34,15 +34,19 @@ def _fake(ctx: Context) -> FakeSandbox:
     return ctx.sandbox
 
 
-def _finished_run(ctx: Context, state: State = State.CANCELLED) -> None:
-    """A run with a real worktree and branch, parked in a collectable state and aged."""
+def _finished_run(
+    ctx: Context, state: State = State.CANCELLED, via: tuple[State, ...] = ()
+) -> None:
+    """A run with a real worktree and branch, parked in `state` by way of `via` and aged."""
     claim_step.run(ctx)
     context_step.run(ctx)
     sandbox_step.run(ctx)
     worktree_step.run(ctx)
-    ctx.store.record_transition(
-        ctx.run.id, from_state=ctx.state, to_state=state, actor="human", rule="test"
-    )
+    for hop in (*via, state):
+        ctx.store.record_transition(
+            ctx.run.id, from_state=ctx.state, to_state=hop, actor="human", rule="test"
+        )
+        ctx.refresh()
     # Both clocks, because §16.5's floor now counts from the transition that parked the
     # run rather than from the row's last write. Ageing `updated_at` alone is what these
     # tests used to do, and it stopped ageing anything the moment the clock moved.
@@ -426,3 +430,190 @@ def test_sandbox_cleanup_failure_is_reported_without_claiming_removal(
     assert removals
     assert any("failed (exit 1)" in action.why for action in removals)
     assert all(not action.done for action in removals)
+
+
+@pytest.mark.parametrize(
+    ("state", "via"),
+    [
+        (State.SUSPENDED, (State.IMPLEMENTING,)),
+        (State.RESUMABLE, (State.IMPLEMENTING,)),
+        (State.BLOCKED, (State.IMPLEMENTING,)),
+        (State.FAILED, (State.IMPLEMENTING, State.RESUMABLE)),
+    ],
+)
+def test_a_vm_a_run_can_still_resume_in_is_never_removed(
+    ctx: Context, state: State, via: tuple[State, ...]
+) -> None:
+    # The run's Claude session lives in its build VM, and the next attempt resumes it with
+    # `--resume`. Removing the VM turns that resume into `session-lost` (#130). Stopping it
+    # keeps the disk, so only removal is refused.
+    _finished_run(ctx, state, via)
+    build = ctx.project.build_sandbox
+    fake = _fake(ctx)
+    [spec] = fake.created
+    review = ctx.project.review_sandbox
+    fake.created.append(replace(spec, name=review))
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert build in fake.names()
+    assert review not in fake.names()
+    removals = [a for a in _kinds(actions, "sandbox-remove") if a.target == build]
+    assert [a.done for a in removals] == [False]
+    assert f"({state}) can still resume in it" in removals[0].why
+    assert [a.done for a in _kinds(actions, "sandbox-stop") if a.target == build] == [True]
+
+
+# --------------------------------------------------------------------------------
+# Per-ticket directories inside the build VM
+# --------------------------------------------------------------------------------
+
+VENVS = "/home/agent/venvs/python-harness"
+
+
+def _venv_per_ticket(ctx: Context, *present: str) -> FakeSandbox:
+    """The live `nemoclaw-dev` shape: one venv per ticket inside the shared build VM."""
+    project = replace(ctx.project, env={"UV_PROJECT_ENVIRONMENT": f"{VENVS}/{{run}}"})
+    ctx.registry = replace(ctx.registry, projects={project.name: project})
+    ctx.project = project
+    fake = _fake(ctx)
+    fake.vm_dirs = {f"{VENVS}/{ticket}" for ticket in present}
+    # `df -P` of the agent's home alone, captured from a sandbox on 2026-10-07.
+    fake.vm_df = (FIXTURES / "sbx" / "df-home.txt").read_text(encoding="utf-8")
+    return fake
+
+
+def _rerun(ctx: Context, *hops: State) -> None:
+    rerun = ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+    state = State.APPROVED
+    for hop in hops:
+        ctx.store.record_transition(rerun.id, from_state=state, to_state=hop, actor="human")
+        state = hop
+
+
+def test_a_ticket_whose_runs_are_all_terminal_loses_its_vm_venv(ctx: Context) -> None:
+    _finished_run(ctx)
+    _rerun(ctx, State.CANCELLED)
+    ctx.store.insert_run(linear_id="BAC-9", project=ctx.run.project, team=ctx.run.team)
+    fake = _venv_per_ticket(ctx, "BAC-4", "BAC-9")
+    build = ctx.project.build_sandbox
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert fake.vm_dirs == {f"{VENVS}/BAC-9"}
+    assert [(a.target, a.done) for a in _kinds(actions, "vm-dir-remove")] == [
+        (f"{build}:{VENVS}/BAC-4", True)
+    ]
+    [disk] = _kinds(actions, "vm-disk")
+    assert (disk.target, disk.done) == (build, True)
+    assert disk.why == (
+        "before /: 19.7 GB and 1,308,831 inodes free; after /: 19.7 GB and 1,308,831 inodes free"
+    )
+
+
+@pytest.mark.parametrize(
+    "hops",
+    [(), (State.CLAIMED, State.RESUMABLE, State.FAILED)],
+    ids=["approved", "failed"],
+)
+def test_a_venv_is_kept_while_any_run_of_its_ticket_can_still_run(
+    ctx: Context, hops: tuple[State, ...]
+) -> None:
+    # BAC-68's shape: a cancelled run and a later run of the same ticket share one venv.
+    _finished_run(ctx)
+    _rerun(ctx, *hops)
+    fake = _venv_per_ticket(ctx, "BAC-4")
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert fake.vm_dirs == {f"{VENVS}/BAC-4"}
+    assert _kinds(actions, "vm-dir-remove") == []
+
+
+def test_a_dry_run_names_the_venv_and_removes_nothing(ctx: Context) -> None:
+    _finished_run(ctx)
+    fake = _venv_per_ticket(ctx, "BAC-4")
+
+    actions = _sweep(ctx, dry_run=True)
+
+    assert fake.vm_dirs == {f"{VENVS}/BAC-4"}
+    [listed] = _kinds(actions, "vm-dir-remove")
+    assert (listed.done, listed.why.startswith("would remove")) == (False, True)
+    assert _kinds(actions, "vm-disk") == []
+
+
+def test_a_stopped_vm_is_not_started_to_clean_it(ctx: Context) -> None:
+    _finished_run(ctx)
+    fake = _venv_per_ticket(ctx, "BAC-4")
+    build = ctx.project.build_sandbox
+    fake.stop(build)
+    calls = len(fake.sync_calls)
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert fake.vm_dirs == {f"{VENVS}/BAC-4"}
+    assert [name for name, _ in fake.sync_calls[calls:]] == []
+    assert [(a.target, a.done) for a in _kinds(actions, "vm-dir-remove")] == [(build, False)]
+
+
+def test_a_sandbox_the_factory_does_not_own_is_never_cleaned(ctx: Context) -> None:
+    _finished_run(ctx)
+    fake = _venv_per_ticket(ctx, "BAC-4")
+    [spec] = fake.created
+    fake.created.append(replace(spec, name="claude-james"))
+    fake.running.add("claude-james")
+    project = replace(ctx.project, build_sandbox="claude-james")
+    ctx.registry = replace(ctx.registry, projects={project.name: project})
+    calls = len(fake.sync_calls)
+
+    actions = _sweep(ctx, dry_run=False)
+
+    assert fake.vm_dirs == {f"{VENVS}/BAC-4"}
+    assert [name for name, _ in fake.sync_calls[calls:]] == []
+    assert _kinds(actions, "vm-dir-remove") == []
+
+
+def test_only_an_env_value_ending_in_run_under_the_agent_home_names_a_venv(
+    ctx: Context,
+) -> None:
+    _finished_run(ctx)
+    fake = _venv_per_ticket(ctx)
+    env = {
+        "UV_PROJECT_ENVIRONMENT": f"{VENVS}/{{run}}",
+        "OUTSIDE_HOME": "/srv/venvs/{run}",
+        "NOT_LAST": "/home/agent/work/{run}/venv",
+        "RELATIVE": "venvs/{run}",
+        "ESCAPES": "/home/agent/../srv/{run}",
+    }
+    project = replace(ctx.project, env=env)
+    ctx.registry = replace(ctx.registry, projects={project.name: project})
+    fake.vm_dirs = {f"{VENVS}/BAC-4"}
+    calls = len(fake.sync_calls)
+
+    _sweep(ctx, dry_run=False)
+
+    asked = [argv[5:] for _, argv in fake.sync_calls[calls:] if argv[3:5] == ("sh", "remove")]
+    assert asked == [(f"{VENVS}/BAC-4",)]
+    assert fake.vm_dirs == set()
+
+
+@pytest.mark.parametrize("ticket", ["", "."])
+def test_a_ticket_id_that_is_not_one_path_component_names_no_venv(
+    ctx: Context, ticket: str
+) -> None:
+    _finished_run(ctx)
+    fake = _venv_per_ticket(ctx)
+    odd = ctx.store.insert_run(linear_id=ticket, project=ctx.run.project, team=ctx.run.team)
+    ctx.store.record_transition(
+        odd.id, from_state=State.APPROVED, to_state=State.CANCELLED, actor="human"
+    )
+    fake.vm_dirs = {VENVS}
+    calls = len(fake.sync_calls)
+
+    _sweep(ctx, dry_run=False)
+
+    asked = [argv[5:] for _, argv in fake.sync_calls[calls:] if argv[3:5] == ("sh", "remove")]
+    assert asked == [(f"{VENVS}/BAC-4",)]
+    assert fake.vm_dirs == {VENVS}
