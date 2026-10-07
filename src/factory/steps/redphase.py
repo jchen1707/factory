@@ -165,6 +165,16 @@ def replay(ctx: Context) -> ReplayOutcome:
     return result
 
 
+def _baseline(ctx: Context, worktree: Path) -> str:
+    """The merge base of the branch, not the base tip.
+
+    Every test patch here is a three-dot diff, which starts at the merge base. Once the base
+    branch moves, its tip can diverge from the patch's preimage: the replay's patch stops
+    applying, and the weakening guard scopes itself to the wrong files.
+    """
+    return repo.merge_base(worktree, ctx.run.base_ref or ctx.project.base_ref)
+
+
 def _replay_scope(ctx: Context, relative: Path, harness: HarnessConfig) -> ReplayOutcome:
     test_gate = harness.gate_of_kind("test")
     if test_gate is None or not test_gate.run:
@@ -172,7 +182,7 @@ def _replay_scope(ctx: Context, relative: Path, harness: HarnessConfig) -> Repla
         return "proceed"
 
     worktree = ctx.worktree / relative
-    base_ref = ctx.run.base_ref or ctx.project.base_ref
+    base_ref = _baseline(ctx, worktree)
     # The one step of the clone path that cannot follow the branch home. Everything else
     # from `reviewing` onward reads the host worktree `clone.fetch_back` made, but this
     # *runs the repository's test command*, and for the project that needs `--clone` at
@@ -288,7 +298,7 @@ def _weakening_scope(ctx: Context, relative: Path, config: HarnessConfig) -> lis
         return []
     tests = list(config.tests)
     worktree = ctx.worktree / relative
-    base_ref = ctx.run.base_ref or ctx.project.base_ref
+    base_ref = _baseline(ctx, worktree)
     existing = _existing_test_files(worktree, base_ref, tests)
     if not existing:
         return []

@@ -43,6 +43,7 @@ __all__ = [
     "index_tree",
     "is_ancestor",
     "local_branches_matching",
+    "merge_base",
     "mode_at_ref",
     "orphan_worktree_dir",
     "prune_worktrees",
@@ -443,6 +444,11 @@ def resolve_ref(repository: Path, ref: str) -> str:
 def is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
     """Whether `ancestor` is reachable from `descendant`."""
     return _git_ok(repository, "merge-base", "--is-ancestor", ancestor, descendant)
+
+
+def merge_base(worktree: Path, base_ref: str) -> str:
+    """The commit `git diff <base_ref>...HEAD` diffs from."""
+    return _git(worktree, "merge-base", base_ref, "HEAD")
 
 
 def clone_bundle(bundle: Path, destination: Path) -> None:
