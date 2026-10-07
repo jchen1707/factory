@@ -9,6 +9,7 @@ from factory.machine import State
 from factory.runtime_jobs import RuntimeJobs
 from factory.steps import Context, claim, context, sandbox, worktree
 from factory.store import Store
+from tests.integration.conftest import plan_finished
 from tests.integration.test_pipeline import _fake
 
 
@@ -151,7 +152,6 @@ def test_queued_launch_refuses_changed_input(ctx: Context, changed: str) -> None
 
 
 def test_execution_brief_and_builder_have_independent_launch_evidence(ctx: Context) -> None:
-    import json
 
     from factory.steps import implement, plan
 
@@ -163,19 +163,16 @@ def test_execution_brief_and_builder_have_independent_launch_evidence(ctx: Conte
     assert started is not None
     assert len(RuntimeJobs(ctx.store).active_agents(ctx.project.name)) == 1
     attempt = started[0]
-    attempt.path("plan-exit").write_text("0")
-    attempt.path("plan-events.jsonl").write_text("")
-    attempt.path("plan-stderr.log").write_text("")
-    attempt.path("plan-last-message.json").write_text(
-        json.dumps(
-            {
-                "status": "ready",
-                "classification": "ready",
-                "summary": "Prepared",
-                "acceptance_behavior": "CRUD",
-                "reproduction_evidence": "",
-            }
-        )
+    plan_finished(
+        ctx,
+        attempt,
+        {
+            "status": "ready",
+            "classification": "ready",
+            "summary": "Prepared",
+            "acceptance_behavior": "CRUD",
+            "reproduction_evidence": "",
+        },
     )
     plans = plan.plan_dir(ctx)
     plans.mkdir(parents=True, exist_ok=True)

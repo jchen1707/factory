@@ -218,7 +218,9 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
 
 
 def _vendor_sync_path() -> Path:
-    return Path.home() / "harness" / "scripts" / "vendor_sync.py"
+    from factory.registry import VENDOR_SYNC
+
+    return VENDOR_SYNC
 
 
 def _protect_paths_canary(ctx: Context, spec: SandboxSpec) -> tuple[bool, str]:
@@ -227,13 +229,13 @@ def _protect_paths_canary(ctx: Context, spec: SandboxSpec) -> tuple[bool, str]:
     What this proves and what it does not, stated plainly because the difference is
     the whole hazard: it proves node can spawn the hook, that the hook resolves this
     repository's `harness.config.json`, and that the rule is live. It does **not**
-    prove Codex is wired to call it — nothing short of a real `codex exec` does, which
-    is a model call, so `factory doctor --deep` offers that and this does not.
+    prove the agent is wired to call it — nothing short of a real `claude -p` run does,
+    which is a model call, so `factory doctor --deep` offers that and this does not.
 
     Everything else about the wiring is asserted structurally instead: the worktree
-    carries `.codex/hooks.json`, `--dangerously-bypass-hook-trust` is on every
-    invocation (a unit test pins it), and the vendored tree just passed its integrity
-    check.
+    carries `.claude/settings.json`, every launch loads it with `--setting-sources
+    project` (a unit test pins the argv), and the vendored tree just passed its
+    integrity check.
     """
     if ctx.harness is None:
         return False, "no harness config loaded"

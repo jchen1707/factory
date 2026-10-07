@@ -5,6 +5,7 @@ import json
 import pytest
 
 from factory.steps import Context, plan
+from tests.integration.conftest import plan_finished
 from tests.integration.test_clone import _to_worktree_ready
 
 
@@ -105,19 +106,16 @@ def test_candidate_cannot_weaken_the_host_snapshotted_design_contract(
     started = plan.start(ctx)
     assert started is not None
     attempt, _, _ = started
-    attempt.path("plan-events.jsonl").write_text("")
-    attempt.path("plan-stderr.log").write_text("")
-    attempt.path("plan-exit").write_text("0")
-    attempt.path("plan-last-message.json").write_text(
-        json.dumps(
-            {
-                "status": "ready",
-                "classification": "ready",
-                "summary": "Ready",
-                "acceptance_behavior": "CRUD",
-                "reproduction_evidence": "",
-            }
-        )
+    plan_finished(
+        ctx,
+        attempt,
+        {
+            "status": "ready",
+            "classification": "ready",
+            "summary": "Ready",
+            "acceptance_behavior": "CRUD",
+            "reproduction_evidence": "",
+        },
     )
     request_path = attempt.path("plan-request.json")
     if change is None:

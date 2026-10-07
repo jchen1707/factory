@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from factory import accounting, authority, execution, handoffs
+from factory.agent import stream
 from factory.machine import Blocked
 from factory.steps import Context
+from tests.support import claude_stream
 
 
 @pytest.fixture(autouse=True)
@@ -44,15 +46,7 @@ def test_accounting_replay_repairs_interrupted_cost_reconciliation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = ctx.home / "events.jsonl"
-    events.write_text(
-        json.dumps(
-            {
-                "type": "turn.completed",
-                "usage": {"input_tokens": 100, "cached_input_tokens": 20, "output_tokens": 10},
-            }
-        )
-        + "\n"
-    )
+    events.write_text("".join(f"{line}\n" for line in claude_stream.success().lines))
     accounting.begin(ctx, 1, ctx.routing.role("builder"), "implement", events)
     original = ctx.store.reconcile_cost
     with monkeypatch.context() as patch:
@@ -66,7 +60,12 @@ def test_accounting_replay_repairs_interrupted_cost_reconciliation(
     assert ctx.store.reconcile_cost == original
     accounting.collect(ctx, 1, "implement", events)
     accounting.collect(ctx, 1, "implement", events)
-    assert ctx.store.spend(ctx.run.id) == (100, 10, None)
+    reported = next(iter(stream.parse(events).by_model.values()))
+    assert ctx.store.spend(ctx.run.id) == (
+        reported.usage.input,
+        reported.usage.output,
+        pytest.approx(reported.notional_usd),
+    )
     assert len(ctx.store.costs(ctx.run.id)) == 1
 
 

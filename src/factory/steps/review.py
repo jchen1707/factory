@@ -1,9 +1,9 @@
 """`reviewing -> pr_ready | awaiting_human` — the two-tier review (§15.2).
 
 Tier 1 is always run: Standards and Spec, independently, in a second, read-only sandbox
-whose workspace is the project mounted `:ro` and whose Codex config is overridden
-per-invocation to `sandbox_mode="read-only"`. Two enforcement layers, neither of them a
-prompt. The prompt is **assembled, not authored** — frame plus checklist, concatenated
+whose workspace is the project mounted `:ro` and whose agent gets the reviewer's tool
+set (no Write, no Edit). Two enforcement layers, neither of them a prompt. The prompt is
+**assembled, not authored** — frame plus checklist, concatenated
 exactly the way layer A's `full-review.js` `axisPrompt()` does it — so a review that runs
 here and a review that runs through the workflow cannot drift apart.
 
@@ -28,7 +28,7 @@ prompts, and spawns one axis in the read-only review sandbox. `collect` lands an
 validates that axis before the host checks approval and spend for the next launch.
 Completed axes survive recovery; the final collection writes the summary and advances.
 The red-phase replay stays synchronous because it runs the test gate in the **build**
-sandbox, while the codex axes must stay in the read-only **review** sandbox (§4.4 —
+sandbox, while the review axes must stay in the read-only **review** sandbox (§4.4 —
 enforcement by mount, not prompt), so the two cannot share one detached script. A
 behaviour-change ticket therefore blocks the tick for one test-run's duration before the
 fan-out detaches; accepted.
@@ -47,19 +47,18 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import shlex
 import shutil
 from pathlib import Path
 from typing import Any
 
-from factory import artifacts, repo
+from factory import agent_run, artifacts, repo
+from factory.agent import claude, stream
 from factory.agent.base import SchemaInvalid, validate_against_schema
-from factory.agent.codex import TranscriptError, parse_events
+from factory.agent.claude import AttemptFiles, StructuredOutputMissing
 from factory.artifacts import AttemptDir
 from factory.harness import HarnessConfig
 from factory.machine import AUTOMATIC, Blocked, State
-from factory.routing import Role
-from factory.sandbox.base import RunHandle, SandboxSpec, Workspace, detached_shell_script
+from factory.sandbox.base import RunHandle, SandboxSpec, Workspace
 from factory.steps import Context, advance, redphase
 from factory.steps import block as block_step
 from factory.steps import clone as clone_step
@@ -124,8 +123,8 @@ _SUMMARY_SCHEMA: dict[str, Any] = {
     },
 }
 
-#: The vendored layer-A findings schema, passed to `codex exec --output-schema` and
-#: used to validate what comes back. One file, so the Codex path and the workflow path
+#: The vendored layer-A findings schema, passed to the reviewer as `--json-schema` and
+#: used to validate what comes back. One file, so the factory path and the workflow path
 #: cannot produce different finding shapes.
 _FINDINGS_SCHEMA = ".agents/vendor/harness/schema/review-findings.schema.json"
 
@@ -148,7 +147,7 @@ def has_blocking_findings(payload: object) -> bool:
 
 
 def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandle] | None:
-    """Run the synchronous pre-checks, then spawn the codex fan-out detached.
+    """Run the synchronous pre-checks, then spawn the review fan-out detached.
 
     Returns `None` when the run transitioned off `reviewing` without a detached spawn —
     a dry run, a red-phase escalation, or a test-weakening escalation. Returns
@@ -336,17 +335,6 @@ def _launch_next(
         axis.setdefault("history", []).append(
             {key: value for key, value in axis.items() if key not in {"history", "prompt_text"}}
         )
-    entry = _axis_entry(
-        ctx,
-        ctx.harness,
-        ctx.state_dir / "review",
-        scratch,
-        _authority_root(ctx) / _FINDINGS_SCHEMA,
-        axis["tier"],
-        axis["label"],
-        axis["prompt_text"],
-    )
-    axis.update(entry["plan"])
     attempt_dir = AttemptDir(
         _sandbox_run_dir(scratch, ctx.run.id)
         / "run"
@@ -354,15 +342,18 @@ def _launch_next(
         / launch.replace(":", "-")
     )
     attempt_dir.root.mkdir(parents=True, exist_ok=True)
+    entry, invocation = _axis_entry(
+        ctx,
+        ctx.state_dir / "review",
+        attempt_dir,
+        _authority_root(ctx) / _FINDINGS_SCHEMA,
+        axis["tier"],
+        axis["label"],
+        axis["prompt_text"],
+    )
+    axis.update(entry)
     axis["artifact_dir"] = str(attempt_dir.root)
     _save_plan(ctx, plan)
-    script = detached_shell_script(
-        heartbeat_path=attempt_dir.heartbeat,
-        exit_path=attempt_dir.exit_file,
-        body=_axis_script_block(entry),
-        pgid_path=attempt_dir.pgid_file,
-        immutable=getattr(ctx.agent, "immutable", False),
-    )
     with workflow_launches.preparation(ctx):
         ctx.store.start_attempt(
             ctx.run.id,
@@ -383,37 +374,49 @@ def _launch_next(
         )
         prompt_path = Path(axis["prompt"])
         inputs: tuple[Path, ...] = (prompt_path, _authority_root(ctx) / _FINDINGS_SCHEMA)
-        workflow_launches.prepare(ctx, axis["invocation_id"], handle, script, inputs=inputs)
+        workflow_launches.prepare(
+            ctx, axis["invocation_id"], handle, claude.script(invocation), inputs=inputs
+        )
     workflow_launches.resume(ctx)
     ctx.log("review.axis_started", axis=axis["label"], invocation=axis["invocation_id"])
     return attempt_dir, handle
 
 
+def _axis_files(attempt_dir: AttemptDir, out_path: Path) -> AttemptFiles:
+    """Every file one axis touches lives in its attempt directory inside the scratch
+    mount, the reviewer's only writable ground, except the findings, which the host
+    writes into the run's own directory from the stream."""
+    return AttemptFiles(
+        prompt=attempt_dir.prompt,
+        events=attempt_dir.events,
+        stderr=attempt_dir.stderr,
+        exit=attempt_dir.exit_file,
+        heartbeat=attempt_dir.heartbeat,
+        pgid=attempt_dir.pgid_file,
+        last_message=out_path,
+    )
+
+
 def _axis_entry(
     ctx: Context,
-    harness: HarnessConfig,
     review_dir: Path,
-    scratch: Path,
+    attempt_dir: AttemptDir,
     schema_path: Path,
     tier: str,
     label: str,
     prompt: str,
-) -> dict[str, Any]:
-    """One axis's start-time bookkeeping: write its prompt, choose its paths, build argv."""
-    # Every path the *sandbox* touches is in the scratch; every path the *host* reads the
-    # evidence from is in the run directory. The prompt is read by codex, the event stream
-    # and stderr are written by it, so all three sit in the scratch and `collect` lands
-    # them — the same round trip the findings have always made.
-    sandbox_dir = _sandbox_run_dir(scratch, ctx.run.id)
+) -> tuple[dict[str, Any], claude.Invocation]:
+    """One axis's start-time bookkeeping: write its prompt, choose its paths, build the launch."""
+    # Every path the *sandbox* touches is in the attempt directory under the scratch;
+    # every path the *host* reads the evidence from is in the run directory. The prompt
+    # is read by the reviewer, the event stream and stderr are written by it, and
+    # `collect` lands the last two beside the findings.
     launch = ctx.store.runtime.settings("run", ctx.run.id).get(
         f"launch:{ctx.run.attempt}:review", 1
     )
     if launch > 1:
-        sandbox_dir = sandbox_dir / f"launch-{launch}"
         review_dir = review_dir / f"launch-{launch}"
-        sandbox_dir.mkdir(parents=True, exist_ok=True)
         review_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = sandbox_dir / f"review-{label}.prompt"
     policy_root = _authority_root(ctx)
     policy_contract = policy_root / ".agents/vendor/harness/docs/agents/delivery-review.md"
     if policy_contract.exists():
@@ -432,47 +435,43 @@ def _axis_entry(
             }
         prompt += "\n\n" + policy_contract.read_text() + f"\nAuthority root: {policy_root}\n"
         prompt += f"Candidate worktree: {ctx.worktree}\nPolicy: {json.dumps(snapshot)}\n"
-    prompt_path.write_text(prompt, encoding="utf-8")
-    scratch_out = _sandbox_out(sandbox_dir, f"review-{label}.json")
-    scratch_events = sandbox_dir / f"review-{label}.events.jsonl"
-    scratch_stderr = sandbox_dir / f"review-{label}.stderr.log"
     out_path = review_dir / f"review-{label}.json"
-    events_path = review_dir / f"review-{label}.events.jsonl"
-    stderr_path = review_dir / f"review-{label}.stderr.log"
+    files = _axis_files(attempt_dir, out_path)
+    files.prompt.write_text(prompt, encoding="utf-8")
     from factory import accounting, execution
 
     role = execution.role_for(ctx, "reviewer")
-    argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree, role=role)
-    invocation_id = accounting.begin(ctx, ctx.run.attempt, role, f"review:{label}", scratch_events)
-    return {
-        "plan": {
-            "tier": tier,
-            "invocation_id": invocation_id,
-            "label": label,
-            "prompt": str(prompt_path),
-            "scratch_out": str(scratch_out),
-            "scratch_events": str(scratch_events),
-            "scratch_stderr": str(scratch_stderr),
-            "out": str(out_path),
-            "events": str(events_path),
-            "stderr": str(stderr_path),
-            "argv": list(argv),
-        },
-        "argv": argv,
-        "prompt_path": prompt_path,
-        "events_path": scratch_events,
-        "stderr_path": scratch_stderr,
-    }
-
-
-def _axis_script_block(axis: dict[str, Any]) -> str:
-    """The shell line for one axis: `codex exec … - < prompt > events 2> stderr`."""
-    argv = " ".join(shlex.quote(str(part)) for part in axis["argv"])
-    return (
-        f"{argv} < {shlex.quote(str(axis['prompt_path']))} "
-        f"> {shlex.quote(str(axis['events_path']))} "
-        f"2> {shlex.quote(str(axis['stderr_path']))}"
+    invocation = agent_run.invocation(
+        ctx,
+        role=claude.Role.REVIEWER,
+        routed=role,
+        files=files,
+        schema=json.loads(schema_path.read_text(encoding="utf-8")),
+        session=claude.new_session(),
+        resume=False,
     )
+    invocation_id = accounting.begin(
+        ctx,
+        ctx.run.attempt,
+        role,
+        f"review:{label}",
+        files.events,
+        extra_metadata={"expected": agent_run.expected_json(invocation)},
+    )
+    entry = {
+        "tier": tier,
+        "invocation_id": invocation_id,
+        "label": label,
+        "session": invocation.session,
+        "prompt": str(files.prompt),
+        "scratch_events": str(files.events),
+        "scratch_stderr": str(files.stderr),
+        "out": str(out_path),
+        "events": str(review_dir / f"review-{label}.events.jsonl"),
+        "stderr": str(review_dir / f"review-{label}.stderr.log"),
+        "argv": claude.argv(invocation),
+    }
+    return entry, invocation
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
@@ -486,10 +485,6 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         raise Blocked("review-plan-mismatch", "The finished process is absent from its review plan")
     if not axis.get("complete"):
         _collect_axis(ctx, axis, attempt)
-        if attempt_dir.exit_code() != 0:
-            raise Blocked(
-                "review-agent-failed", f"The {axis['label']} reviewer exited unsuccessfully"
-            )
         axis["complete"] = True
         _save_plan(ctx, plan)
     if any(not a.get("complete") for a in plan["axes"]):
@@ -501,20 +496,48 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
 
 
 def _collect_axis(ctx: Context, axis: dict[str, Any], attempt: int) -> list[dict[str, Any]]:
+    """Land one axis's stream, read it, and return its findings or raise its stop.
+
+    The landed stream is read rather than the scratch copy, so a re-collection after the
+    move (the final pass over every axis) reads the same evidence the first one did.
+    """
     from factory import accounting
 
     label = str(axis["label"])
     out_path, events_path, stderr_path = (Path(axis[key]) for key in ("out", "events", "stderr"))
-    _land(Path(axis["scratch_out"]), out_path)
-    _land(Path(axis.get("scratch_events", events_path)), events_path)
-    _land(Path(axis.get("scratch_stderr", stderr_path)), stderr_path)
+    _land(Path(axis["scratch_events"]), events_path)
+    _land(Path(axis["scratch_stderr"]), stderr_path)
     accounting.collect(
-        ctx, attempt, f"review:{label}", events_path, invocation_id=axis.get("invocation_id")
+        ctx, attempt, f"review:{label}", events_path, invocation_id=axis["invocation_id"]
     )
     from factory import learning
 
-    learning.collect(ctx, events_path, invocation_id=axis.get("invocation_id"))
-    findings = _validated_findings(ctx, out_path, stderr_path, label)
+    learning.collect(ctx, events_path, invocation_id=axis["invocation_id"])
+    attempt_dir = AttemptDir(Path(str(axis["artifact_dir"])))
+    landed = _axis_files(attempt_dir, out_path)
+    files = AttemptFiles(
+        prompt=landed.prompt,
+        events=events_path,
+        stderr=stderr_path,
+        exit=landed.exit,
+        heartbeat=landed.heartbeat,
+        pgid=landed.pgid,
+        last_message=out_path,
+    )
+    run = agent_run.read(ctx, str(axis["invocation_id"]), files)
+    if not _already_recorded(ctx, attempt):
+        agent_run.record_checks(ctx, attempt, run)
+    stop = agent_run.stop_for(run)
+    if stop is not None:
+        ctx.store.finish_attempt(
+            ctx.run.id,
+            attempt,
+            State.REVIEWING,
+            exit_code=attempt_dir.exit_code(),
+            outcome=stop.reason,
+        )
+        raise type(stop)(stop.reason, f"the {label} review: {stop.detail}")
+    findings = _validated_findings(ctx, run, out_path, label)
     artifacts.scan_for_secrets(_read_text(events_path) + _read_text(stderr_path), f"review {label}")
     return findings
 
@@ -604,73 +627,12 @@ def _read_text(path: Path) -> str:
 # --------------------------------------------------------------------------------
 
 
-def _review_argv(
-    ctx: Context,
-    schema_path: Path,
-    out_path: Path,
-    workdir: Path | None = None,
-    *,
-    role: Role | None = None,
-) -> list[str]:
-    """`codex exec` for one axis — the same invocation the implement step uses.
-
-    Not `codex exec review --base <ref>`: codex refuses that flag together with a prompt
-    (`the argument '--base <BRANCH>' cannot be used with '[PROMPT]'`), and the prompt is
-    the axis. An axis-less review would run the same generic pass twice and call it
-    Standards and Spec, which is the failure §15.2 exists to prevent. Layer A's own
-    `full-review.js` reaches the same conclusion from the other side: it names the diff
-    inside the prompt and never uses the `review` subcommand.
-
-    `--dangerously-bypass-hook-trust` is included for the same reason the implement step
-    includes it: the worktree path is untrusted in `~/.codex/config.toml`, and without it
-    Codex appends a project stanza for it. The `:ro` mount and `sandbox_mode=read-only`
-    are what make the review safe; this flag only stops a config-file side effect.
-    """
-    from factory import execution
-
-    role = role or execution.role_for(ctx, "reviewer")
-    return [
-        "codex",
-        "exec",
-        "-m",
-        role.model,
-        *(["-c", f"model_reasoning_effort={role.effort}"] if role.effort else []),
-        "-c",
-        "sandbox_mode=read-only",
-        "--dangerously-bypass-hook-trust",
-        "--json",
-        "--output-schema",
-        str(schema_path),
-        "-o",
-        str(out_path),
-        # `-C` goes before the positional, never after: `-` is the prompt argument and a
-        # flag trailing it is a flag the parser has already stopped reading.
-        *(["-C", str(workdir)] if workdir else []),
-        "-",  # prompt from stdin
-    ]
-
-
-def _sandbox_out(scratch: Path, name: str) -> Path:
-    """Where a reviewer is told to write, for every tier.
-
-    The scratch is the reviewer's one writable mount, so it is the only path a `-o`
-    argument may name. Told to write anywhere else, codex exits 0 and produces nothing —
-    `Failed to write last message file …: No such file or directory` on stderr — which
-    reads downstream as a review that returned no findings file. Tier 1 learned this on
-    BAC-4's run 1effc543d83a459a and Tier 2 learned it again on 2efa19065ce6476e, so both
-    now come through here.
-    """
-    path = scratch / name
-    path.unlink(missing_ok=True)
-    return path
-
-
 def _sandbox_run_dir(scratch: Path, run_id: str) -> Path:
     """The reviewer's writable ground for **one run**, inside the per-project mount.
 
-    Everything the sandbox must read or write lives here, and the reason is the same one
-    `_sandbox_out` gives for findings: the scratch is the reviewer's only writable mount,
-    and it is the only part of the host filesystem it can see at all. `state/runs/<run>/`
+    Everything the sandbox must read or write lives here: the scratch is the reviewer's
+    only writable mount, and it is the only part of the host filesystem it can see at
+    all. `state/runs/<run>/`
     — where the review's evidence belongs and where `collect` reads its plan — is **not a
     workspace of the review sandbox**, so a prompt written there cannot be read and an
     events file pointed there cannot be written.
@@ -687,9 +649,9 @@ def _sandbox_run_dir(scratch: Path, run_id: str) -> Path:
 
 def _land(scratch_out: Path, out_path: Path) -> None:
     """Move one of the reviewer's outputs from the shared scratch into this run's own
-    directory, where the evidence belongs. Findings, the event stream and stderr all come
-    home this way; a missing file is silent, because an axis that never started has
-    nothing to land and `_validated_findings` is what judges that."""
+    directory, where the evidence belongs. The event stream and stderr both come home
+    this way; a missing file is silent, because an axis that never started has nothing
+    to land and the stream reader is what judges that."""
     if scratch_out.exists():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(scratch_out), out_path)
@@ -827,58 +789,23 @@ def _body(path: Path) -> str:
     return raw.strip()
 
 
-def _transcript_failure(out_path: Path) -> str:
-    """The axis transcript's own account of why it stopped, or `""`.
-
-    The events file sits beside the findings file under the axis's name, so it is derived
-    from `out_path` rather than threaded through every caller. A transcript that cannot be
-    read is not a failure to report — it is simply no evidence, and the caller falls back
-    to the stderr message it always used.
-    """
-    events = out_path.with_suffix("").with_suffix(".events.jsonl")
-    if not events.exists():
-        events = out_path.parent / f"{out_path.stem}.events.jsonl"
-    if not events.exists():
-        return ""
-    try:
-        transcript = parse_events(events.read_text(encoding="utf-8"))
-    except (OSError, TranscriptError):
-        return ""
-    return transcript.failure or ""
-
-
 def _validated_findings(
-    ctx: Context, out_path: Path, stderr_path: Path, label: str
+    ctx: Context, run: stream.Run, out_path: Path, label: str
 ) -> list[dict[str, Any]]:
-    """Read the `-o` findings file, validate against the layer-A schema, return the list.
+    """Write the axis's structured answer to its findings file, validate it against the
+    layer-A schema, and return the list.
 
-    A missing or invalid file blocks rather than rounding to "no findings": an axis that
-    produced nothing the schema recognises is not the same as an axis that found nothing.
+    A missing or invalid answer blocks rather than rounding to "no findings": an axis
+    that produced nothing the schema recognises is not the same as an axis that found
+    nothing. The agent's own failures were raised before this by `agent_run.stop_for`,
+    so what reaches here is a run that completed and either answered or did not.
     """
-    if not out_path.exists():
-        # Ask the transcript why before blaming the schema. A reviewer whose *turn* failed
-        # wrote no file for a reason that has nothing to do with the findings format, and
-        # `review-schema-invalid` sends the reader to the schema, the prompt and the
-        # output path — none of which is where the answer is. Measured 2026-08-23: an
-        # expired codex credential produced five `Reconnecting…` lines, a `turn.failed`
-        # carrying `401 … token_expired`, an *empty* stderr, and a block that said the
-        # findings file was malformed. The cause was one line down in `events.jsonl` and
-        # nothing read it.
-        failure = _transcript_failure(out_path)
-        if failure:
-            raise Blocked(
-                "review-agent-failed",
-                f"the {label} review never finished its turn: {failure}",
-            )
-        stderr_tail = _read_text(stderr_path)[:500]
-        raise Blocked(
-            "review-schema-invalid",
-            f"the {label} review wrote no findings file at {out_path}. stderr={stderr_tail}",
-        )
     try:
-        payload = json.loads(out_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise Blocked("review-schema-invalid", f"the {label} findings are not JSON: {exc}") from exc
+        payload = claude.materialize_final(run, out_path)
+    except StructuredOutputMissing as exc:
+        raise Blocked(
+            "review-schema-invalid", f"the {label} review returned no structured findings"
+        ) from exc
     schema = json.loads((_authority_root(ctx) / _FINDINGS_SCHEMA).read_text(encoding="utf-8"))
     try:
         validate_against_schema(payload, schema)
@@ -987,9 +914,8 @@ def _bug_without_test(ctx: Context) -> bool:
 def _tier2_prompt(ctx: Context, base_ref: str) -> str:
     """The portable `full-review` skill prompt, inlined rather than invoked.
 
-    Matching the implement step's pattern: a Codex skill's availability in the catalog is
-    not guaranteed in an unattended sandbox, and inlining the body keeps the review
-    independent of skill-store plumbing.
+    Matching the implement step's pattern: the reviewer loads no skill store, and
+    inlining the body keeps the review independent of skill-store plumbing.
     """
     skill = _authority_root(ctx) / ".agents/vendor/harness/skills/full-review/SKILL.md"
     if not skill.exists():

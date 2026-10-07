@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from factory import cli, machine, prerequisite_evidence, recovery, review_disposition
+from factory.agent import stream
 from factory.intake.linear import LinearError
 from factory.machine import Blocked, State
 from factory.recovery import Disposition
@@ -128,26 +129,26 @@ def test_an_attempt_still_running_is_left_alone(ctx: Context) -> None:
     assert ctx.state is State.IMPLEMENTING
 
 
-def test_reaping_a_running_attempt_captures_its_session_id(ctx: Context) -> None:
-    """§16.3's "resume by id, never `--last`" needs the id to have been *captured*, and
-    the only code that captured it ran in `factory run`'s foreground watch loop. Under
-    the daemon nothing does, so the column stayed NULL for the whole of `implementing`
-    and every recovery decision for a live run — suspend/resume included — degraded to
-    `RESTART (no-session-id)`, throwing away a session that was sitting in
-    `events.jsonl` line 1 the entire time.
+def test_a_running_attempt_has_its_session_pinned_before_the_agent_opens_it(ctx: Context) -> None:
+    """§16.3's "resume by id" needs the id to exist, and under Codex it was parsed out of
+    the stream after the fact: a run killed before its first event had none, and under
+    the daemon nothing read the stream at all (BAC-6 run `3f03240cd3bc4bd0`, suspended
+    with the id on disk and the column NULL).
 
-    Measured on BAC-6 run `3f03240cd3bc4bd0`: suspended from `implementing` with
-    `thread_id 01a02c50-a4e2-76d0-8d97-67959c9ec813` on disk and `session_id` NULL in
-    the attempts row.
+    The id is minted on the host now and written to the row in the transaction that
+    prepares the launch, so it is there from the first second whether or not the agent
+    ever opens it. The frozen script carries the same id, and so does the stream's `init`.
     """
     _start_an_attempt(ctx, finish=False)
-    assert ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) is None
 
+    pinned = ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+    launch = _fake(ctx).launches[-1]
+    assert pinned is not None
+    assert launch is not None
+    assert launch.session == pinned
+    assert not launch.resume
     reap_step.reap(ctx)
-
-    assert (
-        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == "01a0-fake-thread"
-    )
+    assert ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == pinned
 
 
 def test_start_after_a_verify_fail_loopback_does_not_illegally_re_enter_implementing(
@@ -227,25 +228,52 @@ def test_a_run_with_no_attempt_record_at_all_is_an_orphan(ctx: Context) -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_a_resumable_run_resumes_the_session_it_captured(ctx: Context) -> None:
-    _start_an_attempt(ctx, finish=False)
-    # The session id reaches the store the way the real one does: parsed out of the
-    # first line of `events.jsonl` and written before the run counts as started.
-    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+def test_a_resumable_run_resumes_the_session_it_pinned(ctx: Context) -> None:
+    first_dir = _start_an_attempt(ctx, finish=False)
+    first = _fake(ctx).launches[-1]
+    assert first is not None
     _fake(ctx).poll_status = RunStatus.ORPHANED
     reap_step.reap(ctx)
     _fake(ctx).poll_status = None
-    _fake(ctx).detached.clear()
     _expire_the_backoff(ctx)
 
     verdict = recovery.resume_run(ctx)
 
     assert verdict.disposition is Disposition.RESUME
     assert ctx.state is State.IMPLEMENTING
-    script = _fake(ctx).detached[-1][1]
-    assert "01a0-fake-thread" in script
-    # Never `--last`: on a machine running several tickets that picks a session at random.
-    assert "resume --last" not in script
+    second = _fake(ctx).launches[-1]
+    assert second is not None
+    # `--resume <id>`, never a replayed `--session-id` (which the CLI refuses as "already
+    # in use") and never `--continue` (which picks a session at random on a shared host).
+    assert second.resume
+    assert second.session == first.session
+    # Into a new attempt directory: the resumed attempt's stream is evidence and the new
+    # wrapper's `>` must not truncate it.
+    assert second.events != first.events
+    assert first.events == first_dir / "events.jsonl"
+    assert stream.has_session(first.events)
+
+
+def test_a_session_the_agent_never_opened_is_not_resumed(ctx: Context) -> None:
+    # The row holds an id from the moment of launch, but this stream never got its
+    # `init`: `--resume` would fail as `session-lost`, so the ladder starts fresh instead.
+    first_dir = _start_an_attempt(ctx, finish=False)
+    first = _fake(ctx).launches[-1]
+    assert first is not None
+    (first_dir / "events.jsonl").write_text("")
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+    reap_step.reap(ctx)
+    _fake(ctx).poll_status = None
+    _expire_the_backoff(ctx)
+
+    verdict = recovery.resume_run(ctx)
+
+    assert verdict.disposition is Disposition.RESTART
+    assert verdict.reason == "no-session-id"
+    second = _fake(ctx).launches[-1]
+    assert second is not None
+    assert not second.resume
+    assert second.session != first.session
 
 
 def test_the_continuation_names_the_failure_rather_than_repeating_the_first_prompt(
@@ -633,17 +661,12 @@ def test_the_third_attempt_rewinds_to_planning_instead_of_running_again(ctx: Con
     assert ctx.state is State.PLANNING
 
 
-def test_the_rewind_hands_codex_a_schema_path_that_exists_where_codex_runs(
-    ctx: Context,
-) -> None:
-    # Measured on FRO-11 attempt 3, 2026-08-23: the rung-3 rewind spawned, and codex
-    # died in under a second with
-    #   Failed to read output schema file /Users/james/factory/schemas/implement_result.schema.json
-    # `--output-schema` was the control plane's *host* path, and the plan runs inside the
-    # build sandbox, which has no `/Users/james/factory`. `implement.start` stages the
-    # schema into the attempt directory and points at the copy -- the attempt directory
-    # resolves identically on both sides, which is the whole point of §14.1's protocol --
-    # and `plan.start` made the copy and then handed over the original.
+def test_the_rewind_hands_the_planner_its_schema_inline(ctx: Context) -> None:
+    # Measured on FRO-11 attempt 3, 2026-08-23: the rung-3 rewind spawned, and the agent
+    # died in under a second because its schema flag named a *host* path the sandbox
+    # could not see. The schema now travels inside the argv as JSON text (the CLI takes
+    # no path), so there is no path to get wrong; what is asserted is that the text the
+    # planner gets is the staged copy's, which the attempt directory keeps as evidence.
     _start_an_attempt(ctx, finish=False)
     ctx.store.update_run(ctx.run.id, attempt=2)
     _fake(ctx).poll_status = RunStatus.ORPHANED
@@ -653,10 +676,12 @@ def test_the_rewind_hands_codex_a_schema_path_that_exists_where_codex_runs(
 
     recovery.resume_run(ctx)
 
-    script = _fake(ctx).detached[-1][1]
-    flag = script.split("--output-schema", 1)[1].split()[0].strip("'\"")
-    assert Path(flag).is_relative_to(ctx.factory_dir), flag
-    assert Path(flag).exists()
+    launch = _fake(ctx).launches[-1]
+    assert launch is not None
+    staged = json.loads((ctx.factory_dir / "run" / "3" / "planning" / "schema.json").read_text())
+    staged.pop("$schema", None)
+    assert launch.schema == staged
+    assert "classification" in launch.schema["required"]  # the handoff contract, not the builder's
 
 
 def test_a_run_over_its_budget_blocks_before_the_next_attempt_starts(ctx: Context) -> None:
@@ -1074,9 +1099,9 @@ def test_suspend_parks_a_running_agent_and_keeps_everything(ctx: Context) -> Non
     assert attempt is not None
     assert attempt["outcome"] == "suspended"
     assert worktree.exists()
-    assert (
-        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == "01a0-fake-thread"
-    )
+    launch = _fake(ctx).launches[-1]
+    assert launch is not None
+    assert ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING) == launch.session
     assert branch is not None
     # Stopped, because no other run shares the sandbox.
     assert sandbox not in _fake(ctx).running
@@ -1184,29 +1209,34 @@ def test_a_verifying_resume_re_runs_the_gates_rather_than_reading_a_stale_report
 
 def test_resume_a_suspended_implementing_run_resumes_the_session_by_id(ctx: Context) -> None:
     _start_an_attempt(ctx, finish=False)
-    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+    parked = _fake(ctx).launches[-1]
+    assert parked is not None
     recovery.suspend(ctx, reason="park mid-implement")
     attempt_before = ctx.run.attempt
 
-    recovery.resume(ctx)  # no --from: resume the session the suspended attempt captured
+    recovery.resume(ctx)  # no --from: resume the session the suspended attempt pinned
 
     assert ctx.state is State.IMPLEMENTING
     assert ctx.run.attempt == attempt_before + 1  # an agent starts, so the counter increments
-    script = _fake(ctx).detached[-1][1]
-    assert "01a0-fake-thread" in script  # resumed by id, never `--last`
-    assert "resume --last" not in script
+    resumed = _fake(ctx).launches[-1]
+    assert resumed is not None
+    assert resumed.resume  # resumed by id, never `--continue`
+    assert resumed.session == parked.session
 
 
 def test_resume_from_implementing_forces_a_fresh_attempt_not_a_session_resume(ctx: Context) -> None:
     _start_an_attempt(ctx, finish=False)
-    ctx.store.set_session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING, "01a0-fake-thread")
+    parked = _fake(ctx).launches[-1]
+    assert parked is not None
     recovery.suspend(ctx, reason="park mid-implement")
 
     recovery.resume(ctx, from_state="implementing")  # §16.3b: "starts a new attempt"
 
     assert ctx.state is State.IMPLEMENTING
-    script = _fake(ctx).detached[-1][1]
-    assert "01a0-fake-thread" not in script  # fresh attempt, no session resume
+    fresh = _fake(ctx).launches[-1]
+    assert fresh is not None
+    assert not fresh.resume  # fresh attempt, no session resume
+    assert fresh.session != parked.session
 
 
 def test_rejected_test_weakening_reopens_a_fresh_implementation_attempt(ctx: Context) -> None:
@@ -1441,9 +1471,9 @@ def test_a_third_gate_failure_rewinds_to_planning_not_a_fourth_implement(ctx: Co
     ctx.refresh()
     assert ctx.run.attempt == 2
 
-    # Finish attempt 2 and bring it to `verifying`, where the rewind edge lives.
-    ctx.store.finish_attempt(ctx.run.id, 2, State.IMPLEMENTING, exit_code=0, outcome="implemented")
-    advance(ctx, State.VERIFYING)
+    # Collect attempt 2 and bring it to `verifying`, where the rewind edge lives.
+    assert reap_step.reap(ctx).outcome is reap_step.Outcome.COLLECTED
+    assert ctx.state is State.VERIFYING
     _fake(ctx).gate_report = _fixture("gate-report-fail.json")  # a real code-gate failure
 
     # Rung 3: verify.collect rewinds to planning rather than looping back to a third implement.

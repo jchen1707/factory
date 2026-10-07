@@ -7,12 +7,14 @@ The state-machine transitions are exercised in `tests/integration/test_pipeline.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from factory.agent import stream
 from factory.harness import HarnessConfig
 from factory.machine import Blocked
 from factory.steps import review
@@ -20,10 +22,10 @@ from factory.steps.review import (
     _axis_prompt,
     _decide_tier2,
     _matches_any,
-    _review_argv,
     _review_scratch,
     _review_spec,
 )
+from tests.support import claude_stream
 
 # -- _decide_tier2 (§15.2's trigger table) -------------------------------------
 
@@ -278,19 +280,6 @@ def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
     )
 
 
-def test_the_review_invocation_never_pairs_base_with_a_prompt() -> None:
-    """codex refuses the combination — `the argument '--base <BRANCH>' cannot be used with
-    '[PROMPT]'` — and the prompt is the axis, so the prompt is what stays. BAC-4's run
-    `1effc543d83a459a` blocked here with `review-schema-invalid` when both were passed."""
-    argv = _review_argv(_ctx_for_argv(), Path("/w/schema.json"), Path("/w/out.json"))
-
-    assert "--base" not in argv
-    assert argv[-1] == "-"  # the prompt still arrives on stdin
-    assert argv[:2] == ["codex", "exec"]
-    assert "review" not in argv  # not the `review` subcommand, which owns `--base`
-    assert "sandbox_mode=read-only" in argv
-
-
 def test_the_review_sandbox_spec_does_not_move_between_runs(tmp_path: Path) -> None:
     """§9.1 fixes a sandbox's workspace set at creation and the reviewer is named once per
     project, so nothing in its spec may carry a run id or a ticket. Two contexts differing
@@ -313,84 +302,54 @@ def test_the_review_sandbox_spec_does_not_move_between_runs(tmp_path: Path) -> N
     assert str(one.workspaces[1].path) == str(tmp_path / "python-harness")
 
 
-# -- a reviewer that never finished its turn ----------------------------------
-
-#: The real FRO-11 transcript, trimmed. An expired codex credential: five reconnects that
-#: codex made on its own, then the turn's own verdict. `stderr` was empty — the whole
-#: account of what happened was in here, and the block that fired named the schema.
-_EXPIRED_TOKEN = "\n".join(
-    [
-        '{"type": "thread.started", "thread_id": "01a0307c"}',
-        '{"type": "turn.started"}',
-        '{"type": "error", "message": "Reconnecting... 1/5 (unexpected status 401 Unauthorized: '
-        'Provided authentication token is expired., auth error code: token_expired)"}',
-        '{"type": "error", "message": "unexpected status 401 Unauthorized: Provided '
-        'authentication token is expired., auth error code: token_expired"}',
-        '{"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized: '
-        'Provided authentication token is expired., auth error code: token_expired"}}',
-    ]
-)
+# -- the findings file is the host's rendering of the reviewer's answer ------
 
 
-def test_a_reviewer_whose_turn_failed_is_named_as_such(tmp_path: Path) -> None:
-    out = tmp_path / "review-standards.json"  # deliberately never written
-    (tmp_path / "review-standards.events.jsonl").write_text(_EXPIRED_TOKEN, encoding="utf-8")
-    (tmp_path / "review-standards.stderr.log").write_text("", encoding="utf-8")
-
-    with pytest.raises(Blocked) as caught:
-        review._validated_findings(
-            None,  # type: ignore[arg-type]
-            out,
-            tmp_path / "review-standards.stderr.log",
-            "standards",
-        )
-
-    assert caught.value.reason == "review-agent-failed"
-    assert "token_expired" in caught.value.detail
+def _run(lines: list[str], *, exit_code: int | None = 0) -> stream.Run:
+    return stream.fold(stream.events(lines), exit_code=exit_code)
 
 
-def test_a_missing_file_with_no_transcript_still_blames_the_schema(tmp_path: Path) -> None:
-    """The fallback must survive: an axis that wrote neither a findings file nor a
-    transcript is the case the original message was written for, and it keeps it."""
-    out = tmp_path / "review-spec.json"
-    (tmp_path / "review-spec.stderr.log").write_text("boom", encoding="utf-8")
-
-    with pytest.raises(Blocked) as caught:
-        review._validated_findings(
-            None,  # type: ignore[arg-type]
-            out,
-            tmp_path / "review-spec.stderr.log",
-            "spec",
-        )
-
-    assert caught.value.reason == "review-schema-invalid"
-    assert "boom" in caught.value.detail
-
-
-def test_a_transcript_that_completed_does_not_invent_a_failure(tmp_path: Path) -> None:
-    """A reviewer that finished its turn and still wrote no file is a schema problem, not
-    an agent problem — and a recovered reconnect must not be read as a failure (the
-    correction `factory#38` made for the implement path applies here unchanged)."""
+def test_findings_are_written_from_the_structured_answer(tmp_path: Path) -> None:
     out = tmp_path / "review-standards.json"
-    (tmp_path / "review-standards.events.jsonl").write_text(
-        "\n".join(
-            [
-                '{"type": "thread.started", "thread_id": "01a0307c"}',
-                '{"type": "turn.started"}',
-                '{"type": "error", "message": "Reconnecting... 1/5 (transport)"}',
-                '{"type": "turn.completed"}',
-            ]
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "review-standards.stderr.log").write_text("", encoding="utf-8")
+    answer = {"findings": [{"file": "a.py", "line": 3, "severity": "low", "summary": "s"}]}
+    run = _run(claude_stream.success(answer).lines)
+
+    findings = review._validated_findings(_ctx_with_schema(tmp_path), run, out, "standards")
+
+    assert findings == answer["findings"]
+    assert json.loads(out.read_text()) == answer
+
+
+def test_a_completed_review_with_no_structured_answer_blames_the_schema(tmp_path: Path) -> None:
+    """A schema the model cannot satisfy ends `success` with `structured_output: null`
+    (measured `schema-unsatisfiable`), and that is not a review that found nothing."""
+    out = tmp_path / "review-spec.json"
+    run = _run(claude_stream.success(None, text="no answer").lines)
 
     with pytest.raises(Blocked) as caught:
-        review._validated_findings(
-            None,  # type: ignore[arg-type]
-            out,
-            tmp_path / "review-standards.stderr.log",
-            "standards",
-        )
+        review._validated_findings(_ctx_with_schema(tmp_path), run, out, "spec")
 
     assert caught.value.reason == "review-schema-invalid"
+    assert not out.exists()
+
+
+def test_an_answer_outside_the_findings_schema_blocks(tmp_path: Path) -> None:
+    out = tmp_path / "review-standards.json"
+    run = _run(claude_stream.success({"findings": "not a list"}).lines)
+
+    with pytest.raises(Blocked) as caught:
+        review._validated_findings(_ctx_with_schema(tmp_path), run, out, "standards")
+
+    assert caught.value.reason == "review-schema-invalid"
+    assert out.exists()  # the raw answer is kept as evidence either way
+
+
+def _ctx_with_schema(tmp_path: Path) -> Any:
+    schema = tmp_path / review._FINDINGS_SCHEMA
+    schema.parent.mkdir(parents=True, exist_ok=True)
+    schema.write_text(json.dumps({"type": "object", "properties": {"findings": {"type": "array"}}}))
+    return SimpleNamespace(
+        store=SimpleNamespace(runtime=SimpleNamespace(policy=lambda _: None)),
+        worktree=tmp_path,
+        run=SimpleNamespace(id="r"),
+    )

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from factory import artifacts, policy
-from factory.agent.codex import CodexAdapter
 from factory.harness import HarnessConfig
 from factory.intake.linear import Issue, LinearClient
 from factory.machine import AUTOMATIC, Blocked, State, can
@@ -29,10 +28,10 @@ from factory.sandbox.base import SandboxAdapter
 from factory.store import Run, Store, marker
 
 __all__ = [
-    "KILL_TARGET",
     "Context",
     "advance",
     "factory_dir_for",
+    "kill_target",
     "record_effect",
     "start_agent",
 ]
@@ -40,21 +39,6 @@ __all__ = [
 LEASE_TTL_SECONDS = 900
 
 
-#: The in-VM process name each detached state's body actually runs under.
-#:
-#: `SbxAdapter.kill_agent` is `pkill -x <proc>`: it matches the process name exactly, so a
-#: caller that names the wrong one signals nothing at all. The wrapper is never asked to
-#: stop, no `exit` file lands, and the attempt is orphaned with `exit_code = NULL` after the
-#: whole kill grace is spent — a timeout the factory reports as having signalled, and did not.
-#:
-#: That is Phase 5 defect 3. The foreground waiter fixed it for `factory run` by passing
-#: "node" at the one call site it owned, and the two paths that matter more never learned:
-#: `reap`, which is how every unattended run times out, and `recovery.suspend`, which is how
-#: every park stops an agent. Both signalled `codex` at a gate report. There is one waiter
-#: now (`reap`), which is why that class of divergence has nowhere left to hide.
-#:
-#: Indexed, never `.get(state, "codex")`. A detached state added without an entry here
-#: should raise on the spot; the default is what made the wrong name invisible for a phase.
 def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) -> str:
     """Stop one attempt's body, and say how it was stopped.
 
@@ -63,11 +47,9 @@ def signal_attempt(ctx: Context, sandbox: str, attempt_dir: Path, state: State) 
     concurrent run in the same repository — which is why `KILL_TARGET` below cannot be
     the primary mechanism once a project runs more than one ticket at a time.
 
-    The fallback is not dead code and not politeness: an attempt started before this
-    envelope existed is still running under the old wrapper and has no `pgid` file, and
-    signalling it by name is strictly better than not signalling it at all. It is
-    narrower than it looks — the file is absent only for those attempts and for a body
-    that died before publishing, and in the second case there is nothing left to signal.
+    The fallback is for a body that lost its `pgid` file, and it is narrower than it
+    looks: the wrapper publishes the group before the body starts, so the file is absent
+    only for a body that died before publishing, and then there is nothing left to signal.
     """
     return signal_run_attempt(
         ctx.store,
@@ -103,8 +85,8 @@ def signal_run_attempt(
             "targeted-signal-unavailable",
             "The process group is missing and another run shares the project",
         )
-    adapter.kill_agent(sandbox, KILL_TARGET[state])
-    return f"name {KILL_TARGET[state]} (no pgid file; pre-upgrade attempt)"
+    adapter.kill_agent(sandbox, kill_target(state))
+    return f"name {kill_target(state)} (no pgid file)"
 
 
 def other_run_sandboxes(registry: Registry, store: Store, run: Run) -> set[str]:
@@ -145,12 +127,15 @@ def read_pgid(path: Path) -> int | None:
     return pgid if pgid > 0 else None
 
 
-KILL_TARGET: dict[State, str] = {
-    State.PLANNING: "codex",
-    State.IMPLEMENTING: "codex",
-    State.VERIFYING: "node",  # `node gate_report.mjs`, not an agent session
-    State.REVIEWING: "codex",
-}
+def kill_target(state: State) -> str:
+    """The in-VM process name a detached state's body runs under.
+
+    `SbxAdapter.kill_agent` is `pkill -x <proc>`: it matches the process name exactly, so
+    a caller that names the wrong one signals nothing at all, no `exit` file lands, and
+    the attempt is orphaned after the whole kill grace. Phase 5 defect 3 was `reap`
+    signalling the agent's name at a `verifying` gate report, which is a `node` process.
+    """
+    return "node" if state is State.VERIFYING else "claude"
 
 
 @dataclass
@@ -167,7 +152,6 @@ class Context:
     store: Store
     linear: LinearClient
     sandbox: SandboxAdapter
-    agent: CodexAdapter
     project: Project
     run: Run
     issue: Issue | None = None
@@ -247,6 +231,9 @@ class Context:
             key: value.replace("{run}", self.run.linear_id)
             for key, value in self.project.env.items()
         }
+        # The vault's in-VM name (§9.2): layer A's hooks and the learning distiller read
+        # it, and the vault is mounted at its host path, so the value is that path.
+        environment["OBSIDIAN_VAULT_DIRECTORY"] = str(self.registry.vault.path)
         snapshot = self.store.runtime.policy(self.run.id)
         if snapshot:
             environment["HARNESS_AUTHORITY_ROOT"] = snapshot["root"]

@@ -1,7 +1,7 @@
 """§16.3 and §16.3a — resume versus restart, and the escalation ladder.
 
 The decision is made **once**, deterministically, from four facts that are all on disk:
-whether a Codex session id was captured, whether the worktree is stopped in the middle
+whether an agent session can be resumed, whether the worktree is stopped in the middle
 of a git operation, how many attempts the run has already spent, and what the budget
 allows. Nothing here calls a model, and nothing here guesses.
 
@@ -20,6 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from factory import agent_run
 from factory.machine import AUTOMATIC, Blocked, State, requires_human_rule
 
 if TYPE_CHECKING:
@@ -43,9 +44,9 @@ __all__ = [
 class Disposition(StrEnum):
     """What the next tick does with an orphaned attempt."""
 
-    #: `codex exec resume <session_id>` — the session is intact and the tree is sane.
+    #: `--resume <session_id>` — the session is intact and the tree is sane.
     RESUME = "resume"
-    #: A fresh `codex exec` against the **same worktree**. Work is never thrown away.
+    #: A fresh session against the **same worktree**. Work is never thrown away.
     RESTART = "restart"
     #: Rung 3: a fresh context runs `/plan` first. The worktree is not reset.
     REWIND = "rewind"
@@ -240,7 +241,7 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
 
     if died_in in (State.VERIFYING, State.REVIEWING):
         # A verify/review that orphaned or timed out re-runs the step fresh. There is no
-        # codex session to resume (verify is a node gate report; review.start re-runs
+        # agent session to resume (verify is a node gate report; review.start re-runs
         # Tier-1/Tier-2 fresh), so `decide()`'s RESUME/RESTART/REWIND dispositions all
         # collapse to "re-run" — and its `attempts_in_state` ceiling is decorative here,
         # because `start_attempt` is `INSERT OR REPLACE` on `(run, attempt, state)` and
@@ -253,7 +254,7 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
         attempts_spent=spent,
         total_attempts_spent=ctx.run.attempt,
         attempts_in_state=ctx.store.attempts_in_state(ctx.run.id, died_in),
-        session_id=ctx.store.session_id(ctx.run.id, ctx.run.attempt, died_in),
+        session_id=agent_run.resumable_session(ctx, ctx.run.attempt, died_in),
         interrupted_by=_interrupted_by(ctx),
         max_attempts=ctx.registry.defaults.max_attempts,
         max_total_attempts=ctx.registry.defaults.max_total_attempts,
@@ -283,7 +284,7 @@ def resume_run(ctx: Context, *, skip_backoff: bool = False) -> Verdict:
         return verdict
 
     session = (
-        ctx.store.session_id(ctx.run.id, ctx.run.attempt, died_in)
+        agent_run.resumable_session(ctx, ctx.run.attempt, died_in)
         if verdict.disposition is Disposition.RESUME
         else None
     )
@@ -307,7 +308,7 @@ def next_attempt_disposition(ctx: Context) -> Verdict:
     return decide(
         attempts_spent=ctx.run.attempt,
         attempts_in_state=ctx.store.attempts_in_state(ctx.run.id, State.IMPLEMENTING),
-        session_id=ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING),
+        session_id=agent_run.resumable_session(ctx, ctx.run.attempt, State.IMPLEMENTING),
         interrupted_by=_interrupted_by(ctx),
         max_attempts=ctx.registry.defaults.max_attempts,
         max_total_attempts=ctx.registry.defaults.max_total_attempts,
@@ -564,17 +565,17 @@ def _recollect_readiness(ctx: Context) -> None:
 
 
 def _session_to_resume(ctx: Context, *, forced: bool) -> str | None:
-    """The Codex session id to resume into `implementing`, or None for a fresh attempt.
+    """The session id to resume into `implementing`, or None for a fresh attempt.
 
     `--from implementing` forces a fresh attempt (§16.3b: "starts a new attempt against
-    the existing worktree"), so None. Otherwise the session the prior attempt captured is
+    the existing worktree"), so None. Otherwise the session the prior attempt pinned is
     resumed by id — the same decision `resume_run` makes for rung 2 — unless the worktree
     is stopped mid merge/rebase/cherry-pick, which a resumed session must not be handed
     because the model did not leave it that way and cannot be told so in a continuation.
     """
     if forced:
         return None
-    session = ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+    session = agent_run.resumable_session(ctx, ctx.run.attempt, State.IMPLEMENTING)
     if session is None:
         return None
     if _interrupted_by(ctx) is not None:
@@ -636,7 +637,7 @@ def _suspend_announce(ctx: Context, reason: str, origin: State) -> None:
     body = (
         f"<!-- {marker} -->\n"
         f"The factory was **suspended** from `{origin}`: {reason}\n\n"
-        f"The worktree, branch and Codex session are kept. "
+        f"The worktree, branch and agent session are kept. "
         f"`factory resume {ctx.run.linear_id}` resumes it. "
         f"Run `{ctx.run.id}`, attempt {ctx.run.attempt}.\n"
     )
@@ -676,15 +677,6 @@ def suspend(ctx: Context, *, reason: str) -> State:
             raise Blocked("suspend-stop-unverified", "The active attempt has no artifact directory")
         if row and row["artifact_dir"] and not retired:
             attempt_dir = Path(str(row["artifact_dir"]))
-            # Before the kill, because after it the stream stops and nothing else on this
-            # path reads it. The announcement promises the Codex session is kept, and a
-            # session whose id was never recorded is not kept — `resume` would find NULL
-            # and start a fresh attempt, which is the opposite of what a park means.
-            if origin in reap_step.AGENT_SESSION_STATES:
-                from factory.artifacts import AttemptDir
-                from factory.steps.implement import capture_session_id
-
-                capture_session_id(ctx, AttemptDir(attempt_dir), ctx.run.attempt, origin)
             from factory.steps import signal_attempt
             from factory.steps.plan import PLAN_EXIT_NAME
 

@@ -71,7 +71,7 @@ def assert_primary_workspace_writable(spec: SandboxSpec) -> None:
 
     Measured: creating the reviewer sandbox with the worktree `:ro` first returned
     `ERROR: primary workspace must be read/write (remove ':ro' or ':readonly')`, and
-    `sbx create codex --help` says `:ro` applies to the *additional* workspaces. A
+    `sbx create claude --help` says `:ro` applies to the *additional* workspaces. A
     read-only review sandbox is still exactly buildable — the writable scratch goes
     first and the code under review comes in beside it — so this is an ordering rule,
     not a lost guarantee. It lives here because `create_argv` is the one place a
@@ -95,7 +95,7 @@ def create_argv(spec: SandboxSpec) -> list[str]:
     """
     assert_factory_sandbox(spec.name)
     assert_primary_workspace_writable(spec)
-    argv = ["sbx", "create", "codex", "--name", spec.name]
+    argv = ["sbx", "create", "claude", "--name", spec.name]
     if spec.template:
         argv += ["-t", spec.template]
     for kit in spec.kits:
@@ -435,7 +435,7 @@ class SbxAdapter:
         (handle.attempt_dir / SBX_EXEC_PID).write_text(f"{process.pid}\n", encoding="utf-8")
 
         # "Started" is the heartbeat appearing, not the call returning — the wrapper
-        # writes its first beat before `codex exec` is reached. A process that has
+        # writes its first beat before the agent is reached. A process that has
         # already exited without one never started, and the file says why.
         deadline = time.monotonic() + START_TIMEOUT_SECONDS
         heartbeat = handle.attempt_dir / "heartbeat"
@@ -454,14 +454,14 @@ class SbxAdapter:
             f"{START_TIMEOUT_SECONDS}s; the wrapper never reached its first beat"
         )
 
-    def kill_agent(self, name: str, proc: str = "codex") -> None:
+    def kill_agent(self, name: str, proc: str = "claude") -> None:
         """Stop a hung run so the attempt gets a real terminal record.
 
         A timeout is never silently a success: the wrapper's `exit` file still lands
         after the kill, which is what turns "we gave up" into a recorded exit code.
 
         **The match is on the process name, never the command line.** This read
-        `pkill -f "codex exec"` until 2026-08-22, and that pattern selects three
+        `pkill -f "<agent> exec"` until 2026-08-22, and that pattern selects three
         processes inside the sandbox, not one — measured on
         `factory-build-python-harness-2`:
 
@@ -476,16 +476,15 @@ class SbxAdapter:
         `3f03240cd3bc4bd0` was suspended from `implementing`, waited out
         `KILL_GRACE_SECONDS`, and recorded `exit_code = NULL`.
 
-        `-x codex` selects the agent alone (`command()` puts `codex` at argv[0]); the
-        wrapper, named `sh`, survives to write `143`. Measured both ways on the same
+        `-x <proc>` selects the agent alone (`claude.argv` puts `claude` at argv[0]);
+        the wrapper, named `sh`, survives to write `143`. Measured both ways on the same
         sandbox with the real envelope.
 
-        ``proc`` is the in-VM process name to kill, because not every step runs
-        ``codex``. The ``verifying`` step runs ``node gate_report.mjs`` (Phase 5
-        defect 3): the gate report is a node process, so ``pkill -x codex`` matched
-        nothing, the hung report was never signalled, no ``exit`` landed, and the run
-        went ``resumable`` with no terminal record. The caller names the process; the
-        default stays ``codex`` for implement/review/reap/recovery.
+        ``proc`` is the in-VM process name to kill, because not every step runs the
+        agent. The ``verifying`` step runs ``node gate_report.mjs`` (Phase 5 defect 3):
+        the gate report is a node process, so a kill naming the agent matched nothing,
+        the hung report was never signalled, no ``exit`` landed, and the run went
+        ``resumable`` with no terminal record. `steps.kill_target` names the process.
         """
         assert_factory_sandbox(name)
         self._run(["sbx", "exec", name, "pkill", "-x", proc], timeout=60)
@@ -494,7 +493,7 @@ class SbxAdapter:
         """Signal one run's body by its in-VM pid. The concurrency-safe kill.
 
         `kill_agent` above matches on a process *name*, and the build sandbox is named
-        once per project (`steps/sandbox.py`), so `pkill -x codex` in a VM holding two
+        once per project (`steps/sandbox.py`), so `pkill -x claude` in a VM holding two
         concurrent runs signals both. The second run's wrapper then writes `exit 143` and
         the factory reads it as that run's own timeout — a wrong terminal record for a
         run that was doing nothing wrong, and nothing in the artifacts says otherwise.
@@ -502,8 +501,8 @@ class SbxAdapter:
         A process group cannot make that mistake. The wrapper publishes its pgid
         (`detached_shell_script`) and removes the file once the body is reaped, so a
         readable pgid always names a live group belonging to this attempt. It is a group
-        rather than a pid because a body may be compound — `steps/review.py` runs one
-        codex block per axis — and because a group also reaches whatever the body spawned.
+        rather than a pid because a body may be compound, and because a group also
+        reaches whatever the body spawned.
 
         `-TERM` is what `pkill` sent by default, kept so the wrapper's exit-code path is
         unchanged: the body dies, the wrapper survives, `wait` returns 143 and `exit`

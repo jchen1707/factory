@@ -20,7 +20,7 @@ import pytest
 
 from factory import cli, recovery, repo
 from factory.delivery import github, gitlab, sandbox_gitlab
-from factory.machine import Blocked, State
+from factory.machine import Blocked, Resumable, State
 from factory.registry import SandboxDelivery
 from factory.steps import Context, advance, redphase
 from factory.steps import deliver as deliver_step
@@ -35,6 +35,7 @@ from tests.integration.conftest import (
     git,
 )
 from tests.integration.test_pipeline import _fake, _to_verifying
+from tests.support import claude_stream
 
 # --------------------------------------------------------------------------------
 # review transitions
@@ -927,23 +928,27 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     advance_state(ctx)
 
     scratch = review_step._review_scratch(ctx)
-    # The fan-out ran detached; the per-axis `-o` paths are baked into the script. Every
-    # one must sit inside the sandbox's writable scratch mount, the way the real codex
-    # `-o` enforces it — a `-o` outside the mounts writes nothing (BAC-4 2efa19065ce6476e).
-    scripts = [s for name, s in _fake(ctx).detached if name == ctx.project.review_sandbox]
-    assert len(scripts) == 3  # standards, spec, full, admitted individually
-    outputs = [
-        Path(m.group(1)) for script in scripts for m in re.finditer(r"(?:^|\s)-o (\S+)", script)
+    # The fan-out ran detached; the stream each axis writes is baked into the script as a
+    # `>` redirect. Every one must sit inside the sandbox's writable scratch mount: a
+    # redirect outside the mounts writes nothing (BAC-4 2efa19065ce6476e).
+    launches = [
+        launch
+        for (name, _), launch in zip(_fake(ctx).detached, _fake(ctx).launches, strict=True)
+        if name == ctx.project.review_sandbox
     ]
+    assert len(launches) == 3  # standards, spec, full, admitted individually
+    outputs = [launch.events for launch in launches if launch is not None]
     assert len(outputs) == 3
     # Inside the mount, not necessarily at its root: the *mount* is what §9.1 fixes per
     # project, and a run-id subdirectory under it is free — the same shape the clone mount
     # takes, and what keeps two runs of one ticket from colliding.
     assert all(out.is_relative_to(scratch) for out in outputs), outputs
-    # And each landed in the run's own directory afterwards.
+    # The findings are the host's rendering of each stream's structured answer, written
+    # into the run's own directory, and the streams landed beside them.
     plan = review_step._read_plan(ctx.state_dir / "review")
     assert all(Path(axis["out"]).exists() for axis in plan["axes"])
-    assert not list(scratch.rglob("review-*.json"))  # moved, not copied
+    assert all(Path(axis["events"]).exists() for axis in plan["axes"])
+    assert not list(scratch.rglob("*.jsonl"))  # moved, not copied
 
 
 def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
@@ -1220,7 +1225,14 @@ def test_review_retry_preserves_completed_axes_and_separate_invocation_evidence(
     completed_path = Path(plan["axes"][0]["out"])
     second = plan["axes"][1]
     second_invocation = second["invocation_id"]
-    Path(second["scratch_out"]).unlink()
+    # The second reviewer finished its turn without a structured answer (the measured
+    # `schema-unsatisfiable` shape), so its stream carries no findings to land.
+    launch = _fake(ctx).launches[-1]
+    assert launch is not None
+    silent = claude_stream.success(
+        None, text="nothing", session=launch.session, model=launch.model, tools=launch.tools
+    )
+    launch.events.write_text("".join(f"{line}\n" for line in silent.lines))
     with pytest.raises(Blocked, match="review-schema-invalid"):
         review_step.collect(
             ctx, review_step.AttemptDir(Path(second["artifact_dir"])), ctx.run.attempt
@@ -1292,8 +1304,9 @@ def test_nonzero_reviewer_exit_cannot_authorize_another_axis(
     _fake(ctx).exit_code = 1
     first = review_step.start(ctx)
     assert first is not None
-    # A valid-looking output file cannot erase the process failure.
-    with pytest.raises(Blocked, match="review-agent-failed"):
+    # A valid-looking answer cannot erase the process failure: the axis goes to the
+    # ladder as `agent-failed`, the same way a builder that exited non-zero does.
+    with pytest.raises(Resumable, match="agent-failed"):
         review_step.collect(ctx, first[0], ctx.run.attempt)
     assert (
         len(

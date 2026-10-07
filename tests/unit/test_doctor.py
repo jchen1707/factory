@@ -88,11 +88,11 @@ def test_a_broken_registry_skips_its_dependents_rather_than_hiding_them(
 
 def test_an_unrelated_check_still_runs_when_the_registry_is_broken(tmp_path: Path) -> None:
     """A skip is scoped to what actually depends on the thing that failed. The state
-    table and the price table do not need the registry and must still be reported."""
+    table and the plan copy do not need the registry and must still be reported."""
     names = {r.name for r in doctor.run(_broken_home(tmp_path))}
 
     assert "state table" in names
-    assert "price table" in names
+    assert "plan copy" in names
 
 
 def test_a_skip_does_not_change_the_exit_code(tmp_path: Path) -> None:

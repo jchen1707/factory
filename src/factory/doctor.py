@@ -38,7 +38,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -300,10 +299,6 @@ def _plan_copy(ctx: DoctorContext) -> list[Result]:
     return _from_triple(_plan_copy_check(ctx.home))
 
 
-def _prices(ctx: DoctorContext) -> list[Result]:
-    return _from_triple(_prices_check(ctx.home))
-
-
 def _canary(ctx: DoctorContext) -> list[Result]:
     registry = ctx.registry
     if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
@@ -326,7 +321,6 @@ CHECKS: tuple[Check, ...] = (
     Check("sensitive paths", _sensitive_paths, needs=("registry",)),
     Check("sandbox delivery", _sandbox_delivery, needs=("registry",)),
     Check("plan copy", _plan_copy),
-    Check("price table", _prices),
     Check("codex hook canary", _canary, needs=("registry",), deep=True),
 )
 
@@ -584,23 +578,6 @@ def _skills_check() -> tuple[str, bool, str]:
         "mattpocock execution set",
         not drifted,
         f"pinned {version}, installed {installed or 'unknown'}",
-    )
-
-
-def _prices_check(home: Path) -> tuple[str, bool, str]:
-    import tomllib
-
-    path = home / "config" / "prices.toml"
-    if not path.exists():
-        return "price table", False, f"{path} is missing"
-    rows = tomllib.loads(path.read_text()).get("model", [])
-    today = time.strftime("%Y-%m-%d")
-    expired = [r["name"] for r in rows if r.get("effective_until", "9999") < today]
-    return (
-        "price table",
-        not expired,
-        f"{len(rows)} rows; no OpenAI price yet, so Codex runs record tokens with usd=NULL"
-        + (f"; EXPIRED: {expired}" if expired else ""),
     )
 
 

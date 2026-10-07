@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from factory.agent.base import Usage
-from factory.agent.codex import parse_events
+from factory.agent import stream
 from factory.machine import Blocked
 
 if TYPE_CHECKING:
@@ -76,50 +74,77 @@ def collect(
 
 
 def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
-    """Reconcile retained usage without loading workflow, routing or tracker dependencies."""
+    """Reconcile retained usage without loading workflow, routing or tracker dependencies.
+
+    The cost is the run's own `total_cost_usd`: the CLI prices every model it used at
+    list price, which is notional under a subscription and billed under an API key, and
+    either way it is the number the budget ceiling is measured in. A stream with no
+    `result` event yet has usage but no price, and stays an incomplete estimate.
+    """
     invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
         return
     text = events.read_text(errors="replace")
-    # Account for complete lines even when a failed process left a partial final line.
-    valid = []
-    for line in text.splitlines():
-        try:
-            json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        valid.append(line)
-    transcript = parse_events("\n".join(valid))
+    sequence = sum(1 for line in text.splitlines() if line.strip())
+    run = stream.parse(events)
+    priced = run.by_model != {}
+    usage = _total_usage(run)
     payload: dict[str, Any] = {
-        "evidence_sha256": hashlib.sha256("\n".join(valid).encode()).hexdigest(),
-        "thread_id": transcript.session_id,
-        "usage": asdict(transcript.usage),
-        "context": {"unavailable": "legacy exec has no current-window measurement"},
+        "evidence_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "session_id": run.session,
+        "usage": asdict(usage),
+        "by_model": {
+            model: {"usage": asdict(each.usage), "notional_usd": each.notional_usd}
+            for model, each in run.by_model.items()
+        },
+        "context": {"tokens": run.context_tokens, "effective_window": _window(run)},
+        "rate_limit": asdict(run.rate_limit) if run.rate_limit else None,
         "estimate": {
-            "complete": False,
-            "usd": None,
-            "reason": "request service tier and context band unavailable",
+            "complete": priced,
+            "usd": run.notional_usd if priced else None,
+            "reason": None if priced else "the stream has no result event yet",
         },
     }
-    store.runtime.observe(invocation_id, len(valid), payload)
+    store.runtime.observe(invocation_id, sequence, payload)
     # Reconcile even a duplicate observation: a process may have died after the
     # telemetry commit and before its cost update. Never regress to an older payload.
     retained = store.runtime.invocation(invocation_id)
-    if retained is None or retained["sequence"] > len(valid):
+    if retained is None or retained["sequence"] > sequence:
         return
     payload = retained["telemetry"]
-    model = invocation["metadata"]["model"]
-    usage = Usage(**(payload.get("usage") or {}))
+    usage = stream.Usage(**payload["usage"])
     store.reconcile_cost(
         invocation["run_id"],
         invocation["attempt"],
         invocation["metadata"].get("cost_step", invocation["role"]),
-        model=model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cached_tokens=usage.cached_input_tokens,
+        model=invocation["metadata"]["model"],
+        input_tokens=usage.input,
+        output_tokens=usage.output,
+        cached_tokens=usage.cache_read,
         usd=payload["estimate"]["usd"],
     )
+
+
+def _total_usage(run: stream.Run) -> stream.Usage:
+    total = stream.Usage(input=0, cache_read=0, cache_write=0, output=0, thinking=0)
+    for each in run.by_model.values():
+        used = each.usage
+        total = stream.Usage(
+            input=total.input + used.input,
+            cache_read=total.cache_read + used.cache_read,
+            cache_write=total.cache_write + used.cache_write,
+            output=total.output + used.output,
+            thinking=total.thinking + used.thinking,
+        )
+    return total
+
+
+def _window(run: stream.Run) -> int | None:
+    """The context window the run's own model reported, or None before a result event."""
+    if run.init is None:
+        return None
+    reported = run.by_model.get(run.init.model)
+    return reported.context_window if reported else None
 
 
 def collect_active(ctx: Context) -> None:

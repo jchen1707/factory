@@ -188,6 +188,12 @@ def assert_no_skip_verify(env: Mapping[str, str]) -> None:
 #: hardcoded credential value.
 GATEWAY_CREDENTIAL = "mcpgateway"
 
+#: The agent's own model credential, the one secret that must reach the VM for any run
+#: to happen. It grants the model, not a capability over James's accounts: `sbx` proxies
+#: it onto api.anthropic.com and nowhere else. Named like `GATEWAY_CREDENTIAL` for the
+#: same ruff reason.
+MODEL_CREDENTIAL = "anthropic"
+
 
 def capability_secrets(secrets: Iterable[Any], *, declared: Iterable[str] = ()) -> list[str]:
     """The injected secrets that hand the VM a capability it must not have (§8.7).
@@ -203,9 +209,11 @@ def capability_secrets(secrets: Iterable[Any], *, declared: Iterable[str] = ()) 
     scan "finds nothing and looks green" is measured false — see `capability_env_names`,
     which reads the other.
 
-    Everything is a capability except `GATEWAY_CREDENTIAL`, whose exclusion is argued in
-    full at its definition, and the names in `declared`. Returned sorted so a failure
-    message is stable.
+    Everything is a capability except `GATEWAY_CREDENTIAL` and `MODEL_CREDENTIAL`, whose
+    exclusions are argued at their definitions, and the names in `declared`. An `openai`
+    secret stays a capability: nothing in the factory runs on it any more, so its only
+    effect in a VM would be a credential the agent was never meant to hold. Returned
+    sorted so a failure message is stable.
 
     `declared` is the project's own `[sandbox_delivery] placeholder_env` and nothing else. It
     is threaded from the registry rather than added to a constant here, so that **deleting
@@ -227,7 +235,7 @@ def capability_secrets(secrets: Iterable[Any], *, declared: Iterable[str] = ()) 
         and entry.get("name")
         and not (str(entry.get("name")) in admitted and entry.get("source") == "custom")
     ]
-    return sorted(name for name in names if name != GATEWAY_CREDENTIAL)
+    return sorted(name for name in names if name not in (GATEWAY_CREDENTIAL, MODEL_CREDENTIAL))
 
 
 def capability_env_names(

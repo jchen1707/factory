@@ -103,12 +103,12 @@ def test_authority_snapshot_retains_runtime_hook_configuration(ctx: Context) -> 
         "profiles": {"core": {"required": [], "deferrals": []}},
     }
     config_path.write_text(json.dumps(config))
-    wiring = root / ".codex/hooks.json"
+    wiring = root / ".claude/settings.json"
     wiring.parent.mkdir(exist_ok=True)
     wiring.write_text('{"hooks": {"PreToolUse": []}}')
     snapshot = authority.snapshot(ctx)
     assert snapshot is not None
-    assert (Path(snapshot["root"]) / ".codex/hooks.json").read_text() == wiring.read_text()
+    assert (Path(snapshot["root"]) / ".claude/settings.json").read_text() == wiring.read_text()
 
 
 @pytest.mark.parametrize("interface", ["cli", "console"])

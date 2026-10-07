@@ -11,6 +11,7 @@ from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.sandbox.base import Completed
 from factory.steps import Context, plan
+from tests.integration.conftest import plan_finished
 from tests.integration.test_clone import _fake, _to_worktree_ready
 
 
@@ -29,19 +30,17 @@ def prepare(ctx: Context, structured: bool) -> AttemptDir:
     attempt.path(plan.PLAN_EXIT_NAME).write_text("0")
     if structured:
         attempt.path("plan-request.json").write_text('{"diagnosis": false}')
-        attempt.path("plan-events.jsonl").write_text("")
-        attempt.path("plan-stderr.log").write_text("")
         attempt.schema.write_text((ctx.home / "schemas/handoff_result.schema.json").read_text())
-        attempt.path("plan-last-message.json").write_text(
-            json.dumps(
-                {
-                    "status": "ready",
-                    "classification": "ready",
-                    "summary": "Prepared",
-                    "acceptance_behavior": "CRUD",
-                    "reproduction_evidence": "",
-                }
-            )
+        plan_finished(
+            ctx,
+            attempt,
+            {
+                "status": "ready",
+                "classification": "ready",
+                "summary": "Prepared",
+                "acceptance_behavior": "CRUD",
+                "reproduction_evidence": "",
+            },
         )
     return attempt
 

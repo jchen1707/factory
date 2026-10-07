@@ -11,14 +11,16 @@ import json
 import shutil
 from pathlib import Path
 
-from factory import accounting, artifacts, execution, handoffs
-from factory.agent.base import AgentInvocation, validate_against_schema
+from factory import accounting, agent_run, artifacts, execution, handoffs
+from factory.agent import claude
+from factory.agent.base import SchemaInvalid, validate_against_schema
+from factory.agent.claude import AttemptFiles, StructuredOutputMissing
 from factory.artifacts import AttemptDir
 from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle
 from factory.steps import Context, advance
 
-__all__ = ["collect", "plan_dir", "should_plan", "start"]
+__all__ = ["collect", "files", "plan_dir", "should_plan", "start"]
 
 STEP = "plan"
 
@@ -39,6 +41,19 @@ PLAN_EVENTS_NAME = "plan-events.jsonl"
 PLAN_STDERR_NAME = "plan-stderr.log"
 PLAN_LAST_MESSAGE_NAME = "plan-last-message.json"
 PLAN_REQUEST_NAME = "plan-request.json"
+
+
+def files(attempt_dir: AttemptDir) -> AttemptFiles:
+    """The plan phase's files, named apart from the builder's so a rewind can share a dir."""
+    return AttemptFiles(
+        prompt=attempt_dir.path(PLAN_PROMPT_NAME),
+        events=attempt_dir.path(PLAN_EVENTS_NAME),
+        stderr=attempt_dir.path(PLAN_STDERR_NAME),
+        exit=attempt_dir.path(PLAN_EXIT_NAME),
+        heartbeat=attempt_dir.heartbeat,
+        pgid=attempt_dir.path(PLAN_PGID_NAME),
+        last_message=attempt_dir.path(PLAN_LAST_MESSAGE_NAME),
+    )
 
 
 def should_plan(ctx: Context, *, forced: bool = False) -> bool:
@@ -105,34 +120,26 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
 
     handoffs.write(ctx, ctx.factory_dir / "handoff.json")
     prompt = _prompt(ctx, plans)
-    prompt_path = attempt_dir.path("plan-prompt.md")
+    attempt_files = files(attempt_dir)
+    session = claude.new_session()
 
-    invocation = AgentInvocation(
-        model=role.model,
-        effort=role.effort,
-        workdir=str(worktree),
-        prompt_path=prompt_path,
-        # Stage the schema at the path shared by host and build sandbox.
-        schema_path=attempt_dir.schema,
-        output_path=attempt_dir.path("plan-last-message.json"),
-        events_path=attempt_dir.path("plan-events.jsonl"),
-        stderr_path=attempt_dir.path("plan-stderr.log"),
-        exit_path=attempt_dir.path(PLAN_EXIT_NAME),
-        heartbeat_path=attempt_dir.heartbeat,
-        pgid_path=attempt_dir.path(PLAN_PGID_NAME),
-        vault_directory=str(ctx.registry.vault.path),
-        env=ctx.env,
-    )
-    script = ctx.agent.wrapper_script(invocation)
-
-    prompt_path.write_text(prompt, encoding="utf-8")
+    attempt_files.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(_schema_source(ctx), attempt_dir.schema)
     reproduction = handoffs.reproduction_binding(ctx) if ctx.run.attempt else {}
+    schema = json.loads(attempt_dir.schema.read_text())
     if reproduction:
-        schema = json.loads(attempt_dir.schema.read_text())
         identity = reproduction["reproduction_evidence"]
         schema["properties"]["reproduction_evidence"]["enum"] = [identity, ""] if identity else [""]
         artifacts.write_json(attempt_dir.schema, schema)
+    invocation = agent_run.invocation(
+        ctx,
+        role=claude.Role(role_name),
+        routed=role,
+        files=attempt_files,
+        schema=schema,
+        session=session,
+        resume=False,
+    )
     request = {
         "contract": contract,
         "role": role_name,
@@ -140,7 +147,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
         "required_artifacts": required_artifacts,
         **reproduction,
     }
-    artifacts.write_json(attempt_dir.path("plan-request.json"), request)
+    artifacts.write_json(attempt_dir.path(PLAN_REQUEST_NAME), request)
     # The brief and builder retain one attempt number with separate execution directories.
     # Publish the attempt and prepared request together so reaping can resume a queued
     # launch without re-entering preparation or mistaking it for an orphan.
@@ -152,6 +159,7 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             sandbox=ctx.project.build_sandbox,
             artifact_dir=str(attempt_dir.root),
         )
+        ctx.store.set_session_id(ctx.run.id, attempt, State.PLANNING, session)
         ctx.refresh()
         advance(ctx, State.PLANNING, actor=actor)
 
@@ -169,29 +177,34 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             attempt,
             role,
             STEP,
-            invocation.events_path,
+            attempt_files.events,
             semantic_role=role_name,
-            extra_metadata={"handoff_contract": request},
+            extra_metadata={
+                "handoff_contract": request,
+                "expected": agent_run.expected_json(invocation),
+            },
         )
         inputs: tuple[Path, ...] = (
-            prompt_path,
+            attempt_files.prompt,
             attempt_dir.schema,
-            attempt_dir.path("plan-request.json"),
+            attempt_dir.path(PLAN_REQUEST_NAME),
         )
-        workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
+        workflow_launches.prepare(ctx, identifier, handle, claude.script(invocation), inputs=inputs)
     workflow_launches.resume(ctx)
-    ctx.log("plan.started", model=role.model, effort=role.effort)
-    return attempt_dir, handle, invocation.exit_path
+    ctx.log("plan.started", model=role.model, effort=role.effort, session=session)
+    return attempt_dir, handle, attempt_files.exit
 
 
 def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     """Validate new structured handoffs; retain file-based collection for legacy attempts."""
-    accounting.collect(ctx, ctx.run.attempt, STEP, attempt_dir.path("plan-events.jsonl"))
+    attempt_files = files(attempt_dir)
+    accounting.collect(ctx, ctx.run.attempt, STEP, attempt_files.events)
     from factory import learning
 
-    learning.collect(ctx, attempt_dir.path("plan-events.jsonl"))
-    request_path = attempt_dir.path("plan-request.json")
-    recorded = ctx.store.runtime.invocation(accounting.key(ctx, ctx.run.attempt, STEP))
+    learning.collect(ctx, attempt_files.events)
+    request_path = attempt_dir.path(PLAN_REQUEST_NAME)
+    invocation_id = accounting.key(ctx, ctx.run.attempt, STEP)
+    recorded = ctx.store.runtime.invocation(invocation_id)
     retained_request = recorded["metadata"].get("handoff_contract") if recorded else None
     request = None
     if request_path.exists():
@@ -206,13 +219,22 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
     diagnosis = False
     required_outputs: tuple[str, ...] = ()
     if request is not None:
-        transcript = ctx.agent.read_transcript(
-            attempt_dir.path("plan-events.jsonl"), attempt_dir.path("plan-stderr.log")
-        )
-        if _exit_code(attempt_dir) != 0 or transcript.failed:
-            raise Blocked("handoff-agent-failed", transcript.failure or "nonzero exit")
-        result = json.loads(attempt_dir.path("plan-last-message.json").read_text())
-        validate_against_schema(result, json.loads(attempt_dir.schema.read_text()))
+        run = agent_run.read(ctx, invocation_id, attempt_files)
+        stop = agent_run.stop_for(run)
+        if stop is not None:
+            ctx.store.finish_attempt(
+                ctx.run.id,
+                ctx.run.attempt,
+                State.PLANNING,
+                exit_code=_exit_code(attempt_dir),
+                outcome=stop.reason,
+            )
+            raise stop
+        try:
+            result = dict(claude.materialize_final(run, attempt_files.last_message))
+            validate_against_schema(result, json.loads(attempt_dir.schema.read_text()))
+        except (StructuredOutputMissing, SchemaInvalid) as exc:
+            raise Blocked("handoff-schema-invalid", str(exc)) from exc
         diagnosis = request["diagnosis"]
         if request.get("role") == "test_designer":
             required_outputs = tuple(handoffs.artifact_names(request.get("required_artifacts")))
@@ -229,7 +251,7 @@ def collect(ctx: Context, attempt_dir: AttemptDir) -> None:
                 ctx, result, ctx.run.attempt, expected_reproduction=expected_reproduction
             )
         elif result["status"] != "ready":
-            raise Blocked("readiness-needs-human", result["summary"])
+            raise Blocked("readiness-needs-human", str(result["summary"]))
     plans = plan_dir(ctx)
     expected: tuple[str, ...] = (
         ("execution-brief.md", "test-plan.md") if request_path.exists() else PLAN_FILES

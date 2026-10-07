@@ -8,6 +8,7 @@ import pytest
 from factory import accounting, handoffs
 from factory.machine import Blocked
 from factory.steps import Context, plan
+from tests.integration.conftest import plan_finished
 from tests.integration.test_phase4 import _to_worktree
 
 
@@ -73,10 +74,7 @@ def test_diagnosis_without_reproduction_allows_human_routing_but_not_code_repair
     with pytest.raises(Blocked, match="diagnosis-not-reproduced"):
         handoffs.authorize_repair(ctx, result, ctx.run.attempt)
     result.update(status="needs-human", classification="environment")
-    attempt.path("plan-exit").write_text("0")
-    attempt.path("plan-events.jsonl").write_text("")
-    attempt.path("plan-stderr.log").write_text("")
-    attempt.path("plan-last-message.json").write_text(json.dumps(result))
+    plan_finished(ctx, attempt, result, attempt_number=ctx.run.attempt)
     with pytest.raises(Blocked, match="diagnosis-environment"):
         plan.collect(ctx, attempt)
 
@@ -124,19 +122,17 @@ def test_diagnosis_cannot_authorize_new_bytes_rerecorded_at_the_original_path(ct
     plans.mkdir(parents=True)
     for name in ["execution-brief.md", "test-plan.md"]:
         (plans / name).write_text("Preserved first failure diagnosis")
-    attempt.path("plan-exit").write_text("0")
-    attempt.path("plan-events.jsonl").write_text("")
-    attempt.path("plan-stderr.log").write_text("")
-    attempt.path("plan-last-message.json").write_text(
-        json.dumps(
-            {
-                "status": "repair",
-                "classification": "code",
-                "summary": "Original diagnosis",
-                "acceptance_behavior": "doubling",
-                "reproduction_evidence": "run/1/gates.json",
-            }
-        )
+    plan_finished(
+        ctx,
+        attempt,
+        {
+            "status": "repair",
+            "classification": "code",
+            "summary": "Original diagnosis",
+            "acceptance_behavior": "doubling",
+            "reproduction_evidence": "run/1/gates.json",
+        },
+        attempt_number=ctx.run.attempt,
     )
     with pytest.raises(Blocked, match="diagnosis-reproduction-stale"):
         plan.collect(ctx, attempt)

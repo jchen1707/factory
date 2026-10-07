@@ -35,7 +35,7 @@ def test_create_argv_for_the_python_build_sandbox() -> None:
     assert create_argv(_spec()) == [
         "sbx",
         "create",
-        "codex",
+        "claude",
         "--name",
         "factory-build-python-harness",
         "/Users/james/python-harness",
@@ -483,7 +483,7 @@ def test_the_writable_scratch_leads_and_the_code_under_review_follows_read_only(
 #: `pkill` semantics, measured inside `factory-build-python-harness-2` on 2026-08-22
 #: rather than read off a man page: `-f` matches the **whole command line**, `-x`
 #: matches the **process name** exactly. The measurement that matters is that a
-#: `-f "codex exec"` pattern selected three processes — the agent, the wrapper
+#: `-f "<agent> exec"` pattern selected three processes — the agent, the wrapper
 #: `/bin/sh -lc` whose command line embeds the agent's argv, and the wrapper's
 #: heartbeat subshell — and killing the wrapper is what leaves an attempt with no
 #: `exit` file at all.
@@ -506,26 +506,31 @@ def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
 
     Measured on BAC-6 run `3f03240cd3bc4bd0`: suspend killed the agent and waited out
     `KILL_GRACE_SECONDS`, and no `exit` file ever appeared — because
-    `pkill -f "codex exec"` had killed the shell that would have written it.
+    `pkill -f "<agent> exec"` had killed the shell that would have written it.
     """
-    from factory.agent.base import AgentInvocation
-    from factory.agent.codex import CodexAdapter
+    from factory.agent import claude
+    from factory.agent.stream import SessionId
 
-    invocation = AgentInvocation(
-        model="gpt-5.6-sol",
-        effort="xhigh",
-        workdir="/repo/wt",
-        prompt_path=tmp_path / "prompt.md",
-        schema_path=tmp_path / "schema.json",
-        output_path=tmp_path / "last-message.json",
-        events_path=tmp_path / "events.jsonl",
-        stderr_path=tmp_path / "stderr.log",
-        exit_path=tmp_path / "exit",
-        heartbeat_path=tmp_path / "heartbeat",
-        pgid_path=tmp_path / "pgid",
-        vault_directory="/Users/james/Documents/Obsidian Vault",
+    invocation = claude.Invocation(
+        role=claude.Role.BUILDER,
+        model="claude-opus-5-5",
+        effort="medium",
+        max_turns=10,
+        max_budget_usd=1.0,
+        session=SessionId("5b0c2a4e-8f7d-4c1a-9e3b-2d6f1a7c9e40"),
+        resume=False,
+        files=claude.AttemptFiles(
+            prompt=tmp_path / "prompt.md",
+            events=tmp_path / "events.jsonl",
+            stderr=tmp_path / "stderr.log",
+            exit=tmp_path / "exit",
+            heartbeat=tmp_path / "heartbeat",
+            pgid=tmp_path / "pgid",
+            last_message=tmp_path / "last-message.json",
+        ),
+        schema={"type": "object"},
     )
-    script = CodexAdapter().wrapper_script(invocation)
+    script = claude.script(invocation)
     wrapper_cmdline = f"/bin/sh -lc {script}"
 
     captured: list[list[str]] = []
@@ -541,9 +546,9 @@ def test_kill_agent_does_not_select_the_wrapper_that_writes_the_exit_file(
     pkill = argv[3:]
     assert pkill[0] == "pkill"
 
-    # The agent itself must die: `codex exec ...` runs as a process named `codex`.
+    # The agent itself must die: `claude -p ...` runs as a process named `claude`.
     assert _pkill_selects(
-        pkill, process_name="codex", cmdline=" ".join(CodexAdapter().command(invocation))
+        pkill, process_name=claude.argv(invocation)[0], cmdline=" ".join(claude.argv(invocation))
     )
     # The wrapper must not, and neither must its heartbeat subshell. Both are `/bin/sh`
     # processes whose command line contains the agent's argv verbatim.
@@ -554,7 +559,7 @@ def test_kill_agent_targets_node_for_the_verifying_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Phase 5 defect 3: the `verifying` step runs `node gate_report.mjs`, not
-    `codex exec`, so the default `pkill -x codex` matched nothing and a hung gate
+    the agent, so the default `pkill -x claude` matched nothing and a hung gate
     report was never signalled — no `exit` file, no terminal record, the run went
     `resumable` on a timeout it could not actually stop. `kill_agent` takes the
     in-VM process name; the verifying step passes `node`."""
@@ -571,9 +576,8 @@ def test_kill_agent_targets_node_for_the_verifying_gate(
     assert argv[3:] == ["pkill", "-x", "node"]
 
 
-def test_kill_agent_defaults_to_codex(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The implement/review/reap/recovery callers pass no process name; the default
-    stays `codex` so this change does not widen what those steps kill."""
+def test_kill_agent_defaults_to_the_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller that passes no process name kills the agent and nothing wider."""
     captured: list[list[str]] = []
     monkeypatch.setattr(
         SbxAdapter,
@@ -582,7 +586,7 @@ def test_kill_agent_defaults_to_codex(tmp_path: Path, monkeypatch: pytest.Monkey
     )
     SbxAdapter().kill_agent("factory-build-python-harness")
 
-    assert captured[0][3:] == ["pkill", "-x", "codex"]
+    assert captured[0][3:] == ["pkill", "-x", "claude"]
 
 
 @pytest.mark.parametrize("operation", ["stop", "remove"])
