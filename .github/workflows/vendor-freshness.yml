@@ -1,0 +1,47 @@
+# The stacks' vendor-freshness check, minus the per-PR trigger. Harness's reconcile
+# automation opens a sync PR in each stack whenever layer A moves, so their required
+# check goes red only until that PR lands. Nothing syncs factory, so the same check on
+# every PR would turn unrelated work red until a human ran a sync. A stale pin is not a
+# PR's fault; it is reported here on a schedule, whose failure notifies the author of the
+# cron line. Hand edits are a PR's fault, and tests/unit/test_harness.py already fails
+# those on every PR.
+name: Vendored layer A
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.agents/vendor/harness/**', '.agents/skills/**', '.github/workflows/vendor-freshness.yml']
+  pull_request:
+    paths: ['.agents/vendor/harness/**', '.agents/skills/**', '.github/workflows/vendor-freshness.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out harness
+        uses: actions/checkout@v4
+        with:
+          repository: jchen1707/harness
+          ref: v2
+          path: .harness-check
+          fetch-depth: 0
+
+      # `check` needs origin/v2 to exist locally to measure how far behind the pin is.
+      - name: Fetch the harness source branch
+        working-directory: .harness-check
+        run: git fetch origin v2:refs/remotes/origin/v2 --force
+
+      - name: Verify the vendored copy is intact and current
+        run: |
+          python3 .harness-check/scripts/vendor_sync.py check \
+            --target . \
+            --harness .harness-check
