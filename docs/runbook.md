@@ -124,6 +124,24 @@ when the preserved source and authority still match. Do not copy an old run's ga
 or install commands into a new run: gate selection belongs to the target harness.
 Historical FRO-6 bypass advice is superseded by this evidence-first procedure.
 
+### `blocked: vm-disk-below-floor` — the build VM is full
+
+The preflight measured the project's build VM below `vm_min_free_inodes` or
+`vm_min_free_gb` (`config/projects.toml`), so no agent was launched. The check row
+`preflight:vm-disk-floor` names the filesystem and the count. `vm-disk-unmeasured` means
+the `df` probe itself failed.
+
+1. Run `factory doctor` to see the same row for every build VM.
+2. Free space inside the VM. Pytest temporary directories and the venvs of finished
+   tickets are the usual cause, for example
+   `sbx exec <build_sandbox> rm -rf /tmp/pytest-of-agent /home/agent/venvs/<project>/<old-ticket>`.
+   If the VM is not needed, stop it and `sbx rm` it instead; the factory creates a fresh one.
+   A VM that has stopped at zero free inodes may fail to start. That was observed once, on
+   2026-10-07; `sbx rm` is then the only way out. Read the preservation boundary in
+   [the incident archive](archive/codex-era-build-runtime-incidents.md) before removing
+   any VM that holds a run's source.
+3. Run `factory resume <TICKET>`.
+
 ### `blocked` with any other reason — a judgement call
 
 Every other `blocked` reason is a human judgement: `evidence-mismatch`, `gates-incomplete`,
@@ -211,7 +229,7 @@ is merged by the factory, and that is a unit-tested invariant
 ```
 launchctl print gui/$(id -u)/com.jchen.factory   # is it loaded?
 tail -50 ~/factory/logs/daemon.err.log           # the last tick's failure
-factory doctor                                   # registry, routing, sbx, gh, disk, db
+factory doctor                                   # registry, routing, sbx, gh, disk, build VM disk, db
 ```
 
 Common causes:

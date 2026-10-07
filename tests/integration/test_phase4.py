@@ -35,7 +35,13 @@ from factory.steps import sandbox as sandbox_step
 from factory.steps import verify as verify_step
 from factory.steps import worktree as worktree_step
 from factory.store import Effect, Run, Store
-from tests.integration.conftest import GOOD_GATE_REPORT, GOOD_RESULT, FakeSandbox, advance_state
+from tests.integration.conftest import (
+    FIXTURES,
+    GOOD_GATE_REPORT,
+    GOOD_RESULT,
+    FakeSandbox,
+    advance_state,
+)
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -1597,6 +1603,43 @@ def test_f14_a_run_below_the_disk_floor_blocks(ctx: Context) -> None:
     assert run is not None
     assert run.state is State.BLOCKED
     assert run.blocked_reason == "disk-below-floor"
+
+
+@pytest.mark.parametrize(
+    ("df", "reason", "detail"),
+    [
+        (
+            (FIXTURES / "sbx" / "df-inodes-exhausted.txt").read_text(encoding="utf-8"),
+            "vm-disk-below-floor",
+            "/home/agent on /: 0 inodes free, floor 50,000",
+        ),
+        ("df: cannot read table of mounted file systems\n", "vm-disk-unmeasured", "df printed"),
+    ],
+    ids=["inodes-exhausted", "unreadable"],
+)
+def test_a_build_vm_below_its_disk_floor_blocks_before_any_agent_launch(
+    ctx: Context, df: str, reason: str, detail: str
+) -> None:
+    # BAC-60: the build VM had 3 free inodes and 8.29 GB free, which no host floor sees.
+    ctx.registry = replace(
+        ctx.registry,
+        defaults=replace(ctx.registry.defaults, vm_min_free_gb=2, vm_min_free_inodes=50_000),
+    )
+    _fake(ctx).vm_df = df
+
+    for _ in range(6):
+        _tick(ctx)
+
+    run = ctx.store.run_by_id(ctx.run.id)
+    assert run is not None
+    assert run.state is State.BLOCKED
+    assert run.blocked_reason == reason
+    assert _fake(ctx).detached == []
+    [check] = [
+        r for r in ctx.store.checks(ctx.run.id) if r["check_name"] == "preflight:vm-disk-floor"
+    ]
+    assert check["status"] == "fail"
+    assert detail in check["detail"]
 
 
 def test_f17_a_linear_outage_leaves_the_run_in_place(ctx: Context) -> None:

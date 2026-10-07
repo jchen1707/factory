@@ -25,12 +25,15 @@ from factory.intake.linear import Issue
 from factory.machine import State
 from factory.registry import load_registry
 from factory.routing import load_routing
+from factory.sandbox import vm_disk
 from factory.sandbox.base import Completed, Gone, RunHandle, RunResult, RunStatus, SandboxSpec
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
 from factory.store import Store
 from tests.support import claude_stream
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 #: The exit code a wrapper writes after its body took the group's `TERM`.
 KILLED = 143
@@ -235,6 +238,10 @@ class FakeSandbox:
     #: A different channel from `secrets`: `sbx inspect` cannot see it, which is exactly
     #: how a live token stayed invisible to the preflight until 2026-08-22.
     env_credentials: list[str] = field(default_factory=list)
+    #: What the VM disk probe's `df` prints: a real capture from a fresh sandbox.
+    vm_df: str = field(
+        default_factory=lambda: (FIXTURES / "sbx" / "df-fresh.txt").read_text(encoding="utf-8")
+    )
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -481,6 +488,8 @@ class FakeSandbox:
             # adapter's own request shapes are pinned by `tests/unit/test_sandbox_gitlab`.
             code, body = self.api_replies.pop(0) if self.api_replies else (0, "[]")
             return Completed(tuple(argv), code, body, "")
+        if list(argv[:3]) == vm_disk.probe_argv(())[:3]:
+            return Completed(tuple(argv), 0, self.vm_df, "")
         if argv and argv[-1].endswith("protect_paths.mjs"):
             return Completed(
                 tuple(argv), self.canary_exit, "", "Refusing to edit uv.lock - regenerate it."

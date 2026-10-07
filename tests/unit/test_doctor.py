@@ -16,6 +16,8 @@ import pytest
 
 from factory import doctor
 from factory.doctor import CHECKS, DoctorContext, Result, Status
+from factory.sandbox.base import Completed
+from factory.sandbox.sbx import SbxError
 from tests.support import plugin_cache
 
 HOME = Path(__file__).resolve().parents[2]
@@ -307,3 +309,77 @@ def test_the_doctrine_row_checks_every_declared_skill_against_the_cache(
 
     assert rows["doctrine"].status is status
     assert detail in rows["doctrine"].detail
+
+
+class _BuildVMs:
+    """`sbx ls` and `sbx exec` for the build-VM disk row, without a VM."""
+
+    def __init__(self, existing: set[str], stdout: str, returncode: int = 0) -> None:
+        self.existing, self.stdout, self.returncode = existing, stdout, returncode
+        self.probed: list[str] = []
+
+    def names(self) -> set[str]:
+        return self.existing
+
+    def exec_sync(self, name: str, argv: list[str], **_: object) -> Completed:
+        self.probed.append(name)
+        return Completed(tuple(argv), self.returncode, self.stdout, "")
+
+
+def _vm_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vms: _BuildVMs) -> dict[str, Result]:
+    ctx, _ = doctor.load_context(_home(tmp_path))
+    assert ctx.registry is not None
+    assert ctx.store is not None
+    first = next(iter(ctx.registry.projects.values()))
+    registry = dataclasses.replace(
+        ctx.registry,
+        projects={
+            "full": dataclasses.replace(first, name="full", build_sandbox="factory-build-full"),
+            "new": dataclasses.replace(first, name="new", build_sandbox="factory-build-new"),
+        },
+    )
+    monkeypatch.setattr(doctor, "SbxAdapter", lambda: vms)
+    rows = doctor.check("build VM disk").run(dataclasses.replace(ctx, registry=registry))
+    ctx.store.close()
+    return {r.name: r for r in rows}
+
+
+def test_the_build_vm_row_fails_an_inode_exhausted_vm_and_passes_an_absent_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exhausted = (HOME / "tests" / "fixtures" / "sbx" / "df-inodes-exhausted.txt").read_text()
+    vms = _BuildVMs({"factory-build-full"}, exhausted)
+
+    rows = _vm_rows(tmp_path, monkeypatch, vms)
+
+    assert rows["build VM disk for full"].status is Status.FAIL
+    assert "/home/agent on /: 0 inodes free, floor 50,000" in rows["build VM disk for full"].detail
+    assert rows["build VM disk for new"].status is Status.OK
+    assert vms.probed == ["factory-build-full"]
+
+
+def test_a_build_vm_that_cannot_be_measured_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Measured: `sbx exec` on a stopped VM at zero free inodes could not start it.
+    vms = _BuildVMs({"factory-build-full"}, "", returncode=1)
+    rows = _vm_rows(tmp_path, monkeypatch, vms)
+    assert rows["build VM disk for full"].status is Status.FAIL
+    assert "exited 1" in rows["build VM disk for full"].detail
+
+
+def test_the_build_vm_row_is_skipped_without_sbx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _NoSbx:
+        def names(self) -> set[str]:
+            raise SbxError("sbx ls failed: not signed in")
+
+    monkeypatch.setattr(doctor, "SbxAdapter", _NoSbx)
+    ctx, _ = doctor.load_context(_home(tmp_path))
+    rows = doctor.check("build VM disk").run(ctx)
+    assert ctx.store is not None
+    ctx.store.close()
+    assert rows
+    assert {r.status for r in rows} == {Status.SKIPPED}
+    assert "not signed in" in rows[0].detail
