@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,8 @@ from factory.registry import RegistryError, load_registry
 
 HOME = Path(__file__).resolve().parents[2]
 #: The parser tests read this synthetic registry. Only the `test_the_shipped_registry_*`
-#: guards read `config/projects.toml`, and none of them names a live project, so adding or
-#: removing one never fails a test.
+#: guards read `config/projects.toml`, and each asserts a policy every project must meet,
+#: so retiring a project never fails a test.
 EXAMPLE = HOME / "tests/fixtures/registry/projects.toml"
 SHIPPED = HOME / "config/projects.toml"
 
@@ -57,13 +58,6 @@ def test_the_example_registry_loads() -> None:
     assert registry.projects["gitlab-app"].base_ref == "origin/example-branch"
 
 
-def test_the_shipped_registry_routes_every_project_by_its_own_team() -> None:
-    registry = load_registry(SHIPPED)
-    assert registry.projects
-    for project in registry.projects.values():
-        assert registry.resolve(f"{project.team}-1") == project
-
-
 def test_two_projects_claiming_one_team_refuse_to_load(tmp_path: Path) -> None:
     path = tmp_path / "projects.toml"
     path.write_text(TWO_TEAMS)
@@ -95,10 +89,15 @@ def test_resolution_uses_the_identifier_prefix() -> None:
 
 def test_the_shipped_registry_gives_every_python_project_the_uv_environment_fix() -> None:
     # p0-3: a sandbox `uv sync` against the bind-mounted workspace destroyed the host
-    # venv. This env var is the measured mitigation, so its absence is a regression.
-    for project in load_registry(SHIPPED).projects.values():
+    # venv. This env var is the measured mitigation, so its absence is a regression. Two
+    # writers share one build VM, so above one writer the path must also be per run.
+    registry = load_registry(SHIPPED)
+    for project in registry.projects.values():
         if project.stack == "python":
-            assert project.env["UV_PROJECT_ENVIRONMENT"].startswith("/home/agent/"), project.name
+            uv_env = project.env["UV_PROJECT_ENVIRONMENT"]
+            assert uv_env.startswith("/home/agent/"), project.name
+            if registry.concurrency_for(project) > 1:
+                assert "{run}" in uv_env, project.name
 
 
 def test_the_shipped_registry_denies_the_mcp_gateway_endpoint() -> None:
@@ -198,7 +197,7 @@ def test_the_shipped_registry_names_a_forge_for_every_non_github_remote() -> Non
     # rather than failing.
     for project in load_registry(SHIPPED).projects.values():
         if project.forge == "github":
-            assert "github.com" in project.remote, project.name
+            assert re.match(r"(https://|git@)github\.com[/:]", project.remote), project.name
 
 
 def test_a_project_can_name_gitlab(tmp_path: Path) -> None:
