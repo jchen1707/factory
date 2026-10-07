@@ -143,6 +143,10 @@ def _validated(raw: dict[str, Any]) -> Routing:
     # is as broken as one that does not exist. Only full ids are keys, so an alias such
     # as `opus`, which moves when a new model ships, is refused here.
     for model_facts in catalogue.values():
+        if model_facts.context_window <= 0:
+            raise RoutingError(
+                f"model {model_facts.slug!r} context_window must be greater than zero"
+            )
         unknown = sorted(set(model_facts.supported_efforts) - set(get_args(Effort)))
         if unknown:
             raise RoutingError(

@@ -105,7 +105,7 @@ def evidence(events: Path) -> Evidence:
     """The complete event lines of the stream. A killed or still-running writer leaves a
     torn last line; it is dropped, not interpreted."""
     lines = []
-    for line in events.read_text(errors="replace").splitlines():
+    for line in stream.lines(events.read_text(errors="replace")):
         try:
             value = json.loads(line)
         except ValueError:

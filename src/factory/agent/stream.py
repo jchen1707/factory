@@ -583,8 +583,15 @@ def _read(path: Path | None) -> str | None:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def lines(text: str) -> list[str]:
+    """A stream's lines. JSON Lines ends a line only at "\n": `str.splitlines` also ends one at
+    U+0085, U+2028 and U+2029, which JSON leaves raw inside strings (Claude Code writes U+0085
+    raw in a tool result), and so cuts a valid event in two."""
+    return text.split("\n")
+
+
 def _lines(events_path: Path) -> list[str]:
-    return (_read(events_path) or "").splitlines()
+    return lines(_read(events_path) or "")
 
 
 def parse(

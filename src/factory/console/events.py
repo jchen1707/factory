@@ -136,8 +136,7 @@ def read_stream(events_path: Path) -> StreamView | None:
     issued: dict[str, tuple[stream.ToolUse, float | None]] = {}
     results: dict[str, tuple[bool, float | None]] = {}
     denied: set[str] = set()
-    # `splitlines` would also split on U+2028, which JSON leaves unescaped inside strings.
-    for event in _tolerant(text.split("\n")):
+    for event in _tolerant(stream.lines(text)):
         match event:
             case stream.Message():
                 if event.model != stream.SYNTHETIC:

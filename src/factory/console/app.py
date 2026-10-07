@@ -30,6 +30,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from factory import routing as routing_module
+from factory.agent import stream
 from factory.console import views as console_views
 from factory.console.assets import BundleMiddleware, RenderBundle, current_bundle
 from factory.console.events import context_fraction
@@ -1323,7 +1324,7 @@ def create_app(
             path = Path(detail.events_path)
             if not path.exists():
                 return f"no event stream at {path}"
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = stream.lines(path.read_text(encoding="utf-8", errors="replace").rstrip("\n"))
             return "\n".join(lines[-TAIL_LINES:])
 
         async def events() -> Any:

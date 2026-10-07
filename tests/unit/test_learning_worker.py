@@ -57,6 +57,12 @@ def test_the_session_comes_from_the_stream_not_from_a_guess(tmp_path: Path) -> N
     assert retained.text.count("\n") == len(claude_stream.success().lines)
 
 
+def test_a_line_whose_string_holds_a_unicode_line_boundary_is_kept_whole() -> None:
+    # Measured: Claude Code writes U+0085 raw inside a tool result.
+    events = Path(__file__).parents[1] / "fixtures" / "claude" / "tool-output-nel.jsonl"
+    assert evidence(events).text == events.read_text()
+
+
 def test_a_resumed_launch_is_handed_over_as_partial_evidence(tmp_path: Path) -> None:
     # A `--resume` stream holds only the session's new turns, so layer A must keep the
     # note the full stream wrote rather than replace it with the tail's.

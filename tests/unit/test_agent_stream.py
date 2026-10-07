@@ -30,7 +30,7 @@ SCHEMA_TOOLS = frozenset({"Bash", "Edit", "Read", "Skill", "StructuredOutput", "
 
 
 def lines(name: str) -> list[str]:
-    return (FIXTURES / MANIFEST[name]["events"]).read_text().splitlines()
+    return (FIXTURES / MANIFEST[name]["events"]).read_text().split("\n")[:-1]
 
 
 def stderr(name: str) -> str:
@@ -75,6 +75,7 @@ EXPECTED_OUTCOME = {
     "auth-retry": "auth",
     "session-in-use": "session-in-use",
     "schema-rejected": "launch-refused",
+    "tool-output-nel": "Completed",
 }
 
 
@@ -112,6 +113,26 @@ def test_launch_refused_names_the_first_stderr_line(tmp_path: Path) -> None:
     outcome = parse_fixture("schema-rejected", tmp_path).outcome
 
     assert outcome == Failed(FailureKind.LAUNCH_REFUSED, stderr("schema-rejected").strip())
+
+
+@pytest.mark.parametrize("boundary", ["\x85", "\u2028", "\u2029"])
+def test_a_unicode_line_boundary_inside_a_string_does_not_end_the_line(
+    boundary: str, tmp_path: Path
+) -> None:
+    # JSON escapes only U+0000-U+001F. Claude Code writes U+0085 raw (the fixture is its
+    # measured output); a producer that leaves U+2028 or U+2029 raw is no different.
+    text = (FIXTURES / "tool-output-nel.jsonl").read_text().replace("\x85", boundary)
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(text)
+
+    run = stream.parse(events_path)
+
+    assert run.outcome == Completed(
+        structured_output=None, text="done", turns=2, subagents_spawned=0
+    )
+    assert [
+        event.text for event in stream.events(text.split("\n")) if isinstance(event, ToolResult)
+    ] == [f"x{boundary}y"]
 
 
 NON_EMPTY = sorted(name for name in MANIFEST if lines(name))

@@ -282,6 +282,14 @@ def test_a_zero_turn_cap_is_refused(tmp_path: Path) -> None:
         _load(tmp_path, _table().replace("[budget]", "[budget]\nmax_turns = 0"))
 
 
+@pytest.mark.parametrize("window", ["0", "-1"])
+def test_a_context_window_that_is_not_positive_is_refused(tmp_path: Path, window: str) -> None:
+    # The console divides the last message's tokens by it.
+    table = _table().replace("context_window = 1000000", f"context_window = {window}", 1)
+    with pytest.raises(RoutingError, match="context_window"):
+        _load(tmp_path, table)
+
+
 def test_the_hold_thresholds_default_per_window_and_a_partial_table_keeps_the_other(
     tmp_path: Path,
 ) -> None:
