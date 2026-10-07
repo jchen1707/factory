@@ -1,0 +1,1 @@
+{"plugins": {"pstack@pstack-claude": true}, "marketplaces": {"pstack-claude": {"source": {"source": "github", "repo": "michael-denyer/pstack-claude"}}}}

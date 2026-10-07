@@ -1,4 +1,15 @@
 {
+  "enabledPlugins": {
+    "pstack@pstack-claude": true
+  },
+  "extraKnownMarketplaces": {
+    "pstack-claude": {
+      "source": {
+        "source": "github",
+        "repo": "michael-denyer/pstack-claude"
+      }
+    }
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -113,7 +124,6 @@
       "Bash(git reset --hard:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
-      "Bash(gh pr merge:*)",
       "Bash(gh pr review:*)",
       "Bash(security find-generic-password:*)",
       "Bash(security add-generic-password:*)",
