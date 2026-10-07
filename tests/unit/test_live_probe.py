@@ -8,6 +8,7 @@ against `ProbeSandbox`, which answers each launch the way the captures say the C
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -182,6 +183,20 @@ def _claude_line(script: str) -> list[str]:
     return shlex.split(body)
 
 
+def _dash_lookup(script: str, present: frozenset[str]) -> tuple[str, int]:
+    """`command -v` as the image's dash runs it: one operand per call (measured 2026-10-07)."""
+    loop = re.search(r"for c in ([\w ]+); do command -v \"\$c\" \|\| exit 1; done", script)
+    names = (
+        loop.group(1).split() if loop else re.findall(r"command -v ([\w ]+)", script)[0].split()[:1]
+    )
+    out = ""
+    for name in names:
+        if name not in present:
+            return out, 1
+        out += f"/usr/bin/{name}\n"
+    return out, 0
+
+
 @dataclass
 class ProbeSandbox:
     """Answers `live_probe`'s calls the way the captured CLI and the measured `sbx` do."""
@@ -195,6 +210,7 @@ class ProbeSandbox:
     kill_dir: Path = field(default_factory=Path)
     stopping: int = 0
     settings: list[dict[str, object]] = field(default_factory=list)
+    tools: frozenset[str] = frozenset({"node", "git", "setsid"})
 
     def exists(self, name: str) -> bool:
         return name in self.alive
@@ -236,7 +252,8 @@ class ProbeSandbox:
         script = argv[-1]
         out = ""
         if script.startswith("claude --version"):
-            out = "2.1.292 (Claude Code)\n/usr/bin/node\n/usr/bin/git\n/usr/bin/setsid\n"
+            found, code = _dash_lookup(script, self.tools)
+            return Completed(tuple(argv), code, "2.1.280 (Claude Code)\n" + found, "")
         elif "\nclaude -p " in f"\n{script}":
             self._launch(_claude_line(script), Path(str(workdir)))
         elif script.startswith("cat "):
@@ -417,3 +434,16 @@ def test_a_protected_write_that_lands_on_disk_fails_the_refusal(tmp_path: Path) 
 
     assert by_name["live: protected-path refusal"].status is Status.FAIL
     assert "landed" in by_name["live: protected-path refusal"].detail
+
+
+@pytest.mark.parametrize("missing", ["node", "git", "setsid"])
+def test_the_image_row_fails_when_any_tool_is_missing(tmp_path: Path, missing: str) -> None:
+    sandbox = ProbeSandbox(tools=frozenset({"node", "git", "setsid"} - {missing}))
+    by_name = {r.name: r for r in _probe(tmp_path, sandbox)}
+    assert by_name["live: image"].status is Status.FAIL
+
+
+def test_the_image_row_passes_on_a_dash_image_with_every_tool(tmp_path: Path) -> None:
+    by_name = {r.name: r for r in _probe(tmp_path, ProbeSandbox())}
+    assert by_name["live: image"].status is Status.OK
+    assert "/usr/bin/setsid" in by_name["live: image"].detail
