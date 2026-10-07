@@ -486,22 +486,24 @@ def changed_paths_between(repository: Path, base: str, candidate: str) -> list[s
     return [path for path in listing.split("\0") if path]
 
 
-def shallow_clone(source: Path, branch: str, destination: Path) -> None:
-    _git(
-        destination.parent,
-        "clone",
-        "--quiet",
-        "--depth",
-        "1",
-        "--branch",
-        branch,
-        f"file://{source}",
-        str(destination),
-    )
+def clone_at(source: Path, ref: str, destination: Path) -> None:
+    """A standalone clone of `source` checked out, detached, at `ref`'s commit.
+
+    A local-path clone hardlinks every object, so a remote-tracking `ref` resolves in it
+    even though the clone carries only the source's branches.
+    """
+    commit = resolve_ref(source, ref)
+    _git(destination.parent, "clone", "--quiet", "--no-checkout", str(source), str(destination))
+    _git(destination, "checkout", "--quiet", "--detach", commit)
 
 
 def file_at_ref(repository: Path, ref: str, path: str) -> str | None:
-    """`path`'s content at `ref`, or None when either is missing."""
+    """`path`'s content at `ref`, or None when `ref` has no such file.
+
+    Raises `GitError` when `ref` itself does not resolve, which is a different failure
+    from a missing file.
+    """
+    resolve_ref(repository, ref)
     proc = _git_process(repository, ["show", f"{ref}:{path}"])
     return proc.stdout if proc.returncode == 0 else None
 

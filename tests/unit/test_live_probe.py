@@ -127,7 +127,7 @@ def test_a_write_that_ran_unrefused_fails() -> None:
     run = _run("build-tools", tools=WRITE_TOOLS)
     result = live_probe.refusal(_events("build-tools"), run, "notes.txt", changed=False)
     assert result.status is Status.FAIL
-    assert "did not refuse it" in result.detail
+    assert "did not refuse the write" in result.detail
 
 
 def test_a_write_refused_by_the_permission_layer_is_not_layer_a_refusing_it() -> None:
@@ -135,7 +135,7 @@ def test_a_write_refused_by_the_permission_layer_is_not_layer_a_refusing_it() ->
     run = _run("denied", tools=WRITE_TOOLS, attest=False)
     result = live_probe.refusal(_events("denied"), run, "denied.txt", changed=False)
     assert result.status is Status.FAIL
-    assert "did not refuse it" in result.detail
+    assert "did not refuse the write" in result.detail
 
 
 def test_an_agent_that_never_tried_the_write_is_inconclusive_not_a_pass() -> None:
@@ -193,6 +193,7 @@ class ProbeSandbox:
     stopped: list[str] = field(default_factory=list)
     transcript: str = '{"type":"assistant","perTurnEffort":"low"}\n'
     kill_dir: Path = field(default_factory=Path)
+    stopping: int = 0
 
     def exists(self, name: str) -> bool:
         return name in self.alive
@@ -203,8 +204,15 @@ class ProbeSandbox:
 
     def stop(self, name: str) -> None:
         self.stopped.append(name)
+        self.stopping = 2
+
+    def inspect(self, name: str) -> dict[str, str]:
+        # `sbx stop` can return before the state flips; two reads say `running` first.
+        self.stopping -= 1
+        return {"state": "running" if self.stopping > 0 else "stopped"}
 
     def remove(self, name: str) -> None:
+        assert self.inspect(name)["state"] == "stopped", "sbx remove refused: not stopped"
         self.alive.discard(name)
 
     def kill_group(self, name: str, pgid: int) -> None:
@@ -234,6 +242,9 @@ class ProbeSandbox:
             out = self.transcript
         elif script.startswith("ps "):
             out = f"{PGID} sh\n{PGID} claude\n{PGID} sleep\n1 init\n"
+        elif script.startswith("pgrep -f "):
+            # procps `pgrep -f` skips itself, not the `sh -lc` carrying the same pattern.
+            out = "77\n" if live_probe.SLEEP in script else ""
         return Completed(tuple(argv), 0, out, "")
 
     def _launch(self, argv: list[str], cwd: Path) -> None:
@@ -291,6 +302,7 @@ def _project(tmp_path: Path) -> Project:
         ["init", "-q", "-b", "main"],
         ["add", "-A"],
         ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "seed"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
     ):
         subprocess.run(["git", "-C", str(repo), *args], check=True)
     return Project(
@@ -310,13 +322,17 @@ def _project(tmp_path: Path) -> Project:
     )
 
 
-def _probe(tmp_path: Path, sandbox: ProbeSandbox) -> list[Result]:
+def _probe_project(tmp_path: Path, project: Project, sandbox: ProbeSandbox) -> list[Result]:
     return live_probe.run(
         sandbox,  # type: ignore[arg-type]
-        _project(tmp_path),
+        project,
         root=tmp_path / "doctor",
         builder_model="claude-opus-5-5",
     )
+
+
+def _probe(tmp_path: Path, sandbox: ProbeSandbox) -> list[Result]:
+    return _probe_project(tmp_path, _project(tmp_path), sandbox)
 
 
 def test_every_probe_reports_a_row_and_the_sandbox_and_clone_are_removed(tmp_path: Path) -> None:
@@ -344,6 +360,46 @@ def test_a_ping_that_cannot_authenticate_skips_every_later_probe(tmp_path: Path)
     for label in ("live: protected-path refusal", "live: effort", "live: resume after stop"):
         assert by_name[label].status is Status.SKIPPED
         assert by_name[label].detail == "live: ping did not pass"
+    assert not sandbox.alive
+
+
+def test_the_probe_clones_the_base_ref_not_the_local_branch(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project.path / "harness.config.json").write_text(json.dumps({"name": "demo", "gates": []}))
+    subprocess.run(
+        [
+            *("git", "-C", str(project.path), "-c", "user.name=t", "-c", "user.email=t@x.invalid"),
+            *("commit", "-qam", "local only: no gates, no protected path"),
+        ],
+        check=True,
+    )
+    by_name = {r.name: r for r in _probe_project(tmp_path, project, ProbeSandbox())}
+
+    # origin/main declares uv.lock protected; the local branch declares nothing at all.
+    assert by_name["live: protected-path refusal"].status is Status.OK
+
+
+def test_a_probe_that_raises_is_a_failed_row_and_the_sandbox_still_goes(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project.path / "harness.config.json").unlink()
+    subprocess.run(
+        [
+            *("git", "-C", str(project.path), "-c", "user.name=t", "-c", "user.email=t@x.invalid"),
+            *("commit", "-qam", "no harness config"),
+            "--quiet",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(project.path), "update-ref", "refs/remotes/origin/main", "HEAD"],
+        check=True,
+    )
+    sandbox = ProbeSandbox()
+    by_name = {r.name: r for r in _probe_project(tmp_path, project, sandbox)}
+
+    assert by_name["live: protected-path refusal"].status is Status.FAIL
+    assert by_name["live: protected-path refusal"].detail.startswith("Blocked")
+    assert by_name["live: resume after stop"].status is Status.OK
     assert not sandbox.alive
 
 

@@ -1,8 +1,8 @@
 """`factory doctor --deep`: the Claude unknowns only a real sandbox can settle.
 
-One disposable `factory-doctor-<project>` sandbox over a fresh clone of the project, built
-the way the factory builds a build sandbox (the project's template and kits), and six
-probes in it, each one row:
+One disposable `factory-doctor-<project>` sandbox over a fresh clone of the project at its
+base ref (the tree a run's worktree is cut from), built the way the factory builds a build
+sandbox (the project's template and kits), and six probes in it, each one row:
 
 - `image`: `claude --version`, and `node`, `git`, `setsid` on the PATH (P1).
 - `ping`: a haiku launch with the production argv and a one-field schema. Proves the
@@ -26,7 +26,6 @@ import contextlib
 import hashlib
 import json
 import shutil
-import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -67,6 +66,7 @@ ANSWER = "Answer through the structured output with ok set to true.\n"
 BUDGET_USD = 0.5
 LAUNCH_SECONDS = 300
 KILL_WAIT_SECONDS = 120
+STOP_WAIT_SECONDS = 60
 SLEEP = "sleep 600"
 
 AUTH_ROUTES = (
@@ -194,10 +194,12 @@ def refusal(evs: Iterable[stream.Event], run: Run, target: str, *, changed: bool
                 " and result.permission_denials" if use_id in denied else ""
             )
             return Result(name, Status.OK, f"{_first_line(result.text)} (surfaced as {where})")
+    answers = [results[use_id].text for use_id in attempts if use_id in results]
     return Result(
         name,
         Status.FAIL,
-        f"the agent tried to write {target} and protect_paths.mjs did not refuse it",
+        f"protect_paths.mjs did not refuse the write to {target}; the tool said: "
+        + (_first_line(answers[0]) if answers else "nothing"),
     )
 
 
@@ -396,7 +398,8 @@ def _kill(p: _Probe) -> Result:
     while not files.exit.exists() and time.monotonic() < deadline:
         time.sleep(1)
     exit_text = files.exit.read_text() if files.exit.exists() else None
-    return kill(exit_text, p.sh(f"pgrep -f '{SLEEP}' || true"), group)
+    # `[s]` keeps the pattern from matching the `sh -lc` that carries it.
+    return kill(exit_text, p.sh(f"pgrep -f '[{SLEEP[0]}]{SLEEP[1:]}' || true"), group)
 
 
 def _resume(p: _Probe) -> Result:
@@ -438,6 +441,10 @@ def _discard(sandbox: SandboxAdapter, name: str) -> None:
         return
     with contextlib.suppress(SbxError):
         sandbox.stop(name)
+    # `remove` refuses a sandbox `inspect` does not yet report as stopped.
+    deadline = time.monotonic() + STOP_WAIT_SECONDS
+    while sandbox.inspect(name).get("state") != "stopped" and time.monotonic() < deadline:
+        time.sleep(1)
     sandbox.remove(name)
 
 
@@ -450,7 +457,7 @@ def _probes(probe: _Probe) -> list[Result]:
             continue
         try:
             result = step(probe)
-        except (SbxError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        except Exception as exc:  # a probe that cannot finish is a row, not a crash
             result = Result(label, Status.FAIL, f"{type(exc).__name__}: {exc}")
         results.append(result)
         if gate and result.status is not Status.OK:
@@ -473,7 +480,7 @@ def run(
     try:
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True)
-        repo.shallow_clone(project.path, project.base_branch, probe.repo)
+        repo.clone_at(project.path, project.base_ref, probe.repo)
         _discard(sandbox, name)
         sandbox.ensure(_spec(project, root, deny_network))
         results.append(Result("live: sandbox", Status.OK, f"{name} over a clone of {project.name}"))

@@ -268,10 +268,14 @@ def unwired_hooks(settings_text: str | None) -> list[str]:
         settings = json.loads(settings_text)
     except ValueError as exc:
         return [f"{CLAUDE_SETTINGS} is not JSON: {exc}"]
-    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(settings, dict):
+        settings = {}
+    hooks = settings.get("hooks")
     if not isinstance(hooks, dict):
         hooks = {}
     problems: list[str] = []
+    if settings.get("disableAllHooks") is True:
+        problems.append("disableAllHooks is true")
     for event, script in ENFORCING_HOOKS.items():
         groups = [
             group

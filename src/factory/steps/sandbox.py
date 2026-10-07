@@ -16,6 +16,7 @@ from factory import repo
 from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
+from factory.registry import Project
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.steps import Context, advance
 
@@ -197,16 +198,7 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     # 4b. The worktree is cut from the base ref and carries its `.claude/settings.json`,
     #     the only place a launch's hooks come from. Without them the canary below proves
     #     a hook no agent calls.
-    unwired = unwired_hooks(
-        repo.file_at_ref(ctx.project.path, ctx.project.base_ref, CLAUDE_SETTINGS)
-    )
-    checks.append(
-        (
-            "layer-a-hooks-wired",
-            not unwired,
-            f"{ctx.project.base_ref}: " + ("; ".join(unwired) or "PreToolUse and Stop wired"),
-        )
-    )
+    checks.append(("layer-a-hooks-wired", *layer_a_hooks_wired(ctx.project)))
 
     # 5. The canary. §9.3's rule is that enforcement is proved by producing a refusal,
     #    not by observing the absence of a flag.
@@ -230,6 +222,17 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
             + "; ".join(f"{name} ({detail[:200]})" for name, detail in failed),
         )
     ctx.log("preflight.green", checks=[name for name, _, _ in checks])
+
+
+def layer_a_hooks_wired(project: Project) -> tuple[bool, str]:
+    """Does the base ref's `.claude/settings.json` wire the enforcing hooks?"""
+    try:
+        unwired = unwired_hooks(repo.file_at_ref(project.path, project.base_ref, CLAUDE_SETTINGS))
+    except repo.GitError:
+        return False, f"{project.base_ref} does not resolve in {project.path}; fetch it"
+    return not unwired, f"{project.base_ref}: " + (
+        "; ".join(unwired) or "PreToolUse and Stop wired"
+    )
 
 
 def _vendor_sync_path() -> Path:

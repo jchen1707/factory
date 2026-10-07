@@ -8,6 +8,8 @@ a cleaner machine the more broken the machine is.
 
 from __future__ import annotations
 
+import dataclasses
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -206,14 +208,14 @@ factory-build-nemoclaw-dev   172.18.194.183   FACTORY_GITLAB_TOKEN   sbx-cs-veqN
 """
 
 
-def test_no_anthropic_row_fails_and_says_the_oauth_listing_is_unmeasured() -> None:
+def test_no_global_anthropic_row_is_unknown_not_a_failure() -> None:
     result = doctor.anthropic_credential(SBX_LISTING)
-    assert result.status is Status.FAIL
+    assert result.status is Status.SKIPPED
     assert "unmeasured" in result.detail
     assert "factory doctor --deep" in result.detail
 
 
-def test_an_anthropic_row_passes_without_claiming_the_token_works() -> None:
+def test_a_global_anthropic_row_passes_without_claiming_the_token_works() -> None:
     listed = SBX_LISTING.replace(
         "(global)                 service   openai",
         "(global)                 service   anthropic   (stored)\n(global) service openai",
@@ -224,6 +226,60 @@ def test_an_anthropic_row_passes_without_claiming_the_token_works() -> None:
     assert "validity" in result.detail
 
 
+def test_an_anthropic_row_scoped_to_one_sandbox_does_not_pass() -> None:
+    scoped = SBX_LISTING.replace(
+        "codex-factory            service   github",
+        "factory-build-x          service   anthropic",
+    )
+    result = doctor.anthropic_credential(scoped)
+    assert result.status is Status.SKIPPED
+    assert "scoped to one sandbox only (factory-build-x service anthropic" in result.detail
+
+
 def test_a_custom_secret_named_anthropic_is_not_the_model_credential() -> None:
-    custom = SBX_LISTING + "factory-build-x   api.example   anthropic   sbx-cs-abc   ***\n"
-    assert doctor.anthropic_credential(custom).status is Status.FAIL
+    custom = SBX_LISTING + "(global)   api.example   anthropic   sbx-cs-abc   ***\n"
+    assert doctor.anthropic_credential(custom).status is Status.SKIPPED
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x.invalid", *args],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_the_hooks_row_fails_a_project_whose_base_ref_does_not_wire_them(tmp_path: Path) -> None:
+    (tmp_path / "home").mkdir()
+    ctx, _ = doctor.load_context(_home(tmp_path / "home"))
+    assert ctx.registry is not None
+    assert ctx.store is not None
+    wired, unwired = tmp_path / "wired", tmp_path / "unwired"
+    for repo in (wired, unwired):
+        repo.mkdir()
+        _git(repo, "init", "-q", "-b", "main")
+    (wired / ".claude").mkdir()
+    (wired / ".claude" / "settings.json").write_bytes((HOME / ".claude/settings.json").read_bytes())
+    _git(wired, "add", "-A")
+    for repo in (wired, unwired):
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "seed")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    first = next(iter(ctx.registry.projects.values()))
+    projects = {
+        "wired": dataclasses.replace(first, name="wired", path=wired, base_branch="main"),
+        "unwired": dataclasses.replace(first, name="unwired", path=unwired, base_branch="main"),
+        "unfetched": dataclasses.replace(first, name="unfetched", path=unwired, base_branch="x"),
+    }
+    registry = dataclasses.replace(ctx.registry, projects=projects)
+
+    rows = {
+        r.name: r
+        for r in doctor.check("layer-A hooks").run(dataclasses.replace(ctx, registry=registry))
+    }
+
+    assert rows["layer-A hooks in wired"].status is Status.OK
+    assert rows["layer-A hooks in unwired"].status is Status.FAIL
+    assert ".claude/settings.json is absent" in rows["layer-A hooks in unwired"].detail
+    assert rows["layer-A hooks in unfetched"].status is Status.FAIL
+    assert "origin/x does not resolve" in rows["layer-A hooks in unfetched"].detail
+    ctx.store.close()

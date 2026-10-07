@@ -182,8 +182,25 @@ def test_a_guard_over_every_writing_tool_and_the_stop_gate_are_wired(
             json.dumps({"hooks": {"PreToolUse": [_protect("(", ARGS_FORM)], **VERIFY}}),
             "PreToolUse protect_paths.mjs does not match Bash, Edit, Read, Write",
         ),
+        (
+            json.dumps(
+                {
+                    "disableAllHooks": True,
+                    "hooks": {"PreToolUse": [_protect(None, ARGS_FORM)], **VERIFY},
+                }
+            ),
+            "disableAllHooks is true",
+        ),
     ],
-    ids=["absent", "not-json", "no-guard", "no-stop-gate", "guard-misses-writes", "bad-regex"],
+    ids=[
+        "absent",
+        "not-json",
+        "no-guard",
+        "no-stop-gate",
+        "guard-misses-writes",
+        "bad-regex",
+        "all-hooks-disabled",
+    ],
 )
 def test_an_unenforced_settings_file_says_what_is_missing(
     settings: str | None, problem: str

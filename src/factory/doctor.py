@@ -44,13 +44,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from factory import machine, repo
-from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
+from factory import machine
+from factory.harness import vendor_check
 from factory.intake.linear import LinearError, keychain_secret
 from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.routing import Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, sbx_available
 from factory.steps import review as review_step
+from factory.steps.sandbox import layer_a_hooks_wired
 from factory.store import Store
 
 __all__ = ["CHECKS", "Check", "DoctorContext", "Result", "Status", "check", "report", "run"]
@@ -303,12 +304,7 @@ def _hooks_wired(ctx: DoctorContext) -> list[Result]:
         return []
     results: list[Result] = []
     for project in registry.projects.values():
-        unwired = unwired_hooks(repo.file_at_ref(project.path, project.base_ref, CLAUDE_SETTINGS))
-        results += _one(
-            f"layer-A hooks in {project.name}",
-            not unwired,
-            f"{project.base_ref}: " + ("; ".join(unwired) or "PreToolUse and Stop wired"),
-        )
+        results += _one(f"layer-A hooks in {project.name}", *layer_a_hooks_wired(project))
     return results
 
 
@@ -327,26 +323,27 @@ def _anthropic(_ctx: DoctorContext) -> list[Result]:
 
 
 def anthropic_credential(secret_ls: str) -> Result:
-    """Is an `anthropic` service secret listed by `sbx secret ls`? Presence, not validity.
+    """Does `sbx secret ls` list a global `anthropic` service secret? Presence, not validity.
 
     Measured: the service table's rows read `<scope> service <name> <state>`, e.g.
     `(global) service openai (oauth configured)`. How the anthropic secret is listed is
     not measured, for either route: the API key (`sbx secret set anthropic`) or the OAuth
-    token `sbx run claude <dir> -- auth login` stores. So absence is reported as what was
-    seen, and `factory doctor --deep`'s ping is the check that settles it.
+    token `sbx run claude <dir> -- auth login` stores. So no global row is `skipped`, not
+    `fail`: absent and listed some other way look the same from here, and the deep ping
+    is the check that tells them apart.
     """
     name = "anthropic credential (sbx)"
     service_rows = secret_ls.split("CUSTOM SECRETS", 1)[0].splitlines()
     rows = [line.split() for line in service_rows if "anthropic" in line.split()]
-    if rows:
-        listed = "; ".join(" ".join(row) for row in rows)
+    listed = "; ".join(" ".join(row) for row in rows)
+    if any(row[0] == "(global)" for row in rows):
         return Result(name, Status.OK, f"listed ({listed}); validity is the deep ping's to prove")
     return Result(
         name,
-        Status.FAIL,
-        "no anthropic row in `sbx secret ls`. Store one (docs/runbook.md, first Claude use). "
-        "How sbx lists the OAuth route's token is unmeasured: if you took that route, "
-        "`factory doctor --deep` decides",
+        Status.SKIPPED,
+        (f"anthropic is scoped to one sandbox only ({listed}). " if rows else "")
+        + "No global anthropic row in `sbx secret ls`, and how sbx lists the OAuth route's "
+        "token is unmeasured. `factory doctor --deep` decides; docs/runbook.md has both routes",
     )
 
 
