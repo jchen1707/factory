@@ -139,6 +139,12 @@ def _adapter_seeing(secrets: list[dict[str, str]]) -> SbxAdapter:
         "workspace": "/Users/james/python-harness",
         "secrets": secrets,
     }
+    listing = {
+        "sandboxes": [
+            {"name": _spec().name, "workspaces": [w.as_argument() for w in _spec().workspaces]}
+        ]
+    }
+    adapter._run = lambda argv, **_: Completed(tuple(argv), 0, json.dumps(listing), "")  # type: ignore[method-assign]
     return adapter
 
 
