@@ -318,6 +318,23 @@ def test_gc_names_only_sandboxes_that_exist(ctx: Context) -> None:
     assert targets <= {spec.name for spec in _fake(ctx).created}
 
 
+def test_a_failed_listing_is_reported_and_the_rest_of_the_sweep_still_is(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _finished_run(ctx)
+
+    def refuse(self: FakeSandbox) -> set[str]:
+        raise SbxError("sbx ls failed: daemon not running")
+
+    monkeypatch.setattr(FakeSandbox, "names", refuse)
+    actions = _sweep(ctx, dry_run=False)
+
+    assert [a.why for a in _kinds(actions, "sandbox-list")] == [
+        "refused: sbx ls failed: daemon not running"
+    ]
+    assert [a.done for a in _kinds(actions, "worktree-remove")] == [True]
+
+
 def test_artifacts_are_kept_while_the_disk_is_above_the_floor(ctx: Context) -> None:
     # This is the one step that destroys the record of a run, so age alone does not
     # license it: the disk being below the floor is the reason, and the fixture's floor

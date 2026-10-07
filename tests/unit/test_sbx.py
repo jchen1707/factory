@@ -193,6 +193,14 @@ def _adapter_listing(stdout: str, *, ok: bool = True) -> SbxAdapter:
     return adapter
 
 
+def test_names_reads_the_listing_and_refuses_a_failed_one() -> None:
+    listing = '{"sandboxes": [{"name": "factory-review-p-1", "status": "stopped"}]}'
+    assert _adapter_listing(listing).names() == {"factory-review-p-1"}
+    assert _adapter_listing('{"sandboxes": null}').names() == set()
+    with pytest.raises(SbxError, match="sbx ls failed"):
+        _adapter_listing("", ok=False).names()
+
+
 def test_the_placeholder_is_read_out_of_the_secret_listing() -> None:
     adapter = _adapter_listing(MEASURED_LISTING)
     assert (

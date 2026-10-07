@@ -210,6 +210,13 @@ class SbxAdapter:
         """
         return self._run(["sbx", "inspect", name], timeout=60).ok
 
+    def names(self) -> set[str]:
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        if not result.ok:
+            raise SbxError(f"sbx ls failed: {result.stderr.strip()}")
+        listing = json.loads(result.stdout).get("sandboxes") or []
+        return {str(entry["name"]) for entry in listing}
+
     def inspect(self, name: str) -> dict[str, Any]:
         result = self._run(["sbx", "inspect", name, "--json"], timeout=60)
         if not result.ok:
@@ -588,16 +595,6 @@ def sbx_available() -> tuple[bool, str]:
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout).strip()
     return True, proc.stdout.strip()
-
-
-def list_sandboxes() -> list[str]:
-    proc = subprocess.run(["sbx", "ls"], capture_output=True, text=True, check=False, timeout=60)
-    names: list[str] = []
-    for line in proc.stdout.splitlines()[1:]:
-        parts = line.split()
-        if parts:
-            names.append(parts[0])
-    return names
 
 
 def worktree_inside(workspace: Path, worktree: Path) -> bool:
