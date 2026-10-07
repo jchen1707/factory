@@ -150,15 +150,9 @@ def test_the_board_shows_a_blocked_badge_and_the_reason(ctx: Context) -> None:
 
 
 def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Context) -> None:
-    # The run is `implementing` and the agent has only just been spawned, so there is no
-    # numerator to divide. The page must say why rather than show a number, and must not
-    # invent one — the estimate is the thing §18.5 rules out.
-    #
-    # The reason is the *turn* one, not the *stream* one: a spawned agent has already
-    # written `thread.started`, so the file exists and carries no completed turn. This is
-    # verbatim what the board printed for the live FRO-7 run on 2026-08-22 —
-    # `ctx — (the agent has not completed a turn yet)`.
-    reason = "the agent has not completed a turn yet"
+    # The builder has just spawned: its stream holds `init` and no message yet, so there
+    # is no prompt to divide. The page must say why rather than show a number.
+    reason = "the agent has not answered yet"
     _to_implementing(ctx)
 
     rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
@@ -174,44 +168,93 @@ def test_the_context_percentage_is_hidden_with_its_reason_not_estimated(ctx: Con
     assert "%" not in context_cell
 
 
-def test_intermediate_context_is_shown_without_waiting_for_a_completed_turn(ctx: Context) -> None:
+def _launch_events(ctx: Context) -> Path:
+    return Path(ctx.store.runtime.invocations(ctx.run.id)[-1]["metadata"]["events"])
+
+
+def test_a_captured_claude_stream_renders_on_every_console_view(ctx: Context) -> None:
+    # A real Claude Code 2.1.292 capture lands where the builder's launch streams.
     _to_implementing(ctx)
-    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
-    attempt_dir.mkdir(parents=True, exist_ok=True)
-    usable = ctx.routing.models[ctx.routing.role("builder").model].context_window
-    (attempt_dir / "events.jsonl").write_text(
-        json.dumps({"type": "thread.started", "thread_id": "01a0"})
-        + "\n"
-        + json.dumps(
-            {
-                "type": "factory.context",
-                "tokens": usable // 2,
-                "window": usable,
-                "observed_at": time.time(),
-                "semantics_verified": True,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    capture = Path(__file__).parents[1] / "fixtures" / "claude" / "build-tools.jsonl"
+    _launch_events(ctx).write_text(capture.read_text(encoding="utf-8"), encoding="utf-8")
+    window = ctx.routing.models[ctx.routing.role("builder").model].context_window
+    client = _client(ctx)
+
+    row = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)[0]
+    assert row.context_pct == (8 + 14473 + 888) / window
+    assert row.context_source == "last message of the current launch"
+    assert row.activity == "done"
+
+    board = client.get("/").text
+    assert f"{row.context_pct * 100:.0f}%" in board.split('<td data-label="Context">', 1)[1]
+    assert "<dt>Activity</dt><dd>done</dd>" in board
+
+    detail = client.get("/runs/BAC-4").text
+    assert f'value="{row.context_pct * 100:.1f}" max="100"' in detail
+
+    timeline = client.get("/runs/BAC-4/timeline").text
+    calls = timeline.split("<h2>Tool calls", 1)[1].split("</table>", 1)[0]
+    assert calls.count("<tr><td class='mono'>") == 3
+    for tool, summary, took in (
+        ("Write", "/work/repo/notes.txt", "37ms"),
+        ("Edit", "/work/repo/notes.txt", "44ms"),
+        ("Bash", "touch bash-made.txt &amp;&amp; git add -A", "1s"),
+    ):
+        row_html = calls.split(f'<span class="ttype t-{tool}">{tool}</span>', 1)[1].split("</tr>")[
+            0
+        ]
+        assert summary in row_html
+        assert f'<td class="mono">{took}</td>' in row_html
+        assert '<td class="mono exit ok">ok</td>' in row_html
+
+
+def test_a_review_whose_stream_was_collected_does_not_blank_the_run(ctx: Context) -> None:
+    # A review's collect moves its stream out of the scratch its launch record names, so
+    # that record points at nothing; the console falls back to the newest stream present.
+    _to_implementing(ctx)
+    fixtures = Path(__file__).parents[1] / "fixtures" / "claude"
+    _launch_events(ctx).write_text((fixtures / "build-tools.jsonl").read_text())
+    review_events = ctx.home / "review-scratch" / "events.jsonl"
+    review_events.parent.mkdir()
+    review_events.write_text((fixtures / "denied.jsonl").read_text())
+    ctx.store.runtime.start_invocation(
+        f"{ctx.run.id}:{ctx.run.attempt}:review:spec",
+        ctx.run.id,
+        ctx.run.attempt,
+        "review:spec",
+        {"model": ctx.routing.role("reviewer").model, "events": str(review_events), "expected": {}},
     )
 
-    rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
-
-    row = next(r for r in rows if r.ticket == "BAC-4")
-    assert row.context_reason is not None
-    assert row.context_reason.startswith("fresh; measured")
-    assert row.context_pct is not None
-    assert round(row.context_pct, 2) == 0.50
-    assert "50%" in _client(ctx).get("/").text
-
-    with (attempt_dir / "events.jsonl").open("a") as events:
-        events.write(
-            json.dumps({"type": "factory.context.invalidated", "reason": "compaction completed"})
-            + "\n"
+    def tools() -> list[str]:
+        timeline = console_views.run_timeline(
+            ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run
         )
-    rows = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)
-    assert rows[0].context_pct is None
-    assert rows[0].context_reason == "compaction completed"
+        return [call.tool for call in timeline.tool_calls]
+
+    assert tools() == ["Write"]
+    review_events.unlink()
+    assert tools() == ["Write", "Edit", "Bash"]
+
+
+def test_a_pre_claude_attempt_is_named_not_parsed(ctx: Context) -> None:
+    # An invocation recorded before the cutover has no stored attestation; its stream is
+    # Codex's, which the console no longer reads.
+    _to_implementing(ctx)
+    ctx.store.runtime.start_invocation(
+        f"{ctx.run.id}:{ctx.run.attempt}:codex-builder",
+        ctx.run.id,
+        ctx.run.attempt,
+        "builder",
+        {"model": "gpt-5.6-sol", "events": str(_launch_events(ctx))},
+    )
+
+    row = console_views.runs_board(ctx.home, ctx.registry, ctx.routing, ctx.store)[0]
+
+    assert (row.context_pct, row.context_reason) == (None, "pre-Claude attempt")
+    assert row.activity == "pre-Claude attempt"
+    timeline = _client(ctx).get("/runs/BAC-4/timeline").text
+    assert "pre-Claude attempt" in timeline
+    assert "<h2>Tool calls" not in timeline
 
 
 # --------------------------------------------------------------------------------
@@ -616,112 +659,47 @@ def test_the_run_timeline_page_renders_all_three_bands(ctx: Context) -> None:
     assert ">Merge<" not in page
 
 
-def test_the_timeline_lists_tool_calls_folded_from_events(ctx: Context) -> None:
-    _to_implementing(ctx)
-    ctx.refresh()
-    # the live attempt's events.jsonl gains a completed command; the timeline folds it
-    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
-    attempt_dir.mkdir(parents=True, exist_ok=True)
-    (attempt_dir / "events.jsonl").write_text(
-        json.dumps({"type": "thread.started", "thread_id": "01a0"})
-        + "\n"
-        + json.dumps(
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "i1",
-                    "type": "command_execution",
-                    "command": "uv run pytest -q",
-                    "exit_code": 0,
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    page = _client(ctx).get("/runs/BAC-4/timeline").text
-
-    assert "uv run pytest -q" in page
-    assert "command_execution" in page
-    # no timings sidecar → no dur column (the Phase 1 look, not a column of em dashes)
-    assert "<th>dur</th>" not in page
-
-
-def test_the_timeline_shows_call_durations_when_a_sidecar_exists(ctx: Context) -> None:
-    _to_implementing(ctx)
-    ctx.refresh()
-    attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
-    attempt_dir.mkdir(parents=True, exist_ok=True)
-    events = [
-        {"type": "thread.started", "thread_id": "01a0"},
-        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "i1",
-                "type": "command_execution",
-                "command": "uv run pytest -q",
-                "exit_code": 0,
-            },
-        },
-    ]
-    (attempt_dir / "events.jsonl").write_text(
-        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
-    )
-    # the Phase 2 sidecar: one observed_at per events line, in order
-    (attempt_dir / "events.timings.jsonl").write_text(
-        "\n".join(json.dumps({"observed_at": t}) for t in (1000.0, 1000.0, 1042.0)) + "\n",
-        encoding="utf-8",
-    )
-
-    page = _client(ctx).get("/runs/BAC-4/timeline").text
-
-    # the dur column appears, with the defended duration (42s) rendered
-    assert "<th>dur</th>" in page
-    assert "42s" in page
-
-
-def test_invocation_controls_show_context_freshness_and_incomplete_cost(ctx: Context) -> None:
+def test_invocation_controls_show_context_and_incomplete_cost(ctx: Context) -> None:
+    model = ctx.routing.role("reviewer").model
+    window = ctx.routing.models[model].context_window
     ctx.store.runtime.start_invocation(
         "observed",
         ctx.run.id,
         1,
         "review:spec",
-        {
-            "model": "gpt-5.6-sol",
-            "effort": "high",
-            "preset": "volume",
-        },
+        {"model": model, "effort": "high", "preset": "volume", "expected": {}},
     )
     ctx.store.runtime.observe(
         "observed",
         1,
         {
-            "context": {"tokens": 750, "effective_window": 1000, "observed_at": time.time()},
+            "context": {"tokens": window * 3 // 4, "effective_window": None},
             "estimate": {"usd": 0.25, "complete": False},
         },
     )
     page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
     assert page.status_code == 200
-    assert "Context: 75%" in page.text
-    assert "warn" in page.text
+    assert "Context: 75% · last message" in page.text
     assert "$0.2500 · incomplete" in page.text
-    assert "gpt-5.6-sol" in page.text
+    assert model in page.text
     ctx.store.runtime.configure("run", ctx.run.id, {"waiting_invocation": "observed"})
     page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
     assert "Automatic launch pending" in page.text
     assert 'action="/settings/approve/' not in page.text
     assert "Invocation ID: <code>observed</code>" in page.text
+
+
+def test_an_invocation_from_before_the_cutover_shows_no_context(ctx: Context) -> None:
+    ctx.store.runtime.start_invocation(
+        "codex-era", ctx.run.id, 1, "builder", {"model": "gpt-5.6-sol", "effort": "high"}
+    )
     ctx.store.runtime.observe(
-        "observed",
-        2,
-        {
-            "context": {"tokens": 750, "effective_window": 1000, "observed_at": time.time() - 180},
-        },
+        "codex-era",
+        1,
+        {"context": {"tokens": 750, "effective_window": 1000, "observed_at": time.time()}},
     )
     page = _client(ctx).get(f"/settings/runs/{ctx.run.linear_id}")
-    assert "Context: unavailable · stale" in page.text
+    assert "Context: unavailable · pre-Claude attempt" in page.text
 
 
 def test_inherited_concurrency_uses_project_registry_limit(ctx: Context) -> None:

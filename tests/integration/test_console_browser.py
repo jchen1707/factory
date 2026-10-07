@@ -31,6 +31,7 @@ from factory.operator_controls import status
 from factory.steps import Context
 from factory.store import Store
 from tests.integration.test_console import _models_toml, _to_implementing
+from tests.support import claude_stream
 
 MODULES = os.environ.get("FACTORY_BROWSER_MODULES")
 FIXTURE_NOW = 1788950760.0
@@ -296,6 +297,8 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
         cached_tokens=12000,
         usd=0.42,
     )
+    builder = console_views.current_launch(ctx.store, ctx.run)
+    assert builder is not None
     for index in range(55 if stress else 3):
         invocation = f"fixture-invocation-{index:03}-" + "abcdef0123456789" * 4
         ctx.store.runtime.start_invocation(
@@ -303,18 +306,15 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
             ctx.run.id,
             index + 1,
             "implement" if index == 0 else "child",
-            {"model": "fixture-model", "sandbox": f"factory-review-fixture-{index}"},
+            (builder["metadata"] if index == 0 else {"model": "fixture-model"})
+            | {"sandbox": f"factory-review-fixture-{index}"},
         )
         if index == 0:
             ctx.store.runtime.observe(
                 invocation,
                 1,
                 {
-                    "context": {
-                        "tokens": 46000,
-                        "effective_window": 100000,
-                        "observed_at": time.time(),
-                    },
+                    "context": {"tokens": _fixture_tokens(ctx), "effective_window": None},
                     "usage": {
                         "input_tokens": 24000,
                         "output_tokens": 1600,
@@ -335,22 +335,24 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
             )
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path
-    context_event = json.dumps(
-        {
-            "type": "factory.context",
-            "tokens": 46000,
-            "window": 100000,
-            "observed_at": time.time(),
-            "semantics_verified": True,
-        }
-    )
     Path(detail.events_path).write_text(
-        context_event
-        + "\n"
-        + "".join(f"fixture retained event {index:04}\n" for index in range(250))
+        "".join(
+            claude_stream.line(claude_stream.assistant_text(f"fixture retained event {index:04}"))
+            + "\n"
+            for index in range(250)
+        )
     )
 
     _populate_evidence(ctx)
+
+
+def _fixture_tokens(ctx: Context) -> int:
+    """46% of the builder's window, the occupancy the fixture has always shown."""
+    return ctx.routing.models[ctx.routing.role("builder").model].context_window * 46 // 100
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, UTC).isoformat()
 
 
 def _populate_evidence(ctx: Context) -> None:
@@ -358,50 +360,25 @@ def _populate_evidence(ctx: Context) -> None:
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path
     attempt = Path(detail.events_path).parent
-    events = [
-        {"type": "item.started", "item": {"id": "fixture-read", "type": "command_execution"}},
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "fixture-read",
-                "type": "command_execution",
-                "command": "cat src/app/settings.py",
-                "exit_code": 0,
-            },
-        },
-        {"type": "item.started", "item": {"id": "fixture-test", "type": "command_execution"}},
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "fixture-test",
-                "type": "command_execution",
-                "command": "pytest tests/test_settings.py",
-                "exit_code": 0,
-            },
-        },
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "fixture-untimed",
-                "type": "command_execution",
-                "command": "git diff --stat",
-                "exit_code": 0,
-            },
-        },
-    ]
+    usage = claude_stream.message_usage(input=0, cache_read=_fixture_tokens(ctx), cache_write=0)
+    events = []
+    for use_id, command, issued, answered in [
+        ("fixture-read", "cat src/app/settings.py", 7, 6.8),
+        ("fixture-test", "pytest tests/test_settings.py", 6, 2),
+        ("fixture-running", "git diff --stat", 1, None),
+    ]:
+        use = claude_stream.assistant_tool_use(
+            "Bash", {"command": command}, tool_use_id=use_id, usage=usage
+        )
+        use["timestamp"] = _iso(FIXTURE_NOW - issued)
+        events.append(use)
+        if answered is not None:
+            result = claude_stream.tool_result(use_id, "ok", is_error=False)
+            result["timestamp"] = _iso(FIXTURE_NOW - answered)
+            events.append(result)
     old_lines = Path(detail.events_path).read_text().splitlines()
     Path(detail.events_path).write_text(
-        "\n".join([*old_lines, *(json.dumps(event) for event in events)]) + "\n"
-    )
-    timings = [FIXTURE_NOW - 8] * len(old_lines) + [
-        FIXTURE_NOW - 7,
-        FIXTURE_NOW - 6.8,
-        FIXTURE_NOW - 6,
-        FIXTURE_NOW - 2,
-        FIXTURE_NOW - 1,
-    ]
-    (attempt / "events.timings.jsonl").write_text(
-        "\n".join(json.dumps({"observed_at": t}) for t in timings) + "\n"
+        "\n".join([*old_lines, *(claude_stream.line(event) for event in events)]) + "\n"
     )
     (attempt / "gates.json").write_text(
         json.dumps(

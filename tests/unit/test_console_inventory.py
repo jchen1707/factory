@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from factory.console import views
+from factory.routing import ModelFacts, Routing
 from factory.store import Store
 
 
@@ -174,32 +175,31 @@ def test_failed_inventory_does_not_expose_command_output(monkeypatch: pytest.Mon
     assert cli._sbx_ls_json() == []
 
 
-def test_fresh_context_counts_only_active_invocations_and_not_cumulative_usage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_context_counts_only_active_invocations_with_a_measured_prompt(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
-    monkeypatch.setattr(views.time, "time", lambda: 1000)
-    for name, lease, observed in [
-        ("builder", "active", 990),
-        ("child", "active", 999),
-        ("stale", "active", 500),
-        ("dead", "completed", 999),
-    ]:
-        store.runtime.start_invocation(name, run.id, 1, name, {})
-        store.runtime.observe(
-            name,
-            1,
-            {
-                "usage": {"input_tokens": 999999},
-                "context": {"tokens": 50, "effective_window": 100, "observed_at": observed},
-            },
-        )
+    routing = Routing(
+        roles={},
+        models={"claude-opus-5-5": ModelFacts("claude-opus-5-5", 1000, (), None)},
+        usd_per_run=20.0,
+        usd_warn_at=12.0,
+    )
+    claude: dict[str, Any] = {"expected": {}}
+    rows: list[tuple[str, str, int, dict[str, Any]]] = [
+        ("builder", "active", 500, claude | {"model": "claude-opus-5-5"}),
+        ("waiting", "active", 0, claude | {"model": "claude-opus-5-5"}),
+        ("uncatalogued", "active", 500, claude | {"model": "claude-unknown"}),
+        ("pre-claude", "active", 500, {"model": "claude-opus-5-5"}),
+        ("dead", "completed", 500, claude | {"model": "claude-opus-5-5"}),
+    ]
+    for name, lease, tokens, metadata in rows:
+        store.runtime.start_invocation(name, run.id, 1, name, metadata)
+        store.runtime.observe(name, 1, {"context": {"tokens": tokens, "effective_window": None}})
         store.runtime.db.execute(
             "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
             (name, run.id, run.project, lease),
         )
-    assert views._invocation_context_counts(store, run) == (3, 2)
+    assert views._invocation_context_counts(store, run, routing) == (4, 1)
 
 
 def test_title_comes_only_from_persisted_ticket_heading(tmp_path: Path) -> None:

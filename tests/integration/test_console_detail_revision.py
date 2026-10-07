@@ -67,32 +67,24 @@ def test_timeline_leads_with_measured_runtime_and_collapses_full_transition_evid
     assert page.index("<h2>Execution history</h2>") < page.index("<h2>Agent activity</h2>")
     assert '<details data-key="timeline-transitions">' in page
     assert 'class="transition-preview"' in page
-    assert "No completed tool calls recorded for this attempt." in page
+    assert "No tool calls recorded for this launch." in page
     assert "<h2>Tool calls" not in page
     assert 'data-scroll-key="waterfall"' in page
 
 
 def test_detail_context_progress_uses_percent_not_fraction(ctx: Context) -> None:
-    import json
-    import time
     from pathlib import Path
 
     from factory.console.views import run_detail
+    from tests.support import claude_stream
 
     _to_implementing(ctx)
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path
+    window = ctx.routing.models[ctx.routing.role("builder").model].context_window
+    usage = claude_stream.message_usage(input=0, cache_read=window * 46 // 100, cache_write=0)
     Path(detail.events_path).write_text(
-        json.dumps(
-            {
-                "type": "factory.context",
-                "tokens": 46000,
-                "window": 100000,
-                "observed_at": time.time(),
-                "semantics_verified": True,
-            }
-        )
-        + "\n"
+        claude_stream.line(claude_stream.assistant_text("working", usage=usage)) + "\n"
     )
     page = _client(ctx).get("/runs/BAC-4").text
     assert 'value="46.0" max="100"' in page

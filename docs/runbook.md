@@ -149,8 +149,8 @@ above. It binds loopback only and holds no credential of its own. **There is no 
 button**: merging is James's, on GitHub, and the console links out to the pull request.
 
 Context occupancy, cumulative tokens and estimated costs are separate measurements.
-The console labels unavailable or stale context observations; cumulative billed usage
-must never stand in for occupancy. Cost is an API-equivalent USD estimate, not an account
+Context occupancy is the last model call's prompt over the model's `context_window`;
+the console says why when there is none. Cumulative billed usage never stands in for it. Cost is an API-equivalent USD estimate, not an account
 charge. Missing usage or prices leaves evidence incomplete and known cost a lower bound.
 See [telemetry and costs](operator-reference.md#telemetry-and-costs).
 

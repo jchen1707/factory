@@ -274,17 +274,13 @@
   content: "●";
   margin-right: 0.25rem;
 }
-.ttype.t-command_execution::before {
+.ttype.t-Bash::before {
   color: var(--lane-builder);
 }
-.ttype.t-file_change::before {
+.ttype.t-Write::before,
+.ttype.t-Edit::before,
+.ttype.t-NotebookEdit::before {
   color: var(--lane-planner);
-}
-.ttype.t-agent_message::before {
-  color: var(--lane-reviewer);
-}
-.ttype.t-error::before {
-  color: var(--fail);
 }
 .exit.ok {
   color: var(--pass);
