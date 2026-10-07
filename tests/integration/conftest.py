@@ -245,6 +245,8 @@ class FakeSandbox:
     #: What the in-VM write probe answers for a path that exists on the host; a missing one
     #: answers `ENOENT`. `EROFS` everywhere is a `:ro` mount, as measured on 2026-10-07.
     authority_writes: dict[str, str] = field(default_factory=dict)
+    #: The directories that exist inside any VM, for gc's per-ticket directory script.
+    vm_dirs: set[str] = field(default_factory=set)
     #: What `sbx inspect --json` reports under `secrets`. Empty is the shape a correctly
     #: provisioned host produces; the tests set it to the shape measured on 2026-08-21.
     secrets: list[dict[str, str]] = field(default_factory=list)
@@ -400,7 +402,7 @@ class FakeSandbox:
     def inspect(self, name: str) -> dict[str, Any]:
         return {
             "name": name,
-            "state": "running",
+            "state": "running" if name in self.running else "stopped",
             "secrets": list(self.secrets),
             "workspace": "",
         }
@@ -502,6 +504,16 @@ class FakeSandbox:
                 for path in request["paths"]
             }
             return Completed(tuple(argv), 0, json.dumps(answer) + "\n", "")
+        if list(argv[:2]) == ["/bin/sh", "-c"] and list(argv[3:5]) in (
+            ["sh", "list"],
+            ["sh", "remove"],
+        ):
+            mode, paths = argv[4], argv[5:]
+            found = [p for p in paths if p in self.vm_dirs]
+            if mode == "remove":
+                self.vm_dirs -= set(found)
+            status = "removed" if mode == "remove" else "present"
+            return Completed(tuple(argv), 0, "".join(f"{status} {p}\n" for p in found), "")
         if argv and argv[-1].endswith("protect_paths.mjs"):
             return Completed(
                 tuple(argv), self.canary_exit, "", "Refusing to edit uv.lock - regenerate it."

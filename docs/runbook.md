@@ -132,9 +132,15 @@ The preflight measured the project's build VM below `vm_min_free_inodes` or
 the `df` probe itself failed.
 
 1. Run `factory doctor` to see the same row for every build VM.
-2. Free space inside the VM. Pytest temporary directories and the venvs of finished
-   tickets are the usual cause, for example
-   `sbx exec <build_sandbox> rm -rf /tmp/pytest-of-agent /home/agent/venvs/<project>/<old-ticket>`.
+2. Free space inside the VM. Run `factory gc --dry-run`, then `factory gc`. It removes the
+   per-ticket venvs (`{run}` in the project's env) of every ticket whose runs are all
+   `completed` or `cancelled`, and its `vm-disk` line shows the free inodes and bytes
+   before and after. It skips a stopped VM rather than start it; to clean one, keep a
+   shell open in it (`sbx exec -it <build_sandbox> bash`) while `factory gc` runs. A venv
+   that uv hardlinked from its cache frees only its directories (134 of 918 inodes for
+   one measured 2026-10-07); a copied one frees every file. Pytest temporary
+   directories are the other usual cause:
+   `sbx exec <build_sandbox> rm -rf /tmp/pytest-of-agent`.
    If the VM is not needed, stop it and `sbx rm` it instead; the factory creates a fresh one.
    A VM that has stopped at zero free inodes may fail to start. That was observed once, on
    2026-10-07; `sbx rm` is then the only way out. Read the preservation boundary in
