@@ -18,9 +18,11 @@ from factory.sandbox.sbx import SbxError
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
+from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import FakeSandbox, git
+from tests.integration.conftest import FakeSandbox, _seed_vendored_review_tree, git
+from tests.integration.test_phase3 import _stub_redphase, _to_reviewing
 
 WEEKS_AGO = time.time() - 30 * gc.DAY_SECONDS
 
@@ -284,6 +286,27 @@ def test_the_factory_never_touches_a_sandbox_it_does_not_own(ctx: Context) -> No
 
     touched = [a.target for a in actions if a.kind.startswith("sandbox-")]
     assert all(t.startswith(("factory-build-", "factory-review-")) for t in touched), touched
+
+
+def test_the_sandbox_a_run_reviewed_in_is_collected_with_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Each run reviews in its own sandbox and the registry names only the prefix, so gc
+    # finds it through the run or every review leaves a VM behind for good.
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    review_step.start(ctx)
+    reviewed_in = _fake(ctx).detached[-1][0]
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.state, to_state=State.CANCELLED, actor="human", rule="test"
+    )
+    with ctx.store.transaction() as conn:
+        conn.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (int(WEEKS_AGO), ctx.run.id))
+
+    removals = _kinds(_sweep(ctx, dry_run=True), "sandbox-remove")
+
+    assert reviewed_in in {a.target for a in removals}
 
 
 def test_artifacts_are_kept_while_the_disk_is_above_the_floor(ctx: Context) -> None:

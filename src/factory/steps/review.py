@@ -336,12 +336,7 @@ def _launch_next(
         axis.setdefault("history", []).append(
             {key: value for key, value in axis.items() if key not in {"history", "prompt_text"}}
         )
-    attempt_dir = AttemptDir(
-        _sandbox_run_dir(scratch, ctx.run.id)
-        / "run"
-        / str(ctx.run.attempt)
-        / launch.replace(":", "-")
-    )
+    attempt_dir = AttemptDir(scratch / "run" / str(ctx.run.attempt) / launch.replace(":", "-"))
     attempt_dir.root.mkdir(parents=True, exist_ok=True)
     entry, invocation = _axis_entry(
         ctx,
@@ -528,7 +523,7 @@ def _collect_legacy(
 
     Called by `run` after the fan-out exits, or by `reap` on a later tick — possibly in a
     different process. Nothing here reads anything `start` held in memory: the plan at
-    `review-plan.json`, the findings in the per-project scratch, and the exit code are all
+    `review-plan.json`, the axis files in the run's scratch, and the exit code are all
     on disk.
     """
     review_dir = ctx.state_dir / "review"
@@ -608,28 +603,8 @@ def _read_text(path: Path) -> str:
 # --------------------------------------------------------------------------------
 
 
-def _sandbox_run_dir(scratch: Path, run_id: str) -> Path:
-    """The reviewer's writable ground for **one run**, inside the per-project mount.
-
-    Everything the sandbox must read or write lives here: the scratch is the reviewer's
-    only writable mount, and it is the only part of the host filesystem it can see at
-    all. `state/runs/<run>/`
-    — where the review's evidence belongs and where `collect` reads its plan — is **not a
-    workspace of the review sandbox**, so a prompt written there cannot be read and an
-    events file pointed there cannot be written.
-
-    The mount is fixed per project (§9.1, and `_review_scratch` explains why it cannot be
-    per run); a subdirectory under it is free, exactly as the clone mount takes a run-id
-    subdirectory for the same reason. Keyed by run id so two runs of one ticket cannot
-    collide — the defect `factory_dir_for` records.
-    """
-    path = scratch / run_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def _land(scratch_out: Path, out_path: Path) -> None:
-    """Move one of the reviewer's outputs from the shared scratch into this run's own
+    """Move one of the reviewer's outputs from the scratch into this run's own
     directory, where the evidence belongs. The event stream and stderr both come home
     this way; a missing file is silent, because an axis that never started has nothing
     to land and the stream reader is what judges that."""
@@ -639,31 +614,32 @@ def _land(scratch_out: Path, out_path: Path) -> None:
 
 
 def _review_scratch(ctx: Context) -> Path:
-    """The reviewer's writable ground: one directory per **project**, not per run.
+    """The reviewer's writable ground, and its only one: one directory per **run**.
 
-    §9.1 fixes a sandbox's workspace set at creation, and the reviewer sandbox is named
-    once per project, so every path in its spec has to outlive the run that first created
-    it. A per-run directory does not: the second run finds the sandbox mounted on the
-    first run's path and `_assert_spec_matches` refuses it, correctly. BAC-4 measured
-    exactly that. The axis outputs are moved into the run's own directory as soon as they
-    land, so the evidence is still per-run — only the mount is shared.
+    Everything the sandbox must read or write lives here. `state/runs/<run>/`, where the
+    review's evidence belongs and where `collect` reads its plan, is **not a workspace of
+    the review sandbox**, so a prompt written there cannot be read and an events file
+    pointed there cannot be written.
+
+    Per run because the reviewer holds Bash and nothing else confines it: Claude Code
+    does not scope a tool to its cwd (measured, c4-default-outside-cwd), so a per-project
+    scratch let one run's reviewer rewrite a sibling run's stream, `exit` or `pgid`. The
+    sandbox is per run for the same reason (`isolation.project_for_run`), and the two
+    must move together: §9.1 fixes a workspace set at creation, so a per-run scratch on a
+    sandbox named per project is refused by `_assert_spec_matches`, as BAC-4 measured.
     """
-    scratch = ctx.home / "state" / "review" / ctx.project.name
-    if ctx.store.runtime.settings("run", ctx.run.id).get("isolation") == "per-run":
-        scratch = scratch / ctx.run.id
+    scratch = ctx.home / "state" / "review" / ctx.project.name / ctx.run.id
     scratch.mkdir(parents=True, exist_ok=True)
     return scratch
 
 
 def _review_spec(ctx: Context, scratch: Path) -> SandboxSpec:
-    """The read-only review sandbox: the project `:ro` + a `rw` scratch for findings.
+    """The read-only review sandbox: the project `:ro` + this run's `rw` scratch.
 
-    The read-only mount is the **project root**, not the worktree, for the same reason the
-    scratch is per-project: a worktree path contains the ticket, and a spec that changes
-    per ticket cannot be satisfied by a sandbox named per project. The build sandbox has
-    always mounted the root for this reason — worktrees live inside it at
-    `.factory/worktrees/<TICKET>`, so mounting the root reaches every one of them, and
-    `exec_sync(workdir=...)` still puts the reviewer in the worktree it is reviewing.
+    The read-only mount is the **project root**, not the worktree, because a worktree's
+    git directory lives in the root (`.git/worktrees/<TICKET>`, objects in `.git`), and a
+    reviewer that cannot run `git diff` cannot review. The worktree sits inside the root
+    at `.factory/worktrees/<TICKET>`, and the sandbox's `-w` puts the reviewer in it.
 
     `--no-share-skills` (§19 Phase 3 checklist): the reviewer has no skills store, so the
     portable `full-review` skill is reached by inlining it (Tier 2), not by loading a shared

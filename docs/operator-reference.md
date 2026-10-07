@@ -108,8 +108,10 @@ The console shows inherited/explicit limits, active work, queues and waiting rea
 limits drains admitted work without killing it.
 
 Per-run isolation separates worktrees, writable dependencies, temporary files, databases and
-ports. Clone layouts keep Linux dependencies in the VM. Shared Git maintenance/integration is
-serialized, and diverged branches require verification against the updated integration base.
+ports. Clone layouts keep Linux dependencies in the VM. Review is per run in every mode. Each
+run reviews in its own `<review_sandbox>-<run id>` sandbox, whose only writable mount is that
+run's review scratch. Shared Git maintenance/integration is serialized, and diverged branches
+require verification against the updated integration base.
 Use retained isolation evidence before raising concurrency; a larger configured number does
 not itself prove safe execution.
 

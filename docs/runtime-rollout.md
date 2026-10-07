@@ -281,6 +281,12 @@ apply command refuses while a live run still holds an invocation launched before
 carries no `claude`; remove them (`sbx rm`) so the next run recreates them as `claude`
 sandboxes. `ensure` does not compare the agent kind of an existing sandbox.
 
+Each run now reviews in its own sandbox, `<review_sandbox>-<run id>`, whose only writable
+mount is `state/review/<project>/<run id>`. A run that is reviewing when this lands
+finishes its current axis in the old sandbox and launches the next axis in its own. The
+registry's per-project `factory-review-*` sandbox is then unused. `factory gc` ages it by
+the whole project's last activity, so remove it with `sbx rm` once no run is reviewing.
+
 Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
 subsystem still owns live work, and names each item. Live work is any of these:
 

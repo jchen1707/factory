@@ -274,28 +274,23 @@ def _ctx_for_spec(tmp_path: Path, *, run_id: str, ticket: str) -> Any:
         run=SimpleNamespace(id=run_id, linear_id=ticket),
         worktree=project.path / ".factory/worktrees" / ticket,
         registry=SimpleNamespace(defaults=SimpleNamespace(deny_network=("mcp.linear.app",))),
-        store=SimpleNamespace(
-            runtime=SimpleNamespace(policy=lambda _: None, settings=lambda *args: {})
-        ),
+        store=SimpleNamespace(runtime=SimpleNamespace(policy=lambda _: None)),
     )
 
 
-def test_the_review_sandbox_spec_does_not_move_between_runs(tmp_path: Path) -> None:
-    """§9.1 fixes a sandbox's workspace set at creation and the reviewer is named once per
-    project, so nothing in its spec may carry a run id or a ticket. Two contexts differing
-    only in those must produce the identical workspace set.
-
-    BAC-4 measured the failure: the sandbox created on run `1effc543d83a459a`'s own review
-    directory was refused for run `73f500d22e894d9a`, which is `_assert_spec_matches` doing
-    its job against a spec that should never have varied.
-    """
+def test_the_reviewer_can_write_only_its_own_runs_scratch(tmp_path: Path) -> None:
+    """The reviewer holds Bash, so its one `rw` mount is everything it can write. Two runs
+    of one project must get disjoint ones, and the code under review stays `:ro`."""
     first = _ctx_for_spec(tmp_path, run_id="1effc543d83a459a", ticket="BAC-4")
     second = _ctx_for_spec(tmp_path, run_id="73f500d22e894d9a", ticket="BAC-9")
 
     one = _review_spec(first, _review_scratch(first))
     two = _review_spec(second, _review_scratch(second))
 
-    assert [w.as_argument() for w in one.workspaces] == [w.as_argument() for w in two.workspaces]
+    (mine,) = [w.path for w in one.workspaces if not w.readonly]
+    (theirs,) = [w.path for w in two.workspaces if not w.readonly]
+    assert not mine.is_relative_to(theirs)
+    assert not theirs.is_relative_to(mine)
     # And the shape is what sbx will accept: writable scratch first, code read-only after.
     assert not one.workspaces[0].readonly
     assert one.workspaces[1].readonly

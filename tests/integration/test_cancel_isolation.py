@@ -90,10 +90,10 @@ def test_cancel_targets_only_the_recorded_build_sandbox(
 def test_cancel_stops_recorded_attempt_before_cleanup_and_preserves_busy_sandbox(
     ctx: Context, monkeypatch: pytest.MonkeyPatch, state: State, shared: bool
 ) -> None:
+    advance_state(ctx, until=state)
     own = ctx.project.review_sandbox if state is State.REVIEWING else ctx.project.build_sandbox
     if not shared:
         own += "-recorded"
-    advance_state(ctx, until=state)
     attempt = ctx.home / "attempt"
     attempt.mkdir()
     (attempt / "pgid").write_text("321")
@@ -121,7 +121,9 @@ def test_cancel_stops_recorded_attempt_before_cleanup_and_preserves_busy_sandbox
     monkeypatch.setattr(cli, "_release_local_debris", cleanup)
     cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
     assert calls[0] == ("signal", (own, 321))
-    assert ("stop", own) not in calls if shared else ("stop", own) in calls
+    # Review sandboxes are per run, so a reviewing sibling never holds this run's one.
+    busy = shared and state is State.IMPLEMENTING
+    assert ("stop", own) not in calls if busy else ("stop", own) in calls
     assert ("stop", ctx.project.build_sandbox) not in calls
     row = ctx.store.attempt_row(ctx.run.id, 1, state)
     assert row is not None
