@@ -784,6 +784,7 @@ describe('gate report — base diff integration (real git)', () => {
     assert.equal(r.status, 0, r.stderr);
     const report = JSON.parse(r.stdout);
     assert.equal(report.gates[0].status, 'skipped_unchanged');
+    assert.equal(report.verdict, 'skipped', 'a report that ran nothing must not read pass');
   });
 });
 
@@ -1951,6 +1952,34 @@ describe('gate report — verdict and exit codes', () => {
     assert.equal(exitCode(report.verdict), 0);
   });
 
+  it('is skipped, never pass, when every gate was skipped_unchanged', () => {
+    const { root, targets, missing } = dispatched({
+      name: 'solo',
+      gates: [
+        { name: 'ruff check', kind: 'lint', run: ['ruff'] },
+        { name: 'ruff format', kind: 'format', run: ['ruff'] },
+        { name: 'mypy', kind: 'types', run: ['mypy'] },
+        { name: 'pytest', kind: 'test', run: ['pytest'] },
+      ],
+      hooks: { gatedPaths: ['src'], gatedExtensions: ['.py'] },
+    });
+    const report = buildReport({
+      root,
+      targets,
+      missing,
+      isChanged: () => false,
+      runGate: () => assert.fail('an unchanged app must not run its gates'),
+    });
+    assert.deepEqual(
+      report.gates.map((g) => g.status),
+      ['skipped_unchanged', 'skipped_unchanged', 'skipped_unchanged', 'skipped_unchanged'],
+    );
+    assert.equal(report.verdict, 'skipped');
+    // Nothing failed and nothing went missing, so an exit-code-only caller (a pre-commit
+    // hook on a docs-only commit) is not told to stop; only the verdict says nothing ran.
+    assert.equal(exitCode(report.verdict), 0);
+  });
+
   it('is fail (exit 1) when any gate failed', () => {
     const { root, targets, missing } = dispatched({
       name: 'solo',
@@ -2026,8 +2055,17 @@ describe('gate report — verdict and exit codes', () => {
     assert.equal(computeVerdict([{ status: 'pass' }], []), 'pass');
     assert.equal(
       computeVerdict([{ status: 'not_applicable' }, { status: 'skipped_unchanged' }], []),
-      'pass',
+      'skipped',
     );
+    assert.equal(computeVerdict([{ status: 'disabled' }, { status: 'deferred' }], []), 'skipped');
+    assert.equal(computeVerdict([], []), 'skipped');
+    assert.equal(
+      computeVerdict([{ status: 'pass' }, { status: 'skipped_unchanged' }], []),
+      'pass',
+      'one gate that ran is evidence; the skipped rows beside it are dispatch decisions',
+    );
+    assert.equal(computeVerdict([{ status: 'skipped_unchanged' }], ['apps/web']), 'incomplete');
+    assert.equal(computeVerdict([{ status: 'unavailable' }], []), 'incomplete');
     assert.equal(computeVerdict([{ status: 'pass' }, { status: 'fail' }], []), 'fail');
     assert.equal(computeVerdict([{ status: 'pass' }, { status: 'unavailable' }], []), 'incomplete');
     assert.equal(computeVerdict([{ status: 'pass' }], ['apps/web']), 'incomplete');
@@ -2037,8 +2075,8 @@ describe('gate report — verdict and exit codes', () => {
     );
   });
 
-  it('maps the three verdicts to distinct exit codes 0/1/3', () => {
-    assert.deepEqual(EXIT, { pass: 0, fail: 1, incomplete: 3 });
+  it('maps every verdict to an exit code, keeping fail and incomplete apart from 0', () => {
+    assert.deepEqual(EXIT, { pass: 0, skipped: 0, fail: 1, incomplete: 3 });
     assert.equal(exitCode('pass'), 0);
     assert.equal(exitCode('fail'), 1);
     assert.equal(exitCode('incomplete'), 3);
@@ -2218,7 +2256,7 @@ describe('gate report — --kinds narrows the run', () => {
   it('is inert when asked for a kind this repo does not declare', () => {
     const { report, ran } = reportFor(['build']);
     assert.deepEqual(ran, []);
-    assert.equal(report.verdict, 'pass');
+    assert.equal(report.verdict, 'skipped');
   });
 
   it('runs a gate the change filter would have skipped, when the caller forced it', () => {

@@ -544,7 +544,14 @@ export function distil(transcript, context, prior = '', runtime = '') {
 
   if (result.error)
     return { text: '', failure: `could not run ${backend} (${result.error.message})` };
-  if (result.status !== 0) return { text: '', failure: `${backend} exited ${result.status}` };
+  if (result.status !== 0) {
+    // `claude -p` prints an auth failure on stdout; `codex exec` ends stderr with it.
+    const reason = [result.stderr, result.stdout]
+      .map((stream) => (stream ?? '').trim().split('\n').at(-1).trim())
+      .find(Boolean);
+    const detail = reason ? `: ${reason.slice(0, 200)}` : '';
+    return { text: '', failure: `${backend} exited ${result.status}${detail}` };
+  }
   const text = (result.stdout ?? '').trim();
   if (!text) return { text: '', failure: 'distiller returned empty output' };
   if (text.startsWith(NO_LEARNINGS)) return { text: '', failure: null };

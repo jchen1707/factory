@@ -32,7 +32,9 @@ Report results:
   has to go and look up anyway.
 - Which gates passed, by their `name`.
 - Any gate the report marked `unavailable` or `disabled`, and say which. A verdict of
-  `incomplete` is not a pass — it means a gate could not start.
+  `incomplete` is not a pass — it means a gate could not start. A verdict of `skipped` is
+  not a pass either — it means no gate ran, so this repository declares no lint, format or
+  types gate that could.
 
 Then stop. Two rules about fixing:
 
