@@ -169,7 +169,7 @@ def _baseline(ctx: Context, worktree: Path) -> str:
     """The merge base of the branch, not the base tip.
 
     Every test patch here is a three-dot diff, which starts at the merge base. Once the base
-    branch moves, its tip no longer matches the patch's preimage: the replay's patch stops
+    branch moves, its tip can diverge from the patch's preimage: the replay's patch stops
     applying, and the weakening guard scopes itself to the wrong files.
     """
     return repo.merge_base(worktree, ctx.run.base_ref or ctx.project.base_ref)
