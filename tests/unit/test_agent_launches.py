@@ -4,6 +4,8 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+import pytest
+
 from factory.agent_launches import AgentLaunches
 from factory.runtime_jobs import RuntimeJobs
 from factory.sandbox.base import Gone, RunHandle, RunStatus
@@ -98,6 +100,32 @@ def test_terminal_observation_releases_only_after_usage_collection(tmp_path: Pat
     assert collected == ["usage"]
     assert RuntimeJobs(store).active_agents("synthetic") == []
     assert not launches.start("builder", handle, "script", {}, usd_limit=10, max_attempts=2)
+    store.close()
+
+
+@pytest.mark.parametrize(("code", "status"), [("0", "completed"), ("143", "failed")])
+def test_an_exit_file_releases_its_lease_by_its_own_code_even_when_the_sandbox_is_gone(
+    tmp_path: Path, code: str, status: str
+) -> None:
+    store = Store(tmp_path / "factory.db")
+    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
+    store.runtime.start_invocation("builder", run.id, 1, "builder", {})
+    handle = RunHandle(run.id, 1, "factory-build-synthetic", str(tmp_path), tmp_path / "attempt")
+    sandbox = Sandbox()
+    launches = AgentLaunches(store, sandbox)
+    launches.start("builder", handle, "script", {}, usd_limit=10, max_attempts=2)
+    handle.attempt_dir.mkdir()
+    (handle.attempt_dir / "exit").write_text(code)
+    sandbox.gone = "sandbox-stopped"
+
+    assert launches.reconcile("builder", collect=lambda: None)
+    assert RuntimeJobs(store).active_agents("synthetic") == []
+    assert [
+        json.loads(row["payload"])
+        for row in store.runtime.db.execute(
+            "SELECT payload FROM operator_events WHERE action='agent-finished'"
+        )
+    ] == [{"invocation": "builder", "status": status, "evidence": "exit"}]
     store.close()
 
 
