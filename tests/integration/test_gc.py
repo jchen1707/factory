@@ -307,6 +307,17 @@ def test_the_sandbox_a_run_reviewed_in_is_collected_with_it(
     assert reviewed_in in {a.target for a in removals}
 
 
+def test_gc_names_only_sandboxes_that_exist(ctx: Context) -> None:
+    # Every run resolves to a review sandbox name; only a run that reached review has one.
+    _finished_run(ctx)
+
+    actions = _sweep(ctx, dry_run=True)
+
+    targets = {a.target for a in actions if a.kind.startswith("sandbox-")}
+    assert targets
+    assert targets <= {spec.name for spec in _fake(ctx).created}
+
+
 def test_artifacts_are_kept_while_the_disk_is_above_the_floor(ctx: Context) -> None:
     # This is the one step that destroys the record of a run, so age alone does not
     # license it: the disk being below the floor is the reason, and the fixture's floor
