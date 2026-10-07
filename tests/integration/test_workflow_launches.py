@@ -207,19 +207,7 @@ def test_review_axes_share_capacity_and_release_each_axis_after_collection(ctx: 
     assert jobs.active_agents(ctx.project.name) == []
 
 
-def test_queued_builder_survives_controller_restart_without_a_new_attempt(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from dataclasses import replace
-    from pathlib import Path
-
-    from factory.agent import timings
-
-    observers: list[tuple[Path, Path]] = []
-    monkeypatch.setattr(
-        timings, "spawn", lambda events, exit_path: observers.append((events, exit_path))
-    )
-    ctx.registry = replace(ctx.registry, defaults=replace(ctx.registry.defaults, timings=True))
+def test_queued_builder_survives_controller_restart_without_a_new_attempt(ctx: Context) -> None:
     claim.run(ctx)
     context.run(ctx)
     sandbox.run(ctx)
@@ -249,4 +237,3 @@ def test_queued_builder_survives_controller_restart_without_a_new_attempt(
     assert ctx.state == State.VERIFYING
     assert jobs.active_agents(ctx.project.name) == []
     assert ctx.store.spend(ctx.run.id)[0] > 0
-    assert len(observers) == 1

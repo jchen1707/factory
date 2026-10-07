@@ -101,7 +101,7 @@ def resume(ctx: Context) -> bool:
                 != (ctx.store.runtime.policy(ctx.run.id) or {}).get("revision")
             ):
                 raise Blocked("launch-preparation-stale", effect.step)
-            started = launches.start(
+            launches.start(
                 effect.step,
                 handle,
                 payload["script"],
@@ -109,10 +109,6 @@ def resume(ctx: Context) -> bool:
                 usd_limit=ctx.routing.usd_per_run,
                 max_attempts=ctx.registry.defaults.max_total_attempts,
             )
-            if started and ctx.registry.defaults.timings and ctx.state is State.IMPLEMENTING:
-                from factory.agent import timings
-
-                timings.spawn(Path(metadata["events"]), handle.attempt_dir / handle.exit_name)
         with ctx.store.runtime.transaction():
             ctx.store.confirm_effect(
                 ctx.run.id,
