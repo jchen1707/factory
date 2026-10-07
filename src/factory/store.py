@@ -466,7 +466,9 @@ class Store:
         return Run.from_row(row) if row else None
 
     def all_runs(self) -> list[Run]:
-        rows = self._conn.execute("SELECT * FROM runs ORDER BY created_at DESC").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM runs ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
         return [Run.from_row(r) for r in rows]
 
     def active_runs_for_project(self, project: str) -> list[Run]:

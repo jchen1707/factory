@@ -74,15 +74,15 @@ def sweep(
     actions: list[Action] = []
     runs = store.all_runs()
     # A rerun recreates its ticket's worktree and branch at the cancelled run's path, so
-    # the path belongs to the newest run that records it.
-    owners: dict[str, Run] = {}
+    # the path belongs to the ticket's newest run that records it.
+    owners: dict[tuple[str, str], Run] = {}
     for run in runs:
         if run.worktree:
-            owners.setdefault(run.worktree, run)
+            owners.setdefault((run.linear_id, run.worktree), run)
     for run in runs:
         if run.state not in COLLECTABLE:
             continue
-        owner = owners.get(run.worktree or "", run)
+        owner = owners.get((run.linear_id, run.worktree or ""), run)
         if owner is not run:
             actions.append(
                 Action(
@@ -181,10 +181,20 @@ def _archive_attempts(home: Path, run: Run, *, dry_run: bool) -> list[Action]:
     if not source.is_dir():
         return []
     destination = home / "artifacts" / run.linear_id / run.id
+    # Deliver and cancel may have archived some attempts already; their copies stay.
+    pending = [
+        attempt
+        for attempt in sorted(source.iterdir())
+        if attempt.is_dir() and not (destination / attempt.name).exists()
+    ]
+    if not pending:
+        return [Action("artifact-archive", str(destination), "already archived", False)]
+    names = ", ".join(attempt.name for attempt in pending)
     if dry_run:
-        return [Action("artifact-archive", str(destination), f"would copy {source}", False)]
-    artifacts.archive(source, destination)
-    return [Action("artifact-archive", str(destination), f"copied from {source}", True)]
+        return [Action("artifact-archive", str(destination), f"would copy {names}", False)]
+    for attempt in pending:
+        artifacts.archive(attempt, destination / attempt.name)
+    return [Action("artifact-archive", str(destination), f"copied {names} from {source}", True)]
 
 
 def _remove_worktree(project: Project, run: Run, why: str, *, dry_run: bool) -> list[Action]:
