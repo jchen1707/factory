@@ -196,9 +196,17 @@ def _adapter_listing(stdout: str, *, ok: bool = True) -> SbxAdapter:
 def test_names_reads_the_listing_and_refuses_a_failed_one() -> None:
     listing = '{"sandboxes": [{"name": "factory-review-p-1", "status": "stopped"}]}'
     assert _adapter_listing(listing).names() == {"factory-review-p-1"}
-    assert _adapter_listing('{"sandboxes": null}').names() == set()
     with pytest.raises(SbxError, match="sbx ls failed"):
         _adapter_listing("", ok=False).names()
+
+
+@pytest.mark.parametrize(
+    "stdout", ["", "[]", '{"sandboxes": null}', '{"sandboxes": [{"status": "stopped"}]}']
+)
+def test_names_refuses_a_listing_it_cannot_read(stdout: str) -> None:
+    # gc acts on what this returns, so an unreadable listing must never read as "none".
+    with pytest.raises(SbxError, match="sbx ls"):
+        _adapter_listing(stdout).names()
 
 
 def test_the_placeholder_is_read_out_of_the_secret_listing() -> None:
@@ -251,9 +259,13 @@ class _FakePopen:
             # What the real `sbx exec` would have written to the handle it was given.
             (_STDERR_TARGET[0]).write_text(err)
         self.returncode = rc
+        self.terminated = False
 
     def poll(self) -> int | None:
         return self._rc
+
+    def terminate(self) -> None:
+        self.terminated = True
 
 
 #: Set by each test to the file the adapter opens for `sbx exec`'s stderr.
@@ -303,16 +315,39 @@ def test_exec_detached_never_writes_its_pid_through_a_link_the_sandbox_planted(
     victim.write_text("untouched\n")
     attempt = tmp_path / "attempt"
 
+    started: list[_FakePopen] = []
+
     def fake_popen(argv, **kwargs):  # type: ignore[no-untyped-def]
         # The wrapper is already running in the VM when the host writes the holder pid.
         (attempt / sbx_module.SBX_EXEC_PID).symlink_to(victim)
-        return _FakePopen(argv, heartbeat=attempt / "heartbeat", rc=None)
+        started.append(_FakePopen(argv, heartbeat=attempt / "heartbeat", rc=None))
+        return started[-1]
 
     monkeypatch.setattr(sbx_module.subprocess, "Popen", fake_popen)
-    with pytest.raises(OSError, match="symbolic links"):
+    with pytest.raises(SbxError, match="link"):
         SbxAdapter().exec_detached(replace(_handle(tmp_path), attempt_dir=attempt), "claude", {})
 
     assert victim.read_text() == "untouched\n"
+    assert started[0].terminated, "the holder of a refused launch keeps the VM running"
+
+
+def test_exec_detached_refuses_an_attempt_directory_that_is_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "another-runs-attempt"
+    elsewhere.mkdir()
+    attempt = tmp_path / "attempt"
+    attempt.symlink_to(elsewhere)
+    monkeypatch.setattr(
+        sbx_module.subprocess,
+        "Popen",
+        lambda argv, **kw: pytest.fail("launched into a directory the sandbox redirected"),
+    )
+
+    with pytest.raises(SbxError, match="link"):
+        SbxAdapter().exec_detached(replace(_handle(tmp_path), attempt_dir=attempt), "claude", {})
+
+    assert list(elsewhere.iterdir()) == []
 
 
 def test_exec_detached_holds_the_process_handle_open(

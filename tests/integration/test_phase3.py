@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -949,7 +952,11 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     plan = review_step._read_plan(ctx.state_dir / "review")
     assert all(Path(axis["out"]).exists() for axis in plan["axes"])
     assert all(Path(axis["events"]).exists() for axis in plan["axes"])
-    assert not list(scratch.rglob("*.jsonl"))  # moved, not copied
+    # Copied, so the stream each invocation record names is still there for accounting.
+    assert all(
+        Path(axis["events"]).read_bytes() == Path(axis["scratch_events"]).read_bytes()
+        for axis in plan["axes"]
+    )
 
 
 def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
@@ -1086,6 +1093,102 @@ def test_a_stream_the_reviewer_replaced_with_a_link_is_never_landed(
 
     assert caught.value.reason == "review-scratch-tampered"
     assert not any(p.is_symlink() for p in (ctx.state_dir / "review").rglob("*"))
+
+
+def test_a_stream_the_reviewer_replaced_with_a_fifo_is_refused_not_read(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    _finish_axis(ctx, first)
+    (first / "events.jsonl").unlink()
+    os.mkfifo(first / "events.jsonl")
+
+    def hung(signum: int, frame: Any) -> None:
+        raise AssertionError("the host blocked reading a FIFO the reviewer planted")
+
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(10)
+    try:
+        with pytest.raises(Blocked) as caught:
+            review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert caught.value.reason == "review-scratch-tampered"
+
+
+def test_a_reviewer_cannot_point_its_launch_at_another_runs_files(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    other = _second_run_in(ctx, "BAC-9")
+    _to_reviewing(other)
+    _stub_redphase(monkeypatch)
+    for run_ctx in (ctx, other):
+        _seed_vendored_review_tree(Path(run_ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+    review_step.start(ctx)
+    victim = fake.detached_dirs[-1]
+    review_step.start(other)
+    mine = fake.detached_dirs[-1]
+    _finish_axis(other, mine)
+    mine.rename(mine.with_name(f"{mine.name}-moved"))
+    mine.symlink_to(victim)
+    before = sorted(p.name for p in victim.iterdir())
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(other, AttemptDir(mine), other.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert sorted(p.name for p in victim.iterdir()) == before
+
+
+def test_the_host_never_writes_a_prompt_through_a_link_raced_into_a_fresh_launch(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "outside-every-mount"
+    victim.write_text("untouched\n")
+    original = review_step._axis_files
+
+    def raced(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        files = original(attempt_dir, out_path)
+        if not files.prompt.exists():
+            # A process still running in the VM wins the race to the fresh directory.
+            files.prompt.symlink_to(victim)
+        return files
+
+    monkeypatch.setattr(review_step, "_axis_files", raced)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert victim.read_text() == "untouched\n"
+
+
+def test_each_review_launch_record_names_the_stream_accounting_priced(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+
+    advance_state(ctx)
+
+    reviews = [
+        invocation
+        for invocation in ctx.store.runtime.invocations(ctx.run.id)
+        if invocation["role"].startswith("review:")
+    ]
+    assert reviews
+    for invocation in reviews:
+        recorded = Path(invocation["metadata"]["events"])
+        assert invocation["sequence"] == len(recorded.read_text().splitlines())
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
