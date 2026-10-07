@@ -1175,7 +1175,8 @@ def _cancel_run(
 ) -> list[str]:
     """The rollback core, shared by `cmd_cancel` and the console's Cancel control.
 
-    Archives the attempt directories, removes the worktree and the unpushed branch, records
+    Archives the attempt directories (moving any that hold a secret to the run's quarantine
+    instead), removes the worktree and the unpushed branch, records
     `-> cancelled` under `actor="human"` (the §18.5 control contract), stops the build
     sandbox, and restores the Linear tracker. Returns the lines it would print. A pushed
     branch is never deleted; a Linear outage does not fail the rollback."""
@@ -1219,11 +1220,25 @@ def _cancel_run(
             harness = load_harness_config(project.path)
             for directory in sorted(attempts.iterdir()):
                 if directory.is_dir():
-                    kept = artifacts.archive(
-                        directory,
-                        home / "artifacts" / run.linear_id / run.id / directory.name,
-                        extra_names=harness.secret_vars,
-                    )
+                    try:
+                        kept = artifacts.archive(
+                            directory,
+                            home / "artifacts" / run.linear_id / run.id / directory.name,
+                            extra_names=harness.secret_vars,
+                        )
+                    except artifacts.SecretFound as exc:
+                        # `artifacts/` is the shareable archive. The worktree removal
+                        # below would destroy the evidence, so it moves to run state.
+                        quarantine = (
+                            home / "state" / "runs" / run.id / "quarantine" / directory.name
+                        )
+                        quarantine.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(directory, quarantine)
+                        lines.append(
+                            f"quarantined attempt {directory.name} at {quarantine}: {exc.kind} "
+                            "found; the value is compromised and must be rotated"
+                        )
+                        continue
                     from factory import learning
 
                     for events in kept.rglob("*events.jsonl"):
