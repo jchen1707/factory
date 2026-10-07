@@ -136,6 +136,15 @@ class RuntimeState:
             == 1
         )
 
+    def rate_limit_reports(self, since: float) -> list[dict[str, Any]]:
+        """Every retained rate-limit report from an invocation observed since `since`, any run."""
+        rows = self.db.execute(
+            "SELECT json_extract(telemetry,'$.rate_limit') FROM invocations "
+            "WHERE updated_at>=? AND json_extract(telemetry,'$.rate_limit.windows') IS NOT NULL",
+            (since,),
+        ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
     def policy(self, run_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
             "SELECT revision,payload FROM policy_snapshots WHERE run_id=? "

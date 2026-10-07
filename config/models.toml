@@ -31,6 +31,10 @@ usd_per_run = 50.0                 # hard ceiling; the run blocks, never mid-wri
 usd_warn_at = 30.0
 max_turns   = 200                  # per launch (`claude --max-turns`); a role may override it
 
+[budget.hold_at]                   # no new launch while a subscription window is this full
+five_hour = 0.9
+seven_day = 0.95
+
 # The catalogue, and the only one: routing reads nothing outside this file. A role must
 # name a full model id from this table. Aliases such as `opus` are refused because they
 # move when a new model ships.

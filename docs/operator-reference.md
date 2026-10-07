@@ -113,6 +113,16 @@ serialized, and diverged branches require verification against the updated integ
 Use retained isolation evidence before raising concurrency; a larger configured number does
 not itself prove safe execution.
 
+Under a Claude subscription the scarce resource is the five-hour and seven-day usage windows
+that every launch's `rate_limit_event` reports, and one subscription serves every run, so
+every run's reports count. Utilisation only grows until a window resets, so per window the
+report with the latest reset, then the highest utilisation, is current. While it is at or above its
+`[budget.hold_at]` threshold in `config/models.toml` (defaults `five_hour = 0.9`,
+`seven_day = 0.95`) and its reset is still ahead, no agent launches: the ticket stays queued,
+with the window and its reset as the waiting reason, and nothing is written to the tracker. A
+launch that ends on a 429 holds every run the same way until the reset its stream reported.
+The hold lifts at the reset without a new report.
+
 ## Telemetry and costs
 
 Cumulative usage and estimated spend are separate measurements. `codex exec` reports no

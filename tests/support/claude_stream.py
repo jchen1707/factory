@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
@@ -276,6 +277,7 @@ def rate_limit(
     five_hour: float = 0.44,
     seven_day: float = 0.11,
     resets_at: int = 1791358800,
+    seven_day_resets_at: int | None = None,
     session: str = SESSION,
 ) -> Wire:
     return {
@@ -289,7 +291,10 @@ def rate_limit(
             "isUsingOverage": False,
             "unifiedWindows": {
                 "five_hour": {"utilization": five_hour, "resetsAt": resets_at},
-                "seven_day": {"utilization": seven_day, "resetsAt": resets_at + 44400},
+                "seven_day": {
+                    "utilization": seven_day,
+                    "resetsAt": seven_day_resets_at or resets_at + 44400,
+                },
             },
         },
         "uuid": str(uuid.uuid4()),
@@ -618,6 +623,50 @@ def model_unavailable(
         1,
         "",
     )
+
+
+def unmeasured_429_result(*, session: str = SESSION, model: str = MODEL) -> Wire:
+    """Not a measured shape (P8: exhaustion was never observed), so `result_error` refuses
+    it. This is the measured 404 result carrying the status `stream.classify` keys on,
+    with the text the 2.1.292 binary holds for a 429."""
+    event = _result(
+        subtype="success", is_error=True, num_turns=1, cost=0, model=model, session=session
+    )
+    return event | {
+        "api_error_status": 429,
+        "terminal_reason": "api_error",
+        "result": "Request rejected (429)",
+    }
+
+
+def rate_limited(
+    *,
+    resets_at: int | None = None,
+    reported: bool = True,
+    session: str = SESSION,
+    model: str = MODEL,
+    tools: Iterable[str] = TOOLS,
+) -> Scenario:
+    """A launch the subscription refused. Unmeasured: whether the CLI reports its limits
+    before the 429 is not known, so `reported` covers both. `resets_at` defaults to an
+    hour from now so the refusal is current when the test reads it."""
+    reset = resets_at if resets_at is not None else int(time.time()) + 3600
+    reports = [rate_limit(resets_at=reset, session=session)] if reported else []
+    return Scenario(
+        lines(
+            init(session=session, model=model, tools=tools),
+            *reports,
+            unmeasured_429_result(session=session, model=model),
+        ),
+        1,
+        "",
+    )
+
+
+def rate_limited_unreported(
+    *, session: str = SESSION, model: str = MODEL, tools: Iterable[str] = TOOLS
+) -> Scenario:
+    return rate_limited(reported=False, session=session, model=model, tools=tools)
 
 
 def auth_retrying(
