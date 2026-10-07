@@ -486,6 +486,26 @@ def changed_paths_between(repository: Path, base: str, candidate: str) -> list[s
     return [path for path in listing.split("\0") if path]
 
 
+def shallow_clone(source: Path, branch: str, destination: Path) -> None:
+    _git(
+        destination.parent,
+        "clone",
+        "--quiet",
+        "--depth",
+        "1",
+        "--branch",
+        branch,
+        f"file://{source}",
+        str(destination),
+    )
+
+
+def file_at_ref(repository: Path, ref: str, path: str) -> str | None:
+    """`path`'s content at `ref`, or None when either is missing."""
+    proc = _git_process(repository, ["show", f"{ref}:{path}"])
+    return proc.stdout if proc.returncode == 0 else None
+
+
 def mode_at_ref(repository: Path, ref: str, path: str) -> str | None:
     listing = _git(repository, "ls-tree", ref, "--", path)
     if not listing:

@@ -263,6 +263,23 @@ def test_a_preflight_that_cannot_produce_a_refusal_blocks(ctx: Context) -> None:
     assert caught.value.reason == "enforcement-disabled"
 
 
+def test_a_base_ref_without_the_layer_a_hooks_blocks_before_launch(
+    ctx: Context, project_repo: Path
+) -> None:
+    # The canary feeds `protect_paths.mjs` a payload directly, so it passes whether or not
+    # any launch would call the hook. Only the settings the worktree inherits can say that.
+    git(project_repo, "rm", "-q", ".claude/settings.json")
+    git(project_repo, "commit", "-qm", "drop the hooks")
+    git(project_repo, "push", "-q", "origin", "v2")
+    claim_step.run(ctx)
+    context_step.run(ctx)
+    with pytest.raises(Blocked) as caught:
+        sandbox_step.run(ctx)
+    assert caught.value.reason == "enforcement-disabled"
+    assert "layer-a-hooks-wired" in caught.value.detail
+    assert ".claude/settings.json is absent" in caught.value.detail
+
+
 # §22 F21 — a change outside the vault allowlist is recorded, never blamed on the run.
 def test_a_change_outside_the_vault_allowlist_warns_instead_of_blocking(
     ctx: Context, monkeypatch: pytest.MonkeyPatch

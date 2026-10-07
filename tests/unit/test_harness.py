@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from factory.harness import cross_check_stack, load_harness_config, vendor_check
+from factory.harness import cross_check_stack, load_harness_config, unwired_hooks, vendor_check
 from factory.machine import Blocked
 
 HOME = Path(__file__).resolve().parents[2]
+HARNESS = HOME.parent / "harness"
 PYTHON_HARNESS = Path("/Users/james/python-harness")
 FRONTEND_HARNESS = Path("/Users/james/frontend-harness")
 
@@ -121,9 +124,71 @@ def test_the_canary_target_is_a_literal_path() -> None:
     assert "*" not in protected.glob
 
 
+@pytest.mark.skipif(
+    not HARNESS.exists() and not os.environ.get("CI"),
+    reason="no harness checkout beside this one; CI clones it there, so CI still runs this",
+)
 def test_the_factorys_own_vendored_tree_is_intact() -> None:
-    ok, detail = vendor_check(HOME, HOME.parent / "harness" / "scripts" / "vendor_sync.py")
+    ok, detail = vendor_check(HOME, HARNESS / "scripts" / "vendor_sync.py")
     assert ok, detail
+
+
+def _protect(matcher: str | None, command: Mapping[str, object]) -> dict[str, object]:
+    group: dict[str, object] = {"hooks": [{"type": "command", **command}]}
+    if matcher is not None:
+        group["matcher"] = matcher
+    return group
+
+
+VERIFY = {"Stop": [{"hooks": [{"type": "command", "command": "node", "args": ["verify.mjs"]}]}]}
+ARGS_FORM = {"command": "node", "args": ["${CLAUDE_PROJECT_DIR}/hooks/protect_paths.mjs"]}
+
+
+def test_the_factorys_own_settings_wire_the_enforcing_hooks() -> None:
+    assert unwired_hooks((HOME / ".claude" / "settings.json").read_text()) == []
+
+
+@pytest.mark.parametrize(
+    "protect",
+    [
+        _protect("Read|Edit|Write|NotebookEdit|Bash", ARGS_FORM),
+        _protect(None, ARGS_FORM),
+        _protect("*", {"command": 'node "${CLAUDE_PLUGIN_ROOT}/hooks/protect_paths.mjs"'}),
+    ],
+    ids=["args-form", "no-matcher", "command-string-form"],
+)
+def test_a_guard_over_every_writing_tool_and_the_stop_gate_are_wired(
+    protect: dict[str, object],
+) -> None:
+    settings = {"hooks": {"PreToolUse": [protect], **VERIFY}}
+    assert unwired_hooks(json.dumps(settings)) == []
+
+
+@pytest.mark.parametrize(
+    ("settings", "problem"),
+    [
+        (None, ".claude/settings.json is absent"),
+        ("{not json", ".claude/settings.json is not JSON"),
+        (json.dumps({"hooks": VERIFY}), "PreToolUse does not run protect_paths.mjs"),
+        (
+            json.dumps({"hooks": {"PreToolUse": [_protect("Bash", ARGS_FORM)]}}),
+            "Stop does not run verify.mjs",
+        ),
+        (
+            json.dumps({"hooks": {"PreToolUse": [_protect("Read|Bash", ARGS_FORM)], **VERIFY}}),
+            "PreToolUse protect_paths.mjs does not match Edit, Write",
+        ),
+        (
+            json.dumps({"hooks": {"PreToolUse": [_protect("(", ARGS_FORM)], **VERIFY}}),
+            "PreToolUse protect_paths.mjs does not match Bash, Edit, Read, Write",
+        ),
+    ],
+    ids=["absent", "not-json", "no-guard", "no-stop-gate", "guard-misses-writes", "bad-regex"],
+)
+def test_an_unenforced_settings_file_says_what_is_missing(
+    settings: str | None, problem: str
+) -> None:
+    assert any(found.startswith(problem) for found in unwired_hooks(settings))
 
 
 @pytest.mark.parametrize("app", ["../outside", "/outside", "."])
