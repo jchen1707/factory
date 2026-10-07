@@ -214,7 +214,12 @@ def test_success_schema_folds_its_accounting(tmp_path: Path) -> None:
     )
     assert run.by_model[HAIKU].context_window == 200000
     assert run.rate_limit == stream.RateLimit(
-        status="allowed", five_hour=0.44, seven_day=0.11, resets_at=1791358800
+        status="allowed",
+        resets_at=1791358800,
+        windows={
+            "five_hour": stream.Window(utilization=0.44, resets_at=1791358800),
+            "seven_day": stream.Window(utilization=0.11, resets_at=1791403200),
+        },
     )
     assert isinstance(run.outcome, Completed)
     assert run.outcome.structured_output is not None
@@ -330,13 +335,34 @@ def test_has_session_means_an_init_event_was_written(tmp_path: Path) -> None:
     assert not stream.has_session(tmp_path / "missing.jsonl")
 
 
-def test_a_null_rate_limit_window_is_an_unknown_utilisation() -> None:
+def test_a_null_rate_limit_window_is_an_unknown_window() -> None:
     wire = next(json.loads(x) for x in lines("success-schema") if '"rate_limit_event"' in x)
     wire["rate_limit_info"]["unifiedWindows"]["seven_day"] = None
 
     parsed = list(stream.events([json.dumps(wire), lines("success-schema")[-1]]))
 
-    assert stream.RateLimit("allowed", 0.44, None, 1791358800) in parsed
+    assert (
+        stream.RateLimit("allowed", 1791358800, {"five_hour": stream.Window(0.44, 1791358800)})
+        in parsed
+    )
+
+
+@pytest.mark.parametrize(
+    "seven_day", [{"utilization": None, "resetsAt": 1791403200}, {"utilization": 0.11}, {}]
+)
+def test_a_half_reported_window_is_unknown_and_the_run_keeps_its_result(
+    seven_day: dict[str, object],
+) -> None:
+    whole = lines("success-schema")
+    wire = next(json.loads(x) for x in whole if '"rate_limit_event"' in x)
+    wire["rate_limit_info"]["unifiedWindows"]["seven_day"] = seven_day
+    edited = [json.dumps(wire) if '"rate_limit_event"' in x else x for x in whole]
+
+    run = stream.fold(stream.events(edited))
+
+    assert isinstance(run.outcome, Completed)
+    assert run.rate_limit is not None
+    assert set(run.rate_limit.windows) == {"five_hour"}
 
 
 def test_a_wrongly_shaped_inner_event_is_corrupt_not_a_crash() -> None:

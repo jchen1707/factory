@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, get_args
 
 from factory.agent.claude import Effort
@@ -47,6 +48,11 @@ class ModelFacts:
 #: the work; one that is too high lets a looping agent run until the budget does.
 DEFAULT_MAX_TURNS = 200
 
+#: Utilisation, per subscription window as `rate_limit_event` names it, at which no new
+#: launch starts until that window resets. Below 1.0 so the launches already running
+#: have headroom to finish rather than meet a 429 mid-write.
+DEFAULT_HOLD_AT: Mapping[str, float] = MappingProxyType({"five_hour": 0.9, "seven_day": 0.95})
+
 
 @dataclass(frozen=True)
 class Role:
@@ -64,6 +70,7 @@ class Routing:
     usd_per_run: float
     usd_warn_at: float
     max_turns: int = DEFAULT_MAX_TURNS
+    hold_at: Mapping[str, float] = field(default_factory=lambda: DEFAULT_HOLD_AT)
 
     def role(self, name: str) -> Role:
         try:
@@ -101,6 +108,10 @@ def _validated(raw: dict[str, Any]) -> Routing:
     usd_per_run = float(budget.get("usd_per_run", 0.0))
     usd_warn_at = float(budget.get("usd_warn_at", 0.0))
     max_turns = int(budget.get("max_turns", DEFAULT_MAX_TURNS))
+    configured = budget.get("hold_at", {})
+    if not isinstance(configured, dict):
+        raise RoutingError("budget.hold_at must be a table: [budget.hold_at]")
+    hold_at = {**DEFAULT_HOLD_AT, **{k: float(v) for k, v in configured.items()}}
 
     roles = {
         name: Role(
@@ -167,6 +178,14 @@ def _validated(raw: dict[str, Any]) -> Routing:
     for role in roles.values():
         if role.max_turns < 1:
             raise RoutingError(f"role {role.name!r} max_turns must be at least 1")
+    unknown_windows = sorted(set(hold_at) - set(DEFAULT_HOLD_AT))
+    if unknown_windows:
+        raise RoutingError(
+            f"budget.hold_at names {unknown_windows}; the windows are {list(DEFAULT_HOLD_AT)}"
+        )
+    for window, threshold in hold_at.items():
+        if not 0 < threshold <= 1:
+            raise RoutingError(f"budget.hold_at.{window} must be above 0 and at most 1")
 
     return Routing(
         roles=roles,
@@ -174,6 +193,7 @@ def _validated(raw: dict[str, Any]) -> Routing:
         usd_per_run=usd_per_run,
         usd_warn_at=usd_warn_at,
         max_turns=max_turns,
+        hold_at=MappingProxyType(hold_at),
     )
 
 

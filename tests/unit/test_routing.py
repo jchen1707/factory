@@ -280,3 +280,34 @@ def test_max_turns_defaults_from_the_budget_and_a_role_may_override_it(tmp_path:
 def test_a_zero_turn_cap_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RoutingError, match="max_turns"):
         _load(tmp_path, _table().replace("[budget]", "[budget]\nmax_turns = 0"))
+
+
+def test_the_hold_thresholds_default_per_window_and_a_partial_table_keeps_the_other(
+    tmp_path: Path,
+) -> None:
+    assert load_routing(SHIPPED).hold_at == {"five_hour": 0.9, "seven_day": 0.95}
+    assert _load(tmp_path, _table()).hold_at == {"five_hour": 0.9, "seven_day": 0.95}
+
+    routing = _load(tmp_path, _table() + "\n[budget.hold_at]\nseven_day = 0.8\n")
+
+    assert routing.hold_at == {"five_hour": 0.9, "seven_day": 0.8}
+
+
+@pytest.mark.parametrize(
+    ("table", "message"),
+    [
+        ("five_hours = 0.9", "five_hours"),
+        ("five_hour = 0", "above 0"),
+        ("seven_day = 1.5", "at most 1"),
+    ],
+)
+def test_a_hold_threshold_the_guard_could_not_honour_is_refused(
+    tmp_path: Path, table: str, message: str
+) -> None:
+    with pytest.raises(RoutingError, match=message):
+        _load(tmp_path, _table() + f"\n[budget.hold_at]\n{table}\n")
+
+
+def test_a_scalar_hold_at_is_refused_by_name(tmp_path: Path) -> None:
+    with pytest.raises(RoutingError, match=r"\[budget.hold_at\]"):
+        _load(tmp_path, _table().replace("[budget]", "[budget]\nhold_at = 0.9"))

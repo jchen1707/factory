@@ -116,11 +116,22 @@ class Denied:
 
 
 @dataclass(frozen=True)
+class Window:
+    utilization: float
+    resets_at: int
+
+
+@dataclass(frozen=True)
 class RateLimit:
+    """The subscription's limits as one response reported them.
+
+    `resets_at` belongs to the limit the event names (`rateLimitType`); each window in
+    `windows` (keyed `five_hour`, `seven_day` as the wire names them) carries its own.
+    """
+
     status: str
-    five_hour: float | None
-    seven_day: float | None
     resets_at: int | None
+    windows: Mapping[str, Window]
 
 
 @dataclass(frozen=True)
@@ -306,9 +317,18 @@ def _rate_limit(wire: _Wire) -> RateLimit:
     windows = info.get("unifiedWindows") or {}
     return RateLimit(
         status=info["status"],
-        five_hour=(windows.get("five_hour") or {}).get("utilization"),
-        seven_day=(windows.get("seven_day") or {}).get("utilization"),
         resets_at=info.get("resetsAt"),
+        windows=MappingProxyType(
+            {
+                name: Window(utilization=float(each["utilization"]), resets_at=each["resetsAt"])
+                for name, each in windows.items()
+                # A window without both numbers is unknown; it must not cost the run its
+                # result by corrupting the stream, nor reach the guard half-formed.
+                if isinstance(each, dict)
+                and isinstance(each.get("utilization"), int | float)
+                and isinstance(each.get("resetsAt"), int)
+            }
+        ),
     )
 
 

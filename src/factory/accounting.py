@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, fields
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from factory.agent import stream
@@ -84,6 +86,16 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     (measured: the `--resume` of a $0.0165 session ended at $0.0177). The row for this
     attempt is the difference from the session's last priced launch, so the run's spend
     is summed once however many times the ladder resumed.
+
+    An interrupted launch prices nothing, and no lower bound is taken from its
+    assistant lines: each carries the request's input and cache counts but only the
+    opening output count (measured: 3 and 1 against a final 640), and pricing them
+    would need the price table the cutover deleted. Its spend is not lost when the
+    ladder resumes the session, because the next result's cumulative includes the
+    killed request (measured: 5091 cache-write tokens of the killed launch inside the
+    resume's 5163), and the baseline difference charges it to that launch. A launch
+    that is never resumed is bounded by its own `--max-budget-usd` and the attempt
+    ceiling; under a subscription the windows the launch guard reads count it either way.
     """
     invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
@@ -107,7 +119,7 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
             for model, each in run.by_model.items()
         },
         "context": {"tokens": run.context_tokens, "effective_window": _window(run)},
-        "rate_limit": asdict(run.rate_limit) if run.rate_limit else None,
+        "rate_limit": _limits_json(run),
         "estimate": {
             "complete": priced,
             "usd": run.notional_usd - before_usd if priced else None,
@@ -136,6 +148,62 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
         cached_tokens=usage.cache_read,
         usd=payload["estimate"]["usd"],
     )
+
+
+#: No report observed longer ago than the longest window can still describe one.
+_LONGEST_WINDOW_SECONDS = 7 * 86400
+
+
+@dataclass(frozen=True)
+class Limits:
+    """The subscription's windows as every retained report, from any run, describes them.
+
+    One subscription serves every run, so this is global. A report whose window has not
+    reset yet describes the current window. Utilisation is assumed only to grow within a
+    window (a window accumulates usage until its reset; one report per stream is all that
+    was measured), so for each window the highest such report is current, whatever order
+    the reports were collected in. A report whose reset has passed describes a window that no longer
+    exists, so a hold lifts at the reset without a newer report; it has to, because a
+    hold starts no launch that could bring one. `refused_until` is the latest reset
+    reported by a launch that ended on a 429, while it is still ahead.
+    """
+
+    windows: Mapping[str, stream.Window]
+    refused_until: int | None
+
+
+def limits(store: Store, now: float) -> Limits:
+    reports = store.runtime.rate_limit_reports(since=now - _LONGEST_WINDOW_SECONDS)
+    seen: dict[str, list[stream.Window]] = {}
+    for report in reports:
+        for name, raw in report["windows"].items():
+            if raw["resets_at"] > now:
+                seen.setdefault(name, []).append(stream.Window(**raw))
+    return Limits(
+        windows=MappingProxyType(
+            {name: max(each, key=lambda window: window.utilization) for name, each in seen.items()}
+        ),
+        refused_until=max(
+            (
+                r["resets_at"]
+                for r in reports
+                if r["refused"] and r["resets_at"] is not None and r["resets_at"] > now
+            ),
+            default=None,
+        ),
+    )
+
+
+def _limits_json(run: stream.Run) -> dict[str, Any] | None:
+    if run.rate_limit is None:
+        return None
+    return {
+        "status": run.rate_limit.status,
+        "resets_at": run.rate_limit.resets_at,
+        "windows": {name: asdict(window) for name, window in run.rate_limit.windows.items()},
+        "refused": isinstance(run.outcome, stream.Failed)
+        and run.outcome.kind is stream.FailureKind.RATE_LIMITED,
+    }
 
 
 def _parses(line: str) -> bool:

@@ -7,11 +7,13 @@ two that end `subtype: success` with `is_error: true`.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
-from factory import recovery
+from factory import accounting, recovery
+from factory.execution import ProjectQueued
 from factory.machine import Blocked, Resumable, State
 from factory.recovery import Disposition
 from factory.steps import Context, record_stop
@@ -21,8 +23,9 @@ from factory.steps import plan as plan_step
 from factory.steps import reap as reap_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import KILLED, FakeSandbox, advance_state
+from tests.integration.conftest import KILLED, FakeLinear, FakeSandbox, advance_state
 from tests.integration.test_phase4 import _expire_the_backoff
+from tests.support import claude_stream
 
 
 def _fake(ctx: Context) -> FakeSandbox:
@@ -46,6 +49,7 @@ def _to_worktree(ctx: Context) -> None:
         ("session_in_use", Blocked, "session-in-use"),  # no stream at all, stderr only
         ("max_turns", Resumable, "max-turns"),
         ("session_lost", Resumable, "session-lost"),
+        ("rate_limited", Resumable, "rate-limited"),  # unmeasured: the 404 shape with a 429
     ],
 )
 def test_the_builder_verdict_follows_the_stream(
@@ -92,6 +96,69 @@ def test_a_lost_session_restarts_with_a_fresh_one(ctx: Context) -> None:
     assert fresh is not None
     assert not fresh.resume
     assert fresh.session != lost.session
+
+
+def _refused(ctx: Context, outcome: str) -> int:
+    _fake(ctx).outcome = outcome
+    _to_worktree(ctx)
+    with pytest.raises(Resumable, match="rate-limited"):
+        advance_state(ctx, until=State.VERIFYING)
+    record_stop(ctx, State.RESUMABLE, rule="rate-limited", detail="429")
+    _fake(ctx).outcome = "success"
+    _expire_the_backoff(ctx)
+    return len(_fake(ctx).launches)
+
+
+def test_a_refused_launch_holds_the_next_one_until_its_reset(ctx: Context) -> None:
+    # One subscription serves every run, so a 429 is a reason for no run to launch until
+    # the limit resets, and the held run keeps its place: no attempt spent, no launch.
+    launches = _refused(ctx, "rate_limited")
+
+    with pytest.raises(ProjectQueued, match="429"):
+        recovery.resume_run(ctx)
+
+    assert len(_fake(ctx).launches) == launches
+    assert ctx.state is State.RESUMABLE
+    assert ctx.run.attempt == 1
+
+
+def test_a_full_window_reported_by_another_run_stops_intake_before_any_tracker_write(
+    ctx: Context, tmp_path: Path
+) -> None:
+    other = ctx.store.insert_run(linear_id="SYN-OTHER", project=ctx.project.name, team="SYN")
+    invocation = f"{other.id}:1:implement"
+    ctx.store.runtime.start_invocation(
+        invocation,
+        other.id,
+        1,
+        "implement",
+        {"model": claude_stream.MODEL, "cost_step": "implement"},
+    )
+    events = tmp_path / "other-events.jsonl"
+    report = claude_stream.rate_limit(five_hour=0.95, resets_at=int(time.time()) + 3600)
+    events.write_text(
+        "".join(f"{line}\n" for line in claude_stream.lines(claude_stream.init(), report))
+    )
+    accounting.collect_invocation(ctx.store, invocation, events)
+    linear = ctx.linear
+    assert isinstance(linear, FakeLinear)
+
+    with pytest.raises(ProjectQueued, match="five_hour window at 95%"):
+        claim_step.run(ctx)
+
+    assert linear.state_changes == []
+    assert linear.comments == []
+    assert ctx.state is State.APPROVED
+    assert ctx.store.runtime.admit(other.id, ctx.project.name, 1)  # the held run took no slot
+
+
+def test_a_refusal_that_reported_no_limits_leaves_the_retry_to_the_ladder(ctx: Context) -> None:
+    # No reset to wait for: the ladder's backoff is all that spaces the retries.
+    launches = _refused(ctx, "rate_limited_unreported")
+
+    recovery.resume_run(ctx)
+
+    assert len(_fake(ctx).launches) == launches + 1
 
 
 def test_a_torn_stream_with_a_recorded_exit_is_resumable(ctx: Context) -> None:

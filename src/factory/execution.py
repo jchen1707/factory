@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from factory import accounting
 from factory.machine import Blocked
 from factory.routing import Role
 
@@ -58,6 +62,7 @@ def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None 
         for row in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
     ):
         raise ProjectQueued("waiting for prior agent terminal reconciliation")
+    refuse_while_held(ctx)
     settings = ctx.store.runtime.effective(ctx.project.name, ctx.run.id)
     previous = settings.get(f"launch:{attempt}:{step}", 0)
     wanted = attempt_key(attempt, step, previous + 1)
@@ -85,6 +90,31 @@ def guard(ctx: Context, attempt: int, step: str, *, invocation_role: str | None 
     ctx.store.runtime.configure("run", ctx.run.id, {f"launch:{attempt}:{step}": previous + 1})
     ctx.store.runtime.audit("run", ctx.run.id, "agent-launch", {"invocation": wanted})
     return wanted
+
+
+def refuse_while_held(ctx: Context) -> None:
+    """Keep the ticket queued while the subscription should take no new launch."""
+    held = rate_limit_hold(accounting.limits(ctx.store, time.time()), ctx.routing.hold_at)
+    if held is not None:
+        raise ProjectQueued(held)
+
+
+def rate_limit_hold(limits: accounting.Limits, hold_at: Mapping[str, float]) -> str | None:
+    """Why the subscription should take no new launch yet, or `None`."""
+    for name, threshold in hold_at.items():
+        window = limits.windows.get(name)
+        if window is not None and window.utilization >= threshold:
+            return (
+                f"subscription {name} window at {window.utilization:.0%} "
+                f"(hold at {threshold:.0%}) until {_utc(window.resets_at)}"
+            )
+    if limits.refused_until is not None:
+        return f"subscription refused a launch (429) until {_utc(limits.refused_until)}"
+    return None
+
+
+def _utc(epoch: int) -> str:
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 class AgentApprovalRequired(Exception):
