@@ -326,7 +326,7 @@ def vault_writes_outside_allowlist(
 
     A deletion or truncation *inside* the allowed set counts too: the distiller only
     ever adds or rewrites its own dated note, so a delete there is not the hook's work
-    either.
+    either (its capture-lock cleanup aside).
 
     The union of the two functions below, kept because it is the honest answer to "what
     in this vault moved that the allowlist does not sanction". What it is *not* is a list

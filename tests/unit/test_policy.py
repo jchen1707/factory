@@ -294,6 +294,7 @@ def test_the_two_halves_partition_what_the_old_check_blocked_on() -> None:
         VaultChange("Getting Promoted/Raw notes.md", "modified"),
         VaultChange("Project Learnings/2026-08-19.md", "deleted"),
         VaultChange("Project Learnings/2026-09-02.md", "added"),
+        VaultChange("Project Learnings/._capture-" + "a" * 64 + ".lock/owner.json", "deleted"),
         VaultChange("Upskilling/notes.md", "added"),
     ]
     blocking = disallowed_vault_writes(changes, _ALLOW)

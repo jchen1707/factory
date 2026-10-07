@@ -1,5 +1,12 @@
 """Capture locks are transient evidence, not deleted learning notes."""
 
+import hashlib
+import json
+import os
+import socket
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from factory.policy import (
@@ -54,3 +61,29 @@ def test_lock_outside_allowed_set_remains_unattributable() -> None:
     changes = [VaultChange(LOCK, "deleted")]
     assert disallowed_vault_writes(changes, []) == []
     assert unattributable_vault_changes(changes, []) == changes
+
+
+def test_the_lock_the_hook_takes_is_the_one_exempted(tmp_path: Path) -> None:
+    """Drift guard: the hook must treat this path as its lock, or the exemption is stale."""
+    session = "drift-probe"
+    directory = tmp_path / "Project Learnings"
+    lock = directory / f"._capture-{hashlib.sha256(session.encode()).hexdigest()}.lock"
+    lock.mkdir(parents=True)
+    owner = lock / "owner.json"
+    owner.write_text(json.dumps({"host": socket.gethostname(), "pid": os.getpid()}))
+    hook = Path(__file__).parents[2] / ".agents/vendor/harness/hooks/session_learnings.mjs"
+    probe = (
+        "const [hook, directory, sessionId] = process.argv.slice(1);"
+        "const { distilTranscript } = await import(hook);"
+        "process.stdout.write(distilTranscript({ directory, sessionId }).outcome);"
+    )
+    outcome = subprocess.run(
+        ["node", "--input-type=module", "-e", probe, hook.as_uri(), str(directory), session],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    assert outcome == "failed: session capture already running"
+    deleted = [VaultChange(str(owner.relative_to(tmp_path)), "deleted")]
+    assert disallowed_vault_writes(deleted, ALLOW) == []
