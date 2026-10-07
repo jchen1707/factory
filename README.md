@@ -23,7 +23,7 @@ prerequisites. `doctor --deep` performs a paid model canary.
 
 - [Workflow reference](docs/workflows.md): responsibilities, decisions and failure paths.
 - [Operator reference](docs/operator-reference.md): commands, configuration, runtimes,
-  certification, concurrency and accounting.
+  concurrency and accounting.
 - [Recovery runbook](docs/runbook.md): inspect and resolve a stopped run.
 - [Documentation index](docs/README.md): current guidance, historical evidence and archived handoffs.
 - [UI alternatives](docs/ui-alternatives/index.html): approval history; James selected the dark
@@ -34,8 +34,9 @@ prerequisites. `doctor --deep` performs a paid model canary.
 James approves readiness, disputed findings, merges, deployment, schema migrations and
 credential rotation. Factory never merges or creates tickets. The database contains
 non-reconstructible effects and accounting: preserve it and its artifacts together.
-Features being present in code does not mean they are activated for a project; follow the
-[runtime rollout procedure](docs/runtime-certification-rollout.md) for operator changes.
+Features being present in code does not mean they are activated for a project. Configure them
+through the [operator reference](docs/operator-reference.md), and apply schema changes with the
+[migration procedure](docs/runtime-rollout.md#migration).
 
 For development, use branches named `<type>/<slug>` and run the declared gates:
 

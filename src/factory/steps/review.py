@@ -310,7 +310,6 @@ def _launch_next(
 ) -> tuple[AttemptDir, RunHandle]:
     """One host admission per model process, with the previous usage already retained."""
     from factory import accounting, authority, execution, workflow_launches
-    from factory.agent.selection import select
     from factory.harness import load_harness_config
 
     accounting.collect_active(ctx)
@@ -330,7 +329,6 @@ def _launch_next(
     axis = next(a for a in plan["axes"] if not a.get("complete"))
     scratch = _review_scratch(ctx)
     ctx.sandbox.ensure(_review_spec(ctx, scratch))
-    select(ctx, review=True)
     launch = execution.guard(
         ctx, ctx.run.attempt, "review", invocation_role=f"review:{axis['label']}"
     )
@@ -385,9 +383,6 @@ def _launch_next(
         )
         prompt_path = Path(axis["prompt"])
         inputs: tuple[Path, ...] = (prompt_path, _authority_root(ctx) / _FINDINGS_SCHEMA)
-        worker_request = prompt_path.with_suffix(".app-server.json")
-        if worker_request.exists():
-            inputs += (worker_request,)
         workflow_launches.prepare(ctx, axis["invocation_id"], handle, script, inputs=inputs)
     workflow_launches.resume(ctx)
     ctx.log("review.axis_started", axis=axis["label"], invocation=axis["invocation_id"])
@@ -445,29 +440,9 @@ def _axis_entry(
     events_path = review_dir / f"review-{label}.events.jsonl"
     stderr_path = review_dir / f"review-{label}.stderr.log"
     from factory import accounting, execution
-    from factory.agent.app_server import AppServerAdapter
-    from factory.agent.base import AgentInvocation
 
     role = execution.role_for(ctx, "reviewer")
-    if isinstance(ctx.agent, AppServerAdapter):
-        invocation = AgentInvocation(
-            model=role.model,
-            effort=role.effort,
-            workdir=str(ctx.worktree),
-            prompt_path=prompt_path,
-            schema_path=schema_path,
-            output_path=scratch_out,
-            events_path=scratch_events,
-            stderr_path=scratch_stderr,
-            exit_path=sandbox_dir / "exit",
-            heartbeat_path=sandbox_dir / "heartbeat",
-            pgid_path=sandbox_dir / "pgid",
-            vault_directory=str(ctx.registry.vault.path),
-        )
-        ctx.agent.prepare(invocation, readonly=True)
-        argv = list(ctx.agent.command(invocation))
-    else:
-        argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree, role=role)
+    argv = _review_argv(ctx, schema_path, scratch_out, workdir=ctx.worktree, role=role)
     invocation_id = accounting.begin(ctx, ctx.run.attempt, role, f"review:{label}", scratch_events)
     return {
         "plan": {

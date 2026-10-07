@@ -14,12 +14,11 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 - [UI, learning and documentation completion handoff](handoff-ui-learning-docs.md):
   remaining runtime evidence, worktrees and publication dependencies.
 
-- [certification-retry.md](certification-retry.md)
 - [operator-reference.md](operator-reference.md)
 - [review-disposition-handoff.md](review-disposition-handoff.md)
 - [runbook.md](runbook.md)
-- [runtime-certification-rollout.md](runtime-certification-rollout.md)
-- [runtime-certification-service.md](runtime-certification-service.md)
+- [runtime-rollout.md, Migration](runtime-rollout.md#migration): schema backup, preview,
+  apply and rollback.
 - [stable-review-mirror.md](stable-review-mirror.md)
 - [workflows.md](workflows.md)
 
@@ -41,6 +40,7 @@ because they are old. For current commands use the operator reference above.
 
 | Document | Classification |
 | --- | --- |
+| [certification-retry.md](certification-retry.md) | Retired feature; certification removed in schema 9 |
 | [defect-6-cancel-orphan-cleanup.md](defect-6-cancel-orphan-cleanup.md) | Historical evidence / measured implementation record |
 | [documentation-refresh-evidence.md](documentation-refresh-evidence.md) | Historical evidence / measured implementation record |
 | [handoff-architecture-review-prs-2-5.md](handoff-architecture-review-prs-2-5.md) | Historical handoff; retain decisions and unresolved evidence |
@@ -53,6 +53,8 @@ because they are old. For current commands use the operator reference above.
 | [runtime-cancellation-isolation-fix.md](runtime-cancellation-isolation-fix.md) | Historical evidence / measured implementation record |
 | [runtime-certification-completion-acceptance.md](runtime-certification-completion-acceptance.md) | Historical evidence / measured implementation record |
 | [runtime-certification-implementation-handoff.md](runtime-certification-implementation-handoff.md) | Historical handoff; retain decisions and unresolved evidence |
+| [runtime-certification-rollout.md](runtime-certification-rollout.md) | Retired feature; certification and delegation removed in schemas 8 and 9 |
+| [runtime-certification-service.md](runtime-certification-service.md) | Retired feature; certification removed in schema 9 |
 | [runtime-child-certification-cancellation.md](runtime-child-certification-cancellation.md) | Historical evidence / measured implementation record |
 | [runtime-child-transport-polling.md](runtime-child-transport-polling.md) | Historical evidence / measured implementation record |
 | [runtime-composition-acceptance-2026-09-07.md](runtime-composition-acceptance-2026-09-07.md) | Historical evidence / measured implementation record |
@@ -87,7 +89,7 @@ because they are old. For current commands use the operator reference above.
 | [runtime-policy-model-workflow-acceptance.md](runtime-policy-model-workflow-acceptance.md) | Historical evidence / measured implementation record |
 | [runtime-redphase-classifier-correction.md](runtime-redphase-classifier-correction.md) | Historical evidence / measured implementation record |
 | [runtime-resume-baseline-acceptance.md](runtime-resume-baseline-acceptance.md) | Historical evidence / measured implementation record |
-| [runtime-rollout.md](runtime-rollout.md) | Historical evidence / measured implementation record |
+| [runtime-rollout.md](runtime-rollout.md) | Historical checkpoints; its Migration section is current guidance |
 | [runtime-suspend-announcement.md](runtime-suspend-announcement.md) | Historical evidence / measured implementation record |
 | [runtime-test-design-acceptance.md](runtime-test-design-acceptance.md) | Historical evidence / measured implementation record |
 | [runtime-validation-2026-09-06.md](runtime-validation-2026-09-06.md) | Historical evidence / measured implementation record |

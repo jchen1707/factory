@@ -752,9 +752,7 @@ def test_saving_mode_does_not_replace_the_displayed_run_policy(ctx: Context) -> 
     assert retained["revision"] == 1
 
 
-def test_agent_limits_and_certification_status_are_operator_visible(ctx: Context) -> None:
-    from factory.runtime_jobs import RuntimeJobs
-
+def test_agent_limits_and_runtime_status_are_operator_visible(ctx: Context) -> None:
     client = _client(ctx)
     response = client.post(
         f"/settings/projects/{ctx.run.project}",
@@ -763,10 +761,7 @@ def test_agent_limits_and_certification_status_are_operator_visible(ctx: Context
     assert response.status_code == 200
     response = client.post(f"/settings/runs/{ctx.run.linear_id}", data={"max_active_agents": "5"})
     assert response.status_code == 409
-    job = RuntimeJobs(ctx.store).request_certification(ctx.run.id, {"synthetic": True})
     page = client.get(f"/settings/runs/{ctx.run.linear_id}").text
-    assert job["id"] in page
-    assert "pending" in page
     assert 'name="max_active_agents"' in page
     assert "0 active agents" in page
     assert "incomplete" in page
@@ -788,7 +783,6 @@ def test_refused_settings_preserve_values_and_accessible_retry(ctx: Context, sco
         "model_preset": "volume",
         "max_active_agents": '<script>alert("x")</script>',
         "concurrency": "4",
-        "certification_config": '/safe/a" autofocus onfocus="alert(1)',
     }
     response = _client(ctx).post(f"/settings/{scope}/{owner}", data=submitted)
     assert response.status_code == 409
@@ -804,7 +798,6 @@ def test_refused_settings_preserve_values_and_accessible_retry(ctx: Context, sco
     assert "<button>Save settings</button>" in page
     if scope == "projects":
         assert 'name="concurrency" type="text" inputmode="numeric" value="4"' in page
-        assert 'value="/safe/a&quot; autofocus onfocus=&quot;alert(1)"' in page
     assert ctx.store.runtime.settings(settings_scope, settings_owner) == before
 
 
@@ -864,24 +857,10 @@ def test_config_rejection_identifies_affected_role_without_writing(ctx: Context)
     assert path.read_text() == before
 
 
-def test_runtime_scan_separates_ownership_historical_checks_and_current_identity(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runtime_scan_separates_ownership(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> None:
     from factory.console.views import InventoryResult
 
     sandbox = "factory-build-check-history"
-    ctx.store.runtime.start_invocation(
-        "checks",
-        ctx.run.id,
-        1,
-        "builder",
-        {
-            "runtime_compatibility": {
-                "sandbox": sandbox,
-                "checks": {"hooks": {"status": "pass"}, "transcripts": {"status": "fail"}},
-            },
-        },
-    )
     monkeypatch.setattr(
         "factory.cli._sbx_inventory",
         lambda: InventoryResult(
@@ -894,9 +873,6 @@ def test_runtime_scan_separates_ownership_historical_checks_and_current_identity
     page = _client(ctx).get("/runtimes").text
     assert "factory-owned" in page
     assert "operator-owned" in page
-    assert "Historical · BAC-4: 1/2 recorded checks passed" in page
-    assert "Current certification: Unverified" in page
-    assert "Current identity unobserved" in page
     assert "<button" not in page
 
 
@@ -979,8 +955,8 @@ def test_current_invocations_remain_before_large_history(ctx: Context) -> None:
         ctx.store.runtime.start_invocation(identity, ctx.run.id, index + 1, role, {})
         if index < 2:
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (identity, ctx.run.id, ctx.run.project, "active", None),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (identity, ctx.run.id, ctx.run.project, "active"),
             )
     ctx.store.runtime.configure(
         "run", ctx.run.id, {"waiting_invocation": "invocation-56", "mode": "approval"}

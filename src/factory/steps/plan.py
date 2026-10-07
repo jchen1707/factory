@@ -78,9 +78,6 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
     from factory import workflow_launches
 
     attempt = ctx.run.attempt + 1
-    from factory.agent.selection import select
-
-    select(ctx)
     execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
     attempt_dir = AttemptDir(ctx.factory_dir / "run" / str(attempt) / "planning")
@@ -175,9 +172,6 @@ def start(ctx: Context, *, actor: str = AUTOMATIC) -> tuple[AttemptDir, RunHandl
             attempt_dir.schema,
             attempt_dir.path("plan-request.json"),
         )
-        worker_request = prompt_path.with_suffix(".app-server.json")
-        if worker_request.exists():
-            inputs += (worker_request,)
         workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
     workflow_launches.resume(ctx)
     ctx.log("plan.started", model=role.model, effort=role.effort)

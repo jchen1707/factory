@@ -1,5 +1,9 @@
 # Runtime certification and delegation rollout
 
+Retired. Factory no longer has certification or delegation, and schemas 8 and 9 drop their
+tables. This record describes the 2026-09 rollout only. For the current backup and migration
+procedure, see [Migration](runtime-rollout.md#migration).
+
 Current checkpoint 2026-09-08: schema6 is applied on merged factory `5a2b0ba`. Target PR1
 merged at `16cab7e`; the live target was fast-forwarded cleanly. Fresh base build/reviewer
 identities passed all six checks, the no-change application passed, and real read-only child

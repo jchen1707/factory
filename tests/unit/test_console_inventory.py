@@ -134,12 +134,10 @@ def test_structured_inventory_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli._sbx_inventory().status == "missing"
 
 
-def test_child_and_certification_associations_are_retained_without_certifying_name(
+def test_launch_associations_are_retained(
     tmp_path: Path,
 ) -> None:
     import json
-
-    from factory.runtime_jobs import RuntimeJobs
 
     store = Store(tmp_path / "state.db")
     run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
@@ -153,27 +151,9 @@ def test_child_and_certification_associations_are_retained_without_certifying_na
         "UPDATE effects SET external_id=? WHERE run_id=?",
         (json.dumps({"handle": {"sandbox": "factory-review-child-unique"}}), run.id),
     )
-    job = RuntimeJobs(store).request_certification(
-        run.id, {"sandbox": "factory-build-certified", "generation": "old"}
-    )
-    store.runtime.db.execute(
-        "UPDATE runtime_certifications SET status='passed',lease_until=1 WHERE id=?", (job["id"],)
-    )
-    child, certified = views.runtimes(
-        [
-            {"name": "factory-review-child-unique"},
-            {"name": "factory-build-certified", "status": "running"},
-        ],
-        store,
-    )
+    (child,) = views.runtimes([{"name": "factory-review-child-unique"}], store)
     assert child.runs_using == ["SYN-1"]
     assert child.associations[0].reference == "child"
-    assert certified.recorded_compatibility[0]["identity"]["generation"] == "old"
-    assert certified.recorded_compatibility[0]["fingerprint"] == job["fingerprint"]
-    assert certified.runs_using == []
-    assert certified.associations[0].source == "certification passed"
-    assert certified.compatibility == "Unavailable — current runtime identity unobserved"
-    assert "expired" not in certified.compatibility
 
 
 def test_failed_inventory_does_not_expose_command_output(monkeypatch: pytest.MonkeyPatch) -> None:

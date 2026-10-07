@@ -352,8 +352,8 @@ def fetch_back(ctx: Context) -> Path:
     host-execution guard. Fetching once, early, means every one of them runs unchanged
     against an ordinary worktree, and only this function knows the run was ever a clone.
 
-    Re-entered ticks fetch again, but retain an unchanged clean mirror. Review and
-    certification processes may hold its directory open across ticks. Replacing an
+    Re-entered ticks fetch again, but retain an unchanged clean mirror. Review
+    processes may hold its directory open across ticks. Replacing an
     unchanged tree invalidates those directories even when the new bytes are identical.
     Changed mirrors may be replaced only when clean and no run agent is active.
     """

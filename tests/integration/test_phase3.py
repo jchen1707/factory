@@ -1208,62 +1208,6 @@ def test_approval_change_between_review_axes_preserves_completed_observation(
     )
 
 
-def test_first_axis_spend_blocks_the_next_actual_model_launch(
-    ctx: Context, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _to_reviewing(ctx)
-    _stub_redphase(monkeypatch)
-    ctx.routing = replace(ctx.routing, usd_per_run=1)
-    # Preserve the fake process runner, while supplying a normalized app-server usage record.
-    monkeypatch.setattr(ctx.agent, "report", {}, raising=False)
-    (ctx.home / "config/prices.toml").write_text((HOME / "config/prices.toml").read_text())
-    first = review_step.start(ctx)
-    assert first is not None
-    plan = review_step._read_plan(ctx.state_dir / "review")
-    usage = {
-        "input_tokens": 1_000_000,
-        "output_tokens": 0,
-        "cached_input_tokens": 0,
-        "cache_write_input_tokens": 0,
-        "reasoning_output_tokens": 0,
-    }
-    Path(plan["axes"][0]["scratch_events"]).write_text(
-        json.dumps(
-            {
-                "type": "factory.usage",
-                "usage": usage,
-                "complete": True,
-                "thread_total": {},
-                "pricing_complete": True,
-                "requests": [
-                    {
-                        "model": "gpt-5.6-sol",
-                        "usage": usage,
-                        "observed_at": 1788652800,
-                        "service_tier": "standard",
-                        "long_context": False,
-                    }
-                ],
-            }
-        )
-        + "\n"
-    )
-    with pytest.raises(Blocked, match="budget-exceeded"):
-        review_step.collect(ctx, first[0], ctx.run.attempt)
-    assert ctx.store.known_spend(ctx.run.id) == 4
-    assert (
-        len(
-            [
-                i
-                for i in ctx.store.runtime.invocations(ctx.run.id)
-                if i["role"].startswith("review:")
-            ]
-        )
-        == 1
-    )
-    assert len([1 for name, _ in _fake(ctx).detached if name == ctx.project.review_sandbox]) == 1
-
-
 def test_review_retry_preserves_completed_axes_and_separate_invocation_evidence(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:

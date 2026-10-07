@@ -158,33 +158,6 @@ flowchart TD
 
 </details>
 
-## Runtime certification
-
-Manual compatibility remains the default absent automatic certification configuration. Automatic certification fingerprints the actual executing sandbox, full runtime/helper package, mounts, environment, authority and probe implementation. Paid probes use durable intent and admission; changed identity or incomplete evidence refuses launch. Certification measures runtime behavior, not product correctness.
-
-![Runtime certification workflow](diagrams/certification.svg)
-
-<details>
-<summary>Mermaid source</summary>
-
-```mermaid
-flowchart TD
-  H[Host: configured compatibility mode] --> M{Automatic enabled?}
-  M -->|no| C[Require manual compatibility evidence]
-  M -->|yes| P[Prepare VM runtime and fingerprint]
-  P --> A[Host: admission and durable probe intent]
-  A --> S[Sandbox: compatibility probes]
-  S --> E{Complete matching evidence?}
-  E -->|no| B[Refuse launch; retain outcome]
-  E -->|yes| V[Host: certify exact identity]
-  V --> L[Revalidate immediately before workflow launch]
-  C --> L
-  L -->|identity changed| B
-  L -->|valid| W[Admit application invocation]
-```
-
-</details>
-
 ## Learning capture and recall
 
 Layer A owns note writing, indexing and recall; Factory owns lifecycle coordination and
@@ -243,9 +216,8 @@ flowchart TD
 | --- | --- |
 | CLI commands and settings | [CLI parser](../src/factory/cli.py), [configuration CLI](../src/factory/configuration_cli.py) |
 | Runs `/`, projects `/projects`, details `/runs/{ticket}`, timeline `/runs/{ticket}/timeline`, settings `/settings/runs/{ticket}`, runtimes `/runtimes`, configuration `/config` | [Console routes](../src/factory/console/app.py) |
-| Registry, model routing and estimate inputs | [Projects](../config/projects.toml), [models](../config/models.toml), [prices](../config/prices.toml) |
+| Registry and model routing | [Projects](../config/projects.toml), [models](../config/models.toml) |
 | Recovery and approvals | [Recovery](../src/factory/recovery.py), [operator controls](../src/factory/operator_controls.py) |
-| Certification | [Certification runner](../src/factory/certification_runner.py) |
 | Boundary regression checks | [Boundary tests](../tests/unit/test_boundaries.py) |
 | Real measurements and their limits | [Acceptance inventory](runtime-acceptance-inventory.md), [documentation classification](README.md) |
 

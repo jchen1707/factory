@@ -210,13 +210,6 @@ def _settings_form(
         f'<label>{_e(labels["max_active_agents"])} <input name="max_active_agents" {number_attributes} value="{_e(settings.get("max_active_agents", ""))}" placeholder="Inherited">{effective_hint("max_active_agents")}</label> '
     )
     if "/projects/" in action:
-        options = options_for(("manual", "automatic"), settings.get("certification_mode", "manual"))
-        fields.append(
-            f'<label>Certification <select name="certification_mode">{options}</select></label> '
-        )
-        fields.append(
-            f'<label>Certification configuration <input name="certification_config" value="{_e(settings.get("certification_config", ""))}"></label> '
-        )
         fields.append(
             f'<label>Concurrency <input name="concurrency" {number_attributes} value="{_e(concurrency if concurrency is not None else "")}" placeholder="inherited"></label> '
         )
@@ -250,18 +243,9 @@ def _runtime_status(store: Store, project: str, run_id: str | None = None) -> st
     completeness = "complete" if observed["cost_complete"] else "incomplete · known lower bound"
     estimate_prefix = "" if observed["cost_complete"] else "≥ "
     return (
-        f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents · "
-        f"{observed['pending_certifications']} pending/checking certifications</p>"
+        f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents</p>"
         f"<p>API-equivalent estimated USD: {estimate_prefix}${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
         "These are not Codex account charges.</p>"
-        + _runtime_table(
-            "Certifications",
-            ("Certification", "Status", "Failure"),
-            [
-                (job["id"], job["status"], job["failure"] or "—")
-                for job in observed["certifications"]
-            ],
-        )
         + f"<details><summary>Effective limits, waiting reasons and accounting details</summary><pre>{_e(json.dumps(observed, indent=2))}</pre></details>"
     )
 
@@ -869,10 +853,10 @@ def create_app(
             except (OSError, ValueError):
                 profile = "Unavailable"
             inventory.append(
-                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["pending_certifications"]} certifications</td></tr>'
+                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td></tr>'
             )
         body = (
-            '<h1>Projects</h1><p class="sub">Registered projects, capacity and defaults for future work.</p><section class="panel" id="project-inventory"><h2>Registered projects</h2><div class="scroll" tabindex="0" role="region" aria-label="Project inventory"><table class="inventory-table project-inventory"><thead><tr><th>Project</th><th>Run slots</th><th>Delivery profile</th><th>Agent slots</th><th>Waiting</th></tr></thead><tbody>'
+            '<h1>Projects</h1><p class="sub">Registered projects, capacity and defaults for future work.</p><section class="panel" id="project-inventory"><h2>Registered projects</h2><div class="scroll" tabindex="0" role="region" aria-label="Project inventory"><table class="inventory-table project-inventory"><thead><tr><th>Project</th><th>Run slots</th><th>Delivery profile</th><th>Agent slots</th></tr></thead><tbody>'
             + "".join(inventory)
             + '</tbody></table></div></section><section id="project-defaults"><h2>Project defaults</h2>'
         )
@@ -917,7 +901,7 @@ def create_app(
             )
             body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
             body += (
-                "<details><summary>Runtime and certification history</summary>"
+                "<details><summary>Runtime history</summary>"
                 + _runtime_status(st, name)
                 + "</details></details>"
             )
@@ -1001,7 +985,7 @@ def create_app(
             body += f'<form method="post" action="/settings/replace-policy/{_e(run.linear_id)}"><label>Replacement profile <select name="profile"><option>prototype</option><option>core</option><option>hardening</option></select></label><button class="secondary">Replace paused run policy</button></form>'
         body += f'<p><a href="/runs/{_e(run.linear_id)}">Run controls</a></p></section>'
         body += (
-            '<section class="panel"><details><summary>Runtime and certification history</summary>'
+            '<section class="panel"><details><summary>Runtime history</summary>'
             + _runtime_status(st, run.project, run.id)
             + "</details></section>"
         )
@@ -1394,48 +1378,14 @@ def create_app(
                 cells.append(
                     f"<tr><td data-label='Sandbox'>{_e(r.name)}"
                     + f' <small class="runtime-owner">{"operator-owned" if r.operator_owned else "factory-owned"}</small>'
-                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Certification'>Unverified<small>Current identity unobserved</small></td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
+                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
                 )
             table = (
-                '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Certification</th><th>Runs</th></tr></thead><tbody>'
+                '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Runs</th></tr></thead><tbody>'
                 + "".join(cells)
                 + "</tbody></table></div>"
             )
-        compatibility_rows = []
-        for row in rows:
-            # Retained outcomes are useful scan evidence, never a current attestation.
-            outcomes = []
-            for record in row.recorded_compatibility:
-                report = record.get("report", {})
-                outcome = record.get("status") or report.get("status")
-                checks = report.get("checks", {})
-                if outcome is not None:
-                    label = str(outcome)
-                elif isinstance(checks, dict) and checks:
-                    passed = sum(
-                        isinstance(check, dict) and check.get("status") == "pass"
-                        for check in checks.values()
-                    )
-                    label = f"{passed}/{len(checks)} recorded checks passed"
-                else:
-                    label = "outcome unavailable"
-                outcomes.append(f"{record.get('ticket', 'Unknown ticket')}: {label}")
-            unique = list(dict.fromkeys(outcomes))
-            summary = "; ".join(unique[:3]) or "No historical report"
-            if len(unique) > 3:
-                summary += f"; {len(unique) - 3} more outcomes in evidence"
-            compatibility_rows.append(
-                f'<details class="runtime-compatibility-entry"><summary><span>{_e(row.name)}</span> '
-                f'<span class="muted">Historical · {_e(summary)}</span></summary>'
-                f"<p>Current certification: Unverified. {_e(row.compatibility)}</p>"
-                "<h3>Historical recorded evidence</h3>"
-                "<p>These retained reports are not a current identity attestation.</p>"
-                f"<pre>{_e(json.dumps(row.recorded_compatibility, indent=2))}</pre></details>"
-            )
-        compatibility = "".join(compatibility_rows) or "<p>Compatibility evidence unavailable.</p>"
-        return HTMLResponse(
-            _page("runtimes", _render("runtimes.html", table=table, compatibility=compatibility))
-        )
+        return HTMLResponse(_page("runtimes", _render("runtimes.html", table=table)))
 
     @app.get("/config", response_class=HTMLResponse)
     def config_view(request: Request) -> HTMLResponse:

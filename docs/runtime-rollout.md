@@ -1,5 +1,10 @@
 # Runtime rollout
 
+Every run uses `codex exec`. Factory no longer has app-server, automatic certification or
+delegation, and schemas 8 and 9 drop their tables. The dated checkpoints below record that
+retired rollout and do not describe the current runtime. [Migration](#migration) is the
+current schema procedure.
+
 ## Per-run compatibility measured — 2026-09-07
 
 After #88 merged, a fresh build/review pair received production per-run names and
@@ -200,75 +205,115 @@ in the implementation environment; protocol fixtures are not substitutes for tho
 
 ## Migration
 
-Stop factory writers and retain a database backup before an operator applies the migration.
-Preview the DDL without opening or modifying the database:
+This section is current guidance. When merged code raises the schema version, every
+command that opens an older store, the daemon and the console included, refuses with
+`schema-approval-required` until the operator applies the migration. James approves each
+migration. Run these steps from `~/factory`.
 
-```sh
-factory migrate --database /absolute/path/to/factory.db
-```
+1. Stop the writers. Disable the timer before you unload it, because `bootout` alone does
+   not prevent a later `bootstrap`. Stop the console too, because its controls write settings.
+
+   ```sh
+   launchctl disable gui/$(id -u)/com.jchen.factory
+   launchctl bootout gui/$(id -u)/com.jchen.factory
+   launchctl bootout gui/$(id -u)/com.jchen.factory.console
+   lsof state/factory.db*
+   ```
+
+   `lsof` must list no process. Leave detached agents running. They write attempt files, not
+   the store.
+
+2. Back up the store with SQLite's online backup. A `cp` of an open database is not a
+   verified backup.
+
+   ```sh
+   uv run python - <<'PY'
+   import datetime, os, sqlite3
+   from pathlib import Path
+   os.umask(0o077)
+   source = Path('state/factory.db')
+   stamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%dT%H%M%SZ')
+   target = source.with_name(f'factory.db.pre-migration-{stamp}')
+   old = sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True)
+   copy = sqlite3.connect(target)
+   old.backup(copy)
+   assert copy.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+   print(target, 'schema', copy.execute('PRAGMA user_version').fetchone()[0])
+   PY
+   ```
+
+3. Update `~/factory` to the merged commit without overwriting uncommitted work.
+
+4. Preview the DDL. The preview opens the store read-only. It also lists any live work that
+   blocks the migration.
+
+   ```sh
+   uv run factory migrate --database state/factory.db
+   ```
+
+5. After James approves the displayed DDL, apply it. The command prints the integrity check.
+
+   ```sh
+   uv run factory migrate --database state/factory.db --apply
+   ```
+
+6. Restart the writers.
+
+   ```sh
+   launchctl enable gui/$(id -u)/com.jchen.factory
+   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist
+   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.console.plist
+   ```
 
 Schema 5 adds invocation telemetry, settings/audit events, policy snapshots, project slots,
 and failure episodes. Existing runs, attempts, and effects are retained. Existing schema 4
 stores require explicit migration. New temporary test stores initialize directly.
 Schema 8 drops `delegation_requests`, the retired delegation subsystem's request table, and
-deletes whatever rows it holds. `agent_leases.parent_id` stays as a column that is now
-always null. Every other table and row is retained.
-After James approves the displayed DDL, the operator can run:
+deletes whatever rows it holds. Schema 9 drops `runtime_certifications`, the retired
+certification job table, and the `agent_leases.parent_id` column. Every other table, row and
+column is retained. The apply command refuses a store older than schema 4, whose upgrade needs
+its own review.
+
+Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
+subsystem still owns live work, and names each item. Live work is any of these:
+
+- A delegation request that is not completed, failed or cancelled.
+- An active child, certification or app-server agent.
+- A prepared app-server launch on a run that is not terminal.
+
+Finish or cancel those runs with the code that opens the store's current schema, then migrate
+again. An agent whose sandbox is gone never writes its exit file, so its lease stays active.
+Confirm with `sbx ls` that the sandbox is gone, then record the lease as failed:
 
 ```sh
-factory migrate --database /absolute/path/to/factory.db --apply
+sqlite3 state/factory.db "UPDATE agent_leases SET status='failed' WHERE invocation_id='ID'"
 ```
 
-The apply command refuses older schema versions whose upgrades were not included in this preview.
-No production database has been migrated during implementation.
+After schema 8, nothing removes `factory-build-child-*` or `factory-review-child-*`
+sandboxes. Remove each one with `sbx rm` once its run is terminal.
+
+To roll back before step 6, check out the previous commit in `~/factory`, delete
+`state/factory.db-wal` and `state/factory.db-shm` if they exist, and copy the backup over
+`state/factory.db`. After the writers restart, keep the migrated store and fix forward. Older
+code refuses a newer store with `schema-newer-than-code`, and the backup lacks every run and
+effect recorded after it was taken.
 
 ## Runtime and model selection
 
-Existing runs retain `codex exec`. Project runtime selection affects new runs. An app-server
-run retains its selected adapter and compatibility-directory setting; each launch checks the
-executing sandbox's `codex --version` and the manifest named `<sandbox>.json` in that directory.
-The invocation retains the compatibility report, selected model, effort, preset, and usage.
-
-Each manifest contains `runtime_version` (exact command output, stripped), `sandbox`,
-`worker_sha256`, and `checks`. Every check requires `status: "pass"`, a retained evidence filename, and its SHA-256.
-The required checks are `hook_enforcement`, `schema_output`, `sandbox_isolation`,
-`detached_durability`, `recovery`, and `usage_semantics`. Capture actual runtime effects:
-protected-path denial, schema-valid output, reviewer write refusal, detached process survival,
-recovery after interruption, and observed usage/compaction semantics. Keep raw events.
-Build and review sandboxes need separate manifests. A changed runtime, sandbox or worker
-invalidates that evidence. The worker hash is checked during selection and again before
-copying the invocation worker. The manifest is operator-owned, outside candidate workspaces.
-
-The opt-in app-server worker disables native nested-agent launches on both thread start
-and resume using the measured invocation-local `agents.enabled=false` setting. Factory
-schedules each model role through its own approval, resource and budget checks; its
-independent reviews remain available. Legacy exec runs retain their adapter behavior.
-Historical nested usage remains visibly incomplete; it is not inferred or backfilled.
-This restriction is part of selecting the new adapter, not a production configuration
-change or an implementation of arbitrary nested-agent admission.
+Every run uses `codex exec`. The app-server adapter, its compatibility manifests and automatic
+certification were removed in schema 9; their settings are ignored if still stored.
 
 ```sh
-factory configure --project PROJECT --agent-adapter app-server --app-server-compatibility /absolute/evidence/directory
 factory configure --project PROJECT --model-preset volume
 ```
 
 Presets are `existing`, `volume`, and `high-confidence`, independent of delivery profiles.
-App-server validates each chosen model and effort against the executing `model/list` response.
-Legacy exec presets use a metadata-only executing-sandbox probe: initialize and model/list,
-without creating a thread or invoking a model. The actual attempt retains CodexAdapter.
-Existing routing remains usable without a probe. A switch back to `codex-exec` affects new runs only.
+A named preset is not probed in the executing sandbox before launch.
 
-Current context appears only from validated current-window observations. It warns at 70%,
-requests compaction at a completed-turn boundary at 80%, and becomes stale after 120 seconds.
-Compaction and model changes invalidate the prior context measurement. Thread usage is kept
-separate from invocation deltas; a resumed thread without a retained baseline stays incomplete.
-
-Spend is **API-equivalent estimated USD**, not Codex account charges. Cached input, cache writes,
-output, service tier, pricing date, and long-context treatment affect estimates. Unknown request
-attribution and compaction usage remain incomplete. Long-context classification is currently
-supported by retained documentation for Astra and Sol; Terra/Luna request bands remain unknown.
-Priced lower bounds still count toward the existing budget before the next agent attempt.
-Historical reviewer usage is never invented.
+`codex exec` reports no current-window context, so the console shows context as unavailable.
+Spend is **API-equivalent estimated USD**, not Codex account charges, and `codex exec` usage is
+recorded without the request detail pricing needs: estimates stay incomplete and the run
+ceiling cannot trip until a runtime reports priced usage. Historical usage is never invented.
 
 ## Delivery policy and workflow
 

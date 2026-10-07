@@ -829,8 +829,6 @@ button:disabled { cursor:not-allowed; opacity:0.6; }
 .model-routing input { width:100%; }
 .configuration-sources { color:var(--muted); }
 .project-default[open] { border-color:var(--pass); }
-.runtime-compatibility-entry summary { display:list-item; }
-.runtime-compatibility-entry summary .muted { margin-left:12px; font-weight:400; }
 .evidence-summary { display:block; }
 .evidence-summary h3 { margin:18px 0 8px; }
 .evidence-empty { color:var(--muted); font-size:13px; }

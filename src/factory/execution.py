@@ -38,33 +38,10 @@ def role_for(ctx: Context, name: str) -> Role:
     )
     if preset == "existing":
         return ctx.routing.role("planner" if name in {"diagnoser", "test_designer"} else name)
-    from factory.agent.app_server import AppServerAdapter
-
     if preset not in PRESETS:
         raise Blocked("model-preset-unknown", preset)
     model, effort = PRESETS[preset][name]
-    role = Role(name, model, effort, preset=preset)
-    if not isinstance(ctx.agent, AppServerAdapter):
-        from factory.agent import model_probe
-
-        if name == "reviewer":
-            from factory.steps.review import _review_scratch, _sandbox_run_dir
-
-            directory = _sandbox_run_dir(_review_scratch(ctx), ctx.run.id)
-            sandbox = ctx.project.review_sandbox
-        else:
-            directory = ctx.factory_dir
-            sandbox = ctx.project.build_sandbox
-        evidence = model_probe.validate(ctx.sandbox, sandbox, directory, role, env=ctx.env)
-        ctx.store.record_check(
-            ctx.run.id,
-            ctx.run.attempt,
-            f"runtime-model:{name}",
-            "pass",
-            detail=f"{model} / {effort}",
-            artifact=str(evidence),
-        )
-    return role
+    return Role(name, model, effort, preset=preset)
 
 
 def attempt_key(attempt: int, step: str, launch: int = 1) -> str:

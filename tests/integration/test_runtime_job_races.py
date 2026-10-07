@@ -33,9 +33,6 @@ elif sys.argv[2] == 'launch':
     invocation = store.runtime.invocation(sys.argv[3])
     handle = RunHandle(invocation['run_id'], 1, 'factory-build-race', '/work', Path(sys.argv[1]).parent / 'attempt')
     result = AgentLaunches(store, Sandbox()).start(sys.argv[3], handle, 'script', {}, usd_limit=10, max_attempts=2)
-else:
-    job = jobs.request_certification(sys.argv[3], {'sandbox': 'factory-build-race', 'generation': 'one'})
-    result = [job['id'], jobs.claim_certification(job['id'], now=10, duration=30)]
 print(json.dumps(result), flush=True)
 store.close()
 """
@@ -83,19 +80,6 @@ def test_two_controllers_cannot_take_the_last_agent_slot(tmp_path: Path) -> None
     assert results.count(True) == 1
     assert results.count(False) == 1
     assert len(RuntimeJobs(store).active_agents("synthetic")) == 1
-    store.close()
-
-
-def test_two_controllers_join_and_claim_one_certification(tmp_path: Path) -> None:
-    path = tmp_path / "factory.db"
-    store = Store(path)
-    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
-    results = race(path, "certification", [run.id, run.id])
-    first, second = results
-    assert isinstance(first, list)
-    assert isinstance(second, list)
-    assert first[0] == second[0]
-    assert sum(result[1] is not None for result in (first, second)) == 1
     store.close()
 
 

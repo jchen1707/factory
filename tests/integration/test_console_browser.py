@@ -28,7 +28,6 @@ from factory.console.app import create_app
 from factory.console.views import InventoryResult, run_detail, run_timeline, runs_board
 from factory.machine import State
 from factory.operator_controls import status
-from factory.runtime_jobs import RuntimeJobs
 from factory.steps import Context
 from factory.store import Store
 from tests.integration.test_console import _models_toml, _to_implementing
@@ -214,7 +213,6 @@ def test_console_in_real_browser(
                     "SELECT COUNT(*) FROM agent_leases WHERE project=? AND status='active'",
                     (project.name,),
                 ).fetchone()[0],
-                "waiting": f"{status(ctx.store, project.name)['pending_certifications']} certifications",
                 "effective_agent_limit": status(ctx.store, project.name)["effective"][
                     "max_active_agents"
                 ],
@@ -298,7 +296,6 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
         cached_tokens=12000,
         usd=0.42,
     )
-    jobs = RuntimeJobs(ctx.store)
     for index in range(55 if stress else 3):
         invocation = f"fixture-invocation-{index:03}-" + "abcdef0123456789" * 4
         ctx.store.runtime.start_invocation(
@@ -328,41 +325,14 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
                 },
             )
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (invocation, ctx.run.id, ctx.project.name, "active", None),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (invocation, ctx.run.id, ctx.project.name, "active"),
             )
         if index:
             ctx.store.runtime.db.execute(
-                "INSERT INTO agent_leases(invocation_id,run_id,project,status,parent_id) VALUES (?,?,?,?,?)",
-                (
-                    invocation,
-                    ctx.run.id,
-                    ctx.project.name,
-                    "completed",
-                    "fixture-invocation-000-" + "abcdef0123456789" * 4,
-                ),
+                "INSERT INTO agent_leases(invocation_id,run_id,project,status) VALUES (?,?,?,?)",
+                (invocation, ctx.run.id, ctx.project.name, "completed"),
             )
-        if index < 12:
-            job = jobs.request_certification(
-                ctx.run.id,
-                {"sandbox": f"factory-review-fixture-certification-{index}", "revision": "a" * 64},
-            )
-            if index < 2:
-                ctx.store.runtime.db.execute(
-                    "UPDATE runtime_certifications SET status=?,evidence=?,failure=? WHERE id=?",
-                    (
-                        "completed" if index == 0 else "failed",
-                        json.dumps(
-                            {
-                                "compatible": index == 0,
-                                "probe": "fixture",
-                                "identity": job["identity"],
-                            }
-                        ),
-                        None if index == 0 else "hook probe incomplete",
-                        job["id"],
-                    ),
-                )
     detail = run_detail(ctx.home, ctx.registry, ctx.routing, ctx.store, ctx.run)
     assert detail.events_path
     context_event = json.dumps(
