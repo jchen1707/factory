@@ -1,13 +1,15 @@
 """Paid workflow launch scheduling through the driver and isolated sandbox boundary."""
 
+import json
 import time
 
 import pytest
 
-from factory import driver
-from factory.machine import State
+from factory import driver, workflow_launches
+from factory.machine import Blocked, State
 from factory.runtime_jobs import RuntimeJobs
-from factory.steps import Context, claim, context, sandbox, worktree
+from factory.sandbox.base import RunStatus
+from factory.steps import Context, claim, context, reap, sandbox, worktree
 from factory.store import Store
 from tests.integration.conftest import plan_finished
 from tests.integration.test_pipeline import _fake
@@ -32,6 +34,117 @@ def test_cancellation_collects_paid_usage_and_releases_capacity_before_cleanup(
     assert ctx.state == State.CANCELLED
 
 
+def _launch_without_finishing(ctx: Context) -> str:
+    claim.run(ctx)
+    context.run(ctx)
+    sandbox.run(ctx)
+    worktree.run(ctx)
+    _fake(ctx).detach_without_finishing = True
+    driver.step(ctx)
+    [lease] = RuntimeJobs(ctx.store).active_agents(ctx.project.name)
+    return str(lease["invocation_id"])
+
+
+def _releases(ctx: Context, invocation: str) -> list[dict[str, object]]:
+    return [
+        payload
+        for row in ctx.store.runtime.db.execute(
+            "SELECT payload FROM operator_events WHERE action='agent-finished'"
+        )
+        if (payload := json.loads(row["payload"]))["invocation"] == invocation
+    ]
+
+
+def _orphan_a_wedged_agent(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> str:
+    from factory import cli
+
+    invocation = _launch_without_finishing(ctx)
+    fake = _fake(ctx)
+    fake.poll_status = RunStatus.ORPHANED
+    fake.kill_writes_exit = False
+    reap.reap(ctx)
+    assert ctx.state is State.RESUMABLE
+    assert [
+        lease["invocation_id"] for lease in RuntimeJobs(ctx.store).active_agents(ctx.project.name)
+    ] == [invocation]
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: fake)
+    return invocation
+
+
+def test_cancel_keeps_an_orphaned_lease_while_its_sandbox_runs(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import cli
+
+    invocation = _orphan_a_wedged_agent(ctx, monkeypatch)
+
+    with pytest.raises(Blocked) as refused:
+        cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
+
+    assert refused.value.reason == "cancellation-stop-unverified"
+    assert len(RuntimeJobs(ctx.store).active_agents(ctx.project.name)) == 1
+    assert _releases(ctx, invocation) == []
+
+
+def test_cancel_releases_an_orphaned_lease_once_its_sandbox_is_removed(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import cli
+
+    invocation = _orphan_a_wedged_agent(ctx, monkeypatch)
+    _fake(ctx).remove(ctx.project.build_sandbox)
+
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
+    workflow_launches.reconcile_run(ctx.store, _fake(ctx), ctx.run.id, ctx.project.name)
+
+    ctx.refresh()
+    assert ctx.state is State.CANCELLED
+    assert RuntimeJobs(ctx.store).active_agents(ctx.project.name) == []
+    assert _releases(ctx, invocation) == [
+        {"invocation": invocation, "status": "failed", "evidence": "sandbox-absent"}
+    ]
+
+
+def test_reaping_an_agent_whose_sandbox_was_removed_frees_its_slot(ctx: Context) -> None:
+    invocation = _launch_without_finishing(ctx)
+    _fake(ctx).remove(ctx.project.build_sandbox)
+    _fake(ctx).poll_status = RunStatus.ORPHANED
+
+    reap.reap(ctx)
+
+    assert ctx.state is State.RESUMABLE
+    assert RuntimeJobs(ctx.store).active_agents(ctx.project.name) == []
+    assert _releases(ctx, invocation) == [
+        {"invocation": invocation, "status": "failed", "evidence": "sandbox-absent"}
+    ]
+
+
+def test_cancel_ends_an_attempt_whose_sandbox_stopped_under_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import cli
+
+    invocation = _launch_without_finishing(ctx)
+    state = ctx.state
+    fake = _fake(ctx)
+    fake.stop_sandbox(ctx.project.build_sandbox)
+    fake.poll_status = RunStatus.ORPHANED
+    monkeypatch.setattr(reap, "KILL_GRACE_SECONDS", 0)
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: fake)
+
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
+
+    ctx.refresh()
+    assert ctx.state is State.CANCELLED
+    attempt = ctx.store.attempt_row(ctx.run.id, ctx.run.attempt, state)
+    assert attempt is not None
+    assert (attempt["exit_code"], attempt["outcome"]) == (None, "orphaned")
+    assert RuntimeJobs(ctx.store).active_agents(ctx.project.name) == []
+    assert _releases(ctx, invocation) == [
+        {"invocation": invocation, "status": "failed", "evidence": "sandbox-stopped"}
+    ]
+
+
 def test_prepared_builder_requires_its_exact_approval_after_mode_changes(ctx: Context) -> None:
     claim.run(ctx)
     context.run(ctx)
@@ -45,7 +158,7 @@ def test_prepared_builder_requires_its_exact_approval_after_mode_changes(ctx: Co
     driver.step(ctx)
     identifier = ctx.store.runtime.invocations(ctx.run.id)[0]["id"]
     ctx.store.runtime.configure("run", ctx.run.id, {"mode": "approval"})
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     result = driver.step(ctx)
     assert result.outcome == driver.Outcome.NEEDS_HUMAN
     assert identifier in result.detail
@@ -113,7 +226,7 @@ def test_queue_wait_does_not_consume_execution_timeout(
     driver.step(ctx)
     later = time.time() + ctx.timeout_for(State.IMPLEMENTING) + 10
     monkeypatch.setattr(time, "time", lambda: later)
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     _fake(ctx).detach_without_finishing = True
     driver.step(ctx)
     result = driver.step(ctx)
@@ -124,8 +237,6 @@ def test_queue_wait_does_not_consume_execution_timeout(
 @pytest.mark.parametrize("changed", ["prompt", "candidate"])
 def test_queued_launch_refuses_changed_input(ctx: Context, changed: str) -> None:
     import pytest
-
-    from factory.machine import Blocked
 
     claim.run(ctx)
     context.run(ctx)
@@ -145,7 +256,7 @@ def test_queued_launch_refuses_changed_input(ctx: Context, changed: str) -> None
         (ctx.worktree / "changed.txt").write_text("Changed candidate while queued")
         git(ctx.worktree, "add", "changed.txt")
         git(ctx.worktree, "commit", "-m", "Change candidate")
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     with pytest.raises(Blocked, match="launch-preparation-stale"):
         driver.step(ctx)
     assert _fake(ctx).detached == []
@@ -228,7 +339,7 @@ def test_queued_builder_survives_controller_restart_without_a_new_attempt(ctx: C
     ctx.store.close()
     ctx.store = Store(database)
     jobs = RuntimeJobs(ctx.store)
-    jobs.finish_agent("occupied", status="completed")
+    jobs.finish_agent("occupied", status="completed", evidence="exit")
     driver.step(ctx)
     assert len(_fake(ctx).detached) == 1
     assert ctx.run.attempt == 1

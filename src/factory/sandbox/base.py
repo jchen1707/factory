@@ -15,6 +15,8 @@ from typing import Any, Literal, Protocol
 
 __all__ = [
     "Completed",
+    "Evidence",
+    "Gone",
     "RunHandle",
     "RunResult",
     "RunStatus",
@@ -205,6 +207,10 @@ class RunStatus(StrEnum):
     ORPHANED = "orphaned"
 
 
+Gone = Literal["sandbox-stopped", "sandbox-absent"]
+Evidence = Literal["exit"] | Gone
+
+
 @dataclass(frozen=True)
 class Completed:
     argv: tuple[str, ...]
@@ -252,6 +258,8 @@ class SandboxAdapter(Protocol):
     def kill_group(self, name: str, pgid: int) -> None: ...
 
     def poll(self, handle: RunHandle) -> RunStatus: ...
+
+    def confirm_gone(self, handle: RunHandle) -> Gone | None: ...
 
     def collect(self, handle: RunHandle) -> RunResult: ...
 

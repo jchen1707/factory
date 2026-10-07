@@ -127,6 +127,20 @@ launch that ends on a 429 holds every run the same way until the reset its strea
 The hold also stops intake: a ready ticket is not claimed, so it is not moved to In Progress
 and gets no sandbox. The hold lifts at the reset without a new report.
 
+### Agent slots
+
+An agent holds its slot until the factory has proof that it ended. The proof is the agent's exit
+file, or `sbx` reporting the agent's sandbox stopped or absent once the `sbx exec` process that
+held its session has exited or the agent's heartbeat is 90 s old. A stopped VM runs nothing, so
+that agent never writes an exit file.
+A tick on a run in an agent state, the run's next launch and `factory cancel` each look for this
+proof. The first to find it frees the slot and records an `agent-finished` event whose
+`evidence` is `exit`, `sandbox-stopped` or `sandbox-absent`.
+
+While the sandbox runs, the agent may still be running in it. The slot stays held, and
+`factory cancel` refuses with `cancellation-stop-unverified` and names the sandbox. If no other
+run uses that sandbox, stop it with `sbx stop NAME`, then cancel again.
+
 ## Telemetry and costs
 
 Cumulative usage and estimated spend are separate measurements. `codex exec` reports no

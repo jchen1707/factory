@@ -25,6 +25,7 @@ from typing import Any, TextIO
 from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
     Completed,
+    Gone,
     RunHandle,
     RunResult,
     RunStatus,
@@ -342,7 +343,7 @@ class SbxAdapter:
     def stop(self, name: str) -> None:
         assert_factory_sandbox(name)
         result = self._run(["sbx", "stop", name], timeout=120)
-        if not result.ok:
+        if not result.ok and self._vm_gone(name) is None:
             raise SbxError(f"sbx stop {name} failed (exit {result.returncode})")
 
     def remove(self, name: str) -> None:
@@ -598,6 +599,41 @@ class SbxAdapter:
             return RunStatus.RUNNING
         return RunStatus.RUNNING if age is None else RunStatus.ORPHANED
 
+    def confirm_gone(self, handle: RunHandle) -> Gone | None:
+        """Proof that a run with no `exit` can no longer run, or None.
+
+        A stopping VM takes every process inside it (`exec_detached`, measured), so
+        `stopped` is proof. A live holder with a beating wrapper may be booting a stopped
+        VM for this run, and a dead holder alone proves nothing, because another run's
+        session can keep the VM and the agent running. Absence needs a well-formed
+        `sbx ls` that omits the name: `inspect` also fails when `sbx` does.
+        """
+        if not _went_quiet(handle.attempt_dir):
+            return None
+        try:
+            gone = self._vm_gone(handle.sandbox)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if gone is None or (handle.attempt_dir / handle.exit_name).exists():
+            return None
+        return gone
+
+    def _vm_gone(self, name: str) -> Gone | None:
+        inspected = self._run(["sbx", "inspect", name, "--json"], timeout=60)
+        if inspected.ok:
+            try:
+                info = json.loads(inspected.stdout)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(info, dict) and info.get("state") == "stopped":
+                return "sandbox-stopped"
+            return None
+        try:
+            listed = self.names()
+        except SbxError:
+            return None
+        return None if name in listed else "sandbox-absent"
+
     def collect(self, handle: RunHandle) -> RunResult:
         attempt_dir = handle.attempt_dir
         raw = (attempt_dir / "exit").read_text().strip()
@@ -607,6 +643,22 @@ class SbxAdapter:
             stderr_path=attempt_dir / "stderr.log",
             last_message_path=attempt_dir / "last-message.json",
         )
+
+
+def _went_quiet(attempt_dir: Path) -> bool:
+    """The holder is recorded and dead, or the wrapper's heartbeat is stale.
+
+    The heartbeat covers a holder pid that still answers: an exited child its parent
+    never reaped, which is every holder `factory run` starts, or a reused pid.
+    """
+    holder = holder_pid(attempt_dir)
+    if holder is not None and not pid_alive(holder):
+        return True
+    try:
+        age = time.time() - int((attempt_dir / "heartbeat").read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return age >= ORPHAN_AFTER_SECONDS
 
 
 def sbx_available() -> tuple[bool, str]:

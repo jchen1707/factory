@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -504,6 +505,173 @@ def test_poll_without_a_pid_file_falls_back_to_the_heartbeat(tmp_path: Path) -> 
     assert SbxAdapter().poll(_handle(tmp_path)) is sbx_module.RunStatus.RUNNING
 
 
+_Answer = tuple[int, str] | BaseException
+
+_SANDBOX = "factory-build-python-harness"
+_FAILED: _Answer = (1, "")
+_LISTED: _Answer = (0, json.dumps({"sandboxes": [{"name": _SANDBOX, "status": "running"}]}))
+_UNLISTED: _Answer = (0, json.dumps({"sandboxes": [{"name": "factory-build-other"}]}))
+
+
+def _inspected(state: object) -> _Answer:
+    return (0, json.dumps({"name": _SANDBOX, "state": state}))
+
+
+def _record_dead_holder(attempt_dir: Path) -> None:
+    dead = subprocess.Popen(["/usr/bin/true"])
+    dead.wait()
+    (attempt_dir / sbx_module.SBX_EXEC_PID).write_text(f"{dead.pid}\n")
+
+
+def _adapter_answering(
+    inspect: _Answer, ls: _Answer, calls: list[tuple[str, ...]] | None = None
+) -> SbxAdapter:
+    adapter = SbxAdapter()
+    answers = {("sbx", "inspect", _SANDBOX, "--json"): inspect, ("sbx", "ls", "--json"): ls}
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        if calls is not None:
+            calls.append(tuple(argv))
+        answer = answers[tuple(argv)]
+        if isinstance(answer, BaseException):
+            raise answer
+        return Completed(tuple(argv), answer[0], answer[1], "")
+
+    adapter._run = run  # type: ignore[method-assign]
+    return adapter
+
+
+@pytest.mark.parametrize(
+    ("inspect", "ls", "expected"),
+    [
+        pytest.param(_inspected("stopped"), _UNLISTED, "sandbox-stopped", id="stopped"),
+        pytest.param(_inspected("running"), _UNLISTED, None, id="running"),
+        pytest.param(_inspected("paused"), _UNLISTED, None, id="unknown-state"),
+        pytest.param(_inspected(None), _UNLISTED, None, id="no-state"),
+        pytest.param((0, "not json"), _UNLISTED, None, id="inspect-bad-json"),
+        pytest.param((0, '["stopped"]'), _UNLISTED, None, id="inspect-not-an-object"),
+        pytest.param(_FAILED, _UNLISTED, "sandbox-absent", id="absent"),
+        pytest.param(_FAILED, (0, '{"sandboxes": []}'), "sandbox-absent", id="absent-empty"),
+        pytest.param(_FAILED, _LISTED, None, id="listed"),
+        pytest.param(_FAILED, _FAILED, None, id="ls-fails"),
+        pytest.param(_FAILED, (0, "not json"), None, id="ls-bad-json"),
+        pytest.param(_FAILED, (0, "[]"), None, id="ls-bare-list"),
+        pytest.param(_FAILED, (0, '{"sandboxes": null}'), None, id="ls-null"),
+        pytest.param(_FAILED, (0, '{"sandboxes": ["factory-build-x"]}'), None, id="ls-entry-text"),
+        pytest.param(_FAILED, (0, '{"sandboxes": [{"Name": "x"}]}'), None, id="ls-entry-unnamed"),
+        pytest.param(subprocess.TimeoutExpired(["sbx"], 60), _UNLISTED, None, id="inspect-timeout"),
+        pytest.param(_FAILED, subprocess.TimeoutExpired(["sbx"], 60), None, id="ls-timeout"),
+        pytest.param(FileNotFoundError("sbx"), _UNLISTED, None, id="sbx-missing"),
+    ],
+)
+def test_confirm_gone_accepts_only_a_vm_proven_stopped_or_absent(
+    tmp_path: Path, inspect: _Answer, ls: _Answer, expected: str | None
+) -> None:
+    _record_dead_holder(tmp_path)
+
+    assert _adapter_answering(inspect, ls).confirm_gone(_handle(tmp_path)) == expected
+
+
+@pytest.mark.parametrize("holder", ["alive", "alive-beating", "unrecorded"])
+def test_confirm_gone_asks_sbx_nothing_until_the_holder_is_recorded_and_dead(
+    tmp_path: Path, holder: str
+) -> None:
+    if holder.startswith("alive"):
+        (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{os.getpid()}\n")
+    if holder == "alive-beating":
+        (tmp_path / "heartbeat").write_text(str(int(time.time())))
+    calls: list[tuple[str, ...]] = []
+
+    assert (
+        _adapter_answering(_inspected("stopped"), _UNLISTED, calls).confirm_gone(_handle(tmp_path))
+        is None
+    )
+    assert calls == []
+
+
+@pytest.mark.parametrize("holder", ["unreaped-child", "reused-pid"])
+def test_confirm_gone_trusts_a_stale_heartbeat_over_a_holder_pid_that_looks_alive(
+    tmp_path: Path, holder: str
+) -> None:
+    """An exited holder still answers `kill(pid, 0)` until its parent reaps it, which in
+    `factory run` is never, and a pid can be reused. The wrapper's heartbeat stops with
+    its VM whatever the pid says."""
+    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    if holder == "unreaped-child":
+        exited = subprocess.Popen(["/usr/bin/true"], stdout=subprocess.PIPE, text=True)
+        assert exited.stdout is not None
+        assert exited.stdout.read() == ""
+        adapter._detached[_SANDBOX] = exited
+        pid = exited.pid
+    else:
+        pid = os.getpid()
+    (tmp_path / sbx_module.SBX_EXEC_PID).write_text(f"{pid}\n")
+    (tmp_path / "heartbeat").write_text(str(int(time.time()) - sbx_module.ORPHAN_AFTER_SECONDS - 1))
+
+    assert sbx_module.pid_alive(pid)
+    assert adapter.confirm_gone(_handle(tmp_path)) == "sandbox-stopped"
+
+
+def test_a_verify_launch_does_not_inherit_the_implementers_dead_holder(tmp_path: Path) -> None:
+    """Verify reuses the implement attempt's directory. Until its own `sbx exec` writes a
+    pid, a leftover one names a dead holder while verify may be booting the VM."""
+    from factory.artifacts import AttemptDir
+
+    _record_dead_holder(tmp_path)
+    AttemptDir(tmp_path).clear_liveness()
+
+    adapter = _adapter_answering(_inspected("stopped"), _UNLISTED)
+    assert adapter.confirm_gone(_handle(tmp_path)) is None
+
+
+@pytest.mark.parametrize(
+    ("inspect", "ls", "raises"),
+    [
+        pytest.param(_FAILED, _UNLISTED, False, id="absent"),
+        pytest.param(_inspected("stopped"), _UNLISTED, False, id="stopped"),
+        pytest.param(_inspected("running"), _UNLISTED, True, id="running"),
+        pytest.param(_FAILED, _LISTED, True, id="listed"),
+        pytest.param(_FAILED, _FAILED, True, id="sbx-fails"),
+    ],
+)
+def test_stop_converges_on_a_sandbox_that_is_already_down(
+    inspect: _Answer, ls: _Answer, raises: bool
+) -> None:
+    adapter = _adapter_answering(inspect, ls)
+    answer = adapter._run
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        if argv[:2] == ["sbx", "stop"]:
+            return Completed(tuple(argv), 1, "", "ERROR: sandbox not found")
+        return answer(argv, timeout=timeout, stdin=stdin)
+
+    adapter._run = run  # type: ignore[method-assign]
+    if raises:
+        with pytest.raises(SbxError, match="sbx stop"):
+            adapter.stop(_SANDBOX)
+    else:
+        adapter.stop(_SANDBOX)
+
+
+def test_confirm_gone_defers_to_an_exit_that_lands_while_sbx_answers(tmp_path: Path) -> None:
+    _record_dead_holder(tmp_path)
+    handle = _handle(tmp_path)
+    adapter = SbxAdapter()
+
+    def run(
+        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+    ) -> Completed:
+        (tmp_path / handle.exit_name).write_text("0")
+        return Completed(tuple(argv), 0, json.dumps({"state": "stopped"}), "")
+
+    adapter._run = run  # type: ignore[method-assign]
+    assert adapter.confirm_gone(handle) is None
+
+
 def test_a_read_only_primary_workspace_is_refused_before_sbx_sees_it() -> None:
     """`sbx create` rejects it — `ERROR: primary workspace must be read/write (remove
     ':ro' or ':readonly')` — and its own help scopes `:ro` to the *additional*
@@ -653,9 +821,12 @@ def test_kill_agent_defaults_to_the_agent(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize("operation", ["stop", "remove"])
 def test_cleanup_reports_command_failure(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    # `remove` runs only on a stopped sandbox; a failed `stop` matters only on a running one.
+    state = "stopped" if operation == "remove" else "running"
+
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 0, '{"state":"stopped"}', "")
+            return subprocess.CompletedProcess(argv, 0, f'{{"state":"{state}"}}', "")
         return subprocess.CompletedProcess(argv, 1, "", "cleanup refused")
 
     monkeypatch.setattr(subprocess, "run", run)

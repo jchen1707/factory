@@ -297,12 +297,17 @@ subsystem still owns live work, and names each item. Live work is any of these:
 - A prepared app-server launch on a run that is not terminal.
 
 Finish or cancel those runs with the code that opens the store's current schema, then migrate
-again. An agent whose sandbox is gone never writes its exit file, so its lease stays active.
-Confirm with `sbx ls` that the sandbox is gone, then record the lease as failed:
+again. The code that opens a store older than schema 10 never releases the lease of an agent
+whose sandbox is gone, because that agent never writes its exit file, so its `factory cancel`
+refuses with `cancellation-stop-unverified`. Confirm with `sbx ls` that the sandbox is gone,
+then record the lease as failed:
 
 ```sh
 sqlite3 state/factory.db "UPDATE agent_leases SET status='failed' WHERE invocation_id='ID'"
 ```
+
+Current code releases such a lease itself once `sbx` reports the sandbox stopped or absent. See
+"Agent slots" in `docs/operator-reference.md`.
 
 After schema 8, nothing removes `factory-build-child-*` or `factory-review-child-*`
 sandboxes. Remove each one with `sbx rm` once its run is terminal.

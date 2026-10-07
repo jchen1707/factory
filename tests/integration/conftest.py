@@ -25,7 +25,7 @@ from factory.intake.linear import Issue
 from factory.machine import State
 from factory.registry import load_registry
 from factory.routing import load_routing
-from factory.sandbox.base import Completed, RunHandle, RunResult, RunStatus, SandboxSpec
+from factory.sandbox.base import Completed, Gone, RunHandle, RunResult, RunStatus, SandboxSpec
 from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
@@ -618,6 +618,11 @@ class FakeSandbox:
             else RunStatus.RUNNING
         )
 
+    def confirm_gone(self, handle: RunHandle) -> Gone | None:
+        if (handle.attempt_dir / handle.exit_name).exists() or handle.sandbox in self.running:
+            return None
+        return "sandbox-stopped" if self.exists(handle.sandbox) else "sandbox-absent"
+
     def collect(self, handle: RunHandle) -> RunResult:
         return RunResult(
             exit_code=int((handle.attempt_dir / "exit").read_text()),
@@ -654,6 +659,8 @@ class FakeSandbox:
         # exactly, so naming the wrong one signals nothing at all and no `exit` ever
         # lands. Returning early here is that world, and it is the one a `verifying`
         # attempt lived in until `reap` learned to name `node`.
+        if not self._exec(name):
+            return
         if not self.kill_writes_exit or not self.detached_dirs:
             return
         if proc != self.detached_procs[-1]:
@@ -670,7 +677,7 @@ class FakeSandbox:
         behaviours is the difference between a timeout on one run and a wrong terminal
         record on the other.
         """
-        if not self.kill_writes_exit:
+        if not self._exec(name) or not self.kill_writes_exit:
             return
         for index, published in enumerate(self.detached_pgids):
             if published == pgid:
@@ -679,11 +686,20 @@ class FakeSandbox:
                 )
                 return
 
+    def _exec(self, name: str) -> bool:
+        """Start the VM, as `sbx exec` does. True when it was already running, so the
+        processes that were inside it are still there to signal."""
+        alive = name in self.running
+        if self.exists(name):
+            self._start(name)
+        return alive
+
     def stop(self, name: str) -> None:
         self.stop_sandbox(name)
 
     def remove(self, name: str) -> None:
-        return None
+        self.created = [spec for spec in self.created if spec.name != name]
+        self.stop_sandbox(name)
 
 
 def planner_invocation(ctx: Context, attempt: Any, *, attempt_number: int = 1) -> str:
