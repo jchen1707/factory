@@ -327,10 +327,15 @@ class _Probe:
         ).stdout
 
 
+# One `command -v` per tool: the image's /bin/sh is dash, whose `command -v` reports only its
+# first operand (measured 2026-10-07), so `command -v node git setsid` never checked git or setsid.
+_IMAGE_TOOLS_CHECK = 'for c in node git setsid; do command -v "$c" || exit 1; done'
+
+
 def _image(p: _Probe) -> Result:
     done = p.sandbox.exec_sync(
         p.name,
-        ["/bin/sh", "-lc", "claude --version && command -v node git setsid"],
+        ["/bin/sh", "-lc", f"claude --version && {_IMAGE_TOOLS_CHECK}"],
         workdir=str(p.repo),
         timeout=120,
     )
