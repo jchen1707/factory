@@ -9,9 +9,9 @@ requirements, gate commands and review instructions.
 
 The implementation includes delivery/model profiles, fresh diagnosis, normalized
 telemetry and accounting, and isolated concurrency. These features are configurable; merging code does not
-activate them for existing projects or runs. See the [acceptance report](runtime-certification-completion-acceptance.md)
-for measured synthetic coverage and the [rollout procedure](runtime-certification-rollout.md)
-for deployment, migration and rollback. Production activation is a separate operator action.
+activate them for existing projects or runs. See the [acceptance inventory](runtime-acceptance-inventory.md)
+for measured coverage and the [migration procedure](runtime-rollout.md#migration)
+for backup, migration and rollback. Production activation is a separate operator action.
 
 ## Where this sits
 
@@ -65,7 +65,7 @@ Model presets are independent of delivery profiles. Volume and high-confidence p
 route execution briefs/test design, implementation, review, diagnosis and documentation
 separately. A configurable test-design role defines scenarios; builders retain vertical
 red/green implementation. Verification commands do not need a model. Each invocation
-records the actual model, effort and preset, checked against its executing runtime.
+records the actual model, effort and preset.
 Existing routing remains available and is not silently replaced.
 
 Diagnosis distinguishes reproducible code defects, environment failures, stale authority,
@@ -90,12 +90,7 @@ replacement requires a paused run. Project changes do not rewrite existing run s
 ## Runtimes
 
 `codex exec` is the only agent adapter. Named model presets are not probed in the executing
-sandbox before launch; a preset naming a model the sandbox cannot run fails at launch.
-
-Astra availability is determined inside the executing sandbox, not inferred from the host
-Codex session. Disposable testing found Codex 0.146.0 omitted Astra; 0.153.4 advertised the
-exact `gpt-6-astra` model and completed high/xhigh schema-valid turns with unchanged provider
-context. This does not authorize an arbitrary runtime/account combination or a model alias.
+sandbox before launch. A preset model that the sandbox cannot run fails in the attempt.
 
 ```sh
 uv run factory configure --project PROJECT --max-active-agents 8
@@ -118,20 +113,12 @@ serialized, and diverged branches require verification against the updated integ
 Use retained isolation evidence before raising concurrency; a larger configured number does
 not itself prove safe execution.
 
-Clone snapshots come from the actual VM, preserving commits, index, dirty and untracked source;
-the host checkout is not a fallback authority. Supported relative aliases are retained, including
-the stacks' `.claude` aliases. External, cyclic or noncanonical links, submodules, unmerged
-indexes and oversized snapshots refuse with work preserved. Export is bounded to 100,000 files
-and 64 MiB serialized data. Existing clones without protected mailboxes follow an explicit
-preservation/drain transition rather than being silently rebuilt.
-
 ## Telemetry and costs
 
-Current context, cumulative usage and estimated spend are separate measurements. The console
-shows intermediate context occupancy and freshness; absent/stale measurements are labeled.
-Cumulative billed tokens are never used as context occupancy. Context policy warns at 70% and
-requests safe-boundary compaction at 80%, subject to earlier runtime compaction. Changed authority
-and repeated failures require fresh handoffs, not just compaction.
+Cumulative usage and estimated spend are separate measurements. `codex exec` reports no
+current-window context, so the console shows context as unavailable, and cumulative billed tokens
+are never used as context occupancy. Changed authority and repeated failures require fresh
+handoffs.
 
 Every model invocation's token usage is recorded, including failed attempts, review and
 diagnosis, and replayed events reconcile idempotently. `codex exec` reports aggregate tokens
@@ -229,7 +216,7 @@ Read [the runbook](runbook.md) before rewinding, cancelling or cleaning a stuck 
 capacity ownership. Artifacts retain attempt outputs,
 fingerprinted evidence and handoffs; logs remain outside model context. **The database is
 not trivially rebuildable from Linear and Git.** Back it up consistently before migration
-and preserve evidence alongside it. Use the [rollout procedure](runtime-certification-rollout.md)
+and preserve evidence alongside it. Use the [migration procedure](runtime-rollout.md#migration)
 for writer shutdown, SQLite backup, schema preview/application and rollback without losing
 newly recorded effects.
 
@@ -254,7 +241,7 @@ its proxy boundary are documented in [AGENTS.md](../AGENTS.md).
 
 - `config/projects.toml`: project registry, layout, environment, isolation and retention defaults.
 - `config/models.toml`: validated role routing, model catalogue and budgets.
-- `config/prices.toml`: dated estimate inputs; missing prices remain unknown.
+- `config/prices.toml`: a price table that `factory doctor` checks. No estimate reads it.
 - Target `harness.config.json`: delivery policy, components, capabilities and gate commands.
 - Runtime database settings: explicit project/run operator controls and frozen run selections.
 

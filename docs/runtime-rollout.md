@@ -1,5 +1,10 @@
 # Runtime rollout
 
+Every run uses `codex exec`. Factory no longer has app-server, automatic certification or
+delegation, and schemas 8 and 9 drop their tables. The dated checkpoints below record that
+retired rollout and do not describe the current runtime. [Migration](#migration) is the
+current schema procedure.
+
 ## Per-run compatibility measured — 2026-09-07
 
 After #88 merged, a fresh build/review pair received production per-run names and
@@ -200,28 +205,98 @@ in the implementation environment; protocol fixtures are not substitutes for tho
 
 ## Migration
 
-Stop factory writers and retain a database backup before an operator applies the migration.
-Preview the DDL without opening or modifying the database:
+This section is current guidance. When merged code raises the schema version, every
+command that opens an older store, the daemon and the console included, refuses with
+`schema-approval-required` until the operator applies the migration. James approves each
+migration. Run these steps from `~/factory`.
 
-```sh
-factory migrate --database /absolute/path/to/factory.db
-```
+1. Stop the writers. Disable the timer before you unload it, because `bootout` alone does
+   not prevent a later `bootstrap`. Stop the console too, because its controls write settings.
+
+   ```sh
+   launchctl disable gui/$(id -u)/com.jchen.factory
+   launchctl bootout gui/$(id -u)/com.jchen.factory
+   launchctl bootout gui/$(id -u)/com.jchen.factory.console
+   lsof state/factory.db*
+   ```
+
+   `lsof` must list no process. Leave detached agents running. They write attempt files, not
+   the store.
+
+2. Back up the store with SQLite's online backup. A `cp` of an open database is not a
+   verified backup.
+
+   ```sh
+   uv run python - <<'PY'
+   import datetime, os, sqlite3
+   from pathlib import Path
+   os.umask(0o077)
+   source = Path('state/factory.db')
+   stamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%dT%H%M%SZ')
+   target = source.with_name(f'factory.db.pre-migration-{stamp}')
+   old = sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True)
+   copy = sqlite3.connect(target)
+   old.backup(copy)
+   assert copy.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+   print(target, 'schema', copy.execute('PRAGMA user_version').fetchone()[0])
+   PY
+   ```
+
+3. Update `~/factory` to the merged commit without overwriting uncommitted work.
+
+4. Preview the DDL. The preview opens the store read-only. It also lists any live work that
+   blocks the migration.
+
+   ```sh
+   uv run factory migrate --database state/factory.db
+   ```
+
+5. After James approves the displayed DDL, apply it. The command prints the integrity check.
+
+   ```sh
+   uv run factory migrate --database state/factory.db --apply
+   ```
+
+6. Restart the writers.
+
+   ```sh
+   launchctl enable gui/$(id -u)/com.jchen.factory
+   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.plist
+   launchctl bootstrap gui/$(id -u) ops/com.jchen.factory.console.plist
+   ```
 
 Schema 5 adds invocation telemetry, settings/audit events, policy snapshots, project slots,
 and failure episodes. Existing runs, attempts, and effects are retained. Existing schema 4
 stores require explicit migration. New temporary test stores initialize directly.
 Schema 8 drops `delegation_requests`, the retired delegation subsystem's request table, and
-deletes whatever rows it holds. `agent_leases.parent_id` stays as a column that is now
-always null. Schema 9 drops `runtime_certifications`, the retired certification job table,
-and deletes its rows. Every other table and row is retained.
-After James approves the displayed DDL, the operator can run:
+deletes whatever rows it holds. Schema 9 drops `runtime_certifications`, the retired
+certification job table, and the `agent_leases.parent_id` column. Every other table, row and
+column is retained. The apply command refuses a store older than schema 4, whose upgrade needs
+its own review.
+
+Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
+subsystem still owns live work, and names each item. Live work is any of these:
+
+- A delegation request that is not completed, failed or cancelled.
+- An active child, certification or app-server agent.
+- A prepared app-server launch on a run that is not terminal.
+
+Finish or cancel those runs with the code that opens the store's current schema, then migrate
+again. An agent whose sandbox is gone never writes its exit file, so its lease stays active.
+Confirm with `sbx ls` that the sandbox is gone, then record the lease as failed:
 
 ```sh
-factory migrate --database /absolute/path/to/factory.db --apply
+sqlite3 state/factory.db "UPDATE agent_leases SET status='failed' WHERE invocation_id='ID'"
 ```
 
-The apply command refuses older schema versions whose upgrades were not included in this preview.
-No production database has been migrated during implementation.
+After schema 8, nothing removes `factory-build-child-*` or `factory-review-child-*`
+sandboxes. Remove each one with `sbx rm` once its run is terminal.
+
+To roll back before step 6, check out the previous commit in `~/factory`, delete
+`state/factory.db-wal` and `state/factory.db-shm` if they exist, and copy the backup over
+`state/factory.db`. After the writers restart, keep the migrated store and fix forward. Older
+code refuses a newer store with `schema-newer-than-code`, and the backup lacks every run and
+effect recorded after it was taken.
 
 ## Runtime and model selection
 

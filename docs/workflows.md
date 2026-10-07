@@ -216,7 +216,7 @@ flowchart TD
 | --- | --- |
 | CLI commands and settings | [CLI parser](../src/factory/cli.py), [configuration CLI](../src/factory/configuration_cli.py) |
 | Runs `/`, projects `/projects`, details `/runs/{ticket}`, timeline `/runs/{ticket}/timeline`, settings `/settings/runs/{ticket}`, runtimes `/runtimes`, configuration `/config` | [Console routes](../src/factory/console/app.py) |
-| Registry, model routing and estimate inputs | [Projects](../config/projects.toml), [models](../config/models.toml), [prices](../config/prices.toml) |
+| Registry and model routing | [Projects](../config/projects.toml), [models](../config/models.toml) |
 | Recovery and approvals | [Recovery](../src/factory/recovery.py), [operator controls](../src/factory/operator_controls.py) |
 | Boundary regression checks | [Boundary tests](../tests/unit/test_boundaries.py) |
 | Real measurements and their limits | [Acceptance inventory](runtime-acceptance-inventory.md), [documentation classification](README.md) |

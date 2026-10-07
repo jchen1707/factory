@@ -119,7 +119,7 @@ Common causes:
 - **`tick refused: sqlite says …`** — the DB failed `PRAGMA integrity_check`. Restore from
   the nightly copy (`~/factory/state/factory.db.bak*`); the database is **not** reconstructible from Linear and Git. Preserve the damaged
   database and artifacts before recovery, and follow the
-  [backup and rollback procedure](runtime-certification-rollout.md).
+  [backup and rollback procedure](runtime-rollout.md#migration).
 - **A bad `models.toml`** — the tick refuses and names the rule (F25): the reviewer sharing
   the builder's model, a model outside the `[models.*]` catalogue, an effort that model
   does not offer, or a bad budget. Fix
