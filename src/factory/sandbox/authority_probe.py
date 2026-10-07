@@ -39,7 +39,7 @@ READ_ONLY = "EROFS"
 _SCRIPT = r"""
 const fs = require("fs");
 const { root, paths } = JSON.parse(fs.readFileSync(0, "utf8"));
-const out = {};
+const out = Object.create(null);
 for (const rel of paths) {
   const dir = rel.endsWith("/");
   const path = `${root}/${dir ? rel.slice(0, -1) : rel}`;

@@ -136,8 +136,11 @@ def test_the_real_script_reports_a_writable_tree_and_leaves_it_as_it_was(tmp_pat
     (tmp_path / "snapshot.json").write_text('{"frozen": true}\n')
     (tmp_path / "linked.md").symlink_to(tmp_path / "snapshot.json")
     (tmp_path / "not-a-dir").write_text("file\n")
+    (tmp_path / "__proto__").write_text("a key a plain object drops\n")
     paths = [
-        *authority_probe.targets([".claude/settings.json", "snapshot.json", "linked.md"]),
+        *authority_probe.targets(
+            [".claude/settings.json", "snapshot.json", "linked.md", "__proto__"]
+        ),
         "missing.md",
         "not-a-dir/",
     ]
@@ -155,6 +158,7 @@ def test_the_real_script_reports_a_writable_tree_and_leaves_it_as_it_was(tmp_pat
         ".claude/settings.json": "writable",
         "snapshot.json": "writable",
         "linked.md": "not-a-file",
+        "__proto__": "writable",
         "./": "writable",
         ".claude/": "writable",
         "missing.md": "ENOENT",

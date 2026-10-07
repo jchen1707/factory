@@ -151,7 +151,8 @@ def _authority_read_only(ctx: Context, spec: SandboxSpec) -> None:
     if unprotected:
         raise Blocked(
             "authority-not-read-only",
-            f"{snapshot['root']} in {spec.name}: " + "; ".join(unprotected)[:500],
+            f"{len(unprotected)} of {len(paths)} paths under {snapshot['root']} in {spec.name} "
+            "did not refuse a write: " + "; ".join(unprotected)[:500],
         )
 
 
