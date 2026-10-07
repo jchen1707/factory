@@ -208,7 +208,7 @@ def effort(transcript: str, requested: Effort) -> Result:
     host for a model that takes effort."""
     name = "live: effort"
     seen: list[str] = []
-    for line in transcript.splitlines():
+    for line in stream.lines(transcript):
         try:
             wire = json.loads(line)
         except ValueError:
@@ -360,7 +360,7 @@ def _refusal(p: _Probe) -> Result:
         role=Role.BUILDER,
     )
     run = p.launch(inv)
-    events = list(stream.events(inv.files.events.read_text(encoding="utf-8").splitlines()))
+    events = list(stream.events(stream.lines(inv.files.events.read_text(encoding="utf-8"))))
     return refusal(events, run, protected.glob, changed=_digest(target) != before)
 
 

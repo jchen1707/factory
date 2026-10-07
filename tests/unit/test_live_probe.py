@@ -58,7 +58,7 @@ def _run(
 
 
 def _events(name: str) -> list[stream.Event]:
-    return list(stream.events((FIXTURES / MANIFEST[name]["events"]).read_text().splitlines()))
+    return list(stream.events(stream.lines((FIXTURES / MANIFEST[name]["events"]).read_text())))
 
 
 # --------------------------------------------------------------------------------
