@@ -103,7 +103,7 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     text = events.read_text(errors="replace")
     # Only complete lines count toward the sequence: a torn last line that completes on
     # the next read must advance it, or that read's cost would never be retained.
-    sequence = sum(1 for line in text.splitlines() if _parses(line))
+    sequence = sum(1 for line in stream.lines(text) if _parses(line))
     run = stream.parse(events)
     priced = run.by_model != {}
     cumulative_usage = _total_usage(run)
