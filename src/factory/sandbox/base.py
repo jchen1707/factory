@@ -177,6 +177,10 @@ class SandboxSpec:
     #: registry. Not a creation-time field — it appears in no `create_argv` — so changing
     #: it does not force a new sandbox name.
     allowed_custom_secrets: tuple[str, ...] = ()
+    #: Fixed at creation like the workspace set. `None` leaves sbx's default and is not
+    #: checked; a declared size is measured on an existing sandbox, so a changed size
+    #: refuses it rather than running on the old disk.
+    root_size_gib: int | None = None
 
 
 @dataclass(frozen=True)

@@ -87,6 +87,7 @@ def build_spec(ctx: Context) -> SandboxSpec:
         allowed_custom_secrets=(
             (ctx.project.sandbox_delivery.placeholder_env,) if ctx.project.sandbox_delivery else ()
         ),
+        root_size_gib=ctx.project.root_size_gib,
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ PLUGIN_CACHE = Path.home() / ".claude" / "plugins" / "cache"
 #: constant is not worth a cycle. `tests/unit/test_registry.py` asserts the two agree, so
 #: the duplication cannot drift.
 _FORGES = ("github", "gitlab")
+_ROOT_SIZE = re.compile(r"[1-9][0-9]*g")
 
 
 @dataclass(frozen=True)
@@ -189,6 +191,10 @@ class Project:
     #: and the answer for every other project — means delivery is host-side, which is
     #: what §13.2 says and what `delivery/github.py` and `delivery/gitlab.py` do.
     sandbox_delivery: SandboxDelivery | None = None
+    #: The build VM's root filesystem size, from `root_size = "40g"`. `None` keeps sbx's
+    #: 20 GiB default. Inodes scale with it (1,310,720 at 20g, 2,621,440 at 40g, measured),
+    #: and a shared build VM ran out of inodes at the default (BAC-60).
+    root_size_gib: int | None = None
 
     @property
     def base_ref(self) -> str:
@@ -319,6 +325,18 @@ def _sandbox_delivery(name: str, raw: Mapping[str, Any], *, forge: str) -> Sandb
     )
 
 
+def _root_size_gib(name: str, raw: Mapping[str, Any]) -> int | None:
+    value = raw.get("root_size")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _ROOT_SIZE.fullmatch(value):
+        raise RegistryError(
+            f"project {name!r} sets root_size={value!r}; write whole GiB as a string, "
+            'such as root_size = "40g"'
+        )
+    return int(value[:-1])
+
+
 def _project(name: str, raw: Mapping[str, Any]) -> Project:
     required = ("team", "path", "remote", "base_branch", "stack", "build_sandbox")
     missing = [key for key in required if key not in raw]
@@ -376,6 +394,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
         sensitive_paths=tuple(str(g) for g in raw.get("sensitive_paths", ())),
         concurrency_per_project=concurrency,
         sandbox_delivery=sandbox_delivery,
+        root_size_gib=_root_size_gib(name, raw),
     )
 
 

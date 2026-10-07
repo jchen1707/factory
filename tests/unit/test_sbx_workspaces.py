@@ -28,7 +28,11 @@ def _adapter(listing: object, *, ok: bool = True) -> tuple[SbxAdapter, list[tupl
     calls: list[tuple[str, ...]] = []
 
     def run(
-        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: object = None,
     ) -> Completed:
         calls.append(tuple(argv))
         if list(argv) == ["sbx", "inspect", NAME]:
