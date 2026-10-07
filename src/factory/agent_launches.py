@@ -44,7 +44,6 @@ class AgentLaunches:
         *,
         usd_limit: float,
         max_attempts: int,
-        parent_id: str | None = None,
     ) -> bool:
         """True only for the controller that performs the external launch.
 
@@ -62,7 +61,6 @@ class AgentLaunches:
             raise ValueError("launch handle must belong to the invocation")
         contract = json.dumps(
             {
-                "parent_id": parent_id,
                 "handle": asdict(handle) | {"attempt_dir": str(handle.attempt_dir)},
                 "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
                 "env_sha256": hashlib.sha256(
@@ -86,23 +84,7 @@ class AgentLaunches:
                 if prior.external_id != contract:
                     raise ValueError("launch contract is immutable")
                 return False
-            from factory.child_certifications import authorize
-
-            authorize(self.store, invocation, handle)
-            delegation = self.store.runtime.db.execute(
-                "SELECT id,parent_id,request FROM delegation_requests WHERE child_id=?",
-                (invocation_id,),
-            ).fetchone()
-            if delegation is not None:
-                from factory.delegation import DelegationBroker
-
-                if delegation["parent_id"] != parent_id:
-                    raise ValueError("delegation parent mismatch")
-                DelegationBroker(
-                    self.store,
-                    delegation["parent_id"],
-                    Path(json.loads(delegation["request"])["source_root"]),
-                ).authorize_launch(delegation["id"], invocation_id)
+            self.jobs.authorize_certification_launch(invocation, handle)
             if self.store.runtime.db.execute(
                 "SELECT 1 FROM agent_leases WHERE invocation_id=?", (invocation_id,)
             ).fetchone():
@@ -141,7 +123,6 @@ class AgentLaunches:
                 invocation_id,
                 usd_limit=usd_limit,
                 max_attempts=max_attempts,
-                parent_id=parent_id,
             ):
                 raise ProjectQueued("waiting for an agent slot")
             self.store.intend_effect(

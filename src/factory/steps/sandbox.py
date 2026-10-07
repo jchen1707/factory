@@ -27,10 +27,6 @@ _BLOCKING_EXIT = 2
 
 
 def run(ctx: Context) -> None:
-    if ctx.project.requires_clone:
-        from factory.workflow_delegation import prepare_parent
-
-        prepare_parent(ctx, ctx.run.attempt + 1)
     spec = build_spec(ctx)
 
     advance(ctx, State.SANDBOX_CREATING)
@@ -42,22 +38,6 @@ def run(ctx: Context) -> None:
 
 
 def build_spec(ctx: Context) -> SandboxSpec:
-    from factory.workflow_delegation import parent_spec
-
-    return parent_spec(ctx, base_build_spec(ctx))
-
-
-def base_build_spec(ctx: Context) -> SandboxSpec:
-    """The build sandbox. Every creation-time decision is made here, once.
-
-    The vault is mounted read-write and not `:ro`, because `session_learnings.mjs`
-    *writes* to `<vault>/Project Learnings` and `vault_index.mjs` rewrites
-    `_VAULT_INDEX.md`; a read-only mount would break both. The residual risk is bounded
-    by observation instead — a before/after snapshot with an allowlist (§8.5).
-
-    The static MCP set is empty. That is a decision that cannot be silently widened
-    later, because `sbx` fixes it at creation.
-    """
     workspaces = [Workspace(ctx.project.path)]
     from factory import authority
 

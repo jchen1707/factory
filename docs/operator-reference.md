@@ -8,8 +8,7 @@ It owns scheduling, recovery and external effects; the target repository owns it
 requirements, gate commands and review instructions.
 
 The implementation includes delivery/model profiles, fresh diagnosis, normalized
-telemetry and accounting, isolated concurrency, automatic runtime certification and
-controlled child agents. These features are configurable; merging code does not
+telemetry and accounting, isolated concurrency and automatic runtime certification. These features are configurable; merging code does not
 activate them for existing projects or runs. See the [acceptance report](runtime-certification-completion-acceptance.md)
 for measured synthetic coverage and the [rollout procedure](runtime-certification-rollout.md)
 for deployment, migration and rollback. Production activation is a separate operator action.
@@ -89,11 +88,11 @@ uv run factory configure --ticket BAC-6 --replace-policy core
 These commands change settings. Use the invocation key shown by the console; policy
 replacement requires a paused run. Project changes do not rewrite existing run snapshots.
 
-## Runtimes, certification and child agents
+## Runtimes and certification
 
 Legacy `codex exec` and Codex app-server are separate adapters. Existing runs retain their
 selected adapter. Automatic certification is opt-in; absent configuration uses manual
-compatibility, and child delegation defaults to disabled.
+compatibility.
 
 Astra availability is determined inside the executing sandbox, not inferred from the host
 Codex session. Disposable testing found Codex 0.146.0 omitted Astra; 0.153.4 advertised the
@@ -104,7 +103,7 @@ Automatic certification binds the actual sandbox generation, image, complete run
 package, mounts, environment, trusted authority/hooks and probe implementation. Six compatibility
 checks establish hook enforcement, schema output, isolation, durability, recovery and usage
 semantics before application launch. Fresh validation also runs immediately before builder,
-reviewer, recovery and child launches. Changed identities or tampered evidence refuse launch.
+reviewer and recovery launches. Changed identities or tampered evidence refuse launch.
 Controller restart reconciles durable paid intent rather than duplicating probes.
 
 The supported native package includes Codex, `codex-code-mode-host` and its packaged `bwrap`
@@ -114,33 +113,20 @@ configuration identity and refuses explicit distrust. It never writes the host t
 See [certification service](runtime-certification-service.md) for the exact host configuration
 and [rollout prerequisites](runtime-certification-rollout.md) before selecting it.
 
-Factory-owned child tools pass requests through protected mailboxes to the host broker.
-Every child has durable ownership, an invocation, approval/admission, accounting and validated
-results. Read-only children receive read-only source mounts; clone children use retained
-snapshots, while a bind-mounted source may still change through its parent writer.
-Isolated writable children receive private
-source and dependency environments; scoped artifacts are checked and integrated with preserved
-originals, conflicts and cancellation fences. Children cannot directly write the parent's tree,
-expand their authority, or silently dismiss review findings. Independent review still follows
-integration; a child result does not constitute delivery approval.
-
 ```sh
-uv run factory configure --project PROJECT --delegation-mode read-only \
-  --max-active-agents 8 --max-children-per-parent 2 --max-delegation-depth 1
-uv run factory configure --ticket BAC-6 --delegation-mode inherit --max-active-agents inherit
+uv run factory configure --project PROJECT --max-active-agents 8
+uv run factory configure --ticket BAC-6 --max-active-agents inherit
 ```
 
-These are explicit configuration examples, not activation recommendations. Only depth one is
-supported. Run settings may restrict project permissions/capacity, never expand them. Writable
-mode is a separate opt-in after its prerequisites pass.
+These are explicit configuration examples, not activation recommendations. Run settings may
+restrict project capacity, never expand it.
 
 ## Concurrency and source isolation
 
 Project run slots and agent slots are separate limits. Atomic admission coordinates CLI and
-daemon processes; agent accounting includes parents, children, reviewers and certification.
+daemon processes; agent accounting includes builders, reviewers and certification.
 The console shows inherited/explicit limits, active work, queues and waiting reasons. Lowering
-limits drains admitted work without killing it. Extremely restrictive changes can require an
-operator to drain/suspend parents or restore capacity before queued children progress.
+limits drains admitted work without killing it.
 
 Per-run isolation separates worktrees, writable dependencies, temporary files, databases and
 ports. Clone layouts keep Linux dependencies in the VM. Shared Git maintenance/integration is
@@ -165,7 +151,7 @@ and repeated failures require fresh handoffs, not just compaction.
 
 Costs are **API-equivalent estimated USD**, not Codex account charges. Dated pricing accounts
 for supported cache, output, long-context and service-tier details; every model invocation is
-tracked, including failed attempts, review, diagnosis, certification and children. Replayed
+tracked, including failed attempts, review, diagnosis and certification. Replayed
 events reconcile idempotently. Missing usage or pricing remains visibly incomplete, with known
 cost retained as a lower bound. Historical usage is estimated only where evidence supports it.
 Budgets are checked before subsequent attempts, not by killing a writer midway through a change.
@@ -236,7 +222,7 @@ All commands below use `uv run factory`:
 | `logs BAC-6 --follow` | Follow a run's event stream |
 | `runtimes` | Join sandbox inventory to factory runs |
 | `config models` | Inspect validated routing |
-| `serve` | Console: policy, models, approvals, telemetry, certification, child and capacity status |
+| `serve` | Console: policy, models, approvals, telemetry, certification and capacity status |
 | `suspend BAC-6` / `resume BAC-6` | Stop current work or resume preserved work |
 | `review-disposition-template BAC-6` | Print a non-valid decision draft bound to the latest blocking review |
 | `review-disposition-check BAC-6 PATH` | Validate a completed decision document without writing Factory state |
@@ -257,7 +243,7 @@ Read [the runbook](runbook.md) before rewinding, cancelling or cleaning a stuck 
 ## State, recovery and boundaries
 
 `state/factory.db` stores runs, snapshots, effects, approvals, invocation accounting,
-certification, child requests and capacity ownership. Artifacts retain attempt outputs,
+certification and capacity ownership. Artifacts retain attempt outputs,
 fingerprinted evidence and handoffs; logs remain outside model context. **The database is
 not trivially rebuildable from Linear and Git.** Back it up consistently before migration
 and preserve evidence alongside it. Use the [rollout procedure](runtime-certification-rollout.md)
@@ -267,8 +253,7 @@ newly recorded effects.
 Detached execution survives controller exit through an independent session holder. It does
 not survive every machine failure: reboot, logout, Docker shutdown or stopping the VM ends
 execution. Recovery reconciles the recorded process/thread and effects; uncertain ownership
-holds rather than authorizing duplicate work. Parent VM/native-thread transfer retains source,
-private dependencies and owner checks. Cancel, Suspend and GC target owned child/parent resources
+holds rather than authorizing duplicate work. Cancel, Suspend and GC target owned resources
 and preserve work they cannot safely remove.
 
 The host records external writes before calling adapters, then reconciles their outcome.

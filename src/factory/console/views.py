@@ -126,7 +126,7 @@ def run_usage(store: Store, run: Run) -> UsageSummary:
 
     The cost row written at admission is a placeholder, not an observation of zero.
     Complete invocation estimates already appear in the ledger; known_spend adds only
-    incomplete invocation lower bounds, preventing parent/child double accounting.
+    incomplete invocation lower bounds, preventing double accounting.
     """
     costs = store.costs(run.id)
     invocations = store.runtime.invocations(run.id)
@@ -148,12 +148,7 @@ def run_usage(store: Store, run: Run) -> UsageSummary:
         (item["telemetry"] or {}).get("nested_accounting", {}).get("complete") is False
         for item in invocations
     )
-    complete = (
-        complete
-        and not status["active_agents"]
-        and not status["queued_children"]
-        and not status["pending_certifications"]
-    )
+    complete = complete and not status["active_agents"] and not status["pending_certifications"]
     priced = any(row["usd"] is not None for row in costs) or any(
         "known_usd" in (item["telemetry"] or {}).get("estimate", {}) for item in invocations
     )
@@ -482,7 +477,6 @@ class RuntimeRow:
     runs_using: list[str] = field(default_factory=list)
     last_denial: str | None = None
     associations: list[RuntimeAssociation] = field(default_factory=list)
-    layout: str = "Unavailable — no recorded execution layout"
     compatibility: str = "Unavailable — current runtime identity unobserved"
     agent: str = "Unavailable"
     recorded_compatibility: list[dict[str, Any]] = field(default_factory=list)
@@ -546,23 +540,12 @@ def _runtime_associations(store: Store) -> dict[str, list[RuntimeAssociation]]:
             )
         }
         for effect in store.effects(run.id):
-            if effect.system not in {
-                "agent-launch",
-                "agent-preparation",
-                "delegation-mailbox",
-                "child-execution",
-            }:
+            if effect.system not in {"agent-launch", "agent-preparation"}:
                 continue
             try:
                 payload = json.loads(effect.external_id or "{}")
             except (ValueError, TypeError):
                 continue
-            if isinstance(payload, dict) and effect.system == "delegation-mailbox":
-                spec = payload.get("spec", {})
-                if isinstance(spec, dict):
-                    add(spec.get("name"), "prepared specification", effect.step, False)
-            if isinstance(payload, dict) and effect.system == "child-execution":
-                add(payload.get("sandbox"), "child preparation", effect.step, False)
             handle = payload.get("handle", {}) if isinstance(payload, dict) else {}
             if isinstance(handle, dict):
                 add(handle.get("sandbox"), "invocation", effect.step, effect.step in active)
@@ -624,31 +607,6 @@ def _recorded_compatibility(store: Store) -> dict[str, list[dict[str, Any]]]:
     return records
 
 
-def _recorded_layouts(store: Store) -> dict[str, set[str]]:
-    """Only retained specifications establish bind/clone; registry defaults do not."""
-    layouts: dict[str, set[str]] = {}
-    for run in store.all_runs():
-        for effect in store.effects(run.id):
-            if effect.system != "delegation-mailbox" or effect.status != "confirmed":
-                continue
-            try:
-                payload = json.loads(effect.external_id or "{}")
-            except ValueError:
-                continue
-            spec = payload.get("spec", {}) if isinstance(payload, dict) else {}
-            if (
-                not isinstance(spec, dict)
-                or not isinstance(spec.get("name"), str)
-                or type(spec.get("clone")) is not bool
-            ):
-                continue
-            label = "clone" if spec["clone"] else "bind"
-            layouts.setdefault(spec["name"], set()).add(
-                f"{label} · recorded {run.linear_id} attempt {effect.attempt}"
-            )
-    return layouts
-
-
 def runtimes(
     sandboxes: list[dict[str, Any]],
     store: Store,
@@ -662,7 +620,6 @@ def runtimes(
     sandbox does not observe its runtime generation, so it cannot establish certification.
     """
     recorded = _runtime_associations(store)
-    layouts = _recorded_layouts(store)
     compatibility = _recorded_compatibility(store)
     rows: list[RuntimeRow] = []
     for sbx in sandboxes:
@@ -701,9 +658,6 @@ def runtimes(
                 else None,
                 associations=associations,
                 recorded_compatibility=compatibility.get(name, []),
-                layout="; ".join(sorted(layouts[name]))
-                if name in layouts
-                else "Unavailable — no recorded execution layout",
                 agent=_display(sbx.get("agent")),
             )
         )

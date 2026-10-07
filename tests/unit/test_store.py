@@ -522,3 +522,66 @@ def test_migration_3_to_4_adds_force_plan_without_touching_the_rows_it_finds(
     )
     assert asked.force_plan is True
     assert store.run_by_id(asked.id).force_plan is True  # type: ignore[union-attr]
+
+
+def _database_at(path: Path, version: int) -> str:
+    from factory.store import _LIVE_RUN_INDEX, _MIGRATIONS
+
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.executescript(_SCHEMA)
+    conn.execute(_LIVE_RUN_INDEX)
+    for target in range(3, version + 1):
+        for statement in _MIGRATIONS[target]:
+            conn.execute(statement)
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO runs (id, linear_id, project, team, state, attempt, created_at, updated_at) "
+        "VALUES ('run',  'BAC-1', 'python-harness', 'BAC', 'implementing', 1, ?, ?)",
+        (now, now),
+    )
+    conn.execute(
+        "INSERT INTO invocations (id, run_id, attempt, role, metadata, started_at, updated_at) "
+        "VALUES ('builder', 'run', 1, 'builder', '{}', ?, ?)",
+        (now, now),
+    )
+    conn.execute(
+        "INSERT INTO effects (run_id, attempt, step, system, key, status, external_id, at) "
+        "VALUES ('run', 1, 'builder', 'agent-launch', 'spawn', 'confirmed', '{}', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO agent_leases VALUES ('builder', 'run', 'python-harness', 'completed', NULL)"
+    )
+    conn.execute(f"PRAGMA user_version={version}")
+    conn.close()
+    return "run"
+
+
+def test_migration_7_to_8_drops_delegation_requests_and_keeps_the_ledger(tmp_path: Path) -> None:
+    from factory.store import migration_statements
+
+    path = tmp_path / "factory.db"
+    run_id = _database_at(path, 7)
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute(
+        "INSERT INTO delegation_requests VALUES "
+        "('request', 'builder', 'call', 'run', '{}', 'completed', NULL, NULL)"
+    )
+    conn.close()
+
+    with pytest.raises(Blocked, match="schema-approval-required"):
+        Store(path)
+    assert "DROP TABLE delegation_requests" in migration_statements(7)
+
+    store = Store(path, migrate=True)
+    tables = {row[0] for row in store._conn.execute("SELECT name FROM sqlite_master")}
+    assert "delegation_requests" not in tables
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert store.integrity_ok()[0]
+    assert store.run_by_id(run_id) is not None
+    assert len(store.effects(run_id)) == 1
+    assert store.runtime.invocation("builder") is not None
+    assert [row["invocation_id"] for row in store._conn.execute("SELECT * FROM agent_leases")] == [
+        "builder"
+    ]
+    store.close()

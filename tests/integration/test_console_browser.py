@@ -120,14 +120,6 @@ def test_console_in_real_browser(
                 },
             ]
         )
-    if scenario in ("populated", "stress"):
-        for name, clone in (
-            ("factory-build-python-harness", False),
-            ("factory-review-fixture-certification-1", True),
-        ):
-            owner = (ctx.run.id, 1, "parent", "delegation-mailbox", f"fixture-layout-{name}")
-            ctx.store.intend_effect(*owner)
-            ctx.store.confirm_effect(*owner, json.dumps({"spec": {"name": name, "clone": clone}}))
     for heartbeat in ctx.home.rglob("heartbeat"):
         os.utime(heartbeat, (FIXTURE_NOW - 8, FIXTURE_NOW - 8))
     if ctx.run.worktree:
@@ -222,7 +214,7 @@ def test_console_in_real_browser(
                     "SELECT COUNT(*) FROM agent_leases WHERE project=? AND status='active'",
                     (project.name,),
                 ).fetchone()[0],
-                "waiting": f"{status(ctx.store, project.name)['queued_children']} children · {status(ctx.store, project.name)['pending_certifications']} certifications",
+                "waiting": f"{status(ctx.store, project.name)['pending_certifications']} certifications",
                 "effective_agent_limit": status(ctx.store, project.name)["effective"][
                     "max_active_agents"
                 ],
@@ -348,18 +340,6 @@ def _populate_history(ctx: Context, *, stress: bool = False) -> None:
                     ctx.project.name,
                     "completed",
                     "fixture-invocation-000-" + "abcdef0123456789" * 4,
-                ),
-            )
-            ctx.store.runtime.db.execute(
-                "INSERT INTO delegation_requests(id,parent_id,call_id,run_id,request,status,child_id) VALUES (?,?,?,?,?,?,?)",
-                (
-                    f"fixture-request-{index}-" + "a" * 64,
-                    "fixture-invocation-000-" + "abcdef0123456789" * 4,
-                    f"call-{index}",
-                    ctx.run.id,
-                    "{}",
-                    "completed",
-                    invocation,
                 ),
             )
         if index < 12:

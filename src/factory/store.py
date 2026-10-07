@@ -30,7 +30,7 @@ from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -106,6 +106,7 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     5: RUNTIME_SCHEMA,
     6: RUNTIME_JOBS_SCHEMA,
     7: RETRY_SCHEMA,
+    8: ("DROP TABLE delegation_requests",),
 }
 
 

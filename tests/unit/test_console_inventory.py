@@ -232,17 +232,3 @@ def test_title_comes_only_from_persisted_ticket_heading(tmp_path: Path) -> None:
     assert views._ticket_title(tmp_path, run) == "Persisted title"
     (context / "ticket.md").write_text("# OTHER-1 — Wrong ticket")
     assert views._ticket_title(tmp_path, run) is None
-
-
-def test_layout_uses_recorded_spec_with_historical_scope(tmp_path: Path) -> None:
-    import json
-
-    store = Store(tmp_path / "state.db")
-    run = store.insert_run(linear_id="SYN-1", project="synthetic", team="SYN")
-    owner = (run.id, 1, "parent", "delegation-mailbox", "mounts")
-    store.intend_effect(*owner)
-    store.confirm_effect(
-        *owner, json.dumps({"spec": {"name": "factory-build-recorded", "clone": True}})
-    )
-    row = views.runtimes([{"name": "factory-build-recorded"}], store)[0]
-    assert row.layout == "clone · recorded SYN-1 attempt 1"
