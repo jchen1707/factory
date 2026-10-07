@@ -9,6 +9,82 @@ The first command in every case is `factory status <TICKET> --evidence` — the 
 timeline, the recorded checks and the effects ledger tell you which state below you are in.
 `factory status --all` shows every run on one screen.
 
+## First use after the Claude cutover
+
+Every agent step runs `claude -p` inside a `claude` sandbox since #116. A machine set up for
+Codex needs five steps, in this order, before the first Claude run. Steps 1 and 2 are
+interactive and only the operator can do them.
+
+1. Sign `sbx` in to Docker. Without it every sandbox operation fails with
+   `401 Unauthorized: user is not authenticated to Docker`.
+
+   ```sh
+   sbx login
+   ```
+
+2. Give sandboxes an Anthropic credential. The factory never reads or sets it. Choose one
+   route.
+
+   - **Subscription OAuth (Claude Max).** Log in once from inside a `claude` sandbox. sbx
+     stores the token, and it takes precedence over an API key at runtime.
+
+     ```sh
+     sbx run claude <any directory> -- auth login
+     ```
+
+   - **API key.** Store it globally, or add `--sandbox <name>` to scope it to one sandbox.
+
+     ```sh
+     echo "$ANTHROPIC_API_KEY" | sbx secret set anthropic
+     ```
+
+   Neither route has been observed working in a sandbox yet. `factory doctor` reports an
+   `anthropic` row in `sbx secret ls` when it finds one, but how sbx lists the OAuth token is
+   unmeasured. The deep probe in step 5 is the check that settles it.
+
+3. Migrate the store to schema 10, which nulls every Codex-era `attempts.session_id`. Follow
+   the [migration procedure](runtime-rollout.md#migration): stop the writers, back up, preview,
+   then apply.
+
+   ```sh
+   uv run factory migrate --database state/factory.db           # preview
+   uv run factory migrate --database state/factory.db --apply
+   ```
+
+4. Remove every `factory-build-*` and `factory-review-*` sandbox created before the cutover.
+   They were made with `sbx create codex` and carry no `claude`, and `ensure` attaches to an
+   existing sandbox without comparing its agent kind. Leave `codex-*` sandboxes alone: they
+   are James's interactive sessions.
+
+   ```sh
+   sbx ls
+   sbx stop <name> && sbx rm --force <name>    # for each pre-cutover factory sandbox
+   ```
+
+   A project whose `template` in `config/projects.toml` names a Codex image
+   (`codex-pnpm:v1`) needs a template that carries `claude`. Step 5's `live: image` row
+   says whether it does.
+
+5. Run the live probe. It creates `factory-doctor-<project>` over a fresh clone of the first
+   project, runs six probes and removes the sandbox. It costs a few haiku calls and one call
+   on the routed builder model.
+
+   ```sh
+   uv run factory doctor --deep
+   ```
+
+   | Row | Passes when |
+   | --- | --- |
+   | `live: image` | `claude --version` runs and `node`, `git` and `setsid` are on the PATH. |
+   | `live: ping` | A haiku launch with the production argv answers through `--json-schema` and its `init` matches the launch. |
+   | `live: protected-path refusal` | Layer A's PreToolUse hook refuses an edit to the first protected path, and the file is unchanged. |
+   | `live: effort` | The VM transcript records `perTurnEffort: low` for an `--effort low` launch. |
+   | `live: pgid kill` | Killing a launch's process group still writes `exit`, and no child survives. |
+   | `live: resume after stop` | `--resume` continues the ping's session after `sbx stop`. |
+
+   A failed `live: image` or `live: ping` skips every later row. A ping that fails on
+   authentication names both credential routes from step 2.
+
 ## I want it to stop right now
 
 | You want | Type | What it does |
@@ -137,7 +213,7 @@ factory status                          # the board: every non-terminal run, liv
 factory status <TICKET> --evidence      # transitions, gate table, review findings, artifacts
 factory logs <TICKET> --follow          # tail the agent's own event stream
 factory runtimes                        # sandboxes joined to the runs using them
-uv run factory doctor --deep            # includes a live codex hook canary (costs a model call)
+uv run factory doctor --deep            # adds the live Claude probe (costs model calls)
 
 tail -f ~/factory/logs/factory-$(date +%Y-%m-%d).jsonl   # the structured control-plane log
 ```

@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
+from factory.agent.claude import WRITE_TOOLS
 from factory.machine import Blocked
 
 __all__ = [
@@ -27,6 +31,7 @@ __all__ = [
     "ProtectedPath",
     "cross_check_stack",
     "load_harness_config",
+    "unwired_hooks",
     "vendor_check",
 ]
 
@@ -220,6 +225,75 @@ def vendor_check(target: Path, vendor_sync: Path) -> tuple[bool, str]:
         check=False,
     )
     return proc.returncode == 0, (proc.stdout + proc.stderr).strip()
+
+
+CLAUDE_SETTINGS = ".claude/settings.json"
+
+#: The layer-A hooks a launch is unenforced without, by Claude Code hook event: the write
+#: guard and the Definition-of-Done gate.
+ENFORCING_HOOKS: Mapping[str, str] = MappingProxyType(
+    {"PreToolUse": "protect_paths.mjs", "Stop": "verify.mjs"}
+)
+#: The write guard must see every tool an agent can change files with.
+GUARDED_TOOLS = tuple(sorted(WRITE_TOOLS - {"Skill"}))
+
+
+def _hook_command(hook: Any) -> str:
+    if not isinstance(hook, dict):
+        return ""
+    args = hook.get("args")
+    return " ".join(
+        [str(hook.get("command", "")), *(map(str, args) if isinstance(args, list) else ())]
+    )
+
+
+def _matches(matcher: Any, tool: str) -> bool:
+    if matcher in (None, "", "*"):
+        return True
+    try:
+        return re.fullmatch(str(matcher), tool) is not None
+    except re.error:
+        return False
+
+
+def unwired_hooks(settings_text: str | None) -> list[str]:
+    """What a `.claude/settings.json` fails to wire of `ENFORCING_HOOKS`; empty when wired.
+
+    `None` is an absent file. Every launch loads this file with `--setting-sources project`,
+    so it is the only place the hooks can come from inside a worktree.
+    """
+    if settings_text is None:
+        return [f"{CLAUDE_SETTINGS} is absent"]
+    try:
+        settings = json.loads(settings_text)
+    except ValueError as exc:
+        return [f"{CLAUDE_SETTINGS} is not JSON: {exc}"]
+    if not isinstance(settings, dict):
+        settings = {}
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    problems: list[str] = []
+    if settings.get("disableAllHooks") is True:
+        problems.append("disableAllHooks is true")
+    for event, script in ENFORCING_HOOKS.items():
+        groups = [
+            group
+            for group in hooks.get(event) or []
+            if isinstance(group, dict)
+            and any(script in _hook_command(hook) for hook in group.get("hooks") or [])
+        ]
+        if not groups:
+            problems.append(f"{event} does not run {script}")
+            continue
+        uncovered = [
+            tool
+            for tool in GUARDED_TOOLS
+            if event == "PreToolUse" and not any(_matches(g.get("matcher"), tool) for g in groups)
+        ]
+        if uncovered:
+            problems.append(f"{event} {script} does not match {', '.join(uncovered)}")
+    return problems
 
 
 def gates_summary(gates: Sequence[Gate]) -> str:

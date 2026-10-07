@@ -74,6 +74,31 @@
       "events": "tool-output-nel.jsonl",
       "exit": 0,
       "source": "host claude -p, Bash printf 'x\\302\\205y\\n'"
+    },
+    "ping": {
+      "events": "ping.jsonl",
+      "exit": 0,
+      "session": "8ca2e953-d1b2-47e7-be12-a679c4fa284c",
+      "source": "scratchpad f2/out/m6-ping"
+    },
+    "resume-known": {
+      "events": "resume-known.jsonl",
+      "exit": 0,
+      "session": "8ca2e953-d1b2-47e7-be12-a679c4fa284c",
+      "source": "scratchpad f2/out/m8-resume-ping"
+    },
+    "protected-write": {
+      "events": "protected-write.jsonl",
+      "exit": 0,
+      "session": "3347b149-ed66-4d8c-ba01-29b0d57a8136",
+      "source": "scratchpad f2/out/m4-protected-write"
+    }
+  },
+  "transcripts": {
+    "effort-low": {
+      "transcript": "effort-low.transcript.jsonl",
+      "session": "8b16638b-0140-4528-b58b-b30c32a28644",
+      "source": "scratchpad f2/out/m5-effort-low (native transcript, keys trimmed)"
     }
   }
 }

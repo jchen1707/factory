@@ -12,9 +12,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from factory.harness import vendor_check
+from factory import repo
+from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.machine import Blocked, State
 from factory.policy import capability_env_names, capability_secrets
+from factory.registry import Project
 from factory.sandbox.base import SandboxSpec, Workspace
 from factory.steps import Context, advance
 
@@ -193,6 +195,11 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     ok, detail = vendor_check(ctx.project.path, _vendor_sync_path())
     checks.append(("vendored-tree-intact", ok, detail))
 
+    # 4b. The worktree is cut from the base ref and carries its `.claude/settings.json`,
+    #     the only place a launch's hooks come from. Without them the canary below proves
+    #     a hook no agent calls.
+    checks.append(("layer-a-hooks-wired", *layer_a_hooks_wired(ctx.project)))
+
     # 5. The canary. §9.3's rule is that enforcement is proved by producing a refusal,
     #    not by observing the absence of a flag.
     canary_ok, canary_detail = _protect_paths_canary(ctx, spec)
@@ -217,6 +224,17 @@ def preflight(ctx: Context, spec: SandboxSpec) -> None:
     ctx.log("preflight.green", checks=[name for name, _, _ in checks])
 
 
+def layer_a_hooks_wired(project: Project) -> tuple[bool, str]:
+    """Does the base ref's `.claude/settings.json` wire the enforcing hooks?"""
+    try:
+        unwired = unwired_hooks(repo.file_at_ref(project.path, project.base_ref, CLAUDE_SETTINGS))
+    except repo.GitError:
+        return False, f"{project.base_ref} does not resolve in {project.path}; fetch it"
+    return not unwired, f"{project.base_ref}: " + (
+        "; ".join(unwired) or "PreToolUse and Stop wired"
+    )
+
+
 def _vendor_sync_path() -> Path:
     from factory.registry import VENDOR_SYNC
 
@@ -232,10 +250,10 @@ def _protect_paths_canary(ctx: Context, spec: SandboxSpec) -> tuple[bool, str]:
     prove the agent is wired to call it — nothing short of a real `claude -p` run does,
     which is a model call, so `factory doctor --deep` offers that and this does not.
 
-    Everything else about the wiring is asserted structurally instead: the worktree
-    carries `.claude/settings.json`, every launch loads it with `--setting-sources
-    project` (a unit test pins the argv), and the vendored tree just passed its
-    integrity check.
+    Everything else about the wiring is asserted structurally instead: the base ref's
+    `.claude/settings.json` wires the hooks (check 4b), every launch loads it with
+    `--setting-sources project` (a unit test pins the argv), and the vendored tree just
+    passed its integrity check.
     """
     if ctx.harness is None:
         return False, "no harness config loaded"

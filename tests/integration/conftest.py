@@ -827,6 +827,38 @@ def _seed_vendored_review_tree(worktree: Path) -> None:
     skill.write_text("# full review\n\nthe portable nine-axis skill", encoding="utf-8")
 
 
+#: The two enforcing hooks, wired the way every consumer repository's settings wire them.
+LAYER_A_SETTINGS = {
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Read|Edit|Write|NotebookEdit|Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node",
+                        "args": [
+                            "${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/protect_paths.mjs"
+                        ],
+                    }
+                ],
+            }
+        ],
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node",
+                        "args": ["${CLAUDE_PROJECT_DIR}/.agents/vendor/harness/hooks/verify.mjs"],
+                    }
+                ]
+            }
+        ],
+    }
+}
+
+
 @pytest.fixture
 def project_repo(tmp_path: Path) -> Path:
     """A real git repository with a real `origin`, because `repo.py` shells out to git.
@@ -868,6 +900,8 @@ def project_repo(tmp_path: Path) -> Path:
         )
     )
     (work / "README.md").write_text("# python-harness\n")
+    (work / ".claude").mkdir()
+    (work / ".claude" / "settings.json").write_text(json.dumps(LAYER_A_SETTINGS))
     # Real consumers exclude run artifacts. Staging a source change must not also
     # commit the fake sandbox's prompts and evidence and trip review's size trigger.
     (work / ".gitignore").write_text(".factory/\n")

@@ -59,7 +59,6 @@ NEVER_EMITTED = (
     "-c",
     "--dangerously-skip-permissions",
     "--allow-dangerously-skip-permissions",
-    "--permission-mode",
     "--add-dir",
     "--disallowedTools",
 )
@@ -74,6 +73,7 @@ VALUE_FLAGS = frozenset(
         "--session-id",
         "--resume",
         "--permission-prompts",
+        "--permission-mode",
         "--plugin-dir",
         "--json-schema",
         "--tools",
@@ -186,6 +186,8 @@ def test_argv_fresh_with_effort_is_exact() -> None:
         SESSION,
         "--permission-prompts",
         "none",
+        "--permission-mode",
+        "default",
         "--json-schema",
         COMPACT_SCHEMA,
         "--tools",
@@ -202,7 +204,7 @@ def test_argv_resume_without_effort_with_plugins_is_exact() -> None:
     args = claude.argv(invocation(resume=True, effort=None, plugins=TWO_PLUGINS))
 
     assert args[:5] == ["claude", "-p", "--output-format", "stream-json", "--verbose"]
-    assert args[5:23] == [
+    assert args[5:25] == [
         "--model",
         "claude-opus-5-5",
         "--max-turns",
@@ -215,6 +217,8 @@ def test_argv_resume_without_effort_with_plugins_is_exact() -> None:
         SESSION,
         "--permission-prompts",
         "none",
+        "--permission-mode",
+        "default",
         "--plugin-dir",
         "/factory/plugins/doctrine",
         "--plugin-dir",

@@ -40,7 +40,8 @@ TOOLS: Mapping[Role, frozenset[str]] = MappingProxyType(
 
 # `--json-schema` adds this tool to `init.tools` even under `--tools` (success-schema).
 STRUCTURED_OUTPUT = "StructuredOutput"
-# `init.permissionMode` under `--permission-prompts none` (denied).
+# Passed as `--permission-mode` because a target repo's `permissions.defaultMode` otherwise
+# becomes `init.permissionMode` under `--setting-sources project` and fails attestation.
 PERMISSION_MODE = "default"
 EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
 
@@ -155,6 +156,8 @@ def argv(inv: Invocation) -> list[str]:
         inv.session,
         "--permission-prompts",
         "none",
+        "--permission-mode",
+        PERMISSION_MODE,
         *(arg for plugin in inv.plugins for arg in ("--plugin-dir", str(plugin.path))),
         "--json-schema",
         _schema_json(inv.schema),
