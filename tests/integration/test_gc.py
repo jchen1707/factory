@@ -121,6 +121,22 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
     assert not Path(ctx.run.worktree or "").exists()
 
 
+def test_every_attempt_is_archived_after_delivery_archived_the_last_one(ctx: Context) -> None:
+    _finished_run(ctx)
+    for attempt in ("1", "2"):
+        (ctx.factory_dir / "run" / attempt).mkdir(parents=True, exist_ok=True)
+        (ctx.factory_dir / "run" / attempt / "events.jsonl").write_text(
+            f'{{"attempt":{attempt}}}\n'
+        )
+    delivered = ctx.artifact_root / "2"
+    delivered.mkdir(parents=True)
+    (delivered / "events.jsonl").write_text('{"attempt":2}\n')
+
+    _sweep(ctx, dry_run=False)
+
+    assert (ctx.artifact_root / "1" / "events.jsonl").read_text() == '{"attempt":1}\n'
+
+
 def test_evidence_seeded_before_run_scoping_is_archived_where_it_was_written(
     ctx: Context,
 ) -> None:

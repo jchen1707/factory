@@ -231,7 +231,7 @@ class Context:
 
     @property
     def artifact_root(self) -> Path:
-        return self.home / "artifacts" / self.run.linear_id
+        return self.home / "artifacts" / self.run.linear_id / self.run.id
 
     @property
     def worktree(self) -> Path:

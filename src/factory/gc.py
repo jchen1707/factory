@@ -163,8 +163,6 @@ def _archive_attempts(home: Path, run: Run, *, dry_run: bool) -> list[Action]:
     if not source.is_dir():
         return []
     destination = home / "artifacts" / run.linear_id / run.id
-    if destination.exists():
-        return [Action("artifact-archive", str(destination), "already archived", False)]
     if dry_run:
         return [Action("artifact-archive", str(destination), f"would copy {source}", False)]
     artifacts.archive(source, destination)
