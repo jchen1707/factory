@@ -12,7 +12,7 @@ import pytest
 
 from factory import candidate_handoff, repo
 from factory.machine import Blocked, State
-from factory.steps import Context, implement, worktree
+from factory.steps import Context, claim, context, implement, sandbox, worktree
 from tests.integration.conftest import git
 
 
@@ -170,9 +170,13 @@ def test_retained_candidate_requires_cancel_then_restores_exact_tree_and_prompt(
         project=source_run.project,
         team=source_run.team,
     )
+    assert ctx.store.acquire_lease(new_run.id, ttl_seconds=600)
     new_ctx = replace(ctx, run=new_run)
     candidate_handoff.copy_to_new_run(validated, new_ctx.state_dir)
 
+    claim.run(new_ctx)
+    context.run(new_ctx)
+    sandbox.run(new_ctx)
     worktree.run(new_ctx)
 
     assert new_ctx.state is State.WORKTREE_READY
