@@ -72,7 +72,7 @@ class AgentInvocation:
     """Everything one `codex exec` needs, resolved before anything is spawned."""
 
     model: str
-    effort: str
+    effort: str | None
     workdir: str
     prompt_path: Path
     schema_path: Path

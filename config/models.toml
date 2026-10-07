@@ -2,113 +2,72 @@
 # read. A failing validation refuses to start rather than falling back to a default,
 # because a factory silently running every role on one model looks identical to one
 # routing correctly.
-
-[defaults]
-provider = "codex"
+#
+# The roles below are the operator default set on 2026-10-06, when the factory moved to
+# Anthropic models only. Change any of them here or on the console's settings page.
 
 [roles.planner]
-model  = "gpt-6-astra"
-effort = "medium"                  # the plan is copied into every later step
+model  = "claude-opus-5-5"
+effort = "high"                    # the plan is copied into every later step
 
 [roles.builder]
-model  = "gpt-6-astra"
-# Was "xhigh". Dropped a step after BAC-4's four re-runs exhausted the Codex credit:
-# each implement attempt spent 7-16 M input tokens, and the defects those runs found
-# were all in the factory's own plumbing, not in what the builder wrote. "medium" is
-# the next step down if this is still too expensive; "max" is above, and "ultra" is
-# never routable — the validation refuses it.
-effort = "low"
-
-[roles.reviewer]
-model  = "gpt-5.6-sol"             # MUST differ from roles.builder.model
+model  = "claude-opus-5-5"
 effort = "medium"
 
+[roles.reviewer]
+model  = "claude-fable-5-1"        # MUST differ from roles.builder.model
+effort = "high"
+
 [roles.synthesiser]
-model  = "gpt-5.6-luna"
-effort = "high"                    # merges findings; it does not read the diff
+model  = "claude-sonnet-5-5"
+effort = "medium"                  # merges findings; it does not read the diff
 
 [roles.documenter]
-model  = "gpt-5.6-luna"
-effort = "high"
+model  = "claude-sonnet-5-5"
+effort = "medium"
 
 [budget]
 usd_per_run = 50.0                 # hard ceiling; the run blocks, never mid-write
 usd_warn_at = 30.0
 
-# The measured catalogue, seeded from ~/.codex/models_cache.json
-# (client_version 0.147.0, fetched 2026-08-20T23:00:06Z) — p0-12-models.md.
+# The catalogue, and the only one: routing reads nothing outside this file. A role must
+# name a full model id from this table. Aliases such as `opus` are refused because they
+# move when a new model ships.
 #
-# It is here for two reasons. The console's context denominator is
-# `context_window × effective_percent / 100`, and P0-7 proved the event stream
-# carries neither number: `thread.started` holds `thread_id` and nothing else, so
-# the denominator can only come from a table. And routing validation needs the list
-# of models that exist; reading it from the live cache is authoritative, but a table
-# that omitted a model the validation would accept is a table that has drifted, so
-# both are kept and `factory doctor` reports the difference.
-#
-# `hidden = true` marks a model the cache lists with `visibility: hide`. It exists,
-# so validation accepts it; it is not a routing target and the console says so.
+# `context_window` is Claude Code's `result.modelUsage[<id>].contextWindow`, measured
+# 2026-10-07 UTC with `claude -p --model <id>` (Claude Code 2.1.292). `supported_efforts` and
+# `default_effort` are the Claude Code model catalog's effort options and recommended
+# badge, read the same day. A model with no `supported_efforts` takes no effort, and a
+# role routed to it must not name one.
 
-[models."gpt-5.6-sol"]
-display = "GPT-5.6-Sol"
-default_effort = "low"
-supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
-context_window = 272000
-effective_percent = 95
-hidden = false
-
-[models."gpt-5.6-terra"]
-display = "GPT-5.6-Terra"
-default_effort = "medium"
-supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
-context_window = 272000
-effective_percent = 95
-hidden = false
-
-[models."gpt-5.6-luna"]
-display = "GPT-5.6-Luna"
-default_effort = "medium"
+[models."claude-fable-5-1"]
+context_window = 1000000
 supported_efforts = ["low", "medium", "high", "xhigh", "max"]
-context_window = 272000
-effective_percent = 95
-hidden = false
+default_effort = "high"
 
-[models."gpt-reserve"]
-display = "GPT-Reserve"
-default_effort = "medium"
+[models."claude-opus-5-5"]
+context_window = 1000000
 supported_efforts = ["low", "medium", "high", "xhigh", "max"]
-context_window = 272000
-effective_percent = 95
-hidden = true
-
-[models."gpt-5.5"]
-display = "GPT-5.5"
 default_effort = "medium"
-supported_efforts = ["low", "medium", "high", "xhigh"]
-context_window = 272000
-effective_percent = 95
-hidden = false
 
-[models."gpt-5.4"]
-display = "GPT-5.4"
-default_effort = "medium"
-supported_efforts = ["low", "medium", "high", "xhigh"]
-context_window = 272000
-effective_percent = 95
-hidden = false
-
-[models."gpt-5.4-mini"]
-display = "GPT-5.4-Mini"
-default_effort = "medium"
-supported_efforts = ["low", "medium", "high", "xhigh"]
-context_window = 272000
-effective_percent = 95
-hidden = false
-
-[models."codex-auto-review"]
-display = "Codex Auto Review"
-default_effort = "medium"
+[models."claude-sonnet-5-5"]
+context_window = 1000000
 supported_efforts = ["low", "medium", "high", "xhigh", "max"]
-context_window = 272000
-effective_percent = 95
-hidden = true
+default_effort = "medium"
+
+[models."claude-opus-4-7"]
+context_window = 1000000
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+default_effort = "xhigh"
+
+[models."claude-sonnet-4-6"]
+# Claude Code reports 200000 here although the API offers this model a 1M window.
+context_window = 200000
+supported_efforts = ["low", "medium", "high", "max"]
+default_effort = "high"
+
+[models."claude-haiku-4-5-20251001"]
+# The catalog lists its thinking as "none", and a run with `--effort xhigh` recorded no
+# applied effort.
+context_window = 200000
+supported_efforts = []

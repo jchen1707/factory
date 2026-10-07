@@ -178,7 +178,7 @@ def test_intermediate_context_is_shown_without_waiting_for_a_completed_turn(ctx:
     _to_implementing(ctx)
     attempt_dir = ctx.factory_dir / "run" / str(ctx.run.attempt)
     attempt_dir.mkdir(parents=True, exist_ok=True)
-    usable = ctx.routing.models[ctx.routing.role("builder").model].usable_context
+    usable = ctx.routing.models[ctx.routing.role("builder").model].context_window
     (attempt_dir / "events.jsonl").write_text(
         json.dumps({"type": "thread.started", "thread_id": "01a0"})
         + "\n"
@@ -382,7 +382,7 @@ def _form(ctx: Context, **overrides: str) -> dict[str, str]:
     body: dict[str, str] = {}
     for name, role in ctx.routing.roles.items():
         body[f"model.{name}"] = role.model
-        body[f"effort.{name}"] = role.effort
+        body[f"effort.{name}"] = role.effort or ""
     body["usd_per_run"] = str(ctx.routing.usd_per_run)
     body["usd_warn_at"] = str(ctx.routing.usd_warn_at)
     body.update(overrides)

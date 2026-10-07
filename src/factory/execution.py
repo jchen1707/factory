@@ -12,22 +12,22 @@ if TYPE_CHECKING:
 
 PRESETS = {
     "volume": {
-        "planner": ("gpt-5.6-sol", "high"),
-        "test_designer": ("gpt-5.6-sol", "high"),
-        "builder": ("gpt-5.6-terra", "medium"),
-        "reviewer": ("gpt-5.6-sol", "high"),
-        "diagnoser": ("gpt-5.6-sol", "high"),
-        "synthesiser": ("gpt-5.6-luna", "medium"),
-        "documenter": ("gpt-5.6-luna", "medium"),
+        "planner": ("claude-opus-5-5", "high"),
+        "test_designer": ("claude-opus-5-5", "high"),
+        "builder": ("claude-sonnet-5-5", "medium"),
+        "reviewer": ("claude-opus-5-5", "high"),
+        "diagnoser": ("claude-opus-5-5", "high"),
+        "synthesiser": ("claude-sonnet-5-5", "medium"),
+        "documenter": ("claude-sonnet-5-5", "medium"),
     },
     "high-confidence": {
-        "planner": ("gpt-6-astra", "high"),
-        "test_designer": ("gpt-6-astra", "high"),
-        "builder": ("gpt-6-astra", "high"),
-        "reviewer": ("gpt-5.6-sol", "xhigh"),
-        "diagnoser": ("gpt-6-astra", "xhigh"),
-        "synthesiser": ("gpt-5.6-luna", "medium"),
-        "documenter": ("gpt-5.6-luna", "medium"),
+        "planner": ("claude-fable-5-1", "high"),
+        "test_designer": ("claude-fable-5-1", "high"),
+        "builder": ("claude-opus-5-5", "high"),
+        "reviewer": ("claude-fable-5-1", "xhigh"),
+        "diagnoser": ("claude-fable-5-1", "xhigh"),
+        "synthesiser": ("claude-sonnet-5-5", "medium"),
+        "documenter": ("claude-sonnet-5-5", "medium"),
     },
 }
 

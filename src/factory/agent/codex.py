@@ -47,8 +47,7 @@ class CodexAdapter:
         argv += [
             "-m",
             invocation.model,
-            "-c",
-            f"model_reasoning_effort={invocation.effort}",
+            *(["-c", f"model_reasoning_effort={invocation.effort}"] if invocation.effort else []),
             # Reproduces `codex-vault-setting` exactly, and is passed on **every**
             # invocation including resumes: the in-sandbox name is
             # OBSIDIAN_VAULT_DIRECTORY, the host name is OBSIDIAN_VAULT_DIR, and this

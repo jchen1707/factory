@@ -50,20 +50,16 @@ def _events(tmp_path: Path, *events: Mapping[str, Any]) -> Path:
     return path
 
 
-def _routing(*, window: int = 272000, percent: int = 95, known: bool = True) -> Routing:
+def _routing(*, window: int = 272000, known: bool = True) -> Routing:
     models: dict[str, ModelFacts] = {}
     if known:
         models["gpt-5.6-sol"] = ModelFacts(
             slug="gpt-5.6-sol",
-            display="sol",
-            default_effort="high",
-            supported_efforts=("high",),
             context_window=window,
-            effective_percent=percent,
-            hidden=False,
+            supported_efforts=("high",),
+            default_effort="high",
         )
     return Routing(
-        provider="codex",
         roles={"builder": Role(name="builder", model="gpt-5.6-sol", effort="high")},
         models=models,
         usd_per_run=20.0,

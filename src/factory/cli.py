@@ -1024,7 +1024,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     view = console_views.config_view(routing, registry)
     print("roles:")
     for role in view.roles:
-        print(f"  {role.name:<12} {role.model}  effort={role.effort}")
+        print(f"  {role.name:<12} {role.model}  effort={role.effort or 'none'}")
     print("\nbudget:")
     print(f"  per-run ceiling ${view.usd_per_run:.2f}  warn at ${view.usd_warn_at:.2f}")
     print("\nprojects (read-only — sandbox spec fixed at creation):")
