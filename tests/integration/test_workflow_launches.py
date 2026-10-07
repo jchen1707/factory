@@ -2,6 +2,8 @@
 
 import json
 import time
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +34,64 @@ def test_cancellation_collects_paid_usage_and_releases_capacity_before_cleanup(
     assert ctx.store.spend(ctx.run.id)[0] > 0
     ctx.refresh()
     assert ctx.state == State.CANCELLED
+
+
+def _prepare_rerun(ctx: Context) -> Context:
+    run = ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+    ctx.store.acquire_lease(run.id, ttl_seconds=600)
+    rerun = replace(ctx, run=run)
+    for step in (claim, context, sandbox, worktree):
+        step.run(rerun)
+    return rerun
+
+
+def _cancel(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from factory import cli
+
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
+    return cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "test")
+
+
+def test_a_cancelled_ticket_launches_a_fresh_run(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for step in (claim, context, sandbox, worktree):
+        step.run(ctx)
+    driver.step(ctx)
+    first_events = (ctx.factory_dir / "run/1/events.jsonl").read_bytes()
+    _cancel(ctx, monkeypatch)
+
+    rerun = _prepare_rerun(ctx)
+    driver.step(rerun)
+
+    assert rerun.state is State.IMPLEMENTING
+    assert len(_fake(ctx).detached) == 2
+    assert (rerun.factory_dir / "run/1/events.jsonl").is_file()
+    archived = ctx.home / "artifacts" / ctx.run.linear_id / ctx.run.id / "1/events.jsonl"
+    assert archived.read_bytes() == first_events
+
+
+def test_a_second_cancel_keeps_the_first_cancels_archive(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for step in (claim, context, sandbox, worktree):
+        step.run(ctx)
+    driver.step(ctx)
+    first_events = (ctx.factory_dir / "run/1/events.jsonl").read_bytes()
+    [first_archive] = [
+        Path(line.split(" to ", 1)[1])
+        for line in _cancel(ctx, monkeypatch)
+        if line.startswith("archived 1 ")
+    ]
+
+    rerun = _prepare_rerun(ctx)
+    (rerun.factory_dir / "run/1").mkdir(parents=True, exist_ok=True)
+    (rerun.factory_dir / "run/1/events.jsonl").write_text('{"type":"second run"}\n')
+    _cancel(rerun, monkeypatch)
+
+    assert (first_archive / "events.jsonl").read_bytes() == first_events
 
 
 def _launch_without_finishing(ctx: Context) -> str:

@@ -7,7 +7,9 @@ worse than a sweep that removes nothing at all.
 
 from __future__ import annotations
 
+import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -109,7 +111,7 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
     # Order matters: for a bind-mounted project the evidence lives *inside* the worktree,
     # so archiving afterwards would archive nothing and report success.
     _finished_run(ctx)
-    attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"
+    attempt = ctx.factory_dir / "run" / "1"
     attempt.mkdir(parents=True, exist_ok=True)
     (attempt / "events.jsonl").write_text('{"type":"thread.started"}\n')
 
@@ -118,6 +120,38 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
     archived = ctx.home / "artifacts" / ctx.run.linear_id / ctx.run.id / "1" / "events.jsonl"
     assert archived.exists()
     assert not Path(ctx.run.worktree or "").exists()
+
+
+def test_every_attempt_is_archived_after_delivery_archived_the_last_one(ctx: Context) -> None:
+    _finished_run(ctx)
+    for attempt in ("1", "2"):
+        (ctx.factory_dir / "run" / attempt).mkdir(parents=True, exist_ok=True)
+        (ctx.factory_dir / "run" / attempt / "events.jsonl").write_text(
+            f'{{"attempt":{attempt}}}\n'
+        )
+    delivered = ctx.artifact_root / "2"
+    delivered.mkdir(parents=True)
+    (delivered / "events.jsonl").write_text("scanned with the project's secret names\n")
+
+    _sweep(ctx, dry_run=False)
+
+    assert (ctx.artifact_root / "1" / "events.jsonl").read_text() == '{"attempt":1}\n'
+    assert (delivered / "events.jsonl").read_text() == "scanned with the project's secret names\n"
+
+
+def test_evidence_seeded_before_run_scoping_is_archived_where_it_was_written(
+    ctx: Context,
+) -> None:
+    _finished_run(ctx)
+    root = Path(ctx.run.worktree or "") / ".factory"
+    (root / "run.json").write_text(json.dumps({"run_id": ctx.run.id}))
+    (root / "run" / "1").mkdir(parents=True)
+    (root / "run" / "1" / "events.jsonl").write_text('{"type":"thread.started"}\n')
+
+    _sweep(ctx, dry_run=False)
+
+    archived = ctx.home / "artifacts" / ctx.run.linear_id / ctx.run.id / "1" / "events.jsonl"
+    assert archived.read_text() == '{"type":"thread.started"}\n'
 
 
 def test_a_run_still_inside_the_age_floor_is_left_entirely_alone(ctx: Context) -> None:
@@ -212,6 +246,35 @@ def test_a_live_run_is_never_collected(ctx: Context) -> None:
     actions = _sweep(ctx, dry_run=False)
 
     assert _kinds(actions, "worktree-remove") == []
+
+
+def test_collecting_a_cancelled_run_leaves_its_reruns_worktree_alone(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from factory import cli
+
+    _finished_run(ctx)
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "rerun")
+    rerun_row = ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+    with ctx.store.transaction() as conn:
+        # Created in the same second, which `created_at` cannot order.
+        conn.execute(
+            "UPDATE runs SET created_at = ? WHERE id = ?", (ctx.run.created_at, rerun_row.id)
+        )
+    ctx.store.acquire_lease(rerun_row.id, ttl_seconds=600)
+    rerun = replace(ctx, run=rerun_row)
+    for step in (claim_step, context_step, sandbox_step, worktree_step):
+        step.run(rerun)
+    live = Path(rerun.run.worktree or "")
+    assert live == Path(ctx.run.worktree or "")
+
+    _sweep(ctx, dry_run=False)
+
+    assert live.is_dir()
+    assert repo.local_branch_exists(ctx.project.path, rerun.run.branch or "")
 
 
 # --------------------------------------------------------------------------------

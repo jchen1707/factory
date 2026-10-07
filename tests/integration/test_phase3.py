@@ -802,6 +802,40 @@ def test_deliver_opens_a_ready_for_review_pr_and_announces(
     assert "pull/11" in linear.comments[-1]
 
 
+def test_a_rerun_delivery_keeps_the_evidence_the_first_pr_names(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(deliver_step.repo, "changed_paths", lambda wt, br: ["src/app/main.py"])
+    monkeypatch.setattr(github, "push", lambda wt, b: None)
+    monkeypatch.setattr(github, "find_pr", lambda wt, b: None)
+    bodies: list[str] = []
+
+    def create_pr(worktree: Path, *, body_file: Path, **kw: object) -> str:
+        bodies.append(body_file.read_text())
+        return f"https://github.com/jchen1707/python-harness/pull/{len(bodies)}"
+
+    monkeypatch.setattr(github, "create_pr", create_pr)
+    monkeypatch.setattr(cli, "SbxAdapter", lambda: _fake(ctx))
+
+    _to_pr_ready(ctx, monkeypatch)
+    deliver_step.run(ctx)
+    [named] = re.findall(r"Attempt artifact: `([^`]+)`", bodies[0])
+    first = (Path(named) / "last-message.json").read_bytes()
+    cli._cancel_run(ctx.home, ctx.registry, ctx.store, ctx.linear, ctx.run, "rerun")
+
+    rerun_row = ctx.store.insert_run(
+        linear_id=ctx.run.linear_id, project=ctx.run.project, team=ctx.run.team
+    )
+    ctx.store.acquire_lease(rerun_row.id, ttl_seconds=600)
+    rerun = replace(ctx, run=rerun_row)
+    _fake(ctx).result = {**_fake(ctx).result, "summary": "second run"}
+    _to_pr_ready(rerun, monkeypatch)
+    deliver_step.run(rerun)
+
+    assert len(bodies) == 2
+    assert (Path(named) / "last-message.json").read_bytes() == first
+
+
 def test_a_duplicate_pr_is_edited_not_recreated(
     ctx: Context, monkeypatch: pytest.MonkeyPatch
 ) -> None:

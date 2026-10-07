@@ -64,9 +64,7 @@ def _to_verifying(ctx: Context) -> None:
 
 
 def _gates_json(ctx: Context) -> dict[str, Any]:
-    return json.loads(
-        (Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "gates.json").read_text()
-    )
+    return json.loads((ctx.factory_dir / "run" / "1" / "gates.json").read_text())
 
 
 def _fixture(name: str) -> dict[str, Any]:
@@ -105,14 +103,14 @@ def test_the_worktree_carries_the_context_and_the_run_record(ctx: Context) -> No
     worktree = Path(ctx.run.worktree or "")
     for name in ("ticket.md", "spec.md", "breakdown.md", "comments.md"):
         assert (worktree / ".factory" / "context" / name).read_text().strip()
-    record = json.loads((worktree / ".factory" / "run.json").read_text())
+    record = json.loads((ctx.factory_dir / "run.json").read_text())
     assert record["ticket"] == "BAC-4"
     assert record["branch"] == ctx.run.branch
 
 
 def test_the_attempt_directory_is_complete_and_hashed(ctx: Context) -> None:
     _drive(ctx)
-    attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"
+    attempt = ctx.factory_dir / "run" / "1"
     for name in (
         "request.json",
         "prompt.md",
@@ -145,7 +143,7 @@ def test_the_attempt_directory_is_complete_and_hashed(ctx: Context) -> None:
 
 def test_the_prompt_inlines_the_skill_rather_than_naming_it(ctx: Context) -> None:
     _drive(ctx)
-    prompt = (Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "prompt.md").read_text()
+    prompt = (ctx.factory_dir / "run" / "1" / "prompt.md").read_text()
     assert "Implement the work described by the user" in prompt
     assert "disable-model-invocation" not in prompt  # frontmatter stripped
     assert "/implement" not in prompt  # nothing in the sandbox could expand a slash command
@@ -156,7 +154,7 @@ def test_the_prompt_inlines_the_skill_rather_than_naming_it(ctx: Context) -> Non
 def test_tokens_and_the_notional_cost_are_recorded_from_the_stream(ctx: Context) -> None:
     _drive(ctx)
     tokens_in, tokens_out, usd = ctx.store.spend(ctx.run.id)
-    run = stream.parse(Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "events.jsonl")
+    run = stream.parse(ctx.factory_dir / "run" / "1" / "events.jsonl")
     reported = next(iter(run.by_model.values())).usage
     assert (tokens_in, tokens_out) == (reported.input, reported.output)
     # Priced by the CLI itself (`total_cost_usd`, list price), so the ceiling can trip.
@@ -173,7 +171,7 @@ def test_the_session_is_pinned_before_launch_and_opened_by_the_agent(ctx: Contex
     assert launch is not None
     assert launch.session == pinned
     assert not launch.resume
-    events = Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "events.jsonl"
+    events = ctx.factory_dir / "run" / "1" / "events.jsonl"
     assert stream.session_id(events) == pinned
 
 
@@ -228,7 +226,7 @@ def test_a_schema_invalid_result_blocks_and_keeps_the_raw_file(ctx: Context) -> 
     # §22 F6 — schema-invalid output does not advance the state; the raw file is kept.
     assert caught.value.reason == "schema-invalid"
     assert ctx.run.state is State.IMPLEMENTING  # the state did not advance
-    raw = Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "last-message.json"
+    raw = ctx.factory_dir / "run" / "1" / "last-message.json"
     assert raw.exists()
 
 
@@ -1074,7 +1072,7 @@ def test_a_rejected_report_leaves_its_raw_streams_on_disk(ctx: Context) -> None:
         advance_state(ctx)
     assert caught.value.reason == "schema-invalid"
 
-    attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"
+    attempt = ctx.factory_dir / "run" / "1"
     assert not (attempt / "gates.json").exists()  # the parsed document never existed
     assert (attempt / "gates.stdout.txt").read_text() == (
         '{"schemaVersion": 1, "verdict": "pass"}\ntrailing\n'

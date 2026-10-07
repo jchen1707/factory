@@ -30,6 +30,7 @@ from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
 from factory.sandbox.base import SandboxAdapter
 from factory.sandbox.sbx import SbxError
+from factory.steps import bind_factory_dir
 from factory.store import Run, Store
 
 __all__ = ["Action", "sweep"]
@@ -71,8 +72,26 @@ def sweep(
     """One garbage-collection pass. §16.5's steps, in its order."""
     clock = time.time() if now is None else now
     actions: list[Action] = []
-    for run in store.all_runs():
+    runs = store.all_runs()
+    # A rerun recreates its ticket's worktree and branch at the cancelled run's path, so
+    # the path belongs to the ticket's newest run that records it.
+    owners: dict[tuple[str, str], Run] = {}
+    for run in runs:
+        if run.worktree:
+            owners.setdefault((run.linear_id, run.worktree), run)
+    for run in runs:
         if run.state not in COLLECTABLE:
+            continue
+        owner = owners.get((run.linear_id, run.worktree or ""), run)
+        if owner is not run:
+            actions.append(
+                Action(
+                    "worktree-remove",
+                    str(run.worktree),
+                    f"retained: run {owner.id} ({owner.state}) now uses it",
+                    False,
+                )
+            )
             continue
         actions += _collect_run(home, registry, store, run, dry_run=dry_run, now=clock)
     actions += _sweep_sandboxes(registry, store, sandbox, dry_run=dry_run, now=clock)
@@ -158,16 +177,24 @@ def _archive_attempts(home: Path, run: Run, *, dry_run: bool) -> list[Action]:
     """
     if not run.worktree:
         return []
-    source = Path(run.worktree) / ".factory" / "run"
+    source = bind_factory_dir(Path(run.worktree), run.id) / "run"
     if not source.is_dir():
         return []
     destination = home / "artifacts" / run.linear_id / run.id
-    if destination.exists():
+    # Deliver and cancel may have archived some attempts already; their copies stay.
+    pending = [
+        attempt
+        for attempt in sorted(source.iterdir())
+        if attempt.is_dir() and not (destination / attempt.name).exists()
+    ]
+    if not pending:
         return [Action("artifact-archive", str(destination), "already archived", False)]
+    names = ", ".join(attempt.name for attempt in pending)
     if dry_run:
-        return [Action("artifact-archive", str(destination), f"would copy {source}", False)]
-    artifacts.archive(source, destination)
-    return [Action("artifact-archive", str(destination), f"copied from {source}", True)]
+        return [Action("artifact-archive", str(destination), f"would copy {names}", False)]
+    for attempt in pending:
+        artifacts.archive(attempt, destination / attempt.name)
+    return [Action("artifact-archive", str(destination), f"copied {names} from {source}", True)]
 
 
 def _remove_worktree(project: Project, run: Run, why: str, *, dry_run: bool) -> list[Action]:
