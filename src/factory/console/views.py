@@ -4,7 +4,7 @@ runtimes`, `factory config`, `factory logs`) and `factory serve`.
 One producer so the terminal and the page cannot disagree about what a run is — the same
 shape of defect that cost FRO-6 a stale verdict when two functions read the same input
 differently. Every view is read-only and builds no adapter: it reads the SQLite file the
-daemon writes, the `events.jsonl`/`gates.json`/`review-summary.json` the steps write, and
+daemon writes, the event streams/`gates.json`/`review-summary.json` the steps write, and
 the routing table. Nothing here holds a credential or writes a transition
 — controls go through `recovery`/`policy` in the app layer, never here.
 """
@@ -19,14 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from factory import operator_controls, recovery
-from factory.agent.telemetry import CurrentContext
 from factory.console.events import (
-    ToolCallView,
-    TurnView,
+    StreamView,
+    ToolCall,
+    context_fraction,
     context_percentage,
     lane_of,
-    read_tool_calls,
-    read_turn_view,
+    read_stream,
 )
 from factory.machine import TERMINAL, State
 from factory.registry import Registry
@@ -45,7 +44,7 @@ __all__ = [
     "RunRow",
     "RunTimeline",
     "RuntimeRow",
-    "ToolCallView",
+    "ToolCall",
     "TransitionRow",
     "WaterfallBlock",
     "config_view",
@@ -164,24 +163,55 @@ def run_usage(store: Store, run: Run) -> UsageSummary:
     )
 
 
-def _invocation_context_counts(store: Store, run: Run) -> tuple[int, int]:
+def _invocation_context_counts(store: Store, run: Run, routing: Routing) -> tuple[int, int]:
     active_ids = {
         row["invocation_id"]
         for row in store.runtime.db.execute(
             "SELECT invocation_id FROM agent_leases WHERE run_id=? AND status='active'", (run.id,)
         )
     }
-    fresh = 0
+    measured = 0
     for invocation in store.runtime.invocations(run.id):
         if invocation["id"] not in active_ids:
             continue
-        context = (invocation["telemetry"] or {}).get("context", {})
-        try:
-            reading = CurrentContext(**context).read(now=time.time())
-        except (TypeError, ValueError):
+        if "expected" not in invocation["metadata"]:
             continue
-        fresh += reading.fraction is not None
-    return len(active_ids), fresh
+        tokens = (invocation["telemetry"] or {}).get("context", {}).get("tokens")
+        model = invocation["metadata"].get("model", "")
+        measured += context_fraction(tokens, model, routing)[0] is not None
+    return len(active_ids), measured
+
+
+#: The plain answer for a launch made before the Claude cutover. Its stream is Codex's,
+#: which nothing in the factory reads any more.
+PRE_CLAUDE = "pre-Claude attempt"
+
+
+def _activity(launch: StreamView | str) -> str | None:
+    if isinstance(launch, StreamView):
+        return launch.activity
+    return launch if launch == PRE_CLAUDE else None
+
+
+def current_launch(store: Store, run: Run) -> dict[str, Any] | None:
+    """The run's most recently started agent launch in its current attempt, if any."""
+    launches = [i for i in store.runtime.invocations(run.id) if i["attempt"] == run.attempt]
+    return launches[-1] if launches else None
+
+
+def launch_stream(store: Store, run: Run) -> tuple[StreamView | str, str]:
+    """The current launch's stream, or the reason there is none, and its routed model.
+
+    A launch with no stored attestation predates the cutover, the same rule
+    `agent_run.read` refuses it by."""
+    launch = current_launch(store, run)
+    if launch is None:
+        return "no agent launched in this attempt", ""
+    model = str(launch["metadata"].get("model", ""))
+    if "expected" not in launch["metadata"]:
+        return PRE_CLAUDE, model
+    view = read_stream(Path(launch["metadata"]["events"]))
+    return view if view is not None else "no event stream for this launch yet", model
 
 
 def _ticket_title(home: Path, run: Run) -> str | None:
@@ -219,7 +249,6 @@ def runs_board(
         elapsed = (time.time() - transitions[-1]["at"]) if transitions else 0.0
         timeout = registry.defaults.timeouts_seconds.get(run.state.value)
 
-        view: TurnView | None = None
         heartbeat_age: float | None = None
         if project is not None:
             try:
@@ -227,16 +256,19 @@ def runs_board(
             except Exception:
                 attempt_dir = None
             if attempt_dir is not None:
-                view = read_turn_view(attempt_dir / "events.jsonl")
                 heartbeat = attempt_dir / "heartbeat"
                 if heartbeat.exists():
                     heartbeat_age = time.time() - heartbeat.stat().st_mtime
 
-        context_pct, context_reason = context_percentage(view, run.state, routing)
+        stream_view, model = launch_stream(store, run)
+        context_pct, context_reason = context_percentage(stream_view, run.state, model, routing)
+        view = stream_view if isinstance(stream_view, StreamView) else None
         tokens_in, tokens_out, usd = store.spend(run.id)
         usage = run_usage(store, run)
         cached = usage.tokens_cached
-        active_invocations, fresh_context_invocations = _invocation_context_counts(store, run)
+        active_invocations, fresh_context_invocations = _invocation_context_counts(
+            store, run, routing
+        )
 
         rows.append(
             RunRow(
@@ -257,7 +289,7 @@ def runs_board(
                 tokens_cached=cached,
                 spend_usd=usd,
                 spend_ceiling=routing.usd_per_run,
-                activity=view.activity if view is not None else None,
+                activity=_activity(stream_view),
                 heartbeat_age=heartbeat_age,
                 blocked_reason=run.blocked_reason,
                 pr_url=run.pr_url,
@@ -267,11 +299,11 @@ def runs_board(
                 usage_status=usage.usage_status,
                 spend_status=usage.spend_status,
                 known_spend_usd=usage.known_spend_usd,
-                context_source="current attempt events.jsonl"
-                if view is not None and view.context.observed_at is not None
+                context_source="last message of the current launch"
+                if context_pct is not None
                 else None,
-                context_age_seconds=max(0.0, time.time() - view.context.observed_at)
-                if view is not None and view.context.observed_at is not None
+                context_age_seconds=max(0.0, time.time() - view.context_at)
+                if context_pct is not None and view is not None and view.context_at is not None
                 else None,
             )
         )
@@ -367,7 +399,6 @@ def run_detail(
         except Exception:
             attempt_dir = None
         if attempt_dir is not None:
-            events_path = str(attempt_dir / "events.jsonl")
             gates_doc = _read_json(attempt_dir / "gates.json")
             if gates_doc is not None:
                 gate_verdict = gates_doc.get("verdict")
@@ -405,6 +436,10 @@ def run_detail(
                             summary=finding.get("summary"),
                         )
                     )
+
+    launch = current_launch(store, run)
+    if launch is not None:
+        events_path = launch["metadata"].get("events")
 
     # `include_terminal` because a detail page is asked for by ticket: a cancelled or
     # completed run still has a page, and the board's non-terminal filter would drop its
@@ -637,19 +672,17 @@ def config_view(routing: Routing, registry: Registry) -> ConfigView:
 # Three bands, summary before detail: a head strip (the same `RunRow` the board and the
 # run detail render), one card per agent role (the Gmail-MCP "installed server / authed"
 # analogue), a swim-lane waterfall of the run's states on a time axis (the SSSF
-# visualizer), and a per-tool-call drill-down folded from `events.jsonl`.
+# visualizer), and a per-tool-call drill-down folded from the current launch's stream.
 #
 # The honesty table in `.agents/plans/console-run-timeline-plan.md` decides every field:
 # only what the factory actually records is shown. The waterfall's block widths come from
 # `Run.created_at` and the transitions' `at`; the cards' context % comes from
-# `context_percentage`; the tool calls come from `read_tool_calls`. Per-call duration and
-# per-role token attribution are **absent** — `events.jsonl` carries no timestamp (P0-7),
-# and a number the console cannot defend is the one thing §18.5 refuses to show.
+# `context_percentage`; the tool calls and their durations come from `read_stream`.
+# Per-role token attribution is absent: one stream belongs to one launch, not a role.
 # --------------------------------------------------------------------------------
 
 
-#: The agent roles, in forward order, with the state each runs in. The state machine's
-#: `_AGENT_ROLE` (events.py) maps the other way; this is its inverse for the card row.
+#: The agent roles, in forward order, with the state each runs in.
 _AGENT_ROLES: tuple[tuple[str, State], ...] = (
     ("planner", State.PLANNING),
     ("builder", State.IMPLEMENTING),
@@ -700,7 +733,7 @@ class RunTimeline:
     row: RunRow
     blocks: list[WaterfallBlock]
     cards: list[AgentCard]
-    tool_calls: list[ToolCallView]
+    tool_calls: list[ToolCall]
     elapsed_total_s: float
 
 
@@ -758,7 +791,7 @@ def run_timeline(
 
     Read-only, no credential, no transition written — the same boundaries as every other
     view. Blocks come from the transition log, cards from `routing` + the live attempt's
-    event stream, tool calls from `read_tool_calls`.
+    launch stream, tool calls from the same stream.
     """
     now = time.time()
     transitions = store.transitions(run.id)
@@ -794,7 +827,8 @@ def run_timeline(
             attempt_dir = factory_dir_for(home, project, run) / "run" / str(run.attempt)
         except Exception:
             attempt_dir = None
-    view = read_turn_view(attempt_dir / "events.jsonl") if attempt_dir is not None else None
+    stream_view, model = launch_stream(store, run)
+    view = stream_view if isinstance(stream_view, StreamView) else None
     heartbeat_age: float | None = None
     if attempt_dir is not None:
         heartbeat = attempt_dir / "heartbeat"
@@ -809,8 +843,8 @@ def run_timeline(
             continue  # an unfamiliar role is not the console's to invent
         status = _role_status(role_state, run, transitions)
         if status == "live":
-            context_pct, context_reason = context_percentage(view, run.state, routing)
-            activity = view.activity if view is not None else None
+            context_pct, context_reason = context_percentage(stream_view, run.state, model, routing)
+            activity = _activity(stream_view)
             hb = heartbeat_age
         else:
             context_pct = None
@@ -830,8 +864,8 @@ def run_timeline(
             )
         )
 
-    # ---- band 4: the tool-call drill-down (the whole attempt's calls — Phase 1) ----
-    tool_calls = read_tool_calls(attempt_dir / "events.jsonl") if attempt_dir is not None else []
+    # ---- band 4: the tool-call drill-down (the current launch's calls) ----
+    tool_calls = list(view.tool_calls) if view is not None else []
 
     # ---- band 1: the head strip (reuse the board row) ----
     rows = runs_board(home, registry, routing, store, include_terminal=True)

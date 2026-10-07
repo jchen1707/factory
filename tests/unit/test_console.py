@@ -1,154 +1,159 @@
-"""§18.5 — the console's event parser and its context percentage.
+"""§18.5 — the console's fold of a Claude launch's stream and its context percentage.
 
-The load-bearing property is the one the plan states twice: the percentage is either
-shown from a confirmed measurement or hidden **with the reason stated**, and it is never
-estimated. P0-7 (`docs/discovery/codex-events.md`) refuted the plan's original reading of
-the stream — there is no `model_context_window`, no `context_window`, no `tokens_used` and
-no `percent` in `codex exec --json` — so the numerator comes from the turn's usage and the
-denominator from the model catalogue, and every branch that cannot produce one says which.
+Every stream here is a real capture from `tests/fixtures/claude/` (Claude Code 2.1.292),
+cut or edited only where a test needs a state the captures do not hold. The percentage is
+either shown from the last message's prompt over the model's `context_window`, or hidden
+with the reason stated; it is never estimated.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
-from factory.console.events import (
-    ToolCallView,
-    context_percentage,
-    lane_of,
-    read_tool_calls,
-    read_turn_view,
-)
+import pytest
+
+from factory.console.events import context_percentage, lane_of, read_stream
 from factory.machine import State
 from factory.routing import ModelFacts, Role, Routing
 
-#: The exact `turn.completed` shape P0-7 captured off codex-cli 0.147.0 — no `total_tokens`
-#: (the factory sums it itself) and no window anywhere in the stream.
-TURN_COMPLETED: dict[str, Any] = {
-    "type": "turn.completed",
-    "usage": {
-        "input_tokens": 136000,
-        "cached_input_tokens": 11008,
-        "cache_write_input_tokens": 0,
-        "output_tokens": 900,
-        "reasoning_output_tokens": 240,
-    },
-}
-
-THREAD_STARTED: dict[str, Any] = {
-    "type": "thread.started",
-    "thread_id": "01a02738-0315-7470-b41e-510699d1",
-}
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "claude"
+MODEL = "claude-opus-5-5"
 
 
-def _events(tmp_path: Path, *events: Mapping[str, Any]) -> Path:
+def _lines(name: str) -> list[str]:
+    return (FIXTURES / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()
+
+
+def _write(tmp_path: Path, lines: list[str]) -> Path:
     path = tmp_path / "events.jsonl"
-    path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
-def _routing(*, window: int = 272000, known: bool = True) -> Routing:
-    models: dict[str, ModelFacts] = {}
-    if known:
-        models["gpt-5.6-sol"] = ModelFacts(
-            slug="gpt-5.6-sol",
-            context_window=window,
-            supported_efforts=("high",),
-            default_effort="high",
-        )
+def _routing(window: int = 100_000) -> Routing:
     return Routing(
-        roles={"builder": Role(name="builder", model="gpt-5.6-sol", effort="high")},
-        models=models,
+        roles={"builder": Role(name="builder", model=MODEL, effort="medium")},
+        models={MODEL: ModelFacts(MODEL, window, ("medium",), "medium")},
         usd_per_run=20.0,
         usd_warn_at=12.0,
     )
 
 
-def test_the_latest_turn_supplies_the_numerator(tmp_path: Path) -> None:
-    # Two turns: the usage of the *latest* is the context in the window, not the sum. The
-    # window holds a conversation, and codex reports the whole conversation each turn — so
-    # adding them would double-count and show 200% on a healthy run.
-    first: dict[str, Any] = {
-        "type": "turn.completed",
-        "usage": {**TURN_COMPLETED["usage"], "input_tokens": 50000},
-    }
-    path = _events(tmp_path, THREAD_STARTED, first, TURN_COMPLETED)
-
-    view = read_turn_view(path)
+def test_a_build_stream_folds_to_its_tool_calls_with_measured_durations() -> None:
+    view = read_stream(FIXTURES / "build-tools.jsonl")
 
     assert view is not None
-    assert view.has_turn
-    assert view.input_tokens == 136000
-    assert view.cached_input_tokens == 11008
+    assert [(c.tool, c.summary, c.outcome) for c in view.tool_calls] == [
+        ("Write", "/work/repo/notes.txt", "ok"),
+        ("Edit", "/work/repo/notes.txt", "ok"),
+        (
+            "Bash",
+            "touch bash-made.txt && git add -A && git -c commit.gpgsign=false commit -qm probe"
+            " && git log --oneline | head -1",
+            "ok",
+        ),
+    ]
+    # tool_result timestamp minus the issuing assistant event's: 40.633→40.670,
+    # 41.603→41.647, 42.434→43.437.
+    durations = [c.duration_s for c in view.tool_calls]
+    assert durations == pytest.approx([0.037, 0.044, 1.003], abs=1e-6)
+    assert [c.index for c in view.tool_calls] == [0, 1, 2]
+    assert view.activity == "done"
 
 
-def test_legacy_usage_is_not_a_current_context_measurement(tmp_path: Path) -> None:
-    view = read_turn_view(_events(tmp_path, THREAD_STARTED, TURN_COMPLETED))
-    for routing in (_routing(), _routing(known=False)):
-        pct, reason = context_percentage(view, State.IMPLEMENTING, routing)
-        assert pct is None
-        assert reason == "legacy exec has no current-window measurement"
+def test_the_context_numerator_is_the_last_message_prompt() -> None:
+    # The last message reports input 8, cache read 14473, cache write 888; the first
+    # (7566 + 6907 + 9) must not be the one that counts.
+    view = read_stream(FIXTURES / "build-tools.jsonl")
+
+    assert view is not None
+    assert view.context_tokens == 8 + 14473 + 888
+    pct, reason = context_percentage(view, State.IMPLEMENTING, MODEL, _routing())
+    assert pct == pytest.approx(15369 / 100_000)
+    assert reason is None
 
 
-def test_a_turn_still_running_hides_the_percentage(tmp_path: Path) -> None:
-    # `turn.completed` is the only event carrying usage, so mid-turn there is no numerator.
-    view = read_turn_view(_events(tmp_path, THREAD_STARTED))
+def test_a_denied_call_is_shown_as_denied() -> None:
+    view = read_stream(FIXTURES / "denied.jsonl")
 
-    pct, reason = context_percentage(view, State.IMPLEMENTING, _routing())
+    assert view is not None
+    assert [(c.tool, c.outcome) for c in view.tool_calls] == [("Write", "denied")]
 
+
+def test_a_failed_call_is_an_error(tmp_path: Path) -> None:
+    lines = _lines("build-tools")
+    bash_result = next(
+        i
+        for i, text in enumerate(lines)
+        if '"tool_use_id":"toolu_01J3SHKytGzN8tNDR8ECZGff"' in text
+    )
+    wire = json.loads(lines[bash_result])
+    wire["message"]["content"][0]["is_error"] = True
+    lines[bash_result] = json.dumps(wire)
+
+    view = read_stream(_write(tmp_path, lines))
+
+    assert view is not None
+    assert [c.outcome for c in view.tool_calls] == ["ok", "ok", "error"]
+
+
+def test_a_call_still_running_has_no_duration(tmp_path: Path) -> None:
+    lines = _lines("build-tools")
+    issued = next(i for i, text in enumerate(lines) if '"name":"Bash"' in text)
+
+    view = read_stream(_write(tmp_path, lines[: issued + 1]))
+
+    assert view is not None
+    running = view.tool_calls[-1]
+    assert (running.tool, running.outcome, running.duration_s) == ("Bash", "running", None)
+    assert view.activity == running.summary
+
+
+def test_a_launch_that_never_reached_the_api_has_no_context() -> None:
+    # The CLI writes a `<synthetic>` message with zero usage when it is not logged in.
+    view = read_stream(FIXTURES / "not-logged-in.jsonl")
+
+    assert view is not None
+    assert view.context_tokens is None
+    assert view.activity == "Not logged in · Please run /login"
+    pct, reason = context_percentage(view, State.IMPLEMENTING, MODEL, _routing())
     assert pct is None
-    assert reason == "the agent has not completed a turn yet"
+    assert reason == "the agent has not answered yet"
 
 
-def test_a_state_with_no_agent_hides_the_percentage(tmp_path: Path) -> None:
-    # `verifying` runs a node gate report and `pr_ready` is a host-side push: neither has a
-    # model, so neither has a context window. Showing the builder's percentage there would
-    # attribute one state's pressure to another.
-    view = read_turn_view(_events(tmp_path, THREAD_STARTED, TURN_COMPLETED))
+def test_a_torn_last_line_and_a_corrupt_middle_line_do_not_raise(tmp_path: Path) -> None:
+    lines = _lines("build-tools")
+    torn = read_stream(_write(tmp_path, [*lines, lines[3][: len(lines[3]) // 2]]))
+    assert torn is not None
+    assert len(torn.tool_calls) == 3
 
-    pct, reason = context_percentage(view, State.VERIFYING, _routing())
-
-    assert pct is None
-    assert reason is not None
-    assert "verifying" in reason
-
-
-def test_a_missing_stream_is_none_rather_than_an_error(tmp_path: Path) -> None:
-    assert read_turn_view(tmp_path / "nope.jsonl") is None
+    issued = next(i for i, text in enumerate(lines) if '"name":"Bash"' in text)
+    corrupt = read_stream(_write(tmp_path, [*lines[:issued], "{not json", *lines[issued:]]))
+    assert corrupt is not None
+    assert [c.tool for c in corrupt.tool_calls] == ["Write", "Edit"]
 
 
-def test_a_half_flushed_trailing_line_is_skipped_not_fatal(tmp_path: Path) -> None:
-    # The normal state of a file a live agent is writing. `agent.codex.parse_events` raises
-    # here — correctly, it advances the state machine on that evidence — but the console
-    # only displays, and a board that 500'd because a run was mid-write would be useless
-    # exactly when it is being watched.
-    path = _events(tmp_path, THREAD_STARTED, TURN_COMPLETED)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write('{"type":"item.comp')
+def test_a_missing_stream_is_none(tmp_path: Path) -> None:
+    assert read_stream(tmp_path / "absent.jsonl") is None
 
-    view = read_turn_view(path)
 
+def test_the_percentage_is_hidden_with_its_reason() -> None:
+    view = read_stream(FIXTURES / "build-tools.jsonl")
     assert view is not None
-    assert view.input_tokens == 136000
 
-
-def test_the_activity_column_reads_the_last_completed_item(tmp_path: Path) -> None:
-    command: dict[str, Any] = {
-        "type": "item.completed",
-        "item": {"id": "item_9", "type": "command_execution", "command": "uv run pytest -q"},
-    }
-    view = read_turn_view(_events(tmp_path, THREAD_STARTED, TURN_COMPLETED, command))
-
-    assert view is not None
-    assert view.activity == "uv run pytest -q"
-
-
-# --------------------------------------------------------------------------------
-# Lane mapping + the tool-call drill-down (run timeline, §18.5 View 6)
-# --------------------------------------------------------------------------------
+    assert context_percentage(view, State.VERIFYING, MODEL, _routing()) == (
+        None,
+        "no agent running in verifying",
+    )
+    assert context_percentage("pre-Claude attempt", State.IMPLEMENTING, MODEL, _routing()) == (
+        None,
+        "pre-Claude attempt",
+    )
+    assert context_percentage(view, State.IMPLEMENTING, "claude-unknown", _routing()) == (
+        None,
+        "no context window on file for claude-unknown",
+    )
 
 
 def test_lane_of_maps_each_state_to_its_actor_lane() -> None:
@@ -164,135 +169,3 @@ def test_lane_of_maps_each_state_to_its_actor_lane() -> None:
     assert lane_of(State.BLOCKED) is None
     assert lane_of(State.RESUMABLE) is None
     assert lane_of(State.CANCELLED) is None
-
-
-def test_read_tool_calls_folds_one_row_per_completed_item(tmp_path: Path) -> None:
-    # The SSSF fold: one row per `item.completed`, in file order. `item.started` is the
-    # stream's noise and is skipped. A command carries its exit code; a file change does
-    # not (the field is `None`, not invented).
-    events: list[dict[str, Any]] = [
-        {"type": "thread.started", "thread_id": "01a0"},
-        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "i1",
-                "type": "command_execution",
-                "command": "uv run pytest -q",
-                "exit_code": 0,
-            },
-        },
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "i2",
-                "type": "file_change",
-                "changes": [{"path": "a.py", "kind": "modify"}],
-            },
-        },
-        {
-            "type": "item.completed",
-            "item": {"id": "i3", "type": "command_execution", "command": "false", "exit_code": 1},
-        },
-        {"type": "item.completed", "item": {"id": "i4", "type": "agent_message", "text": "done"}},
-        {"type": "item.completed", "item": {"id": "i5", "type": "error", "message": "boom"}},
-    ]
-    rows = read_tool_calls(_events(tmp_path, *events))
-
-    assert [r.index for r in rows] == [0, 1, 2, 3, 4]  # item.started skipped, ordinal resets
-    assert [r.kind for r in rows] == [
-        "command_execution",
-        "file_change",
-        "command_execution",
-        "agent_message",
-        "error",
-    ]
-    assert rows[0].exit_code == 0
-    assert rows[2].exit_code == 1
-    assert rows[1].exit_code is None  # a file change has no exit code
-    assert "pytest" in rows[0].summary
-    assert "changed 1 file" in rows[1].summary
-
-
-def test_read_tool_calls_duration_is_none_without_a_timings_sidecar(tmp_path: Path) -> None:
-    # Phase 2: `duration_s` exists on the dataclass, but is `None` unless an
-    # `events.timings.jsonl` sidecar defends it. Without a sidecar (Phase 1, or a producer
-    # that never armed one), every row is `None` — never a guess. The field is Optional,
-    # not absent, and the console renders no `dur` column when all rows are `None`.
-    assert "duration_s" in ToolCallView.__dataclass_fields__
-    rows = read_tool_calls(
-        _events(
-            tmp_path,
-            {
-                "type": "item.completed",
-                "item": {"id": "i1", "type": "command_execution", "command": "ls", "exit_code": 0},
-            },
-        )
-    )
-    assert rows
-    assert rows[0].duration_s is None
-
-
-def test_read_tool_calls_durations_come_from_the_timings_sidecar(tmp_path: Path) -> None:
-    # With a sidecar (one `observed_at` per events line, in order), a call's duration is its
-    # `item.completed` observed time minus its matching `item.started` observed time, paired
-    # by item `id`. The producer writes the sidecar; the console only reads.
-    path = _events(
-        tmp_path,
-        {"type": "thread.started", "thread_id": "01a0"},  # line 0
-        {"type": "item.started", "item": {"id": "i1", "type": "command_execution"}},  # line 1
-        {  # line 2
-            "type": "item.completed",
-            "item": {
-                "id": "i1",
-                "type": "command_execution",
-                "command": "uv run pytest",
-                "exit_code": 0,
-            },
-        },
-        {"type": "item.started", "item": {"id": "i2", "type": "file_change"}},  # line 3
-        {  # line 4
-            "type": "item.completed",
-            "item": {
-                "id": "i2",
-                "type": "file_change",
-                "changes": [{"path": "a.py", "kind": "modify"}],
-            },
-        },
-    )
-    path.with_name("events.timings.jsonl").write_text(
-        "\n".join(json.dumps({"observed_at": t}) for t in (1000.0, 1000.5, 1012.9, 1013.0, 1013.4))
-        + "\n",
-        encoding="utf-8",
-    )
-
-    rows = read_tool_calls(path)
-    assert [r.kind for r in rows] == ["command_execution", "file_change"]
-    assert rows[0].duration_s is not None
-    assert round(rows[0].duration_s, 1) == 12.4  # 1012.9 - 1000.5
-    assert rows[1].duration_s is not None
-    assert round(rows[1].duration_s, 1) == 0.4  # 1013.4 - 1013.0
-
-
-def test_read_tool_calls_skips_a_half_flushed_trailing_line(tmp_path: Path) -> None:
-    # The same live-write condition `read_turn_view` handles: a file a live agent is
-    # writing ends mid-line, and a display parser skips it rather than raising.
-    path = _events(
-        tmp_path,
-        {"type": "thread.started", "thread_id": "01a0"},
-        {
-            "type": "item.completed",
-            "item": {"id": "i1", "type": "command_execution", "command": "ls", "exit_code": 0},
-        },
-    )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write('{"type":"item.comp')
-
-    rows = read_tool_calls(path)
-
-    assert len(rows) == 1
-    assert rows[0].kind == "command_execution"
-
-
-def test_read_tool_calls_missing_file_is_empty(tmp_path: Path) -> None:
-    assert read_tool_calls(tmp_path / "nope.jsonl") == []

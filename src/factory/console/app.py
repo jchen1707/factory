@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from factory import routing as routing_module
 from factory.console import views as console_views
 from factory.console.assets import BundleMiddleware, RenderBundle, current_bundle
+from factory.console.events import context_fraction
 from factory.intake.linear import LinearClient
 from factory.machine import Blocked, State
 from factory.registry import Registry, load_registry
@@ -117,7 +118,7 @@ def _page(title: str, body: str, *, ticket: str | None = None, view: str = "") -
 def _pct_cell(pct: float | None, reason: str | None) -> str:
     """The context percentage, or the reason it is hidden. §18.5: never estimated — a
     hidden percentage says why, so the operator can tell 'no window on file' from 'the
-    agent has not finished a turn'."""
+    agent has not answered yet'."""
     if pct is None:
         return f'<span class="muted" title="{_e(reason or "current context unavailable")}">{_e(reason or "current context unavailable")}</span>'
     width = max(0, min(100, int(pct * 100)))
@@ -264,18 +265,18 @@ def _runtime_table(title: str, headings: tuple[str, ...], rows: list[tuple[str, 
     )
 
 
-def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
-    from factory.agent.telemetry import CurrentContext
-
+def _invocation_cards(invocations: list[dict[str, Any]], routing: Routing) -> str:
     cards = []
     for invocation in invocations:
         metadata = invocation["metadata"]
         telemetry = invocation.get("telemetry") or {}
-        reading = CurrentContext(**telemetry.get("context", {})).read(now=time.time())
-        context = f"{reading.fraction:.0%}" if reading.fraction is not None else "unavailable"
-        age = (
-            f" · measured {reading.age_seconds:.0f}s ago" if reading.age_seconds is not None else ""
-        )
+        if "expected" in metadata:
+            fraction, reason = context_fraction(
+                telemetry.get("context", {}).get("tokens"), metadata.get("model", ""), routing
+            )
+        else:
+            fraction, reason = None, console_views.PRE_CLAUDE
+        context = f"{fraction:.0%}" if fraction is not None else "unavailable"
         estimate = telemetry.get("estimate", {})
         usd = estimate.get("usd")
         if usd is None:
@@ -289,7 +290,7 @@ def _invocation_cards(invocations: list[dict[str, Any]]) -> str:
             f'<details data-key="invocation-{_e(invocation["id"])}"><summary>{_e(invocation["role"])} · attempt {invocation["attempt"]} · {_e(model)} · {context} context · {spend}</summary>'
             f"<p>Invocation ID: <code>{_e(invocation['id'])}</code></p>"
             f"<p>{_e(model)} · {_e(metadata.get('effort', 'unknown'))} · {_e(metadata.get('preset', 'existing'))}</p>"
-            f"<p>Context: {context} · {_e(reading.status)}{age}</p>"
+            f"<p>Context: {context} · {_e(reason)}</p>"
             f"<p>API-equivalent estimate: {spend}</p>"
             f"<details><summary>Usage and evidence</summary><pre>{_e(json.dumps(invocation, indent=2))}</pre></details></details>"
         )
@@ -668,35 +669,32 @@ def _waterfall_html(blocks: list[console_views.WaterfallBlock]) -> str:
     return f'<div class="waterfall" tabindex="0" role="region" data-scroll-key="waterfall" aria-label="Runtime waterfall">{axis}{"".join(rows)}{legend}</div>'
 
 
-def _tool_calls_html(calls: list[console_views.ToolCallView]) -> str:
-    """Band 4 — the per-tool-call drill-down. The `#` ordinal, type, summary and exit code
-    are always shown; a `dur` column appears only when the Phase 2 `events.timings.jsonl`
-    sidecar defended a duration for at least one call — so a run with no sidecar keeps the
-    Phase 1 look (no column of em dashes), and a run with one gains the column honestly."""
-    if not calls:
-        return (
-            '<h2>Tool calls <span class="muted">this attempt</span></h2>'
-            '<p class="muted">No completed calls yet.</p>'
-        )
-    has_dur = any(c.duration_s is not None for c in calls)
+def _tool_calls_html(calls: list[console_views.ToolCall]) -> str:
+    """Band 4 — the per-tool-call drill-down: ordinal, tool, summary, duration, outcome."""
     rows = "".join(
         f"<tr><td class='mono'>{c.index}</td>"
-        f'<td><span class="ttype t-{_e(c.kind)}">{_e(c.kind)}</span></td>'
+        f'<td><span class="ttype t-{_e(c.tool)}">{_e(c.tool)}</span></td>'
         f'<td class="wrap">{_e(c.summary)}</td>'
-        + (f'<td class="mono">{_duration(c.duration_s)}</td>' if has_dur else "")
-        + f'<td class="mono exit '
-        f'{"ok" if c.exit_code == 0 else "bad" if c.exit_code is not None else "na"}">'
-        f"{_e(c.exit_code) if c.exit_code is not None else '—'}</td></tr>"
+        f'<td class="mono">{_call_duration(c.duration_s)}</td>'
+        f'<td class="mono exit {_OUTCOME_CLASS[c.outcome]}">{_e(c.outcome)}</td></tr>'
         for c in calls
     )
     head = (
-        '<h2>Tool calls <span class="muted">this attempt</span></h2>'
-        '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>#</th><th>type</th>'
-        "<th>command / summary</th>"
-        + ("<th>dur</th>" if has_dur else "")
-        + "<th>exit</th></tr></thead><tbody>"
+        '<h2>Tool calls <span class="muted">current launch</span></h2>'
+        '<div class="scroll" tabindex="0" role="region" aria-label="Scrollable evidence table"><table><thead><tr><th>#</th><th>tool</th>'
+        "<th>command / summary</th><th>dur</th><th>result</th></tr></thead><tbody>"
     )
     return head + rows + "</tbody></table></div>"
+
+
+_OUTCOME_CLASS = {"ok": "ok", "error": "bad", "denied": "bad", "running": "na"}
+
+
+def _call_duration(seconds: float | None) -> str:
+    """Most tool calls finish inside a second, which `_duration` would print as 0s."""
+    if seconds is not None and seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    return _duration(seconds)
 
 
 def _timeline_html(tl: console_views.RunTimeline, ticket: str, transitions: str = "") -> str:
@@ -704,7 +702,7 @@ def _timeline_html(tl: console_views.RunTimeline, ticket: str, transitions: str 
     tools = (
         _tool_calls_html(tl.tool_calls)
         if tl.tool_calls
-        else '<p class="muted">No completed tool calls recorded for this attempt.</p>'
+        else '<p class="muted">No tool calls recorded for this launch.</p>'
     )
     return (
         '<div id="timeline">'
@@ -909,7 +907,7 @@ def create_app(
 
     @app.get("/settings/runs/{ticket}", response_class=HTMLResponse)
     def run_settings(ticket: str) -> HTMLResponse:
-        _, _, st, _ = _cfg()
+        _, rt, st, _ = _cfg()
         run = st.run_by_ticket(ticket.upper())
         if run is None:
             return HTMLResponse("Run not found", status_code=404)
@@ -953,14 +951,14 @@ def create_app(
         history = [item for item in invocations if item["id"] not in current_ids]
         body += f'<section class="panel"><h2>Invocations · {len(invocations)}</h2><p class="muted">API-equivalent estimated USD, not account charges.</p>'
         body += "<h3>Active and waiting</h3>" + (
-            _invocation_cards(current)
+            _invocation_cards(current, rt)
             if current
             else "<p>No active or waiting invocation evidence recorded.</p>"
         )
         if history:
             body += (
                 f'<details data-key="invocation-history"><summary>Invocation history ({len(history)})</summary>'
-                + _invocation_cards(list(reversed(history)))
+                + _invocation_cards(list(reversed(history)), rt)
                 + "</details>"
             )
         body += "</section>"
@@ -1301,8 +1299,8 @@ def create_app(
 
     @app.get("/sse/tail/{ticket}")
     async def tail_stream(ticket: str) -> StreamingResponse:
-        """The `events.jsonl` live tail (§18.5 View 3). The last lines only — a full
-        transcript belongs in `factory logs`, not in a page."""
+        """The current launch's event stream as a live tail (§18.5 View 3). The last lines
+        only — a full transcript belongs in `factory logs`, not in a page."""
 
         def read_tail() -> str:
             """The blocking half, run in a worker thread. SQLite and the filesystem are

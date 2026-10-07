@@ -1,45 +1,34 @@
-"""The console's read-only view of a run's `events.jsonl` — §18.5.
+"""The console's read-only view of one Claude launch's `stream-json` events — §18.5.
 
-Legacy exec streams carry billed usage without current-window occupancy. Only validated
-normalized context observations produce a percentage; unavailable and stale measurements
-remain explicit. Compaction and model changes invalidate the previous measurement.
-
-This is a display parser, not the state machine's. `agent.stream.parse` advances on
-evidence and judges a torn line; this one only displays, so a half-flushed trailing
-line (the normal case for a file a live process is writing) is skipped, not fatal.
+`stream.events` parses; this module only folds what the console shows. A display never
+raises: a stream that turns corrupt mid-file shows what was read before the bad line.
 """
 
 from __future__ import annotations
 
-import json
-import time
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
-from factory.agent.telemetry import CurrentContext
+from factory.agent import stream
 from factory.machine import State
 from factory.routing import Routing
 
 __all__ = [
-    "ToolCallView",
-    "TurnView",
+    "StreamView",
+    "ToolCall",
+    "context_fraction",
     "context_percentage",
     "lane_of",
-    "read_tool_calls",
-    "read_turn_view",
+    "read_stream",
 ]
 
 
-#: The agent role each live state runs under — the model that produced the events the
-#: console reads. Non-agent states have no model: `verifying` runs a node gate report,
-#: `pr_ready`/`deliver` is a host-side push. Their context percentage is hidden with a
-#: reason rather than shown against the wrong denominator.
-_AGENT_ROLE: dict[State, str] = {
-    State.PLANNING: "planner",
-    State.IMPLEMENTING: "builder",
-    State.REVIEWING: "reviewer",
-}
+#: The states an agent runs in. Elsewhere the latest launch's stream is history, and a
+#: context percentage against it would describe an agent that is no longer there.
+_AGENT_STATES = frozenset({State.PLANNING, State.IMPLEMENTING, State.REVIEWING})
 
 
 #: The lane each state belongs to on the run timeline — the AGENTS.md three-actor model
@@ -69,259 +58,139 @@ def lane_of(state: State) -> str | None:
     return _LANE.get(state)
 
 
-@dataclass(frozen=True)
-class TurnView:
-    """The latest `turn.completed` usage of a run's active attempt, plus the last thing
-    the agent did. `has_turn=False` when no turn has completed yet — the caller reads that
-    as 'hide the percentage, the agent is mid-turn and a partial turn is not a number to
-    defend'."""
-
-    input_tokens: int
-    cached_input_tokens: int
-    output_tokens: int
-    reasoning_output_tokens: int
-    activity: str | None
-    has_turn: bool
-    context: CurrentContext = field(default_factory=CurrentContext)
-
-
-def read_turn_view(events_path: Path) -> TurnView | None:
-    """Read an `events.jsonl` for the console's columns.
-
-    `None` when the file is absent — the attempt has not spawned yet, or the run is in a
-    state with no events. A `has_turn=False` view when the file exists but no
-    `turn.completed` has landed. The last `item.completed` becomes `activity`, the latest
-    turn's `usage` becomes the token columns; both are read back rather than remembered,
-    because the file is the only thing a fresh console process shares with the run.
-    """
-    if not events_path.exists():
-        return None
-    saw_turn = False
-    input_tokens = 0
-    cached = 0
-    output = 0
-    reasoning = 0
-    activity: str | None = None
-    context = CurrentContext()
-    for line in events_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue  # a half-flushed trailing line is normal for a file being written
-        if not isinstance(event, dict):
-            continue
-        kind = event.get("type")
-        if kind == "factory.context":
-            tokens, window, observed = (
-                event.get("tokens"),
-                event.get("window"),
-                event.get("observed_at"),
-            )
-            if (
-                event.get("semantics_verified") is True
-                and type(tokens) is int
-                and tokens >= 0
-                and type(window) is int
-                and window > 0
-                and isinstance(observed, (int, float))
-            ):
-                context = CurrentContext(tokens, window, observed)
-        elif kind == "factory.context.invalidated":
-            context = CurrentContext(
-                unavailable=str(event.get("reason", "awaiting context measurement"))
-            )
-        elif kind == "turn.completed":
-            raw = event.get("usage")
-            if isinstance(raw, dict):
-                input_tokens = int(raw.get("input_tokens", 0) or 0)
-                cached = int(raw.get("cached_input_tokens", 0) or 0)
-                output = int(raw.get("output_tokens", 0) or 0)
-                reasoning = int(raw.get("reasoning_output_tokens", 0) or 0)
-            saw_turn = True
-        elif kind == "item.completed":
-            activity = _activity_from(event.get("item"))
-    return TurnView(input_tokens, cached, output, reasoning, activity, saw_turn, context)
+ToolOutcome = Literal["ok", "error", "denied", "running"]
 
 
 @dataclass(frozen=True)
-class ToolCallView:
-    """One row in the run-timeline tool-call drill-down — the `events.jsonl` stream folded
-    to one entry per `item.completed`, the SSSF visualizer's per-phase call list.
+class ToolCall:
+    """One `tool_use` and its `tool_result`, in the order the agent issued them.
 
-    `duration_s` is `None` unless an `events.timings.jsonl` sidecar (Phase 2) is present.
-    The event stream itself carries no timestamp (P0-7, `docs/discovery/codex-events.md`):
-    each line has only `type` and `item`/`usage`, never `at`. A duration the console cannot
-    defend is the one thing §18.5 refuses to show, so the field is `None` — never a guess —
-    until a sidecar defends it. The sidecar is one `{"observed_at": <epoch>}` row per
-    `events.jsonl` line, in order; a call's duration is its `item.completed` observed time
-    minus its matching `item.started` observed time (paired by item `id`).
-    """
+    `duration_s` is the result event's `timestamp` minus the issuing assistant event's,
+    and `None` while the call runs or when either event lacks a timestamp."""
 
     index: int
-    kind: str  # the item's `type` — command_execution | file_change | agent_message | error
+    tool: str
     summary: str
-    exit_code: int | None  # only `command_execution` carries one
-    duration_s: float | None  # Phase 2 sidecar; None without it
+    outcome: ToolOutcome
+    duration_s: float | None
 
 
-def _exit_code_of(item: dict[str, Any], item_type: str) -> int | None:
-    if item_type != "command_execution":
+@dataclass(frozen=True)
+class StreamView:
+    """What the console shows of one launch. `context_tokens` is the prompt the API last
+    answered (input + cache read + cache write), `None` until the first real message."""
+
+    activity: str | None
+    context_tokens: int | None
+    context_at: float | None
+    tool_calls: tuple[ToolCall, ...]
+
+
+def _epoch(timestamp: str | None) -> float | None:
+    if timestamp is None:
         return None
-    raw = item.get("exit_code")
-    if isinstance(raw, bool):  # JSON true/false are ints in Python; refuse them
+    try:
+        return datetime.fromisoformat(timestamp).timestamp()
+    except ValueError:
         return None
-    if isinstance(raw, int):
-        return raw
-    if isinstance(raw, float) and raw.is_integer():
-        return int(raw)
-    return None
 
 
-def _read_timings(path: Path) -> list[float | None]:
-    """The `events.timings.jsonl` sidecar as a list indexed by `events.jsonl` line number.
-
-    One row per line, in order — blank/unparseable lines become `None` so the indices stay
-    aligned with `enumerate(events.jsonl.splitlines())`. Returns `[]` when there is no
-    sidecar (Phase 1, or a run whose writer never armed one), which leaves every
-    `duration_s` `None` — the Phase 1 behaviour, unchanged.
-    """
-    if not path.exists():
-        return []
-    out: list[float | None] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            out.append(None)
-            continue
-        ts = row.get("observed_at") if isinstance(row, dict) else None
-        out.append(float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None)
-    return out
+def _clip(text: str, width: int = 120) -> str:
+    flat = text.strip().replace("\n", " ")
+    return flat[:width] + "…" if len(flat) > width else flat
 
 
-def _duration_of(
-    item_id: str | None,
-    completed_line: int,
-    started_line: dict[str, int],
-    observed: list[float | None],
-) -> float | None:
-    """A call's wall-clock duration from the sidecar, or `None` if undefended.
-
-    `item.completed` is emitted *after* the call finishes, so its observed time is the end;
-    the matching `item.started` (same `id`, earlier line) is the start. Both must have a
-    sidecar timestamp, or the result is `None` — never a guess.
-    """
-    if item_id is None or item_id not in started_line:
-        return None
-    start_line = started_line[item_id]
-    if start_line >= len(observed) or completed_line >= len(observed):
-        return None
-    start, end = observed[start_line], observed[completed_line]
-    if start is None or end is None:
-        return None
-    elapsed = end - start
-    return elapsed if elapsed >= 0 else None
+_SUMMARY_KEYS = ("command", "file_path", "notebook_path", "pattern", "skill", "url")
 
 
-def read_tool_calls(events_path: Path) -> list[ToolCallView]:
-    """Fold an `events.jsonl` into one `ToolCallView` per `item.completed`, in file order.
+def _summary(use: stream.ToolUse) -> str:
+    value = next((use.input[k] for k in _SUMMARY_KEYS if isinstance(use.input.get(k), str)), "")
+    return _clip(str(value)) or use.name
 
-    A sibling to `read_turn_view`: the same half-flushed-trailing-line skip (a file a live
-    agent is writing is the normal case), the same "display only, never raise" stance, and
-    the same `_activity_from` summary. Only `item.completed` is folded into rows;
-    `item.started` is consumed only to pair start/end with the sidecar for `duration_s`.
-    `item.updated` is the stream's noise. Returns `[]` for a missing file (the attempt has
-    not spawned, or the state has no agent).
 
-    Per-call `duration_s` is `None` unless an `events.timings.jsonl` sidecar sits beside the
-    stream — the Phase 2 producer's call to arm, not the console's to assume.
-    """
+def _outcome(denied: bool, answered: bool, is_error: bool) -> ToolOutcome:
+    if denied:
+        return "denied"
+    if not answered:
+        return "running"
+    return "error" if is_error else "ok"
+
+
+def _tolerant(lines: Iterable[str]) -> Iterator[stream.Event]:
+    try:
+        yield from stream.events(lines)
+    except stream.CorruptStream:
+        return
+
+
+def read_stream(events_path: Path) -> StreamView | None:
+    """Fold a launch's stream for the console, or `None` when the file is absent."""
     if not events_path.exists():
-        return []
-    observed = _read_timings(events_path.with_name("events.timings.jsonl"))
-    rows: list[ToolCallView] = []
-    started_line: dict[str, int] = {}
-    for i, line in enumerate(events_path.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue  # half-flushed trailing line — see read_turn_view for the reasoning
-        if not isinstance(event, dict):
-            continue
-        kind = event.get("type")
-        item = event.get("item")
-        if not isinstance(item, dict):
-            continue
-        item_id = item.get("id")
-        item_id_str = str(item_id) if item_id is not None else None
-        if kind == "item.started":
-            if item_id_str is not None:
-                started_line[item_id_str] = i
-            continue
-        if kind != "item.completed":
-            continue
-        item_type = str(item.get("item_type") or item.get("type") or "")
-        rows.append(
-            ToolCallView(
-                index=len(rows),
-                kind=item_type,
-                summary=_activity_from(item) or item_type or "item",
-                exit_code=_exit_code_of(item, item_type),
-                duration_s=_duration_of(item_id_str, i, started_line, observed),
+        return None
+    activity: str | None = None
+    context_tokens: int | None = None
+    context_at: float | None = None
+    issued: dict[str, tuple[stream.ToolUse, float | None]] = {}
+    results: dict[str, tuple[bool, float | None]] = {}
+    denied: set[str] = set()
+    text = events_path.read_text(encoding="utf-8", errors="replace")
+    for event in _tolerant(text.splitlines()):
+        match event:
+            case stream.Message():
+                if event.model != stream.SYNTHETIC:
+                    # The CLI's own synthetic error line never reached the API.
+                    context_tokens = event.usage.context_tokens
+                    context_at = _epoch(event.timestamp)
+                for use in event.tool_uses:
+                    issued.setdefault(use.id, (use, _epoch(event.timestamp)))
+                if event.tool_uses:
+                    activity = _summary(event.tool_uses[-1])
+                elif event.text.strip():
+                    activity = _clip(event.text)
+            case stream.ToolResult():
+                results[event.tool_use_id] = (event.is_error, _epoch(event.timestamp))
+            case stream.Denied():
+                denied.add(event.tool_use_id)
+                activity = f"denied {event.tool}"
+            case stream.Retry():
+                activity = f"retrying the API (attempt {event.attempt}): {event.error}"
+    calls = []
+    for index, (use_id, (use, start)) in enumerate(issued.items()):
+        is_error, end = results.get(use_id, (False, None))
+        duration = end - start if start is not None and end is not None else None
+        calls.append(
+            ToolCall(
+                index=index,
+                tool=use.name,
+                summary=_summary(use),
+                outcome=_outcome(use_id in denied, use_id in results, is_error),
+                duration_s=duration if duration is None or duration >= 0 else None,
             )
         )
-    return rows
+    return StreamView(activity, context_tokens, context_at, tuple(calls))
+
+
+def context_fraction(tokens: int | None, model: str, routing: Routing) -> tuple[float | None, str]:
+    """`tokens` over the model's `context_window` in `models.toml`, or why there is none."""
+    if not tokens:
+        return None, "the agent has not answered yet"
+    facts = routing.models.get(model)
+    if facts is None:
+        return None, f"no context window on file for {model}"
+    return tokens / facts.context_window, "last message"
 
 
 def context_percentage(
-    view: TurnView | None, state: State, routing: Routing
+    launch: StreamView | str, state: State, model: str, routing: Routing
 ) -> tuple[float | None, str | None]:
-    """The context-used percentage for a run, or `None` and the reason it is hidden.
+    """The run's context percentage, or `None` and the reason it is hidden.
 
-    §18.5: the percentage is either shown from the P0-7-confirmed numerator over the
-    cache denominator, or hidden with the reason stated. It is never estimated, so every
-    branch that returns `None` names exactly what is missing — no model for the state, no
-    completed turn yet, or no context window on file for the routed model.
+    `launch` is the current launch's stream, or the reason the run has none to read.
+    §18.5: shown from the measurement or hidden with the reason, never estimated.
     """
-    role = _AGENT_ROLE.get(state)
-    if role is None:
+    if state not in _AGENT_STATES:
         return None, f"no agent running in {state.value}"
-    if view is None:
-        return None, "no event stream for this attempt yet"
-    if view.context.observed_at is not None:
-        reading = view.context.read(now=time.time())
-        return reading.fraction, f"{reading.status}; measured {reading.age_seconds:.0f}s ago"
-    if view.context.unavailable != CurrentContext().unavailable:
-        return None, view.context.unavailable
-    if not view.has_turn:
-        return None, "the agent has not completed a turn yet"
-    return None, "legacy exec has no current-window measurement"
-
-
-def _activity_from(item: Any) -> str | None:
-    """One short line describing the last `item.completed` — the 'current activity' column.
-
-    The event shapes are P0-7's: `agent_message` (`text`), `command_execution`
-    (`command`, `aggregated_output`, `exit_code`), `file_change` (`changes: [{path,
-    kind}]`), `error` (`message`). Truncated to a column-friendly width; the full text is
-    in the run-detail tail, not the board."""
-    if not isinstance(item, dict):
-        return None
-    item_type = item.get("item_type") or item.get("type")
-    if item_type == "agent_message":
-        text = str(item.get("text", "")).strip().replace("\n", " ")
-        return (text[:120] + "…") if len(text) > 120 else (text or "agent message")
-    if item_type == "command_execution":
-        cmd = str(item.get("command", "")).strip().replace("\n", " ")
-        return (cmd[:120] + "…") if len(cmd) > 120 else (cmd or "command")
-    if item_type == "file_change":
-        changes = item.get("changes")
-        n = len(changes) if isinstance(changes, list) else 0
-        return f"changed {n} file{'s' if n != 1 else ''}"
-    if item_type == "error":
-        return f"error: {str(item.get('message', ''))[:100]}"
-    return str(item_type) if item_type else None
+    if isinstance(launch, str):
+        return None, launch
+    fraction, reason = context_fraction(launch.context_tokens, model, routing)
+    return fraction, None if fraction is not None else reason
