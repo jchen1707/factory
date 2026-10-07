@@ -62,7 +62,7 @@ try {
         };
         return {projects: before('project-inventory', 'project-defaults'),
           detail: before('current-attempt', 'run-history'),
-          runtimes: Boolean(document.getElementById('runtime-compatibility')),
+          runtimes: [...document.querySelectorAll('h2')].some(h => h.textContent === 'Sandbox inventory'),
           config: Boolean(document.getElementById('configuration-sources'))};
       });
       if (['projects', 'detail', 'runtimes', 'config'].includes(name) && !sections[name]) report.failures.push({viewport, name, sections});

@@ -14,12 +14,10 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
 - [UI, learning and documentation completion handoff](handoff-ui-learning-docs.md):
   remaining runtime evidence, worktrees and publication dependencies.
 
-- [certification-retry.md](certification-retry.md)
 - [operator-reference.md](operator-reference.md)
 - [review-disposition-handoff.md](review-disposition-handoff.md)
 - [runbook.md](runbook.md)
 - [runtime-certification-rollout.md](runtime-certification-rollout.md)
-- [runtime-certification-service.md](runtime-certification-service.md)
 - [stable-review-mirror.md](stable-review-mirror.md)
 - [workflows.md](workflows.md)
 
@@ -41,6 +39,8 @@ because they are old. For current commands use the operator reference above.
 
 | Document | Classification |
 | --- | --- |
+| [certification-retry.md](certification-retry.md) | Retired feature; certification removed in schema 9 |
+| [runtime-certification-service.md](runtime-certification-service.md) | Retired feature; certification removed in schema 9 |
 | [defect-6-cancel-orphan-cleanup.md](defect-6-cancel-orphan-cleanup.md) | Historical evidence / measured implementation record |
 | [documentation-refresh-evidence.md](documentation-refresh-evidence.md) | Historical evidence / measured implementation record |
 | [handoff-architecture-review-prs-2-5.md](handoff-architecture-review-prs-2-5.md) | Historical handoff; retain decisions and unresolved evidence |

@@ -148,7 +148,7 @@ def run_usage(store: Store, run: Run) -> UsageSummary:
         (item["telemetry"] or {}).get("nested_accounting", {}).get("complete") is False
         for item in invocations
     )
-    complete = complete and not status["active_agents"] and not status["pending_certifications"]
+    complete = complete and not status["active_agents"]
     priced = any(row["usd"] is not None for row in costs) or any(
         "known_usd" in (item["telemetry"] or {}).get("estimate", {}) for item in invocations
     )
@@ -477,9 +477,7 @@ class RuntimeRow:
     runs_using: list[str] = field(default_factory=list)
     last_denial: str | None = None
     associations: list[RuntimeAssociation] = field(default_factory=list)
-    compatibility: str = "Unavailable — current runtime identity unobserved"
     agent: str = "Unavailable"
-    recorded_compatibility: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _ports_of(sandbox: dict[str, Any]) -> list[str]:
@@ -549,62 +547,7 @@ def _runtime_associations(store: Store) -> dict[str, list[RuntimeAssociation]]:
             handle = payload.get("handle", {}) if isinstance(payload, dict) else {}
             if isinstance(handle, dict):
                 add(handle.get("sandbox"), "invocation", effect.step, effect.step in active)
-        for invocation in store.runtime.invocations(run.id):
-            metadata = invocation["metadata"]
-            handle = (metadata.get("preparation") or {}).get("handle", {})
-            add(handle.get("sandbox"), "invocation", invocation["id"], invocation["id"] in active)
-        for job in store.runtime.db.execute(
-            "SELECT * FROM runtime_certifications WHERE run_id=?", (run.id,)
-        ):
-            identity = json.loads(job["identity"])
-            add(identity.get("sandbox"), "certification " + job["status"], job["id"], False)
     return associations
-
-
-def _recorded_compatibility(store: Store) -> dict[str, list[dict[str, Any]]]:
-    records: dict[str, list[dict[str, Any]]] = {}
-    for run in store.all_runs():
-        for row in store.runtime.db.execute(
-            "SELECT * FROM runtime_certifications WHERE run_id=?", (run.id,)
-        ):
-            identity = json.loads(row["identity"])
-            sandbox = identity.get("sandbox")
-            if not isinstance(sandbox, str):
-                continue
-            evidence = json.loads(row["evidence"]) if row["evidence"] else None
-            records.setdefault(sandbox, []).append(
-                {
-                    "source": "recorded certification",
-                    "ticket": run.linear_id,
-                    "job_id": row["id"],
-                    "status": row["status"],
-                    "identity": identity,
-                    "fingerprint": row["fingerprint"],
-                    "failure": row["failure"],
-                    "evidence": evidence,
-                }
-            )
-        for invocation in store.runtime.invocations(run.id):
-            report = invocation["metadata"].get("runtime_compatibility")
-            if not isinstance(report, dict):
-                continue
-            certification = report.get("certification", {})
-            identity = certification.get("identity", {}) if isinstance(certification, dict) else {}
-            sandbox = (
-                identity.get("sandbox", report.get("sandbox"))
-                if isinstance(identity, dict)
-                else report.get("sandbox")
-            )
-            if isinstance(sandbox, str):
-                records.setdefault(sandbox, []).append(
-                    {
-                        "source": "recorded invocation compatibility",
-                        "ticket": run.linear_id,
-                        "invocation_id": invocation["id"],
-                        "report": report,
-                    }
-                )
-    return records
 
 
 def runtimes(
@@ -614,13 +557,7 @@ def runtimes(
     *,
     registry: Registry | None = None,
 ) -> list[RuntimeRow]:
-    """Normalize inventory and join recorded uses, without inferring activity from names.
-
-    Certification records describe their retained identity. Listing an identically named
-    sandbox does not observe its runtime generation, so it cannot establish certification.
-    """
     recorded = _runtime_associations(store)
-    compatibility = _recorded_compatibility(store)
     rows: list[RuntimeRow] = []
     for sbx in sandboxes:
         if not isinstance(sbx, dict):
@@ -657,7 +594,6 @@ def runtimes(
                 if isinstance(sbx.get("last_denial"), str)
                 else None,
                 associations=associations,
-                recorded_compatibility=compatibility.get(name, []),
                 agent=_display(sbx.get("agent")),
             )
         )

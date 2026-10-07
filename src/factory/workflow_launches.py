@@ -37,10 +37,6 @@ def prepare(
     """Persist preparation before admission can queue it; model execution stays outside SQLite."""
     from factory import repo
 
-    if ctx.store.runtime.settings("run", ctx.run.id).get("certification_mode") == "automatic":
-        from factory.workflow_certification import freeze_script
-
-        script = freeze_script(script, inputs)
     payload = json.dumps(
         {
             "state": str(ctx.state),
@@ -74,7 +70,6 @@ def prepare(
 def resume(ctx: Context) -> bool:
     """Resume a prepared current step; an uncertain launch is observed, never repeated."""
     from factory import authority, repo
-    from factory.agent.selection import select
 
     for effect in ctx.store.effects(ctx.run.id):
         if effect.system != "agent-preparation" or effect.status != "intended":
@@ -105,21 +100,6 @@ def resume(ctx: Context) -> bool:
                 or metadata["policy_revision"]
                 != (ctx.store.runtime.policy(ctx.run.id) or {}).get("revision")
             ):
-                raise Blocked("launch-preparation-stale", effect.step)
-            report: object
-            if (
-                ctx.store.runtime.settings("run", ctx.run.id).get("certification_mode")
-                == "automatic"
-            ):
-                from factory.workflow_certification import validate_prepared
-
-                report = validate_prepared(
-                    ctx, metadata["runtime_compatibility"], review=ctx.state is State.REVIEWING
-                )
-            else:
-                select(ctx, review=ctx.state is State.REVIEWING)
-                report = getattr(ctx.agent, "report", None)
-            if metadata["runtime_compatibility"] != report:
                 raise Blocked("launch-preparation-stale", effect.step)
             started = launches.start(
                 effect.step,

@@ -90,12 +90,7 @@ def snapshot(
         configs.extend(relative / app for app in cfg.get("apps", []))
         dst = staging / relative
         dst.mkdir(parents=True, exist_ok=True)
-        # Certification checks the candidate against these exact approved bytes.
-        # Re-serializing equivalent JSON changes its digest and refuses unchanged
-        # repositories before any runtime probe can launch.
         shutil.copyfile(src / "harness.config.json", dst / "harness.config.json")
-        # Runtime wiring is policy input too. Existing snapshots stay immutable;
-        # enabling certification on an older snapshot requires explicit replacement.
         for name in (".codex/hooks.json", ".codex/config.toml"):
             wiring = src / name
             _safe_tree(wiring, source)

@@ -437,7 +437,6 @@ def test_fetch_back_is_re_entrant(clone_ctx: Context) -> None:
 
 
 def test_fetch_back_preserves_an_open_reviewer_directory(clone_ctx: Context) -> None:
-    """Native hooks may retain a cwd/directory fd while certification is polled."""
     import os
 
     _to_verifying(clone_ctx)

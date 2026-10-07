@@ -89,10 +89,6 @@ def configure(args: argparse.Namespace) -> int:
                 "workflow",
                 "isolation",
                 "isolation_measurement",
-                "agent_adapter",
-                "app_server_compatibility",
-                "certification_mode",
-                "certification_config",
             )
             if getattr(args, key, None) is not None
         }
@@ -133,74 +129,6 @@ def configure(args: argparse.Namespace) -> int:
     return 0
 
 
-def retry_certification(args: argparse.Namespace) -> int:
-    """Queue one explicitly named retry after fresh observation; do not resume or approve."""
-    from dataclasses import asdict
-    from uuid import uuid4
-
-    from factory import cli, workflow_certification
-    from factory.intake.linear import LinearClient
-    from factory.registry import load_registry
-    from factory.routing import load_routing
-
-    home = cli.factory_home()
-    store = Store(home / "state/factory.db")
-    try:
-        run = store.run_by_ticket(args.ticket.upper())
-        if run is None:
-            raise Blocked("run-not-found", args.ticket)
-        lease_owner = "certification-retry:" + uuid4().hex
-        if not store.acquire_lease(run.id, ttl_seconds=300, owner=lease_owner):
-            raise Blocked("run-leased", run.id)
-        try:
-            ctx = cli._context_for(
-                home,
-                load_registry(home / "config/projects.toml"),
-                load_routing(home / "config/models.toml"),
-                store,
-                LinearClient(),
-                run,
-            )
-            runner, _ = workflow_certification.service(
-                ctx,
-                review=args.role == "review",
-                prepare_runtime=False,
-            )
-            # Reconcile retained execution before accepting a fresh attempt. Unknown
-            # or active launch reservations still block retry at the transaction seam.
-            previous = runner.status(args.job)
-            if previous["run_id"] != run.id:
-                raise Blocked("certification-retry-owner", args.job)
-            runner.collect(args.job)
-            current = runner.observe()
-            runner.driver.preflight(current)
-            with store.runtime.transaction():
-                if not store.holds_lease(run.id, owner=lease_owner):
-                    raise Blocked("run-lease-lost", run.id)
-                result = runner.certifications.jobs.retry_certification(
-                    run.id,
-                    args.job,
-                    asdict(current),
-                    reason=args.reason,
-                )
-            print(
-                json.dumps(
-                    {
-                        "job_id": result["id"],
-                        "status": result["status"],
-                        "retry_of": result["retry_of"],
-                    }
-                )
-            )
-        finally:
-            with store.runtime.transaction():
-                if store.holds_lease(run.id, owner=lease_owner):
-                    store.release_lease(run.id)
-    finally:
-        store.close()
-    return 0
-
-
 def metrics(args: argparse.Namespace) -> int:
     from factory.evaluation import summarize
 
@@ -213,14 +141,6 @@ def metrics(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    retry = sub.add_parser(
-        "retry-certification", help="request one explicit failed-certification retry; no launch"
-    )
-    retry.add_argument("--ticket", required=True)
-    retry.add_argument("--job", required=True, help="exact failed certification ID")
-    retry.add_argument("--role", choices=("build", "review"), required=True)
-    retry.add_argument("--reason", required=True)
-    retry.set_defaults(func=retry_certification)
     evaluation = sub.add_parser(
         "metrics", help="summarize retained workflow outcomes and estimated cost"
     )
@@ -244,17 +164,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     settings.add_argument("--replace-policy", choices=("prototype", "core", "hardening"))
     settings.add_argument("--workflow", choices=("existing", "diagnosis"))
-    settings.add_argument("--agent-adapter", choices=("codex-exec", "app-server"))
-    settings.add_argument(
-        "--app-server-compatibility", help="directory of sandbox compatibility manifests"
-    )
     settings.add_argument(
         "--max-active-agents",
         help="positive count or inherit; run values cannot exceed project limits",
-    )
-    settings.add_argument("--certification-mode", choices=("manual", "automatic"))
-    settings.add_argument(
-        "--certification-config", help="host-owned certification configuration JSON"
     )
     settings.add_argument("--isolation", choices=("shared", "per-run"))
     settings.add_argument("--isolation-measurement", help="retained isolation manifest path")

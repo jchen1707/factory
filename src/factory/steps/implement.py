@@ -81,9 +81,6 @@ def start(
     # already planned reuses that attempt's number and its directory. Anywhere else this
     # is a new attempt.
     attempt = ctx.run.attempt if ctx.state is State.PLANNING else ctx.run.attempt + 1
-    from factory.agent.selection import select
-
-    select(ctx)
     execution.guard(ctx, attempt, STEP, invocation_role=STEP)
     worktree = ctx.worktree
     attempt_dir = AttemptDir.create(ctx.factory_dir, attempt)
@@ -159,9 +156,6 @@ def start(
         identifier = accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
         script = ctx.agent.wrapper_script(invocation)
         inputs: tuple[Path, ...] = (attempt_dir.prompt, attempt_dir.schema, attempt_dir.request)
-        worker_request = attempt_dir.prompt.with_suffix(".app-server.json")
-        if worker_request.exists():
-            inputs += (worker_request,)
         workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
     workflow_launches.resume(ctx)
     ctx.log(

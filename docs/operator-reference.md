@@ -8,7 +8,7 @@ It owns scheduling, recovery and external effects; the target repository owns it
 requirements, gate commands and review instructions.
 
 The implementation includes delivery/model profiles, fresh diagnosis, normalized
-telemetry and accounting, isolated concurrency and automatic runtime certification. These features are configurable; merging code does not
+telemetry and accounting, and isolated concurrency. These features are configurable; merging code does not
 activate them for existing projects or runs. See the [acceptance report](runtime-certification-completion-acceptance.md)
 for measured synthetic coverage and the [rollout procedure](runtime-certification-rollout.md)
 for deployment, migration and rollback. Production activation is a separate operator action.
@@ -45,8 +45,7 @@ uv run factory serve                    # loopback operator console
 ```
 
 A registered project, working sandbox runtime, approved target authority and configured
-host credentials are prerequisites. `doctor --deep` includes a paid model canary;
-ordinary inspection is not a substitute for compatibility certification.
+host credentials are prerequisites. `doctor --deep` includes a paid model canary.
 
 ## Workflow and delivery policy
 
@@ -88,30 +87,15 @@ uv run factory configure --ticket BAC-6 --replace-policy core
 These commands change settings. Use the invocation key shown by the console; policy
 replacement requires a paused run. Project changes do not rewrite existing run snapshots.
 
-## Runtimes and certification
+## Runtimes
 
-Legacy `codex exec` and Codex app-server are separate adapters. Existing runs retain their
-selected adapter. Automatic certification is opt-in; absent configuration uses manual
-compatibility.
+`codex exec` is the only agent adapter. Named model presets are not probed in the executing
+sandbox before launch; a preset naming a model the sandbox cannot run fails at launch.
 
 Astra availability is determined inside the executing sandbox, not inferred from the host
 Codex session. Disposable testing found Codex 0.146.0 omitted Astra; 0.153.4 advertised the
 exact `gpt-6-astra` model and completed high/xhigh schema-valid turns with unchanged provider
 context. This does not authorize an arbitrary runtime/account combination or a model alias.
-
-Automatic certification binds the actual sandbox generation, image, complete runtime/helper
-package, mounts, environment, trusted authority/hooks and probe implementation. Six compatibility
-checks establish hook enforcement, schema output, isolation, durability, recovery and usage
-semantics before application launch. Fresh validation also runs immediately before builder,
-reviewer and recovery launches. Changed identities or tampered evidence refuse launch.
-Controller restart reconciles durable paid intent rather than duplicating probes.
-
-The supported native package includes Codex, `codex-code-mode-host` and its packaged `bwrap`
-resource. Copying a standalone executable is insufficient. Zero-turn preparation settles native
-initialization in the VM's private Codex home before its first fingerprint, preserves full
-configuration identity and refuses explicit distrust. It never writes the host trust store.
-See [certification service](runtime-certification-service.md) for the exact host configuration
-and [rollout prerequisites](runtime-certification-rollout.md) before selecting it.
 
 ```sh
 uv run factory configure --project PROJECT --max-active-agents 8
@@ -124,7 +108,7 @@ restrict project capacity, never expand it.
 ## Concurrency and source isolation
 
 Project run slots and agent slots are separate limits. Atomic admission coordinates CLI and
-daemon processes; agent accounting includes builders, reviewers and certification.
+daemon processes; agent accounting includes builders and reviewers.
 The console shows inherited/explicit limits, active work, queues and waiting reasons. Lowering
 limits drains admitted work without killing it.
 
@@ -149,12 +133,11 @@ Cumulative billed tokens are never used as context occupancy. Context policy war
 requests safe-boundary compaction at 80%, subject to earlier runtime compaction. Changed authority
 and repeated failures require fresh handoffs, not just compaction.
 
-Costs are **API-equivalent estimated USD**, not Codex account charges. Dated pricing accounts
-for supported cache, output, long-context and service-tier details; every model invocation is
-tracked, including failed attempts, review, diagnosis and certification. Replayed
-events reconcile idempotently. Missing usage or pricing remains visibly incomplete, with known
-cost retained as a lower bound. Historical usage is estimated only where evidence supports it.
-Budgets are checked before subsequent attempts, not by killing a writer midway through a change.
+Every model invocation's token usage is recorded, including failed attempts, review and
+diagnosis, and replayed events reconcile idempotently. `codex exec` reports aggregate tokens
+without the request detail pricing needs, so every estimate is incomplete and no USD figure is
+recorded. Budgets are checked before subsequent attempts, not by killing a writer midway through
+a change, but with no priced usage the run ceiling cannot trip.
 The checked-in routing currently declares a $50 run ceiling and $30 warning; inspect effective
 configuration rather than assuming those defaults govern every run.
 
@@ -222,7 +205,7 @@ All commands below use `uv run factory`:
 | `logs BAC-6 --follow` | Follow a run's event stream |
 | `runtimes` | Join sandbox inventory to factory runs |
 | `config models` | Inspect validated routing |
-| `serve` | Console: policy, models, approvals, telemetry, certification and capacity status |
+| `serve` | Console: policy, models, approvals, telemetry and capacity status |
 | `suspend BAC-6` / `resume BAC-6` | Stop current work or resume preserved work |
 | `review-disposition-template BAC-6` | Print a non-valid decision draft bound to the latest blocking review |
 | `review-disposition-check BAC-6 PATH` | Validate a completed decision document without writing Factory state |
@@ -242,8 +225,8 @@ Read [the runbook](runbook.md) before rewinding, cancelling or cleaning a stuck 
 
 ## State, recovery and boundaries
 
-`state/factory.db` stores runs, snapshots, effects, approvals, invocation accounting,
-certification and capacity ownership. Artifacts retain attempt outputs,
+`state/factory.db` stores runs, snapshots, effects, approvals, invocation accounting and
+capacity ownership. Artifacts retain attempt outputs,
 fingerprinted evidence and handoffs; logs remain outside model context. **The database is
 not trivially rebuildable from Linear and Git.** Back it up consistently before migration
 and preserve evidence alongside it. Use the [rollout procedure](runtime-certification-rollout.md)
@@ -257,8 +240,7 @@ holds rather than authorizing duplicate work. Cancel, Suspend and GC target owne
 and preserve work they cannot safely remove.
 
 The host records external writes before calling adapters, then reconciles their outcome.
-Ambiguous acknowledgements are not permission to retry blindly. Uncertain zero-turn preparation
-also retains evidence for operator reconciliation.
+Ambiguous acknowledgements are not permission to retry blindly.
 
 James owns ticket/spec approval, the readiness label, merges, deployments, schema migrations,
 credential rotation and disputed review decisions. Factory has no merge, force-push or

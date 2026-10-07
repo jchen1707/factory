@@ -30,10 +30,6 @@ def _configure(
         "test_design",
         "isolation",
         "isolation_measurement",
-        "agent_adapter",
-        "app_server_compatibility",
-        "certification_mode",
-        "certification_config",
         "max_active_agents",
     }
     if set(changes) - allowed:
@@ -50,38 +46,6 @@ def _configure(
             raise ValueError("max_active_agents must be a positive integer or inherited")
         if run and value > project_settings.get("max_active_agents", 8):
             raise ValueError("max_active_agents exceeds the project ceiling")
-    if "certification_mode" in changes and changes["certification_mode"] not in (
-        "manual",
-        "automatic",
-    ):
-        raise ValueError("certification_mode must be manual or automatic")
-    if "certification_config" in changes and (
-        not isinstance(changes["certification_config"], str)
-        or not Path(changes["certification_config"]).is_absolute()
-    ):
-        raise ValueError("certification_config must be an absolute host configuration path")
-    if {
-        "agent_adapter",
-        "app_server_compatibility",
-        "certification_mode",
-        "certification_config",
-    } & changes.keys():
-        if scope != "project":
-            raise ValueError("Runtime selection applies to new project runs")
-        effective = store.runtime.settings(scope, owner) | changes
-        if effective.get("agent_adapter", "codex-exec") not in {"codex-exec", "app-server"}:
-            raise ValueError("Unknown agent adapter")
-        automatic = effective.get("certification_mode", "manual") == "automatic"
-        if automatic and not effective.get("certification_config"):
-            raise ValueError("automatic certification requires certification_config")
-        if (
-            effective.get("agent_adapter") == "app-server"
-            and not automatic
-            and not effective.get("app_server_compatibility")
-        ):
-            raise Blocked(
-                "app-server-compatibility-incomplete", "Supply the compatibility manifest directory"
-            )
     if "mode" in changes and changes["mode"] not in {"automatic", "approval"}:
         raise ValueError("mode must be automatic or approval")
     if "workflow" in changes and changes["workflow"] not in {"existing", "diagnosis"}:
@@ -155,33 +119,19 @@ def configure(
 
 
 def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, Any]:
-    """Read retained jobs and accounting; observation never launches or certifies."""
     runs = [
         run
         for run in store.all_runs()
         if run.project == project and (run_id is None or run.id == run_id)
     ]
     agents: list[dict[str, Any]] = []
-    certifications: list[dict[str, Any]] = []
-    preparations: list[dict[str, Any]] = []
     waiting: list[dict[str, Any]] = []
     invocations: list[dict[str, Any]] = []
     for run in runs:
-        preparations.extend(
-            {"id": effect.step, "run_id": run.id, "status": effect.status}
-            for effect in store.effects(run.id)
-            if effect.system == "runtime-preparation"
-        )
         agents.extend(
             dict(row)
             for row in store.runtime.db.execute(
                 "SELECT invocation_id,status FROM agent_leases WHERE run_id=?", (run.id,)
-            )
-        )
-        certifications.extend(
-            dict(row)
-            for row in store.runtime.db.execute(
-                "SELECT id,status,failure FROM runtime_certifications WHERE run_id=?", (run.id,)
             )
         )
         settings = store.runtime.settings("run", run.id)
@@ -197,30 +147,19 @@ def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, 
                 }
             )
         invocations.extend(store.runtime.invocations(run.id))
-    terminal = {"completed", "failed", "cancelled", "suspended", "passed"}
+    terminal = {"completed", "failed", "cancelled", "suspended"}
     estimates = [(item.get("telemetry") or {}).get("estimate", {}) for item in invocations]
     complete = bool(estimates) and all(item.get("complete") is True for item in estimates)
-    complete = complete and all(item["status"] in terminal for item in agents + certifications)
+    complete = complete and all(item["status"] in terminal for item in agents)
     settings = (
         store.runtime.effective(project, run_id)
         if run_id
         else store.runtime.settings("project", project)
     )
     return {
-        "effective": {
-            key: settings.get(key, default)
-            for key, default in (
-                ("max_active_agents", 8),
-                ("certification_mode", "manual"),
-            )
-        },
+        "effective": {"max_active_agents": settings.get("max_active_agents", 8)},
         "active_agents": sum(item["status"] == "active" for item in agents),
-        "pending_certifications": sum(
-            item["status"] in {"pending", "checking"} for item in certifications
-        ),
-        "runtime_preparations": preparations,
         "agents": agents,
-        "certifications": certifications,
         "waiting": waiting,
         "api_equivalent_estimate_usd": sum(
             (item.get("usd") if item.get("complete") else item.get("known_usd")) or 0
