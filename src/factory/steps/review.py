@@ -47,7 +47,9 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import shutil
+import stat
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -336,13 +338,13 @@ def _launch_next(
         axis.setdefault("history", []).append(
             {key: value for key, value in axis.items() if key not in {"history", "prompt_text"}}
         )
-    attempt_dir = AttemptDir(
-        _sandbox_run_dir(scratch, ctx.run.id)
-        / "run"
-        / str(ctx.run.attempt)
-        / launch.replace(":", "-")
-    )
-    attempt_dir.root.mkdir(parents=True, exist_ok=True)
+    attempt_dir = AttemptDir(scratch / launch.replace(":", "-"))
+    # The reviewer can write the scratch and every launch key is predictable, so a
+    # directory already there was planted. The mount root itself cannot be replaced.
+    try:
+        attempt_dir.root.mkdir()
+    except FileExistsError as exc:
+        raise Blocked("review-scratch-tampered", str(exc)) from exc
     entry, invocation = _axis_entry(
         ctx,
         ctx.state_dir / "review",
@@ -425,7 +427,7 @@ def _axis_entry(
         prompt += f"Candidate worktree: {ctx.worktree}\nPolicy: {json.dumps(snapshot)}\n"
     out_path = review_dir / f"review-{label}.json"
     files = _axis_files(attempt_dir, out_path)
-    files.prompt.write_text(prompt, encoding="utf-8")
+    _write_prompt(files.prompt, prompt)
     from factory import accounting, execution
 
     role = execution.role_for(ctx, "reviewer")
@@ -488,16 +490,20 @@ def _collect_axis(
 ) -> list[dict[str, Any]]:
     """Land one axis's stream, read it, and return its findings or raise its stop.
 
-    The landed stream is read rather than the scratch copy, so the final pass over every
-    axis reads the same evidence the first one did. `record` is true on that first pass
-    only: the check rows are append-only and one axis is one attestation.
+    The landed stream is read rather than the scratch, which later axes of the run can
+    write, so the final pass over every axis reads the same evidence the first one did,
+    and the invocation record is repointed at it so accounting and the console read it
+    too. `record` is true on that first pass only: the check rows are append-only and
+    one axis is one attestation.
     """
     from factory import accounting
 
     label = str(axis["label"])
     out_path, events_path, stderr_path = (Path(axis[key]) for key in ("out", "events", "stderr"))
-    _land(Path(axis["scratch_events"]), events_path)
-    _land(Path(axis["scratch_stderr"]), stderr_path)
+    if record:
+        _land(Path(axis["scratch_events"]), events_path)
+        _land(Path(axis["scratch_stderr"]), stderr_path)
+        ctx.store.runtime.relocate_events(axis["invocation_id"], events_path)
     accounting.collect(
         ctx, attempt, f"review:{label}", events_path, invocation_id=axis["invocation_id"]
     )
@@ -528,7 +534,7 @@ def _collect_legacy(
 
     Called by `run` after the fan-out exits, or by `reap` on a later tick — possibly in a
     different process. Nothing here reads anything `start` held in memory: the plan at
-    `review-plan.json`, the findings in the per-project scratch, and the exit code are all
+    `review-plan.json`, the axis files in the run's scratch, and the exit code are all
     on disk.
     """
     review_dir = ctx.state_dir / "review"
@@ -608,62 +614,63 @@ def _read_text(path: Path) -> str:
 # --------------------------------------------------------------------------------
 
 
-def _sandbox_run_dir(scratch: Path, run_id: str) -> Path:
-    """The reviewer's writable ground for **one run**, inside the per-project mount.
+def _open_launch(directory: Path) -> int:
+    """A launch directory, refusing a link: the reviewer can write the scratch, and a
+    directory it swapped for a link would aim the host at another run's files."""
+    try:
+        return os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise Blocked("review-scratch-tampered", f"{directory}: {exc}") from exc
 
-    Everything the sandbox must read or write lives here: the scratch is the reviewer's
-    only writable mount, and it is the only part of the host filesystem it can see at
-    all. `state/runs/<run>/`
-    — where the review's evidence belongs and where `collect` reads its plan — is **not a
-    workspace of the review sandbox**, so a prompt written there cannot be read and an
-    events file pointed there cannot be written.
 
-    The mount is fixed per project (§9.1, and `_review_scratch` explains why it cannot be
-    per run); a subdirectory under it is free, exactly as the clone mount takes a run-id
-    subdirectory for the same reason. Keyed by run id so two runs of one ticket cannot
-    collide — the defect `factory_dir_for` records.
-    """
-    path = scratch / run_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _write_prompt(path: Path, text: str) -> None:
+    launch = _open_launch(path.parent)
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        descriptor = os.open(path.name, flags, 0o644, dir_fd=launch)
+    except OSError as exc:
+        raise Blocked("review-scratch-tampered", f"{path}: {exc}") from exc
+    finally:
+        os.close(launch)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 def _land(scratch_out: Path, out_path: Path) -> None:
-    """Move one of the reviewer's outputs from the shared scratch into this run's own
-    directory, where the evidence belongs. The event stream and stderr both come home
-    this way; a missing file is silent, because an axis that never started has nothing
-    to land and the stream reader is what judges that."""
-    if scratch_out.exists():
+    """Move one of the reviewer's outputs into this run's own directory, where the
+    evidence belongs and no later axis can write it. The event stream and stderr both
+    come home this way; a missing file is silent, because an axis that never started has
+    nothing to land and the stream reader is what judges that. Anything but a regular
+    file was planted: a FIFO would hang every later read."""
+    launch = _open_launch(scratch_out.parent)
+    try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(scratch_out), out_path)
+        os.rename(scratch_out.name, out_path, src_dir_fd=launch)
+    except FileNotFoundError:
+        return
+    finally:
+        os.close(launch)
+    if not stat.S_ISREG(os.lstat(out_path).st_mode):
+        if out_path.is_dir() and not out_path.is_symlink():
+            shutil.rmtree(out_path)
+        else:
+            out_path.unlink()
+        raise Blocked("review-scratch-tampered", f"{scratch_out} is not a regular file")
 
 
 def _review_scratch(ctx: Context) -> Path:
-    """The reviewer's writable ground: one directory per **project**, not per run.
-
-    §9.1 fixes a sandbox's workspace set at creation, and the reviewer sandbox is named
-    once per project, so every path in its spec has to outlive the run that first created
-    it. A per-run directory does not: the second run finds the sandbox mounted on the
-    first run's path and `_assert_spec_matches` refuses it, correctly. BAC-4 measured
-    exactly that. The axis outputs are moved into the run's own directory as soon as they
-    land, so the evidence is still per-run — only the mount is shared.
-    """
-    scratch = ctx.home / "state" / "review" / ctx.project.name
-    if ctx.store.runtime.settings("run", ctx.run.id).get("isolation") == "per-run":
-        scratch = scratch / ctx.run.id
+    """Named after the sandbox, because §9.1 fixes a sandbox's mounts at creation: a
+    scratch that varied apart from the name is the spec `_assert_spec_matches` refused on
+    BAC-4."""
+    scratch = ctx.home / "state" / "review" / ctx.project.review_sandbox
     scratch.mkdir(parents=True, exist_ok=True)
     return scratch
 
 
 def _review_spec(ctx: Context, scratch: Path) -> SandboxSpec:
-    """The read-only review sandbox: the project `:ro` + a `rw` scratch for findings.
-
-    The read-only mount is the **project root**, not the worktree, for the same reason the
-    scratch is per-project: a worktree path contains the ticket, and a spec that changes
-    per ticket cannot be satisfied by a sandbox named per project. The build sandbox has
-    always mounted the root for this reason — worktrees live inside it at
-    `.factory/worktrees/<TICKET>`, so mounting the root reaches every one of them, and
-    `exec_sync(workdir=...)` still puts the reviewer in the worktree it is reviewing.
+    """The read-only mount is the **project root**, not the worktree, because a worktree's
+    git directory lives in the root (`.git/worktrees/<TICKET>`, objects in `.git`), and a
+    reviewer that cannot run `git diff` cannot review.
 
     `--no-share-skills` (§19 Phase 3 checklist): the reviewer has no skills store, so the
     portable `full-review` skill is reached by inlining it (Tier 2), not by loading a shared

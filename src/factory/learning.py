@@ -51,7 +51,11 @@ def schedule(project: Path, vault: Path, events: Path, *, resumed: bool = False)
         if not script.is_file():
             _write(outcome, {"outcome": "unavailable:script"})
             return
-        if not events.is_file():
+        if events.parent.is_symlink():
+            # The receipt and the worker's files go beside the stream, so a directory
+            # the agent swapped for a link would aim them into another run's.
+            return
+        if events.is_symlink() or not events.is_file():
             _write(outcome, {"outcome": "unavailable:transcript"})
             return
         subprocess.Popen(  # noqa: S603 — controller-owned module and registry argv

@@ -18,9 +18,11 @@ from factory.sandbox.sbx import SbxError
 from factory.steps import Context
 from factory.steps import claim as claim_step
 from factory.steps import context as context_step
+from factory.steps import review as review_step
 from factory.steps import sandbox as sandbox_step
 from factory.steps import worktree as worktree_step
-from tests.integration.conftest import FakeSandbox, git
+from tests.integration.conftest import FakeSandbox, _seed_vendored_review_tree, git
+from tests.integration.test_phase3 import _stub_redphase, _to_reviewing
 
 WEEKS_AGO = time.time() - 30 * gc.DAY_SECONDS
 
@@ -284,6 +286,53 @@ def test_the_factory_never_touches_a_sandbox_it_does_not_own(ctx: Context) -> No
 
     touched = [a.target for a in actions if a.kind.startswith("sandbox-")]
     assert all(t.startswith(("factory-build-", "factory-review-")) for t in touched), touched
+
+
+def test_the_sandbox_a_run_reviewed_in_is_collected_with_it(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    review_step.start(ctx)
+    reviewed_in = _fake(ctx).detached[-1][0]
+    ctx.store.record_transition(
+        ctx.run.id, from_state=ctx.state, to_state=State.CANCELLED, actor="human", rule="test"
+    )
+    with ctx.store.transaction() as conn:
+        conn.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (int(WEEKS_AGO), ctx.run.id))
+
+    removals = _kinds(_sweep(ctx, dry_run=True), "sandbox-remove")
+
+    assert reviewed_in in {a.target for a in removals}
+
+
+def test_gc_names_only_sandboxes_that_exist(ctx: Context) -> None:
+    # Every run resolves to a review sandbox name; only a run that reached review has one.
+    _finished_run(ctx)
+
+    actions = _sweep(ctx, dry_run=True)
+
+    targets = {a.target for a in actions if a.kind.startswith("sandbox-")}
+    assert targets
+    assert targets <= {spec.name for spec in _fake(ctx).created}
+
+
+def test_a_failed_listing_is_reported_and_the_rest_of_the_sweep_still_is(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _finished_run(ctx)
+
+    def refuse(self: FakeSandbox) -> set[str]:
+        raise SbxError("sbx ls failed: daemon not running")
+
+    monkeypatch.setattr(FakeSandbox, "names", refuse)
+    actions = _sweep(ctx, dry_run=False)
+
+    assert [a.why for a in _kinds(actions, "sandbox-list")] == [
+        "refused: sbx ls failed: daemon not running"
+    ]
+    assert [a.done for a in _kinds(actions, "worktree-remove")] == [True]
 
 
 def test_artifacts_are_kept_while_the_disk_is_above_the_floor(ctx: Context) -> None:

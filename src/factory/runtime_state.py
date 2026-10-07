@@ -8,6 +8,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 SCHEMA = (
@@ -124,6 +125,17 @@ class RuntimeState:
             "INSERT INTO invocations(id,run_id,attempt,role,metadata,started_at,updated_at) "
             "VALUES (?,?,?,?,?,?,?)",
             (invocation_id, run_id, attempt, role, json.dumps(metadata), now, now),
+        )
+
+    def relocate_events(self, invocation_id: str, events: Path) -> None:
+        """Name the stream's new home once the host has moved it out of a directory the
+        agent can still write."""
+        invocation = self.invocation(invocation_id)
+        if invocation is None:
+            raise ValueError(f"unknown invocation {invocation_id}")
+        metadata = invocation["metadata"] | {"events": str(events)}
+        self.db.execute(
+            "UPDATE invocations SET metadata=? WHERE id=?", (json.dumps(metadata), invocation_id)
         )
 
     def observe(self, invocation_id: str, sequence: int, telemetry: dict[str, Any]) -> bool:

@@ -11,14 +11,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from factory import cli, recovery, repo
+from factory import cli, execution, recovery, repo
+from factory.artifacts import AttemptDir
 from factory.delivery import github, gitlab, sandbox_gitlab
 from factory.machine import Blocked, Resumable, State
 from factory.registry import SandboxDelivery
@@ -34,7 +38,7 @@ from tests.integration.conftest import (
     advance_state,
     git,
 )
-from tests.integration.test_pipeline import _fake, _to_verifying
+from tests.integration.test_pipeline import _fake, _second_run_in, _to_verifying
 from tests.support import claude_stream
 
 # --------------------------------------------------------------------------------
@@ -1008,6 +1012,244 @@ def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
     ]
     unwritable = [p for p in written if not any(p.is_relative_to(w) for w in writable)]
     assert not unwritable, f"written by the reviewer but not on a writable mount: {unwritable}"
+
+
+def test_a_review_launch_cannot_write_another_runs_review_files(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    other = _second_run_in(ctx, "BAC-9")
+    _to_reviewing(other)
+    _stub_redphase(monkeypatch)
+    for run_ctx in (ctx, other):
+        _seed_vendored_review_tree(Path(run_ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+
+    review_step.start(ctx)
+    first_files = [p for p in fake.detached_dirs[-1].rglob("*") if p.is_file()]
+    review_step.start(other)
+    second_sandbox = fake.detached[-1][0]
+
+    assert {p.name for p in first_files} >= {"events.jsonl", "pgid", "prompt.md"}
+    writable = fake._writable_roots(second_sandbox)
+    assert writable, "the review sandbox has no writable mount at all"
+    reachable = [p for p in first_files if any(p.is_relative_to(root) for root in writable)]
+    assert not reachable, f"{other.run.id}'s reviewer can write {ctx.run.id}'s files: {reachable}"
+
+
+def _first_axis_in_flight(ctx: Context, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+    review_step.start(ctx)
+    return fake.detached_dirs[-1]
+
+
+def _finish_axis(ctx: Context, attempt_dir: Path) -> None:
+    fake = _fake(ctx)
+    launch = fake.launches[-1]
+    assert launch is not None
+    fake._write_stream(launch, fake._scenario(launch).lines, 0, "")
+    (attempt_dir / "exit").write_text("0")
+
+
+def test_the_host_never_writes_through_a_link_planted_in_the_review_scratch(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "outside-every-mount"
+    victim.write_text("untouched\n")
+    next_launch = execution.attempt_key(ctx.run.attempt, "review", 2).replace(":", "-")
+    planted = first.with_name(next_launch)
+    planted.mkdir()
+    (planted / "prompt.md").symlink_to(victim)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert victim.read_text() == "untouched\n"
+
+
+def test_a_stream_the_reviewer_replaced_with_a_link_is_never_landed(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    _finish_axis(ctx, first)
+    host_file = tmp_path / "outside-every-mount.jsonl"
+    (first / "events.jsonl").replace(host_file)
+    (first / "events.jsonl").symlink_to(host_file)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert not any(p.is_symlink() for p in (ctx.state_dir / "review").rglob("*"))
+
+
+def test_a_stream_the_reviewer_replaced_with_a_fifo_is_refused_not_read(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    _finish_axis(ctx, first)
+    (first / "events.jsonl").unlink()
+    os.mkfifo(first / "events.jsonl")
+
+    def hung(signum: int, frame: Any) -> None:
+        raise AssertionError("the host blocked reading a FIFO the reviewer planted")
+
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(10)
+    try:
+        with pytest.raises(Blocked) as caught:
+            review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert caught.value.reason == "review-scratch-tampered"
+
+
+def test_a_reviewer_cannot_point_its_launch_at_another_runs_files(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    other = _second_run_in(ctx, "BAC-9")
+    _to_reviewing(other)
+    _stub_redphase(monkeypatch)
+    for run_ctx in (ctx, other):
+        _seed_vendored_review_tree(Path(run_ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+    review_step.start(ctx)
+    victim = fake.detached_dirs[-1]
+    review_step.start(other)
+    mine = fake.detached_dirs[-1]
+    _finish_axis(other, mine)
+    mine.rename(mine.with_name(f"{mine.name}-moved"))
+    mine.symlink_to(victim)
+    before = sorted(p.name for p in victim.iterdir())
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(other, AttemptDir(mine), other.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert sorted(p.name for p in victim.iterdir()) == before
+
+
+def test_the_host_never_writes_a_prompt_through_a_link_raced_into_a_fresh_launch(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "outside-every-mount"
+    victim.write_text("untouched\n")
+    original = review_step._axis_files
+
+    def raced(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        files = original(attempt_dir, out_path)
+        if not files.prompt.exists():
+            # A process still running in the VM wins the race to the fresh directory.
+            files.prompt.symlink_to(victim)
+        return files
+
+    monkeypatch.setattr(review_step, "_axis_files", raced)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert victim.read_text() == "untouched\n"
+
+
+def test_each_review_launch_record_names_the_stream_accounting_priced(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+
+    advance_state(ctx)
+
+    reviews = [
+        invocation
+        for invocation in ctx.store.runtime.invocations(ctx.run.id)
+        if invocation["role"].startswith("review:")
+    ]
+    assert reviews
+    for invocation in reviews:
+        recorded = Path(invocation["metadata"]["events"])
+        assert invocation["sequence"] == len(recorded.read_text().splitlines())
+        # Later axes of the run can write the scratch; a stream priced from there could
+        # be rewritten to lift the budget ceiling.
+        assert not recorded.is_relative_to(ctx.home / "state" / "review")
+
+
+def test_the_final_review_pass_reads_nothing_a_later_axis_could_have_replaced(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+    original = review_step._axis_files
+    planted: list[Path] = []
+
+    def later_axis(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        plan = review_step._read_plan(ctx.state_dir / "review")
+        done = [Path(a["scratch_events"]) for a in plan["axes"] if a.get("complete")]
+        if done and not planted:
+            # The second axis replaces the first axis's stream with a FIFO.
+            done[0].unlink(missing_ok=True)
+            os.mkfifo(done[0])
+            planted.append(done[0])
+        return original(attempt_dir, out_path)
+
+    review_step.start(ctx)
+    monkeypatch.setattr(review_step, "_axis_files", later_axis)
+
+    def hung(signum: int, frame: Any) -> None:
+        raise AssertionError("the final pass read a stream a later axis replaced")
+
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(20)
+    try:
+        advance_state(ctx)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert planted
+    assert ctx.state is State.PR_READY
+
+
+def test_the_host_never_writes_a_prompt_through_a_launch_directory_swapped_for_a_link(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "another-runs-launch"
+    victim.mkdir()
+    original = review_step._axis_files
+
+    def swapped(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        if attempt_dir.root != first and not attempt_dir.root.is_symlink():
+            attempt_dir.root.rmdir()
+            attempt_dir.root.symlink_to(victim)
+        return original(attempt_dir, out_path)
+
+    monkeypatch.setattr(review_step, "_axis_files", swapped)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert list(victim.iterdir()) == []
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(

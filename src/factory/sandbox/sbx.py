@@ -12,13 +12,15 @@ the caller. A guard the caller can forget to call is not a guard.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import stat
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
@@ -139,6 +141,18 @@ def exec_argv(
     return out
 
 
+def _create_in(directory: int, name: str) -> TextIO:
+    """Open `name` for writing in an attempt directory the sandbox can also write,
+    refusing a link or a FIFO it planted there: either would aim this host write
+    somewhere else, or block it."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptor = os.open(name, flags, 0o644, dir_fd=directory)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise OSError(errno.EINVAL, "not a regular file", name)
+    return os.fdopen(descriptor, "w", encoding="utf-8")
+
+
 def holder_pid(attempt_dir: Path) -> int | None:
     """The pid of the `sbx exec` process holding this attempt's session open."""
     try:
@@ -202,6 +216,15 @@ class SbxAdapter:
         by running it: it returns exactly the fields `inspect()` needs.
         """
         return self._run(["sbx", "inspect", name], timeout=60).ok
+
+    def names(self) -> set[str]:
+        result = self._run(["sbx", "ls", "--json"], timeout=60)
+        if not result.ok:
+            raise SbxError(f"sbx ls failed: {result.stderr.strip()}")
+        try:
+            return {str(entry["name"]) for entry in json.loads(result.stdout)["sandboxes"]}
+        except (ValueError, LookupError, TypeError) as exc:
+            raise SbxError(f"sbx ls returned a listing it cannot read: {exc!r}") from exc
 
     def inspect(self, name: str) -> dict[str, Any]:
         result = self._run(["sbx", "inspect", name, "--json"], timeout=60)
@@ -417,22 +440,39 @@ class SbxAdapter:
         stderr_path = handle.attempt_dir / SBX_EXEC_STDERR
         from contextlib import ExitStack
 
-        with ExitStack() as files:
-            stderr_file = files.enter_context(stderr_path.open("w", encoding="utf-8"))
-            stdout_file = (
-                files.enter_context(stdout_path.open("x", encoding="utf-8"))
-                if stdout_path is not None
-                else subprocess.DEVNULL
-            )
-            process = subprocess.Popen(
-                list(argv),
-                stdout=stdout_file,
-                stderr=stderr_file,
-                text=True,
-                start_new_session=True,
-            )
-        self._detached[handle.sandbox] = process
-        (handle.attempt_dir / SBX_EXEC_PID).write_text(f"{process.pid}\n", encoding="utf-8")
+        try:
+            directory = os.open(handle.attempt_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError as exc:
+            raise SbxError(f"{handle.attempt_dir} is a link the sandbox planted: {exc}") from exc
+        try:
+            with ExitStack() as files:
+                try:
+                    stderr_file = files.enter_context(_create_in(directory, SBX_EXEC_STDERR))
+                except OSError as exc:
+                    raise SbxError(f"{stderr_path} is a link the sandbox planted: {exc}") from exc
+                stdout_file = (
+                    files.enter_context(stdout_path.open("x", encoding="utf-8"))
+                    if stdout_path is not None
+                    else subprocess.DEVNULL
+                )
+                process = subprocess.Popen(
+                    list(argv),
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    text=True,
+                    start_new_session=True,
+                )
+            self._detached[handle.sandbox] = process
+            try:
+                with _create_in(directory, SBX_EXEC_PID) as pid_file:
+                    pid_file.write(f"{process.pid}\n")
+            except OSError as exc:
+                process.terminate()
+                raise SbxError(
+                    f"{handle.attempt_dir / SBX_EXEC_PID} is a link the sandbox planted: {exc}"
+                ) from exc
+        finally:
+            os.close(directory)
 
         # "Started" is the heartbeat appearing, not the call returning — the wrapper
         # writes its first beat before the agent is reached. A process that has
@@ -580,16 +620,6 @@ def sbx_available() -> tuple[bool, str]:
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout).strip()
     return True, proc.stdout.strip()
-
-
-def list_sandboxes() -> list[str]:
-    proc = subprocess.run(["sbx", "ls"], capture_output=True, text=True, check=False, timeout=60)
-    names: list[str] = []
-    for line in proc.stdout.splitlines()[1:]:
-        parts = line.split()
-        if parts:
-            names.append(parts[0])
-    return names
 
 
 def worktree_inside(workspace: Path, worktree: Path) -> bool:

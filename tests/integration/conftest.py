@@ -301,6 +301,9 @@ class FakeSandbox:
     def exists(self, name: str) -> bool:
         return any(spec.name == name for spec in self.created)
 
+    def names(self) -> set[str]:
+        return {spec.name for spec in self.created}
+
     # -- clone mode ---------------------------------------------------------------
 
     def _spec(self, name: str) -> SandboxSpec | None:

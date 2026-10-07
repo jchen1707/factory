@@ -225,11 +225,12 @@ def _sweep_sandboxes(
 ) -> list[Action]:
     """Stop an idle factory sandbox; remove one only after much longer.
 
-    The names come from the **registry**, never from `sbx ls`. That is the difference
-    between collecting the factory's own sandboxes and collecting whatever happens to be
-    on the machine, and `policy.assert_factory_sandbox` in the adapter is the second lock
-    on the same door: a `codex-*` sandbox is James's live `csbx` session and an
-    unattended writer inside a live human session is the failure that rule prevents.
+    The names come from the **registry**, never from `sbx ls`, which only drops the
+    names with no sandbox behind them. That is the difference between collecting the
+    factory's own sandboxes and collecting whatever happens to be on the machine, and
+    `policy.assert_factory_sandbox` in the adapter is the second lock on the same door: a
+    `codex-*` sandbox is James's live `csbx` session and an unattended writer inside a
+    live human session is the failure that rule prevents.
     """
     actions: list[Action] = []
     idle_floor = registry.defaults.gc.sandbox_idle_hours * 3600
@@ -237,25 +238,22 @@ def _sweep_sandboxes(
 
     from factory.isolation import project_for_run
 
+    try:
+        existing = sandbox.names()
+    except SbxError as exc:
+        return [Action("sandbox-list", "sbx ls", f"refused: {exc}", False)]
     for project in registry.projects.values():
         active = store.active_runs_for_project(project.name)
-        names = {project.build_sandbox, project.review_sandbox}
-        retained = [run for run in store.all_runs() if run.project == project.name]
-        for run in retained:
-            resolved = project_for_run(project, run, store)
-            names.update((resolved.build_sandbox, resolved.review_sandbox))
-        for name in sorted(names):
+        users_of: dict[str, list[Run]] = {project.build_sandbox: [], project.review_sandbox: []}
+        for run in store.all_runs():
+            if run.project == project.name:
+                resolved = project_for_run(project, run, store)
+                for used in {resolved.build_sandbox, resolved.review_sandbox}:
+                    users_of.setdefault(used, []).append(run)
+        for name in sorted(users_of.keys() & existing):
             if not name or not policy.sandbox_is_factory_owned(name):
                 continue
-            users = [
-                run
-                for run in retained
-                if name
-                in (
-                    project_for_run(project, run, store).build_sandbox,
-                    project_for_run(project, run, store).review_sandbox,
-                )
-            ]
+            users = users_of[name]
             busy = [run for run in users if run in active]
             if busy:
                 actions.append(

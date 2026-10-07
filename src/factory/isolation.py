@@ -18,7 +18,7 @@ def project_for_run(project: Project, run: Run, store: Store) -> Project:
     return replace(
         project,
         build_sandbox=build or project.build_sandbox,
-        review_sandbox=review or project.review_sandbox,
+        review_sandbox=review or f"{project.review_sandbox}-{run.id}",
     )
 
 
@@ -40,11 +40,7 @@ def prepare(project: Project, run: Run, store: Store) -> Project:
         store.runtime.configure(
             "run",
             run.id,
-            {
-                "isolation": mode,
-                "build_sandbox": f"{project.build_sandbox}-{run.id}",
-                "review_sandbox": f"{project.review_sandbox}-{run.id}",
-            },
+            {"isolation": mode, "build_sandbox": f"{project.build_sandbox}-{run.id}"},
         )
     else:
         store.runtime.configure("run", run.id, {"isolation": "shared"})
