@@ -87,6 +87,15 @@ def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     attempt is the difference from the session's last priced launch, so the run's spend
     is summed once however many times the ladder resumed.
 
+    An interrupted launch prices nothing, and no lower bound is taken from its
+    assistant lines: each carries the request's input and cache counts but only the
+    opening output count (measured: 3 and 1 against a final 640), and pricing them
+    would need the price table the cutover deleted. Its spend is not lost when the
+    ladder resumes the session, because the next result's cumulative includes the
+    killed request (measured: 5091 cache-write tokens of the killed launch inside the
+    resume's 5163), and the baseline difference charges it to that launch. A launch
+    that is never resumed is bounded by its own `--max-budget-usd` and the attempt
+    ceiling; under a subscription the windows the launch guard reads count it either way.
     """
     invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
