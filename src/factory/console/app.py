@@ -158,8 +158,6 @@ def _settings_form(
         "workflow": "Workflow",
         "test_design": "Test design",
         "max_active_agents": "Active agent limit",
-        "max_children_per_parent": "Children per parent",
-        "max_delegation_depth": "Delegation depth",
     }
     option_labels = {
         "": "Repository default",
@@ -167,8 +165,6 @@ def _settings_form(
         "true": "Enabled",
         "inherit": "Inherit project default",
         "existing": "Repository default",
-        "read-only": "Read only",
-        "isolated-write": "Isolated write",
         "high-confidence": "High confidence",
         "per-run": "Per run",
     }
@@ -176,15 +172,7 @@ def _settings_form(
     def effective_hint(key: str) -> str:
         if effective is None:
             return ""
-        value = effective.get(
-            key,
-            {
-                "delegation_mode": "disabled",
-                "max_active_agents": 8,
-                "max_children_per_parent": 2,
-                "max_delegation_depth": 1,
-            }.get(key, "repository default"),
-        )
+        value = effective.get(key, 8 if key == "max_active_agents" else "repository default")
         source = "Run override" if settings.get(key) is not None else "Inherited"
         return (
             f"<small>{source} · effective: {_e(option_labels.get(str(value), str(value)))}</small>"
@@ -218,16 +206,9 @@ def _settings_form(
             choices, str(selected).lower() if str(selected).lower() in choices else selected
         )
         fields.append(f'<label>{_e(labels[key])} <select name="{key}">{options}</select></label> ')
-    choices = ("inherit", "disabled", "read-only", "isolated-write")
-    selected = settings.get("delegation_mode", "inherit")
-    options = options_for(choices, selected)
     fields.append(
-        f'<label>Delegation <select name="delegation_mode">{options}</select>{effective_hint("delegation_mode")}</label> '
+        f'<label>{_e(labels["max_active_agents"])} <input name="max_active_agents" {number_attributes} value="{_e(settings.get("max_active_agents", ""))}" placeholder="Inherited">{effective_hint("max_active_agents")}</label> '
     )
-    for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
-        fields.append(
-            f'<label>{_e(labels[key])} <input name="{key}" {number_attributes} value="{_e(settings.get(key, ""))}" placeholder="Inherited">{effective_hint(key)}</label> '
-        )
     if "/projects/" in action:
         options = options_for(("manual", "automatic"), settings.get("certification_mode", "manual"))
         fields.append(
@@ -270,26 +251,9 @@ def _runtime_status(store: Store, project: str, run_id: str | None = None) -> st
     estimate_prefix = "" if observed["cost_complete"] else "≥ "
     return (
         f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents · "
-        f"{observed['queued_children']} queued children · {observed['pending_certifications']} pending/checking certifications</p>"
+        f"{observed['pending_certifications']} pending/checking certifications</p>"
         f"<p>API-equivalent estimated USD: {estimate_prefix}${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
-        "These are not Codex account charges. Queued children and certification jobs may overlap.</p>"
-        + _runtime_table(
-            "Children",
-            ("Child", "Parent", "Status"),
-            [
-                (
-                    child["id"],
-                    child["parent_id"],
-                    "running"
-                    if any(
-                        agent["invocation_id"] == child["child_id"] and agent["status"] == "active"
-                        for agent in observed["agents"]
-                    )
-                    else child["status"],
-                )
-                for child in observed["children"]
-            ],
-        )
+        "These are not Codex account charges.</p>"
         + _runtime_table(
             "Certifications",
             ("Certification", "Status", "Failure"),
@@ -905,7 +869,7 @@ def create_app(
             except (OSError, ValueError):
                 profile = "Unavailable"
             inventory.append(
-                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["queued_children"]} children · {observed["pending_certifications"]} certifications<small>May overlap</small></td></tr>'
+                f'<tr><td data-label="Project"><a data-project-link="project-{_e(name)}" href="?project={_query(name)}#project-{_e(name)}"{chr(32) + "aria-current=true" if name == selected else ""}>{_e(name)}</a></td><td data-label="Run slots">{occupied} / {explicit or reg.concurrency_for(project)}</td><td data-label="Delivery profile">{_e(profile)}</td><td data-label="Agent slots">{observed["active_agents"]} / {observed["effective"]["max_active_agents"]}</td><td data-label="Waiting">{observed["pending_certifications"]} certifications</td></tr>'
             )
         body = (
             '<h1>Projects</h1><p class="sub">Registered projects, capacity and defaults for future work.</p><section class="panel" id="project-inventory"><h2>Registered projects</h2><div class="scroll" tabindex="0" role="region" aria-label="Project inventory"><table class="inventory-table project-inventory"><thead><tr><th>Project</th><th>Run slots</th><th>Delivery profile</th><th>Agent slots</th><th>Waiting</th></tr></thead><tbody>'
@@ -949,9 +913,7 @@ def create_app(
                 '<p class="muted">Defaults apply to future work. Blank limits inherit the factory defaults; '
                 "delivery profile inherits the repository policy.</p>"
                 '<dl class="project-effective"><dt>Effective active-agent limit</dt>'
-                f"<dd>{_e(effective['max_active_agents'])}</dd><dt>Effective child limit</dt>"
-                f"<dd>{_e(effective['max_children_per_parent'])}</dd><dt>Effective delegation depth</dt>"
-                f"<dd>{_e(effective['max_delegation_depth'])}</dd></dl>"
+                f"<dd>{_e(effective['max_active_agents'])}</dd></dl>"
             )
             body += _settings_form(f"/settings/projects/{name}", settings, concurrency=explicit)
             body += (
@@ -1020,16 +982,10 @@ def create_app(
         body += "</section>"
         body += '<section class="panel" id="effective-settings"><h2>Effective settings</h2>'
         form_settings = settings | {
-            key: st.runtime.settings("run", run.id).get(key)
-            for key in (
-                "delegation_mode",
-                "max_active_agents",
-                "max_children_per_parent",
-                "max_delegation_depth",
-            )
+            "max_active_agents": st.runtime.settings("run", run.id).get("max_active_agents")
         }
         form_settings = {key: value for key, value in form_settings.items() if value is not None}
-        body += '<p class="muted">Blank limits and inherited delegation use project defaults. Run overrides may lower project limits.</p>'
+        body += '<p class="muted">Blank limits use project defaults. Run overrides may lower project limits.</p>'
         body += _settings_form(f"/settings/runs/{run.linear_id}", form_settings, effective=settings)
         body += '</section><section class="panel"><h2>Effective delivery policy</h2>'
         if policy:
@@ -1103,11 +1059,10 @@ def create_app(
                     changes["concurrency"] = (
                         int(form["concurrency"]) if form["concurrency"] else None
                     )
-                for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
-                    if key in form:
-                        changes[key] = int(form[key]) if form[key] else None
-                if changes.get("delegation_mode") == "inherit":
-                    changes["delegation_mode"] = None
+                if "max_active_agents" in form:
+                    changes["max_active_agents"] = (
+                        int(form["max_active_agents"]) if form["max_active_agents"] else None
+                    )
                 if "test_design" in changes:
                     changes["test_design"] = changes["test_design"] == "true"
                 operator_controls.configure(
@@ -1439,10 +1394,10 @@ def create_app(
                 cells.append(
                     f"<tr><td data-label='Sandbox'>{_e(r.name)}"
                     + f' <small class="runtime-owner">{"operator-owned" if r.operator_owned else "factory-owned"}</small>'
-                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Layout'>{_e(r.layout) if not r.layout.startswith('Unavailable') else '<details><summary>Unavailable</summary><p>' + _e(r.layout) + '</p></details>'}</td><td data-label='Certification'>Unverified<small>Current identity unobserved</small></td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
+                    + f"<details><summary>Runtime evidence</summary><dl><dt>Workspace</dt><dd>{_e(r.workspace)}</dd><dt>Template</dt><dd>{_e(r.template or 'Unavailable')}</dd><dt>Ports</dt><dd>{_e(', '.join(r.published_ports) or 'Unavailable')}</dd><dt>Last denial</dt><dd>{_e(r.last_denial or 'None recorded')}</dd></dl><ul>{associations}</ul></details></td><td data-label='State'>{_e(r.state)}</td><td data-label='Certification'>Unverified<small>Current identity unobserved</small></td><td data-label='Runs'>{_e(', '.join(r.runs_using) or 'Unassociated')}</td></tr>"
                 )
             table = (
-                '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Layout</th><th>Certification</th><th>Runs</th></tr></thead><tbody>'
+                '<div class="scroll" tabindex="0" role="region" aria-label="Runtime inventory"><table class="inventory-table runtime-inventory"><thead><tr><th>Sandbox</th><th>State</th><th>Certification</th><th>Runs</th></tr></thead><tbody>'
                 + "".join(cells)
                 + "</tbody></table></div>"
             )

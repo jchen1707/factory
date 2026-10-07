@@ -93,7 +93,6 @@ def configure(args: argparse.Namespace) -> int:
                 "app_server_compatibility",
                 "certification_mode",
                 "certification_config",
-                "delegation_mode",
             )
             if getattr(args, key, None) is not None
         }
@@ -103,12 +102,10 @@ def configure(args: argparse.Namespace) -> int:
             changes["concurrency"] = (
                 None if args.concurrency == "inherit" else int(args.concurrency)
             )
-        if changes.get("delegation_mode") == "inherit":
-            changes["delegation_mode"] = None
-        for key in ("max_active_agents", "max_children_per_parent", "max_delegation_depth"):
-            value = getattr(args, key, None)
-            if value is not None:
-                changes[key] = None if value == "inherit" else int(value)
+        if args.max_active_agents is not None:
+            changes["max_active_agents"] = (
+                None if args.max_active_agents == "inherit" else int(args.max_active_agents)
+            )
         if changes:
             operator_controls.configure(
                 store,
@@ -252,12 +249,9 @@ def register(sub: argparse._SubParsersAction) -> None:
         "--app-server-compatibility", help="directory of sandbox compatibility manifests"
     )
     settings.add_argument(
-        "--delegation-mode", choices=("inherit", "disabled", "read-only", "isolated-write")
+        "--max-active-agents",
+        help="positive count or inherit; run values cannot exceed project limits",
     )
-    for option in ("--max-active-agents", "--max-children-per-parent", "--max-delegation-depth"):
-        settings.add_argument(
-            option, help="positive count or inherit; run values cannot exceed project limits"
-        )
     settings.add_argument("--certification-mode", choices=("manual", "automatic"))
     settings.add_argument(
         "--certification-config", help="host-owned certification configuration JSON"

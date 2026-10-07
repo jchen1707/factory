@@ -94,10 +94,6 @@ def resume(ctx: Context) -> bool:
         if intent is None:
             authority.current(ctx)
             metadata = invocation["metadata"]
-            if metadata.get("semantic_role") == "builder" and metadata.get("parent_id") is None:
-                from factory.workflow_delegation import parent_configuration
-
-                parent_configuration(ctx, effect.step)
             if (
                 payload["env_sha256"] != _environment(ctx)
                 or payload["head"] != repo.head_sha(ctx.worktree)
@@ -183,18 +179,10 @@ def reconcile_run(
 ) -> None:
     """Retain terminal costs before cancellation can archive/remove execution evidence."""
     from factory import accounting
-    from factory.delegation_controller import DelegationController
     from factory.runtime_jobs import RuntimeJobs
 
-    controller = DelegationController(store, home)
-    controller.service_run(run_id)
-    from factory import child_certifications, delegation_cancellation, delegation_results
-
-    delegation_cancellation.reconcile(store, sandbox, run_id)
-    delegation_results.collect(store, run_id, sandbox)
     launches = AgentLaunches(store, sandbox)
-    active = RuntimeJobs(store).active_agents(project)
-    for lease in sorted(active, key=lambda row: row["parent_id"] is None):
+    for lease in RuntimeJobs(store).active_agents(project):
         if lease["run_id"] != run_id:
             continue
         invocation = store.runtime.invocation(lease["invocation_id"])
@@ -207,18 +195,6 @@ def reconcile_run(
             is None
         ):
             continue
-        handle = launches.handle(invocation["id"])
-        if lease["parent_id"] is None and (handle.attempt_dir / handle.exit_name).exists():
-            controller.cancel_requests(invocation["id"])
-            # A paid child still requires owned signalling and terminal collection.
-            # Retain parent usage now, but never finalize it over an active subtree.
-            if any(
-                child["parent_id"] == invocation["id"] for child in active
-            ) or child_certifications.active_for_parent(store, run_id, invocation["id"]):
-                accounting.collect_invocation(
-                    store, home, invocation["id"], Path(invocation["metadata"]["events"])
-                )
-                continue
         launches.reconcile(
             invocation["id"],
             collect=partial(
@@ -229,9 +205,6 @@ def reconcile_run(
                 Path(invocation["metadata"]["events"]),
             ),
         )
-
-    delegation_cancellation.reconcile(store, sandbox, run_id)
-    delegation_results.collect(store, run_id, sandbox)
 
 
 def stop_orphans(ctx: Context) -> None:

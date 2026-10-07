@@ -34,10 +34,7 @@ def _configure(
         "app_server_compatibility",
         "certification_mode",
         "certification_config",
-        "delegation_mode",
         "max_active_agents",
-        "max_children_per_parent",
-        "max_delegation_depth",
     }
     if set(changes) - allowed:
         raise ValueError("unknown operator setting")
@@ -47,31 +44,12 @@ def _configure(
     if scope == "run" and run is None:
         raise ValueError("unknown run")
     project_settings = store.runtime.settings("project", run.project) if run else {}
-    modes = {"disabled": 0, "read-only": 1, "isolated-write": 2}
-    if "delegation_mode" in changes:
-        mode = changes["delegation_mode"]
-        if mode is not None and (not isinstance(mode, str) or mode not in modes):
-            raise ValueError("invalid delegation mode")
-        if (
-            run
-            and mode is not None
-            and modes[mode] > modes[project_settings.get("delegation_mode", "disabled")]
-        ):
-            raise ValueError("delegation mode exceeds the project capability")
-    for field, default in (
-        ("max_active_agents", 8),
-        ("max_children_per_parent", 2),
-        ("max_delegation_depth", 1),
-    ):
-        if field not in changes or changes[field] is None:
-            continue
-        value = changes[field]
+    value = changes.get("max_active_agents")
+    if value is not None:
         if type(value) is not int or value < 1:
-            raise ValueError(f"{field} must be a positive integer or inherited")
-        if field == "max_delegation_depth" and value != 1:
-            raise ValueError("only delegation depth one is supported")
-        if run and value > project_settings.get(field, default):
-            raise ValueError(f"{field} exceeds the project ceiling")
+            raise ValueError("max_active_agents must be a positive integer or inherited")
+        if run and value > project_settings.get("max_active_agents", 8):
+            raise ValueError("max_active_agents exceeds the project ceiling")
     if "certification_mode" in changes and changes["certification_mode"] not in (
         "manual",
         "automatic",
@@ -184,7 +162,6 @@ def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, 
         if run.project == project and (run_id is None or run.id == run_id)
     ]
     agents: list[dict[str, Any]] = []
-    children: list[dict[str, Any]] = []
     certifications: list[dict[str, Any]] = []
     preparations: list[dict[str, Any]] = []
     waiting: list[dict[str, Any]] = []
@@ -198,14 +175,7 @@ def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, 
         agents.extend(
             dict(row)
             for row in store.runtime.db.execute(
-                "SELECT invocation_id,parent_id,status FROM agent_leases WHERE run_id=?", (run.id,)
-            )
-        )
-        children.extend(
-            dict(row)
-            for row in store.runtime.db.execute(
-                "SELECT id,parent_id,child_id,status FROM delegation_requests WHERE run_id=?",
-                (run.id,),
+                "SELECT invocation_id,status FROM agent_leases WHERE run_id=?", (run.id,)
             )
         )
         certifications.extend(
@@ -226,27 +196,11 @@ def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, 
                     ),
                 }
             )
-        for key, value in settings.items():
-            if key.startswith("child-status:") and any(
-                child["id"] == key.removeprefix("child-status:")
-                and child["status"] in {"pending", "prepared"}
-                for child in children
-            ):
-                waiting.append(
-                    {
-                        "run_id": run.id,
-                        "child_id": key.removeprefix("child-status:"),
-                        "detail": value,
-                    }
-                )
         invocations.extend(store.runtime.invocations(run.id))
-    active_ids = {item["invocation_id"] for item in agents if item["status"] == "active"}
     terminal = {"completed", "failed", "cancelled", "suspended", "passed"}
     estimates = [(item.get("telemetry") or {}).get("estimate", {}) for item in invocations]
     complete = bool(estimates) and all(item.get("complete") is True for item in estimates)
-    complete = complete and all(
-        item["status"] in terminal for item in agents + children + certifications
-    )
+    complete = complete and all(item["status"] in terminal for item in agents + certifications)
     settings = (
         store.runtime.effective(project, run_id)
         if run_id
@@ -256,24 +210,16 @@ def _status(store: Store, project: str, run_id: str | None = None) -> dict[str, 
         "effective": {
             key: settings.get(key, default)
             for key, default in (
-                ("delegation_mode", "disabled"),
                 ("max_active_agents", 8),
-                ("max_children_per_parent", 2),
-                ("max_delegation_depth", 1),
                 ("certification_mode", "manual"),
             )
         },
         "active_agents": sum(item["status"] == "active" for item in agents),
-        "queued_children": sum(
-            item["status"] in {"pending", "prepared"} and item["child_id"] not in active_ids
-            for item in children
-        ),
         "pending_certifications": sum(
             item["status"] in {"pending", "checking"} for item in certifications
         ),
         "runtime_preparations": preparations,
         "agents": agents,
-        "children": children,
         "certifications": certifications,
         "waiting": waiting,
         "api_equivalent_estimate_usd": sum(

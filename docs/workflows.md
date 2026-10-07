@@ -3,7 +3,7 @@
 Current guidance, audited against the checked-in interfaces on 2026-09-08. These are
 operational flows, not a replacement specification or a claim that every project has
 activated optional features. Host means the factory control plane; sandbox means an
-owned build, review or child execution environment. James nodes mark human decisions.
+owned build or review execution environment. James nodes mark human decisions.
 Each diagram is also available as a rendered SVG for readers without Mermaid support.
 
 The pure [transition table](../src/factory/machine.py), [policy](../src/factory/policy.py)
@@ -150,7 +150,7 @@ flowchart TD
   R -->|recoverable exit| B[Backoff and bounded recovery]
   R -->|uncertain ownership| H[Hold for operator]
   B -->|budget exhausted| F[Failed; James reauthorizes spend]
-  J[James cancels] --> C[Host: stop owned parent and children]
+  J[James cancels] --> C[Host: stop owned agents]
   C --> K[Retain unsafe source; clean eligible resources]
   G[Operator: GC dry run] --> E[Host: ownership and retention checks]
   E -->|approved cleanup invocation| K
@@ -177,34 +177,10 @@ flowchart TD
   S --> E{Complete matching evidence?}
   E -->|no| B[Refuse launch; retain outcome]
   E -->|yes| V[Host: certify exact identity]
-  V --> L[Revalidate immediately before workflow or child launch]
+  V --> L[Revalidate immediately before workflow launch]
   C --> L
   L -->|identity changed| B
   L -->|valid| W[Admit application invocation]
-```
-
-</details>
-
-## Child delegation
-
-Delegation defaults to disabled and supports depth one. The host broker owns admission, approvals, invocation accounting and cancellation. Read-only children cannot write parent source; writable children need explicit mode and private source/dependency isolation. Integration preserves originals and conflicts, then normal verification and independent review apply.
-
-![Child delegation workflow](diagrams/delegation.svg)
-
-<details>
-<summary>Mermaid source</summary>
-
-```mermaid
-flowchart TD
-  P[Parent sandbox: child request] --> M[Protected mailbox]
-  M --> H[Host broker: policy, depth, capacity and approval]
-  H -->|refused or queued| Q[Observable reason returned to parent]
-  H -->|admitted and certified| C[Child sandbox: bounded task]
-  C --> R[Host: collect and validate result]
-  R -->|read-only| A[Return findings to parent]
-  R -->|writable| I[Host: validate scope and integration base]
-  I -->|conflict or cancellation| K[Preserve artifacts; hold integration]
-  I -->|valid| V[Integrate, verify and independently review]
 ```
 
 </details>
@@ -269,7 +245,7 @@ flowchart TD
 | Runs `/`, projects `/projects`, details `/runs/{ticket}`, timeline `/runs/{ticket}/timeline`, settings `/settings/runs/{ticket}`, runtimes `/runtimes`, configuration `/config` | [Console routes](../src/factory/console/app.py) |
 | Registry, model routing and estimate inputs | [Projects](../config/projects.toml), [models](../config/models.toml), [prices](../config/prices.toml) |
 | Recovery and approvals | [Recovery](../src/factory/recovery.py), [operator controls](../src/factory/operator_controls.py) |
-| Certification and child ownership | [Certification runner](../src/factory/certification_runner.py), [delegation controller](../src/factory/delegation_controller.py) |
+| Certification | [Certification runner](../src/factory/certification_runner.py) |
 | Boundary regression checks | [Boundary tests](../tests/unit/test_boundaries.py) |
 | Real measurements and their limits | [Acceptance inventory](runtime-acceptance-inventory.md), [documentation classification](README.md) |
 

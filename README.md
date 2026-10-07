@@ -23,7 +23,7 @@ prerequisites. `doctor --deep` performs a paid model canary.
 
 - [Workflow reference](docs/workflows.md): responsibilities, decisions and failure paths.
 - [Operator reference](docs/operator-reference.md): commands, configuration, runtimes,
-  certification, delegation, concurrency and accounting.
+  certification, concurrency and accounting.
 - [Recovery runbook](docs/runbook.md): inspect and resolve a stopped run.
 - [Documentation index](docs/README.md): current guidance, historical evidence and archived handoffs.
 - [UI alternatives](docs/ui-alternatives/index.html): approval history; James selected the dark
