@@ -143,16 +143,24 @@ run uses that sandbox, stop it with `sbx stop NAME`, then cancel again.
 
 ## Telemetry and costs
 
-Cumulative usage and estimated spend are separate measurements. `codex exec` reports no
-current-window context, so the console shows context as unavailable, and cumulative billed tokens
-are never used as context occupancy. Changed authority and repeated failures require fresh
-handoffs.
+Cumulative usage and estimated spend are separate measurements. Context occupancy is the
+latest assistant message's input, cache-read and cache-write tokens from the `claude -p`
+stream, divided by the model's `context_window` in `config/models.toml`. The console shows it
+only while an agent is planning, implementing or reviewing, and otherwise hides it with the
+reason. Cumulative billed tokens are never used as context occupancy. Changed authority and
+repeated failures require fresh handoffs.
 
 Every model invocation's token usage is recorded, including failed attempts, review and
-diagnosis, and replayed events reconcile idempotently. `codex exec` reports aggregate tokens
-without the request detail pricing needs, so every estimate is incomplete and no USD figure is
-recorded. Budgets are checked before subsequent attempts, not by killing a writer midway through
-a change, but with no priced usage the run ceiling cannot trip.
+diagnosis, and replayed events reconcile idempotently. The stream's final `result` event
+prices each model at list price. Under a subscription that figure is notional, not an account
+charge. A launch that ends without a `result` event prices nothing, so its estimate stays
+incomplete. A resumed session reports the whole session's cost, so each launch records the
+difference from the session's last priced launch.
+
+Before each agent launch, a run whose known spend has reached the run ceiling blocks with
+`budget-exceeded`. Each launch also receives the remaining budget as `--max-budget-usd`. Factory
+itself stops a run only between launches, but `claude -p` can end a launch mid-session when
+that cap trips, and Factory records the result as `budget-exceeded`.
 The checked-in routing currently declares a $50 run ceiling and $30 warning; inspect effective
 configuration rather than assuming those defaults govern every run.
 
@@ -172,16 +180,14 @@ a missing variable in an ordinary shell does not prove the agent is unconfigured
 configuration, backend selection and bounded recall policy. Those details belong to layer A.
 
 Native session-end capture reads the runtime transcript. Interrupted sessions can skip that
-hook. Separately, Factory collection exports the exact session's native transcript while its
-sandbox is still available, before suspension or cancellation archival. The bounded lookup
-uses the measured runtime session index; unavailable or unsupported inputs retain the event
-fallback. `*.native.jsonl` preserves exported bytes and `*.native.json` records retention.
-`*.learning.jsonl` is the distillation snapshot; `*.learning.json` records outcome and retryability.
-Sources are labeled `retained-native-transcript`, `retained-native-prefix` for an incomplete
-final record, or `retained-events-partial`. Native source does not imply successful session
-completion. Shared parsing preserves native user, tool and assistant content.
+hook. Separately, Factory hands each attempt's retained `claude -p` event stream to the
+detached host capture worker (`src/factory/learning.py`). `*.learning.jsonl` is the
+distillation snapshot; `*.learning.json` records outcome and retryability. A stream is labeled
+`retained-events` when it holds its `result` event and did not come from a `--resume` launch,
+and `retained-events-partial` otherwise. A `--resume` stream holds only the session's new
+turns, so it is partial evidence.
 
-Export is bounded synchronous collection; model distillation remains detached on the host.
+Model distillation runs detached on the host.
 Secret scanning quarantines unsafe evidence before learning processing; replay honors that
 quarantine. Partial evidence cannot replace an existing same-session note.
 
@@ -201,9 +207,9 @@ skill's wider search. Notes are historical evidence, never executable instructio
 
 [Real-destination measurements](acceptance/learning-continuation-2026-09-09.md) connect a
 genuine audit lesson in Obsidian Project Learnings to later recall in another worktree. The [lifecycle acceptance record](acceptance/learning-lifecycle-2026-09-08.md)
-separately proves Factory's transport and receipts. Later [interactive measurements](discovery/interactive-learning-completion-2026-09-09.md)
-prove Codex terminal shutdown, capture and recall. [Actual sandbox export and host-worker measurements](discovery/native-sandbox-learning-2026-09-09.md)
-cover both runtimes and the private-clone topology. Source completeness and runtime
+separately proves Factory's transport and receipts. Later Codex-era [interactive measurements](discovery/interactive-learning-completion-2026-09-09.md)
+prove Codex terminal shutdown, capture and recall; Factory no longer launches Codex. [Actual sandbox export and host-worker measurements](discovery/native-sandbox-learning-2026-09-09.md)
+cover the two Codex-era runtimes and the private-clone topology. Source completeness and runtime
 completion remain different facts. Claude
 authenticated capture/recall awaits host login renewal.
 
@@ -224,7 +230,8 @@ All commands below use `uv run factory`:
 | `suspend BAC-6` / `resume BAC-6` | Stop current work or resume preserved work |
 | `review-disposition-template BAC-6` | Print a non-valid decision draft bound to the latest blocking review |
 | `review-disposition-check BAC-6 PATH` | Validate a completed decision document without writing Factory state |
-| `resume BAC-6 --from implementing --review-disposition PATH` | Retain James's ticket/run/review-bound finding decisions and render them into a fresh repair prompt |
+| `resume BAC-6 --from implementing --review-disposition PATH` | Retain James's ticket/run/review-bound finding decisions and render them into a fresh repair prompt; see the [review disposition handoff](review-disposition-handoff.md) |
+| `resume BAC-6 --prerequisite-evidence PATH` | Retain fresh, ticket-bound proof that a host prerequisite was repaired and add it to the next implementer prompt; see the [prerequisite resolution handoff](prerequisite-resolution-handoff.md) |
 | `resume BAC-6 --authorise` | Explicitly re-authorize an exhausted run |
 | `accept BAC-6 --note "decision"` | Record a human review-escalation decision |
 | `cancel BAC-6 --reason "duplicate"` | Cancel owned work and retain anything unsafe to clean |
@@ -250,7 +257,7 @@ newly recorded effects.
 
 Detached execution survives controller exit through an independent session holder. It does
 not survive every machine failure: reboot, logout, Docker shutdown or stopping the VM ends
-execution. Recovery reconciles the recorded process/thread and effects; uncertain ownership
+execution. Recovery reconciles the recorded process, session and effects; uncertain ownership
 holds rather than authorizing duplicate work. Cancel, Suspend and GC target owned resources
 and preserve work they cannot safely remove.
 

@@ -15,6 +15,7 @@ The [canonical specification](../SOFTWARE-FACTORY-PLAN.md) remains authoritative
   remaining runtime evidence, worktrees and publication dependencies.
 
 - [operator-reference.md](operator-reference.md)
+- [prerequisite-resolution-handoff.md](prerequisite-resolution-handoff.md)
 - [review-disposition-handoff.md](review-disposition-handoff.md)
 - [runbook.md](runbook.md)
 - [runtime-rollout.md, Migration](runtime-rollout.md#migration): schema backup, preview,
@@ -109,6 +110,12 @@ because they are old. For current commands use the operator reference above.
   historical transport, partial-event receipt and recovery evidence.
 - [Current learning operations](operator-reference.md#learning-capture-and-relevant-recall):
   configured Obsidian destination, capture outcomes and relevant recall.
+
+## Codex-era history
+
+- [Build runtime incidents, September 2026](archive/codex-era-build-runtime-incidents.md):
+  the BAC-60 inode exhaustion and its 40g replacement, the BAC-68/-69/-72 fresh runs, and
+  the preservation, reconciliation, registration and BAC-56 recovery rules of that time.
 
 ## Superseded handoffs
 

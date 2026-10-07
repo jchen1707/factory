@@ -931,8 +931,8 @@ adds no accounting evidence and does not establish sustained capacity or deliver
 James authorized reuse of FRO tickets for load/accounting measurement. Completed a bounded
 real workload using frozen FRO-12/13/14/15 descriptions: four independent source/requirement
 analyses, not ticket implementation or delivery. Linear states/labels remained unchanged.
-Deployed code `fd1f44e` and target `16cab7e` remain unchanged. Evidence and detailed limits:
-[runtime-fro-load-capacity-accounting.md](runtime-fro-load-capacity-accounting.md).
+Deployed code `fd1f44e` and target `16cab7e` remain unchanged. Evidence and detailed limits
+were written to `runtime-fro-load-capacity-accounting.md`, which was never committed to `main`.
 
 - Four new isolated production-spec sandbox identities each passed all six automatic checks.
 - Four real Sol/high application turns overlapped for 50.96 seconds, measured from captured

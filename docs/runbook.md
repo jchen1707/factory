@@ -200,6 +200,11 @@ is merged by the factory, and that is a unit-tested invariant
   `factory resume <TICKET> --from implementing --review-disposition PATH`. Factory refuses an
   incomplete or stale finding set and renders an intact audited copy into the fresh repair
   prompt. This is not finding acceptance, delivery approval or an external-effect grant.
+- **The worker blocked on a host prerequisite that has since been repaired:** recheck it, write
+  the fresh ticket-bound JSON described in
+  [Prerequisite resolution handoff](prerequisite-resolution-handoff.md), then use
+  `factory resume <TICKET> --prerequisite-evidence PATH`. The evidence adds prompt text only.
+  It satisfies no gate, and Factory never runs the command it records.
 
 ## The daemon did nothing / is not running
 
