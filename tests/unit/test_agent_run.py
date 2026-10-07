@@ -134,6 +134,7 @@ def test_invocation_caps_the_budget_at_what_the_run_has_left(tmp_path: Path) -> 
         store=SimpleNamespace(known_spend=lambda run_id: 37.5),
         run=SimpleNamespace(id="r"),
         env={"UV_PROJECT_ENVIRONMENT": "/home/agent/venvs/p"},
+        target_plugins=(),
     )
     routed = SimpleNamespace(model="claude-opus-5-5", effort="medium", max_turns=200)
     inv = agent_run.invocation(
@@ -159,6 +160,7 @@ def test_an_effort_routing_knows_but_the_cli_does_not_blocks_rather_than_crashin
         store=SimpleNamespace(known_spend=lambda run_id: 0.0),
         run=SimpleNamespace(id="r"),
         env={},
+        target_plugins=(),
     )
     routed = SimpleNamespace(model="claude-opus-5-5", effort="ultra", max_turns=200)
     with pytest.raises(Blocked) as caught:

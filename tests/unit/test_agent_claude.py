@@ -75,6 +75,7 @@ VALUE_FLAGS = frozenset(
         "--permission-prompts",
         "--permission-mode",
         "--plugin-dir",
+        "--settings",
         "--json-schema",
         "--tools",
         "--allowedTools",
@@ -228,6 +229,24 @@ def test_argv_resume_without_effort_with_plugins_is_exact() -> None:
     ]
     assert "--session-id" not in args
     assert "--effort" not in args
+
+
+def test_a_target_enabled_plugin_is_switched_off_on_the_launch() -> None:
+    inv = replace(
+        invocation(plugins=TWO_PLUGINS[:1]),
+        disabled_plugins=("mattpocock-skills@claude-plugins-official", "pstack@pstack-claude"),
+    )
+    args = claude.argv(inv)
+
+    settings = json.loads(args[args.index("--settings") + 1])
+    assert settings == {
+        "enabledPlugins": {
+            "mattpocock-skills@claude-plugins-official": False,
+            "pstack@pstack-claude": False,
+        }
+    }
+    assert args.index("--settings") > args.index("--plugin-dir")
+    assert "--settings" not in claude.argv(invocation())
 
 
 @pytest.mark.parametrize("inv", VARIANTS, ids=variant_id)

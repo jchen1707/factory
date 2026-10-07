@@ -76,6 +76,10 @@ class Invocation:
     schema: Mapping[str, object]
     env: Mapping[str, str] = MappingProxyType({})
     plugins: tuple[PluginRef, ...] = ()
+    #: Plugins the target's own `.claude/settings.json` enables, switched off for this
+    #: launch: `--setting-sources project` loads them otherwise (measured), and only the
+    #: declared doctrine may load.
+    disabled_plugins: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         forbidden = [key for key in self.env if overrides_cli(key)]
@@ -130,6 +134,10 @@ def _schema_json(schema: Mapping[str, object]) -> str:
     )
 
 
+def _disabled(plugins: tuple[str, ...]) -> str:
+    return json.dumps({"enabledPlugins": dict.fromkeys(plugins, False)}, separators=(",", ":"))
+
+
 def argv(inv: Invocation) -> list[str]:
     """The `claude` argv. The prompt arrives on stdin, so nothing here is positional.
 
@@ -159,6 +167,7 @@ def argv(inv: Invocation) -> list[str]:
         "--permission-mode",
         PERMISSION_MODE,
         *(arg for plugin in inv.plugins for arg in ("--plugin-dir", str(plugin.path))),
+        *(["--settings", _disabled(inv.disabled_plugins)] if inv.disabled_plugins else []),
         "--json-schema",
         _schema_json(inv.schema),
         "--tools",

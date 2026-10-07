@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, assert_never, cast
 
 from factory import artifacts
 from factory.agent import stream
-from factory.agent.claude import AttemptFiles, Effort, Invocation, Role
+from factory.agent.claude import AttemptFiles, Effort, Invocation, PluginRef, Role
 from factory.agent.stream import (
     Completed,
     Expected,
@@ -109,6 +109,7 @@ def invocation(
     schema: Mapping[str, object],
     session: SessionId,
     resume: bool,
+    plugins: tuple[PluginRef, ...] = (),
 ) -> Invocation:
     remaining = ctx.routing.usd_per_run - ctx.store.known_spend(ctx.run.id)
     try:
@@ -123,6 +124,8 @@ def invocation(
             files=files,
             schema=schema,
             env=ctx.env,
+            plugins=plugins,
+            disabled_plugins=ctx.target_plugins,
         )
     except ValueError as exc:
         raise Blocked("launch-invalid", str(exc)) from exc
