@@ -18,7 +18,7 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from factory.policy import assert_factory_sandbox, assert_no_skip_verify, capability_secrets
 from factory.sandbox.base import (
@@ -137,6 +137,13 @@ def exec_argv(
         out += ["-e", f"{key}={value}"]
     out += [name, *argv]
     return out
+
+
+def _open_no_follow(path: Path) -> TextIO:
+    """Open for writing without following a link: the sandbox can write the attempt
+    directory too, and a link it planted would aim this host write anywhere."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    return os.fdopen(os.open(path, flags, 0o644), "w", encoding="utf-8")
 
 
 def holder_pid(attempt_dir: Path) -> int | None:
@@ -418,7 +425,7 @@ class SbxAdapter:
         from contextlib import ExitStack
 
         with ExitStack() as files:
-            stderr_file = files.enter_context(stderr_path.open("w", encoding="utf-8"))
+            stderr_file = files.enter_context(_open_no_follow(stderr_path))
             stdout_file = (
                 files.enter_context(stdout_path.open("x", encoding="utf-8"))
                 if stdout_path is not None
@@ -432,7 +439,8 @@ class SbxAdapter:
                 start_new_session=True,
             )
         self._detached[handle.sandbox] = process
-        (handle.attempt_dir / SBX_EXEC_PID).write_text(f"{process.pid}\n", encoding="utf-8")
+        with _open_no_follow(handle.attempt_dir / SBX_EXEC_PID) as pid_file:
+            pid_file.write(f"{process.pid}\n")
 
         # "Started" is the heartbeat appearing, not the call returning — the wrapper
         # writes its first beat before the agent is reached. A process that has

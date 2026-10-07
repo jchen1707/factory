@@ -336,8 +336,13 @@ def _launch_next(
         axis.setdefault("history", []).append(
             {key: value for key, value in axis.items() if key not in {"history", "prompt_text"}}
         )
-    attempt_dir = AttemptDir(scratch / "run" / str(ctx.run.attempt) / launch.replace(":", "-"))
-    attempt_dir.root.mkdir(parents=True, exist_ok=True)
+    attempt_dir = AttemptDir(scratch / launch.replace(":", "-"))
+    # The reviewer can write the scratch and every launch key is predictable, so a
+    # directory already there was planted. The mount root itself cannot be replaced.
+    try:
+        attempt_dir.root.mkdir()
+    except FileExistsError as exc:
+        raise Blocked("review-scratch-tampered", str(exc)) from exc
     entry, invocation = _axis_entry(
         ctx,
         ctx.state_dir / "review",
@@ -420,7 +425,8 @@ def _axis_entry(
         prompt += f"Candidate worktree: {ctx.worktree}\nPolicy: {json.dumps(snapshot)}\n"
     out_path = review_dir / f"review-{label}.json"
     files = _axis_files(attempt_dir, out_path)
-    files.prompt.write_text(prompt, encoding="utf-8")
+    with files.prompt.open("x", encoding="utf-8") as handle:
+        handle.write(prompt)
     from factory import accounting, execution
 
     role = execution.role_for(ctx, "reviewer")
@@ -608,6 +614,8 @@ def _land(scratch_out: Path, out_path: Path) -> None:
     directory, where the evidence belongs. The event stream and stderr both come home
     this way; a missing file is silent, because an axis that never started has nothing
     to land and the stream reader is what judges that."""
+    if scratch_out.is_symlink():
+        raise Blocked("review-scratch-tampered", f"{scratch_out} is a link")
     if scratch_out.exists():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(scratch_out), out_path)

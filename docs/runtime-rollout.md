@@ -286,6 +286,8 @@ mount is `state/review/<review_sandbox>-<run id>`. A run that is reviewing when 
 finishes its current axis in the old sandbox and launches the next axis in its own. The
 registry's per-project `factory-review-*` sandbox is then unused. `factory gc` ages it by
 the whole project's last activity, so remove it with `sbx rm` once no run is reviewing.
+Also remove every per-run `factory-review-*-<run id>` sandbox created before this change.
+Its writable mount moved, so `ensure` refuses it at the run's next review launch.
 
 Before it applies any step, `--apply` refuses with `migration-live-work` while a retired
 subsystem still owns live work, and names each item. Live work is any of these:
