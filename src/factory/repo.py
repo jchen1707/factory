@@ -517,7 +517,7 @@ def is_clean(worktree: Path) -> bool:
 
 #: The files git leaves behind while an operation is half-finished. `git status` reports
 #: a tree mid-rebase as merely dirty, and §16.3's resume condition is not "clean" — it is
-#: "no uncommitted merge/rebase state", because resuming a Codex session into a tree with
+#: "no uncommitted merge/rebase state", because resuming an agent session into a tree with
 #: conflict markers in it hands the model a repository it did not leave.
 #:
 #: Only the marker filenames are written out; the operation's name is derived from the

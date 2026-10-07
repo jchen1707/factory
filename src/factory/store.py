@@ -30,7 +30,7 @@ from factory.runtime_state import RuntimeState
 
 __all__ = ["Effect", "Run", "Store", "marker", "new_run_id", "owner_token"]
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 #: The schema version at which `_LIVE_RUN_INDEX` was last built. An existing database
 #: keeps the index it was created with, so **changing `machine.TERMINAL` means bumping
@@ -108,6 +108,10 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     7: RETRY_SCHEMA,
     8: ("DROP TABLE delegation_requests",),
     9: ("DROP TABLE runtime_certifications", "ALTER TABLE agent_leases DROP COLUMN parent_id"),
+    # Every session id recorded before this version is a Codex thread id, which
+    # `claude --resume` cannot open. Null, so recovery restarts those attempts instead
+    # of spending a rung on `session-lost`.
+    10: ("UPDATE attempts SET session_id = NULL",),
 }
 
 #: A step that retires a subsystem refuses while that subsystem still owns live work,
@@ -128,6 +132,12 @@ _LIVE_WORK: dict[int, tuple[str, str]] = {
         "OR (json_extract(i.metadata,'$.adapter')='app-server' AND EXISTS (SELECT 1 FROM effects e "
         "WHERE e.step=i.id AND e.system='agent-preparation' AND e.status='intended')))",
         "child, certification or app-server invocations",
+    ),
+    10: (
+        "SELECT group_concat(i.id, ', ') FROM invocations i JOIN runs r ON r.id=i.run_id "  # noqa: S608 - states from TERMINAL
+        f"WHERE r.state NOT IN ({', '.join(chr(39) + str(s) + chr(39) for s in sorted(TERMINAL))}) "
+        "AND json_extract(i.metadata,'$.expected') IS NULL",
+        "agent invocations launched before the Claude cutover",
     ),
 }
 
@@ -804,10 +814,10 @@ class Store:
         return int(row["n"]) if row else 0
 
     def set_session_id(self, run_id: str, attempt: int, state: State, session_id: str) -> None:
-        """Stored before the run is considered started, so a crash can resume by id.
+        """Pinned before the launch, so a crash at any later point can resume by id.
 
-        Never `codex exec resume --last`: on a machine running several tickets that
-        picks "the most recent recorded session", which is a coin flip (§16.3).
+        Never `--continue`: on a machine running several tickets that picks "the most
+        recent session", which is a coin flip (§16.3).
         """
         self._conn.execute(
             "UPDATE attempts SET session_id = ? WHERE run_id = ? AND attempt = ? AND state = ?",

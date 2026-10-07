@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -40,7 +39,6 @@ from factory import (
     review_disposition,
 )
 from factory.agent.base import SchemaInvalid, SchemaUnsupported, validate_against_schema
-from factory.agent.codex import CodexAdapter
 from factory.console import views as console_views
 from factory.delivery import forge as forge_dispatch
 from factory.execution import AgentApprovalRequired, ProjectQueued
@@ -307,7 +305,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         store=store,
         linear=linear,
         sandbox=SbxAdapter(),
-        agent=CodexAdapter(),
         project=project,
         run=store.run_by_id(run.id) or run,
         issue=issue,
@@ -337,8 +334,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         ctx.store.release_lease(ctx.run.id)
         return 1
 
-    codex_stanzas_before = _codex_project_stanzas()
-
     # The same loop the daemon runs, with `follow` on: `factory run` stays with the run
     # instead of coming back next tick. It is not a second execution model — which is
     # what buys it `reap`'s orphan detection and kill-grace, neither of which the old
@@ -350,7 +345,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         _report(ctx)
         return 2
     finally:
-        _assert_codex_config_untouched(codex_stanzas_before)
         ctx.store.release_lease(ctx.run.id)
 
     if result.outcome is driver.Outcome.STOPPED and ctx.state is State.BLOCKED:
@@ -547,7 +541,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
 
 #: How a run row becomes a `Context`. Injectable for exactly one reason: §21.3 requires
 #: the whole state machine to run in-process against fakes, and the default builds the
-#: real `sbx` and `codex` adapters. Nothing in production passes anything else.
+#: real `sbx` adapter. Nothing in production passes anything else.
 ContextFactory = Callable[[Run], Context]
 
 
@@ -629,7 +623,6 @@ def _context_for(
         store=store,
         linear=linear,
         sandbox=SbxAdapter(),
-        agent=CodexAdapter(),
         project=project,
         run=run,
         issue=linear.issue(run.linear_id),
@@ -1197,25 +1190,6 @@ def _cancel_run(
     if any(row["run_id"] == run.id for row in RuntimeJobs(store).active_agents(project.name)):
         raise Blocked(
             "cancellation-stop-unverified", "Owned agents still need terminal reconciliation"
-        )
-
-    # Native rollouts live in the runtime home, outside every archive/worktree mount.
-    # Retain them before either archive or sandbox teardown, even without an exit file.
-    from factory import learning
-    from factory.agent_launches import AgentLaunches
-
-    harness = load_harness_config(project.path)
-    environment = {key: value.replace("{run}", run.id) for key, value in project.env.items()}
-    for invocation in store.runtime.invocations(run.id):
-        events = invocation.get("metadata", {}).get("events")
-        if not isinstance(events, str) or not Path(events).is_file():
-            continue
-        try:
-            handle = AgentLaunches(store, sbx).handle(invocation["id"])
-        except (ValueError, KeyError):
-            continue
-        learning.retain(
-            sbx, handle.sandbox, environment, Path(events), extra_names=harness.secret_vars
         )
 
     for path in paths:
@@ -1923,7 +1897,7 @@ def dispatch_control(
 
     `context_factory` is the same injection seam `tick_once` carries, and for the same
     reason: §21.3 requires the whole state machine to run in-process against fakes, and a
-    control that always built the real `sbx` and `codex` adapters could not be tested
+    control that always built the real `sbx` adapter could not be tested
     without a Docker login. Nothing in production passes it.
     """
     if action not in _CONTROLS:
@@ -2066,33 +2040,6 @@ def _open_pr_heads(repo_path: Path) -> tuple[str, ...]:
         return tuple(row["headRefName"] for row in json.loads(proc.stdout or "[]"))
     except json.JSONDecodeError:
         return ()
-
-
-def _codex_project_stanzas() -> int:
-    """How many `[projects."…"]` stanzas `~/.codex/config.toml` holds.
-
-    With `approval_policy = 'never'`, `codex exec` silently appends one for a directory
-    it has not seen before. Worktree runs did not add any during discovery, because the
-    parent repo is already trusted — but one per worktree would grow the file without
-    bound under an unattended factory, so the count is asserted rather than assumed.
-    The factory reads this file and never writes it.
-    """
-    path = Path.home() / ".codex" / "config.toml"
-    if not path.exists():
-        return 0
-    return len(re.findall(r"^\[projects\.", path.read_text(), flags=re.MULTILINE))
-
-
-def _assert_codex_config_untouched(before: int) -> None:
-    after = _codex_project_stanzas()
-    if after != before:
-        print(
-            f"\nWARNING: ~/.codex/config.toml gained {after - before} [projects] stanza(s) "
-            "during this run. Codex writes one for a directory it has not seen before. "
-            "An agent must never edit that file — remove the stanza by hand if it is "
-            "unwanted.",
-            file=sys.stderr,
-        )
 
 
 def build_parser() -> argparse.ArgumentParser:

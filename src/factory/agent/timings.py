@@ -4,9 +4,9 @@ attempt's `events.jsonl` with an `observed_at` wall clock as it appears, writing
 `read_tool_calls` pairs a call's `item.completed` with its `item.started` (by item `id`) to
 defend a per-call `duration_s` it could not show in Phase 1.
 
-Why a host tailer and not an in-sandbox stampler. The codex wrapper redirects codex's
+Why a host tailer and not an in-sandbox stampler. The agent wrapper redirects the agent's
 stdout straight to `events.jsonl`, and `detached_shell_script`'s `code=$?` *is* the exit
-protocol `poll`/`reap` rely on (§4.2). Piping codex through a shell stampler would break
+protocol `poll`/`reap` rely on (§4.2). Piping the agent through a shell stampler would break
 that capture, and the `awk`/`/bin/sh` dialect differs between the macOS host and the Linux
 sandbox the wrapper runs in. A host-side Python tailer reads the same file — the attempt
 directory's path is identical on host and VM (RunHandle, §8.5), which is already what makes

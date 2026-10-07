@@ -165,10 +165,10 @@ class AttemptDir:
     def stderr(self) -> Path:
         """Captured separately from `events.jsonl`, and that is not a detail.
 
-        P0-7 measured two things at once: a hook denial never reaches the JSON stream
-        (it is a stderr line from `codex_core::tools::router`), and folding stderr into
-        the same file with `2>&1` would put non-JSON lines into a JSONL parser. So the
-        streams are split: one is evidence, the other is data.
+        The CLI's own refusals arrive on stderr and nowhere else (`Session ID ... is
+        already in use`, a rejected `--json-schema`), and folding stderr into the same
+        file with `2>&1` would put non-JSON lines into a JSONL parser. So the streams are
+        split: one is evidence, the other is data, and `stream.classify` reads both.
         """
         return self.root / "stderr.log"
 

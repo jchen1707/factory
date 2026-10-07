@@ -198,13 +198,15 @@ reviewer sandbox and delivery; Phase 4 adds the poller, `gc` and the console.
 
 Four measured findings are load-bearing in the code and must not be "simplified":
 
-- `--dangerously-bypass-hook-trust` on every `codex exec`. Without it, at a worktree
-  path, the enforcement layer is not merely inert — it is invisible. A protected-path
-  edit succeeded at exit 0, in silence (`docs/discovery/p0-6-codex-trust.md`).
-- The `implement` skill is **inlined**, not invoked. Codex removes a skill marked
-  `allow_implicit_invocation: false` from the catalog entirely, so no prompt reaches it
-  and `codex exec` does not expand a leading `/skill` either
-  (`docs/discovery/p0-15-skills.md`).
+- The session id is minted on the host and pinned on the attempt row in the transaction
+  that prepares the launch (`--session-id`). A relaunch never replays it: the CLI refuses
+  a replayed id as "already in use" and the wrapper's `>` would truncate the stream. A
+  resume is `--resume <id>` into a new attempt directory, and only when the previous
+  attempt's stream holds an `init` event (`agent_run.resumable_session`); a session the
+  CLI never opened restarts fresh. Measured in `claude-adapter/synthesis.md` (d, h).
+- The `implement` skill is **inlined**, not invoked. The sandbox loads no skill store
+  (`--setting-sources project`, no plugin directory), so the prompt is the only text the
+  builder can follow, and the record hashes exactly that text.
 - `start_new_session=True` on `exec_detached`'s `Popen`. It reads like tidiness and it
   is the entire durability guarantee: the sandbox lives as long as that session, and
   without its own session the holder dies with the factory's process group

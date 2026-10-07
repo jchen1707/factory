@@ -50,9 +50,9 @@ def detached_shell_script(
     `body` is interpolated raw — the caller `shlex.quote`s every path and argv it
     names — so this function never has to guess what needs quoting.
 
-    Every detached step runs through here — the codex wrapper
-    (`agent/codex.py:wrapper_script`) for plan/implement/review, and the verify gate
-    report — so the heartbeat/exit protocol has one copy.
+    Every detached step runs through here — the agent wrapper (`agent/claude.py:script`)
+    for plan/implement/review, and the verify gate report — so the heartbeat/exit
+    protocol has one copy.
 
     `pgid_path` extends that protocol with the body's **in-VM process group id**, and it
     is what makes two concurrent runs in one sandbox safe to stop independently. Without
@@ -65,8 +65,8 @@ def detached_shell_script(
     tell it from a real one.
 
     A process group is exact where a process name is not, and it is a *group* rather than
-    the single pid `$!` would give because a body may be compound: `steps/review.py`
-    passes one codex block per axis, so there is no single pid to name. `setsid` puts the
+    the single pid `$!` would give because a body may be compound, and because a group
+    also reaches whatever the body spawned. `setsid` puts the
     whole body in a fresh session — measured present at `/usr/bin/setsid`, with `--wait`,
     in the stock image on 2026-09-02 — and the group leader publishes its own `$$`, which
     is the pgid however `setsid` chose to fork. `kill -TERM -<pgid>` then reaches the body
@@ -245,7 +245,7 @@ class SandboxAdapter(Protocol):
         stdin: str | None = None,
     ) -> Completed: ...
 
-    def kill_agent(self, name: str, proc: str = "codex") -> None: ...
+    def kill_agent(self, name: str, proc: str = "claude") -> None: ...
 
     def kill_group(self, name: str, pgid: int) -> None: ...
 

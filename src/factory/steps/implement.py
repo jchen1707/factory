@@ -6,11 +6,9 @@ filesystem. If the control plane dies at any moment, the next tick reads SQLite,
 the attempt, and learns what happened by looking at `heartbeat`, `exit` and
 `events.jsonl`.
 
-The prompt inlines `implement`'s SKILL.md rather than naming it. P0-15 measured why:
-Codex treats `policy: allow_implicit_invocation: false` as *remove from the catalog*,
-not *the model may not invoke it*, so no prompt reaches `/implement` — not by name, not
-as a slash command, which `codex exec` does not expand anyway. The other six skills are
-reachable and are named normally.
+The prompt inlines `implement`'s SKILL.md rather than naming it: the sandbox loads no
+skill store (`--setting-sources project`, no plugin directory), so the only text the
+builder can follow is the text the prompt carries, and the record hashes exactly that.
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ from typing import Any
 
 from factory import (
     accounting,
+    agent_run,
     artifacts,
     authority,
     candidate_handoff,
@@ -31,26 +30,19 @@ from factory import (
     policy,
     workflow_launches,
 )
-from factory.agent.base import (
-    AgentInvocation,
-    SchemaInvalid,
-    Transcript,
-    validate_against_schema,
-)
-from factory.agent.codex import TranscriptError
+from factory.agent import claude, stream
+from factory.agent.base import SchemaInvalid, validate_against_schema
+from factory.agent.claude import StructuredOutputMissing
+from factory.agent.stream import SessionId
 from factory.artifacts import AttemptDir
-from factory.machine import AUTOMATIC, Blocked, Resumable, State
+from factory.machine import AUTOMATIC, Blocked, State
+from factory.registry import IMPLEMENT_SKILL
 from factory.sandbox.base import RunHandle
-from factory.steps import Context, advance
+from factory.steps import Context, advance, attempt_files
 
-__all__ = ["build_prompt", "collect", "start"]
+__all__ = ["IMPLEMENT_SKILL", "build_prompt", "collect", "start"]
 
 STEP = "implement"
-
-#: The skill the workflow names, and the one Codex cannot be asked for. Read at run
-#: time and hashed into the evidence, so the record names the exact text that drove the
-#: run rather than a skill name that could mean anything.
-IMPLEMENT_SKILL = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
 
 
 def start(
@@ -64,9 +56,9 @@ def start(
 
     `None` means a dry run, which walks the states and executes nothing.
 
-    `resume_session` is §16.3's resume branch: the same worktree, the same attempt
-    directory shape, and `codex exec resume <id>` instead of a fresh `codex exec`. Never
-    `--last` — on a machine running several tickets that picks a session at random.
+    `resume_session` is §16.3's resume branch: `--resume <id>` into the session the
+    previous attempt pinned, in a new attempt directory. The caller found the id through
+    `agent_run.resumable_session`, so its stream holds an `init` event.
     `continuation` is the ladder's rung-2 addition: what the previous attempt already
     changed and how it failed, which is the only thing that makes a second attempt
     different from the first.
@@ -88,37 +80,30 @@ def start(
 
     prompt, skill_sha = build_prompt(ctx, continuation=continuation)
     schema_source = _schema_path(ctx)
-
-    invocation = AgentInvocation(
-        model=role.model,
-        effort=role.effort,
-        workdir=str(worktree),
-        prompt_path=attempt_dir.prompt,
-        schema_path=attempt_dir.schema,
-        output_path=attempt_dir.last_message,
-        events_path=attempt_dir.events,
-        stderr_path=attempt_dir.stderr,
-        exit_path=attempt_dir.exit_file,
-        heartbeat_path=attempt_dir.heartbeat,
-        pgid_path=attempt_dir.pgid_file,
-        vault_directory=str(ctx.registry.vault.path),
-        env=ctx.env,
-        resume_session=resume_session,
-    )
+    session = SessionId(resume_session) if resume_session else claude.new_session()
 
     attempt_dir.prompt.write_text(prompt, encoding="utf-8")
     shutil.copyfile(schema_source, attempt_dir.schema)
+    invocation = agent_run.invocation(
+        ctx,
+        role=claude.Role.BUILDER,
+        routed=role,
+        files=attempt_files(State.IMPLEMENTING, attempt_dir.root),
+        schema=json.loads(attempt_dir.schema.read_text(encoding="utf-8")),
+        session=session,
+        resume=resume_session is not None,
+    )
     artifacts.write_json(
         attempt_dir.request,
         {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "run_id": ctx.run.id,
             "ticket": ctx.run.linear_id,
             "attempt": attempt,
             "role": role.name,
             "model": role.model,
             "effort": role.effort,
-            "argv": list(ctx.agent.command(invocation)),
+            "argv": claude.argv(invocation),
             "implement_skill_sha256": skill_sha,
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
             "schema_sha256": artifacts.sha256_of(attempt_dir.schema),
@@ -136,6 +121,9 @@ def start(
             sandbox=ctx.project.build_sandbox,
             artifact_dir=str(attempt_dir.root),
         )
+        # Pinned before the launch, in the transaction that records it: a crash at any
+        # later point leaves a row that names the session the frozen script will open.
+        ctx.store.set_session_id(ctx.run.id, attempt, State.IMPLEMENTING, session)
         ctx.refresh()
         # The hop into `implementing` is recorded once, by whoever put the run here. From
         # `worktree_ready`/`planning`/`suspended`/`blocked`/`resumable` that is this `start`; from
@@ -153,16 +141,26 @@ def start(
             workdir=str(worktree),
             attempt_dir=attempt_dir.root,
         )
-        identifier = accounting.begin(ctx, attempt, role, STEP, attempt_dir.events)
-        script = ctx.agent.wrapper_script(invocation)
+        identifier = accounting.begin(
+            ctx,
+            attempt,
+            role,
+            STEP,
+            attempt_dir.events,
+            extra_metadata={
+                "expected": agent_run.expected_json(invocation),
+                "resume": resume_session is not None,
+            },
+        )
         inputs: tuple[Path, ...] = (attempt_dir.prompt, attempt_dir.schema, attempt_dir.request)
-        workflow_launches.prepare(ctx, identifier, handle, script, inputs=inputs)
+        workflow_launches.prepare(ctx, identifier, handle, claude.script(invocation), inputs=inputs)
     workflow_launches.resume(ctx)
     ctx.log(
         "implement.started",
         sandbox=handle.sandbox,
         model=role.model,
         effort=role.effort,
+        session=session,
         resumed=bool(resume_session),
     )
     return attempt_dir, handle
@@ -208,40 +206,6 @@ def _read_vault_snapshot(ctx: Context, attempt_dir: AttemptDir) -> dict[str, tup
     }
 
 
-def capture_session_id(
-    ctx: Context, attempt_dir: AttemptDir, attempt: int, state: State = State.IMPLEMENTING
-) -> None:
-    """Store the session id before the run is considered started (§16.3).
-
-    Parsed from `thread.started`, which P0-7 confirmed carries `thread_id` and nothing
-    else. Never `codex exec resume --last`: with several tickets on one machine that
-    picks a session at random.
-
-    Called from two places, and the second one is why this is not private: the
-    foreground watch loop below, and `reap` on every tick that finds the attempt still
-    running. Under the daemon the foreground loop does not exist, so without the reap
-    call the column stays NULL for the whole of `implementing` — and `recovery` reads
-    it, finds nothing, and restarts a session it could have resumed.
-    """
-    if ctx.store.session_id(ctx.run.id, attempt, state):
-        return
-    if not attempt_dir.events.exists():
-        return
-    first = [
-        line
-        for line in attempt_dir.events.read_text(errors="replace").splitlines()
-        if '"thread.started"' in line
-    ][:1]
-    if not first:
-        return
-    try:
-        event = json.loads(first[0])
-    except json.JSONDecodeError:
-        return
-    if event.get("type") == "thread.started" and event.get("thread_id"):
-        ctx.store.set_session_id(ctx.run.id, attempt, state, str(event["thread_id"]))
-
-
 def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     """Read the attempt back off the filesystem and decide what it proved.
 
@@ -263,33 +227,17 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
     # append-only tables are not written twice, because two cost rows for one model
     # call is a spend report that is quietly wrong.
     recorded = _already_recorded(ctx, attempt)
-    try:
-        transcript = ctx.agent.read_transcript(attempt_dir.events, attempt_dir.stderr)
-    except TranscriptError as exc:
-        ctx.store.finish_attempt(
-            ctx.run.id, attempt, State.IMPLEMENTING, exit_code=exit_code, outcome="truncated"
-        )
-        raise Resumable("transcript-truncated", str(exc)) from exc
-
-    if transcript.session_id:
-        ctx.store.set_session_id(ctx.run.id, attempt, State.IMPLEMENTING, transcript.session_id)
-
-    if not recorded:
-        _record_evidence(ctx, attempt_dir, attempt, transcript)
-
     _check_vault(ctx, attempt, vault_before)
+    run = agent_run.conclude(
+        ctx,
+        attempt=attempt,
+        state=State.IMPLEMENTING,
+        invocation_id=accounting.key(ctx, attempt, STEP),
+        files=attempt_files(State.IMPLEMENTING, attempt_dir.root),
+        record=not recorded,
+    )
 
-    if transcript.failed or exit_code not in (0,):
-        ctx.store.finish_attempt(
-            ctx.run.id, attempt, State.IMPLEMENTING, exit_code=exit_code, outcome="failed"
-        )
-        tail = artifacts.tail_lines(attempt_dir.stderr, 40)
-        raise Resumable(
-            "agent-failed",
-            f"exit {exit_code}; {transcript.failure or 'no turn.failed event'}\n{tail}",
-        )
-
-    result = _validated_result(ctx, attempt_dir, attempt, recorded=recorded)
+    result = _validated_result(ctx, run, attempt_dir, attempt, recorded=recorded)
     artifacts.write_manifest(attempt_dir.root, produced_by=str(State.IMPLEMENTING))
     ctx.store.finish_attempt(
         ctx.run.id,
@@ -297,7 +245,6 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         State.IMPLEMENTING,
         exit_code=exit_code,
         outcome=str(result.get("status")),
-        session_id=transcript.session_id,
     )
 
     if result.get("status") == "blocked":
@@ -309,8 +256,8 @@ def collect(ctx: Context, attempt_dir: AttemptDir, attempt: int) -> None:
         files=len(result.get("files_changed", [])),
         tests=len(result.get("tests_added", [])),
         behaviour_changed=result.get("behaviour_changed"),
-        tokens_in=transcript.usage.input_tokens,
-        tokens_out=transcript.usage.output_tokens,
+        notional_usd=run.notional_usd,
+        context_tokens=run.context_tokens,
     )
     advance(ctx, State.VERIFYING)
 
@@ -320,47 +267,18 @@ def _already_recorded(ctx: Context, attempt: int) -> bool:
     return row is not None and row["ended_at"] is not None
 
 
-def _record_evidence(
-    ctx: Context, attempt_dir: AttemptDir, attempt: int, transcript: Transcript
-) -> None:
-    if ctx.store.runtime.invocation(accounting.key(ctx, attempt, STEP)) is None:
-        # Pre-upgrade attempts have no invocation record. Preserve only their retained
-        # aggregate evidence; new invocations are reconciled by accounting.collect.
-        ctx.store.reconcile_cost(
-            ctx.run.id,
-            attempt,
-            STEP,
-            model=None,
-            input_tokens=transcript.usage.input_tokens,
-            output_tokens=transcript.usage.output_tokens,
-            cached_tokens=transcript.usage.cached_input_tokens,
-            usd=None,
-        )
-
-    if transcript.hook_denials:
-        # Not a failure on its own — a refused write is enforcement working — but it
-        # never reaches the JSON stream, so without this the evidence would show a
-        # clean run for a turn that was blocked.
-        ctx.store.record_check(
-            ctx.run.id,
-            attempt,
-            "hook_denials",
-            "fail",
-            detail="\n".join(transcript.hook_denials)[:2000],
-        )
-        ctx.log("implement.hook-denied", level="warning", count=len(transcript.hook_denials))
-
-
 def _validated_result(
-    ctx: Context, attempt_dir: AttemptDir, attempt: int, *, recorded: bool = False
+    ctx: Context, run: stream.Run, attempt_dir: AttemptDir, attempt: int, *, recorded: bool = False
 ) -> dict[str, Any]:
-    """Schema-valid or the state does not advance. F6 — the raw file is kept either way."""
-    if not attempt_dir.last_message.exists():
-        raise Blocked("schema-invalid", "the agent wrote no last-message.json")
+    """Schema-valid or the state does not advance. F6 — the raw file is kept either way.
+
+    A schema the model cannot satisfy ends `success` with `structured_output: null`; the
+    first check is that case.
+    """
     try:
-        payload = json.loads(attempt_dir.last_message.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise Blocked("schema-invalid", f"last-message.json is not JSON: {exc}") from exc
+        payload = claude.materialize_final(run, attempt_dir.last_message)
+    except StructuredOutputMissing as exc:
+        raise Blocked("schema-invalid", "the agent returned no structured output") from exc
 
     schema = json.loads(_schema_path(ctx).read_text(encoding="utf-8"))
     try:
@@ -482,17 +400,12 @@ def build_prompt(ctx: Context, *, continuation: str | None = None) -> tuple[str,
         "## The workflow you are running",
         "",
         "The text below is the `implement` skill, inlined verbatim. It is inlined rather",
-        "than invoked because Codex removes a skill marked `allow_implicit_invocation:",
-        "false` from the catalog entirely, so no prompt can reach it by name. Follow it as",
-        "though it had been invoked.",
+        "than invoked because this run loads no skill store, so nothing could reach it by",
+        "name. Follow it as though it had been invoked.",
         "",
         '<skill name="implement">',
         skill_body.strip(),
         "</skill>",
-        "",
-        "`tdd`, `code-review`, `codebase-design`, `diagnosing-bugs`, `research` and",
-        "`resolving-merge-conflicts` **are** in your catalog and can be used by name. Use",
-        "`tdd` for anything that changes behaviour.",
         "",
         "## Context, already written for you",
         "",

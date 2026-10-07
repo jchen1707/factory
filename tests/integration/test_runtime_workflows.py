@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from factory import accounting, authority, execution, handoffs
+from factory.agent import stream
 from factory.machine import Blocked
 from factory.steps import Context
+from tests.support import claude_stream
 
 
 @pytest.fixture(autouse=True)
@@ -44,15 +46,7 @@ def test_accounting_replay_repairs_interrupted_cost_reconciliation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = ctx.home / "events.jsonl"
-    events.write_text(
-        json.dumps(
-            {
-                "type": "turn.completed",
-                "usage": {"input_tokens": 100, "cached_input_tokens": 20, "output_tokens": 10},
-            }
-        )
-        + "\n"
-    )
+    events.write_text("".join(f"{line}\n" for line in claude_stream.success().lines))
     accounting.begin(ctx, 1, ctx.routing.role("builder"), "implement", events)
     original = ctx.store.reconcile_cost
     with monkeypatch.context() as patch:
@@ -66,7 +60,12 @@ def test_accounting_replay_repairs_interrupted_cost_reconciliation(
     assert ctx.store.reconcile_cost == original
     accounting.collect(ctx, 1, "implement", events)
     accounting.collect(ctx, 1, "implement", events)
-    assert ctx.store.spend(ctx.run.id) == (100, 10, None)
+    reported = next(iter(stream.parse(events).by_model.values()))
+    assert ctx.store.spend(ctx.run.id) == (
+        reported.usage.input,
+        reported.usage.output,
+        pytest.approx(reported.notional_usd),
+    )
     assert len(ctx.store.costs(ctx.run.id)) == 1
 
 
@@ -541,3 +540,58 @@ def test_fresh_builder_receives_captured_requirements_and_deferrals(
     assert "Later ticket" in prompt
     assert "Preserved candidate carried forward" not in prompt
     assert not (ctx.state_dir / "handoffs" / "candidate").exists()
+
+
+def test_a_resumed_launch_is_charged_its_own_share_of_the_session(ctx: Context) -> None:
+    """Measured: a `--resume` run reports the whole session's `total_cost_usd` and
+    `modelUsage` (a $0.0165 session resumed ended at $0.0177). Summing both launches'
+    cumulative figures would count the first launch twice."""
+    session = claude_stream.SESSION
+    expected = {
+        "session": session,
+        "model": claude_stream.MODEL,
+        "tools": sorted(claude_stream.TOOLS),
+        "plugins": [],
+        "permission_mode": "default",
+    }
+    first = ctx.home / "first.jsonl"
+    first.write_text(
+        "".join(f"{line}\n" for line in claude_stream.max_turns(session=session).lines)
+    )
+    second = ctx.home / "second.jsonl"
+    second.write_text(
+        "".join(
+            f"{line}\n"
+            for line in claude_stream.lines(
+                claude_stream.init(session=session),
+                claude_stream.result_success(claude_stream.ANSWER, cost=0.05, session=session),
+            )
+        )
+    )
+    accounting.begin(
+        ctx,
+        1,
+        ctx.routing.role("builder"),
+        "implement",
+        first,
+        extra_metadata={"expected": expected},
+    )
+    ctx.store.update_run(ctx.run.id, attempt=2)
+    ctx.refresh()
+    accounting.begin(
+        ctx,
+        2,
+        ctx.routing.role("builder"),
+        "implement",
+        second,
+        extra_metadata={"expected": expected, "resume": True},
+    )
+    accounting.collect(ctx, 1, "implement", first)
+    accounting.collect(ctx, 2, "implement", second)
+
+    first_cost = stream.parse(first).notional_usd
+    rows = {row["attempt"]: row for row in ctx.store.costs(ctx.run.id)}
+    assert rows[1]["usd"] == pytest.approx(first_cost)
+    assert rows[2]["usd"] == pytest.approx(0.05 - first_cost)
+    assert ctx.store.spend(ctx.run.id)[2] == pytest.approx(0.05)
+    assert ctx.store.known_spend(ctx.run.id) == pytest.approx(0.05)

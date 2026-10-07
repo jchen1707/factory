@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from factory import repo
+from factory.agent import stream
 from factory.intake.linear import LinearError
 from factory.machine import Blocked, Resumable, State
 from factory.steps import Context, signal_attempt
@@ -134,7 +135,12 @@ def test_the_attempt_directory_is_complete_and_hashed(ctx: Context) -> None:
     assert request["model"] == builder.model
     assert request["effort"] == builder.effort
     assert len(request["implement_skill_sha256"]) == 64
-    assert "--dangerously-bypass-hook-trust" in request["argv"]
+    # The launch pins its session and carries the schema inline; both are evidence.
+    argv = request["argv"]
+    assert argv[argv.index("--session-id") + 1] == ctx.store.session_id(
+        ctx.run.id, 1, State.IMPLEMENTING
+    )
+    assert json.loads(argv[argv.index("--json-schema") + 1])["title"] == "implement_result"
 
 
 def test_the_prompt_inlines_the_skill_rather_than_naming_it(ctx: Context) -> None:
@@ -142,22 +148,33 @@ def test_the_prompt_inlines_the_skill_rather_than_naming_it(ctx: Context) -> Non
     prompt = (Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "prompt.md").read_text()
     assert "Implement the work described by the user" in prompt
     assert "disable-model-invocation" not in prompt  # frontmatter stripped
-    assert "/implement" not in prompt  # `codex exec` does not expand a slash command
-    assert "tdd" in prompt  # the reachable skills are still named
+    assert "/implement" not in prompt  # nothing in the sandbox could expand a slash command
     assert "Do not write to Linear" in prompt
     assert "harness.config.json" in prompt  # gates are read, never restated
 
 
-def test_tokens_are_recorded_and_cost_is_null_not_zero(ctx: Context) -> None:
+def test_tokens_and_the_notional_cost_are_recorded_from_the_stream(ctx: Context) -> None:
     _drive(ctx)
     tokens_in, tokens_out, usd = ctx.store.spend(ctx.run.id)
-    assert (tokens_in, tokens_out) == (12000, 300)
-    assert usd is None
+    run = stream.parse(Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "events.jsonl")
+    reported = next(iter(run.by_model.values())).usage
+    assert (tokens_in, tokens_out) == (reported.input, reported.output)
+    # Priced by the CLI itself (`total_cost_usd`, list price), so the ceiling can trip.
+    assert usd is not None
+    assert usd == pytest.approx(run.notional_usd)
+    assert usd > 0
 
 
-def test_the_session_id_is_captured_for_the_resume_path(ctx: Context) -> None:
+def test_the_session_is_pinned_before_launch_and_opened_by_the_agent(ctx: Context) -> None:
     _drive(ctx)
-    assert ctx.store.session_id(ctx.run.id, 1, State.IMPLEMENTING) == "01a0-fake-thread"
+    pinned = ctx.store.session_id(ctx.run.id, 1, State.IMPLEMENTING)
+    assert pinned is not None
+    launch = _fake(ctx).launches[0]
+    assert launch is not None
+    assert launch.session == pinned
+    assert not launch.resume
+    events = Path(ctx.run.worktree or "") / ".factory" / "run" / "1" / "events.jsonl"
+    assert stream.session_id(events) == pinned
 
 
 def test_linear_is_written_once_and_reconciled_on_a_repeat(ctx: Context) -> None:
@@ -228,8 +245,9 @@ def test_a_non_zero_exit_is_resumable_and_carries_the_stderr_tail(ctx: Context) 
     with pytest.raises(Resumable) as caught:
         advance_state(ctx, until=State.VERIFYING)
     assert caught.value.reason == "agent-failed"
-    assert "traceback line" in caught.value.detail
-    assert caught.value.detail.count("traceback line") == 40
+    summary, _, tail = caught.value.detail.partition("\n")
+    assert summary.startswith("exit 1;")
+    assert tail.count("traceback line") == 40
 
 
 def test_a_preflight_that_cannot_produce_a_refusal_blocks(ctx: Context) -> None:

@@ -202,22 +202,20 @@ def test_a_parked_escalation_can_be_cleared_back_into_reviewing() -> None:
 
 
 def test_every_detached_state_names_the_process_its_body_runs_under() -> None:
-    """`KILL_TARGET` must cover exactly the states that spawn something killable.
-
-    A missing entry is the defect this table was added for, and it is silent: `kill_agent`
-    is `pkill -x <proc>`, so signalling a name nothing runs under selects no process, the
-    wrapper is never asked to stop, and the attempt times out into an orphan with no exit
-    code — a run the factory reports as having signalled, and did not. `verifying` runs
-    `node gate_report.mjs` and was signalled as `codex` for a phase.
-
-    Keyed off `DETACHED_STATES` rather than listed again here, so a fifth detached state
-    fails this test on the commit that adds it rather than on the night it first hangs.
-    """
-    from factory.steps import KILL_TARGET
+    """`kill_agent` is `pkill -x <proc>`, so signalling a name nothing runs under selects
+    no process, the wrapper is never asked to stop, and the attempt times out into an
+    orphan with no exit code — a run the factory reports as having signalled, and did
+    not. `verifying` runs `node gate_report.mjs` and was signalled as the agent for a
+    phase; every other detached state runs the agent."""
+    from factory.steps import kill_target
     from factory.steps.reap import DETACHED_STATES
 
-    assert set(KILL_TARGET) == set(DETACHED_STATES)
-    assert KILL_TARGET[State.VERIFYING] == "node"
+    assert {state: kill_target(state) for state in DETACHED_STATES} == {
+        State.PLANNING: "claude",
+        State.IMPLEMENTING: "claude",
+        State.VERIFYING: "node",
+        State.REVIEWING: "claude",
+    }
 
 
 # --------------------------------------------------------------------------------

@@ -19,19 +19,21 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from factory import agent_run
+from factory.agent import stream
 from factory.artifacts import AttemptDir
-from factory.machine import AUTOMATIC, State
+from factory.machine import AUTOMATIC, Blocked, State
 from factory.sandbox.base import RunHandle, RunStatus
-from factory.steps import Context, advance, signal_attempt
+from factory.steps import Context, advance, attempt_names, signal_attempt
 from factory.steps import implement as implement_step
 from factory.steps import plan as plan_step
 from factory.steps import review as review_step
 from factory.steps import verify as verify_step
 
-__all__ = ["AGENT_SESSION_STATES", "DETACHED_STATES", "Outcome", "Verdict", "act", "reap"]
+__all__ = ["AGENT_STATES", "DETACHED_STATES", "Outcome", "Verdict", "act", "reap"]
 
-#: The states whose entry action spawns a detached run inside a sandbox — a codex
-#: agent (planning, implementing, the review fan-out) or a node gate report (verify).
+#: The states whose entry action spawns a detached run inside a sandbox — an agent
+#: (planning, implementing, the review fan-out) or a node gate report (verify).
 #: All of them report through the filesystem (`heartbeat`/`exit`/`sbx-exec.pid`) and
 #: are reaped the same way: the tick that asks is never the tick that started the run.
 #: A run sitting anywhere else is between steps: the next tick re-enters it, which is
@@ -43,10 +45,7 @@ DETACHED_STATES: tuple[State, ...] = (
     State.REVIEWING,
 )
 
-#: The subset of `DETACHED_STATES` whose attempt is a single codex session with an id
-#: worth resuming. `verifying` is a node gate report and has none; `reviewing` is a
-#: fan-out of several sessions, so there is no one id for the row to hold.
-AGENT_SESSION_STATES: frozenset[State] = frozenset({State.PLANNING, State.IMPLEMENTING})
+AGENT_STATES: frozenset[State] = frozenset(DETACHED_STATES) - {State.VERIFYING}
 
 #: How long after the wrapper is signalled the tick waits for its `exit` file. The
 #: wrapper writes `exit` last and atomically, so this is bounded by one `mv`; a run
@@ -156,7 +155,7 @@ def _start_next_attempt(ctx: Context) -> Verdict:
 
     # RESUME or RESTART: a fresh implement against the same worktree, rung 2.
     session = (
-        ctx.store.session_id(ctx.run.id, ctx.run.attempt, State.IMPLEMENTING)
+        agent_run.resumable_session(ctx, ctx.run.attempt, State.IMPLEMENTING)
         if verdict.disposition is recovery.Disposition.RESUME
         else None
     )
@@ -221,16 +220,9 @@ def reap(ctx: Context) -> Verdict:
         session_id=row["session_id"],
         # The plan phase writes `plan-exit`; polling for `exit` reads its failure as an
         # orphan and spends a ladder rung on a collectable result (FRO-11 attempt 3).
-        exit_name=plan_step.PLAN_EXIT_NAME if state is State.PLANNING else "exit",
+        exit_name=attempt_names(state).exit,
     )
-
-    # Before the verdict, not after it: an orphaned or killed attempt is exactly the one
-    # whose session id recovery is about to ask for, and by then nothing will write it.
-    # The id is on disk in `events.jsonl` line 1 from the agent's first second; under the
-    # daemon this is the only code that reads it, because `implement`'s foreground watch
-    # loop never runs.
-    if state in AGENT_SESSION_STATES:
-        implement_step.capture_session_id(ctx, attempt_dir, ctx.run.attempt, state)
+    exit_file = attempt_dir.path(handle.exit_name)
 
     from factory import accounting
 
@@ -246,6 +238,21 @@ def reap(ctx: Context) -> Verdict:
     if status is RunStatus.ORPHANED:
         return _orphan(ctx, "attempt-orphaned", f"{state} attempt {ctx.run.attempt} is not running")
 
+    if state in AGENT_STATES and _auth_failing(attempt_dir.path(attempt_names(state).events)):
+        # The CLI retries a refused credential for minutes before giving up. Nothing
+        # changes while it does, so the run is stopped now and collected as the auth
+        # failure it is, rather than after the state's whole timeout.
+        ctx.log("reap.auth-failing", level="warning", state=str(state))
+        how = signal_attempt(ctx, handle.sandbox, attempt_dir.root, state)
+        _wait_for_exit(exit_file)
+        if exit_file.exists():
+            _collect(ctx, state, attempt_dir)
+            return Verdict(Outcome.COLLECTED, f"stopped on auth failure ({how})")
+        ctx.store.finish_attempt(
+            ctx.run.id, ctx.run.attempt, state, exit_code=None, outcome=agent_run.AUTH_FAILED
+        )
+        raise Blocked(agent_run.AUTH_FAILED, f"{state} was signalled ({how}) and left no exit")
+
     overrun = _overrun_seconds(ctx, state)
     if overrun is not None:
         # §16.1's last live row: the heartbeat is fresh, so the wrapper is alive, but
@@ -255,9 +262,7 @@ def reap(ctx: Context) -> Verdict:
         # the record, rather than reporting a kill as a result.
         ctx.log("reap.timeout", level="warning", state=str(state), overrun_seconds=int(overrun))
         how = signal_attempt(ctx, handle.sandbox, attempt_dir.root, state)
-        deadline = time.monotonic() + KILL_GRACE_SECONDS
-        while time.monotonic() < deadline and not attempt_dir.exit_file.exists():
-            time.sleep(5)
+        _wait_for_exit(exit_file)
         detail = f"{state} ran {int(overrun)}s past its timeout and was signalled ({how})"
         # Resumable, not collected. A killed body did not finish its work, so its artifacts
         # are truncated by definition — and `collect` reads them as a *verdict*: a signalled
@@ -269,8 +274,8 @@ def reap(ctx: Context) -> Verdict:
         # waiter — `plan`, `implement`, `verify`, `review` — signals and then raises
         # `Resumable`, and not one of them collects. The branch could disagree unnoticed for
         # as long as it did because for `verifying` it was never reached: the signal named
-        # `codex` at a `node` process, so the wait always timed out into `_orphan` below.
-        if attempt_dir.exit_file.exists():
+        # the agent at a `node` process, so the wait always timed out into `_orphan` below.
+        if exit_file.exists():
             return _stopped(
                 ctx,
                 "state-timeout",
@@ -281,6 +286,17 @@ def reap(ctx: Context) -> Verdict:
         return _orphan(ctx, "state-timeout", detail)
 
     return Verdict(Outcome.RUNNING, f"{state} attempt {ctx.run.attempt}")
+
+
+def _auth_failing(events: Path) -> bool:
+    outcome = stream.parse(events).outcome
+    return isinstance(outcome, stream.Interrupted) and outcome.auth_failing
+
+
+def _wait_for_exit(exit_file: Path) -> None:
+    deadline = time.monotonic() + KILL_GRACE_SECONDS
+    while time.monotonic() < deadline and not exit_file.exists():
+        time.sleep(5)
 
 
 def _exit_code(attempt_dir: AttemptDir, exit_name: str) -> int | None:

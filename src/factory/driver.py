@@ -190,7 +190,7 @@ _SYNCHRONOUS: dict[Action, Callable[[Context], None]] = {
 
 #: What `reap.act`'s verdict means to the loop. Indexed rather than `.get`: a verdict
 #: with no meaning here is a factory bug and should say so on the spot, which is the same
-#: discipline `KILL_TARGET` records. `NEXT_STEP` and `START_NEEDED` are absent because
+#: discipline `steps.kill_target` keeps. `NEXT_STEP` and `START_NEEDED` are absent because
 #: `act` resolves both into `STARTED`/`EXHAUSTED` before returning.
 _REAPED: dict[reap_step.Outcome, Outcome] = {
     reap_step.Outcome.RUNNING: Outcome.WAITING,

@@ -8,9 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from factory.agent.claude import overrides_cli
 from factory.machine import Blocked
 
 __all__ = [
+    "IMPLEMENT_SKILL",
+    "VENDOR_SYNC",
     "Defaults",
     "GarbageCollection",
     "Project",
@@ -24,6 +27,12 @@ __all__ = [
 
 class RegistryError(Exception):
     """A configuration error the daemon must refuse to start on."""
+
+
+#: The two things the operator installs beside this checkout (§24.11). The only `src/`
+#: reads of the operator's home besides `doctor.py`; `tests/unit/test_boundaries.py` pins it.
+IMPLEMENT_SKILL = Path.home() / ".agents" / "skills" / "implement" / "SKILL.md"
+VENDOR_SYNC = Path.home() / "harness" / "scripts" / "vendor_sync.py"
 
 
 #: The forge names `delivery/forge.py` has an adapter for. Spelled here rather than
@@ -330,6 +339,14 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
             "A run must not discover this after it has spent model budget."
         )
     sandbox_delivery = _sandbox_delivery(name, raw, forge=forge)
+    env = {str(k): str(v) for k, v in dict(raw.get("env", {})).items()}
+    overriding = sorted(key for key in env if overrides_cli(key))
+    if overriding:
+        raise RegistryError(
+            f"project {name!r} env sets {overriding}; the Claude CLI reads those ahead of "
+            "the flags the factory passes (effort, credential, config dir), so a run would "
+            "not use what routing asked for"
+        )
     concurrency = raw.get("concurrency_per_project")
     if concurrency is not None:
         concurrency = int(concurrency)
@@ -354,7 +371,7 @@ def _project(name: str, raw: Mapping[str, Any]) -> Project:
         review_sandbox=str(raw.get("review_sandbox", "")),
         vault_mount=str(raw.get("vault_mount", "rw")),
         network_allow=tuple(str(h) for h in raw.get("network_allow", ())),
-        env={str(k): str(v) for k, v in dict(raw.get("env", {})).items()},
+        env=env,
         requires_clone=bool(raw.get("requires_clone", False)),
         acknowledged_env_credentials=tuple(
             str(n) for n in raw.get("acknowledged_env_credentials", ())

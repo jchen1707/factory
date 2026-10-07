@@ -16,7 +16,7 @@ def test_preview_does_not_create_a_database(
     path = tmp_path / "unused.db"
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
     assert not path.exists()
-    assert "Schema 8 -> 9" in capsys.readouterr().out
+    assert "Schema 9 -> 10" in capsys.readouterr().out
 
 
 def test_apply_refuses_unreviewed_older_migrations(tmp_path: Path) -> None:
@@ -40,12 +40,13 @@ def test_preview_from_schema_five_includes_the_actual_six_migration(
     before = path.read_bytes()
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
     preview = capsys.readouterr().out
-    assert "Schema 5 -> 9" in preview
+    assert "Schema 5 -> 10" in preview
     assert "runtime_certifications" in preview
     assert "agent_leases" in preview
     assert "DROP TABLE delegation_requests" in preview
     assert "DROP TABLE runtime_certifications" in preview
     assert "ALTER TABLE agent_leases DROP COLUMN parent_id" in preview
+    assert "UPDATE attempts SET session_id = NULL" in preview
     assert path.read_bytes() == before
 
 
@@ -68,10 +69,10 @@ def test_preview_names_the_live_work_that_apply_would_refuse(
     before = path.read_bytes()
 
     assert migrate(argparse.Namespace(database=path, apply=False)) == 0
-    assert (
-        "--apply refuses until no work is live: child, certification or app-server "
-        "invocations probe." in capsys.readouterr().out
-    )
+    preview = capsys.readouterr().out
+    assert "--apply refuses until no work is live: " in preview
+    assert "child, certification or app-server invocations probe" in preview
+    assert "agent invocations launched before the Claude cutover probe" in preview
     with pytest.raises(Blocked, match="migration-live-work"):
         migrate(argparse.Namespace(database=path, apply=True))
     assert path.read_bytes() == before

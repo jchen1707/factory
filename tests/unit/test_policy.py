@@ -167,9 +167,11 @@ def test_an_empty_secret_set_is_clean() -> None:
     assert capability_secrets([]) == []
 
 
-def test_every_other_service_secret_is_reported_sorted() -> None:
-    secrets = [{"name": "openai"}, {"name": "mcpgateway"}, {"name": "anthropic"}]
-    assert capability_secrets(secrets) == ["anthropic", "openai"]
+def test_the_model_credential_is_admitted_and_every_other_service_secret_reported() -> None:
+    # `anthropic` is the credential the agent runs on; `openai` grants nothing a Claude
+    # run needs, so holding it in the VM is a capability the agent must not have.
+    secrets = [{"name": "openai"}, {"name": "mcpgateway"}, {"name": "anthropic"}, {"name": "gh"}]
+    assert capability_secrets(secrets) == ["gh", "openai"]
 
 
 def test_malformed_entries_are_ignored_rather_than_crashing_the_preflight() -> None:

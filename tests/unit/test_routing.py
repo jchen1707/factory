@@ -263,3 +263,20 @@ def test_rewrite_leaves_the_comment_column_where_it_found_it(tmp_path: Path) -> 
     text = rewrite(path, {"effort.builder": "max"})
 
     assert text.splitlines()[1].index("#") == len('effort = "xhigh"      ')
+
+
+def test_max_turns_defaults_from_the_budget_and_a_role_may_override_it(tmp_path: Path) -> None:
+    body = _table().replace("[budget]", "[budget]\nmax_turns = 120")
+    body = body.replace('effort = "high"\n', 'effort = "high"\nmax_turns = 40\n', 1)  # the reviewer
+    routing = _load(tmp_path, body)
+    assert routing.max_turns == 120
+    assert routing.role("builder").max_turns == 120
+    assert routing.role("reviewer").max_turns == 40
+    # Absent entirely, the shipped default applies rather than a zero that would refuse
+    # every launch.
+    assert _load(tmp_path, _table()).role("builder").max_turns == 200
+
+
+def test_a_zero_turn_cap_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(RoutingError, match="max_turns"):
+        _load(tmp_path, _table().replace("[budget]", "[budget]\nmax_turns = 0"))

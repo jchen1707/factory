@@ -373,6 +373,19 @@ def test_the_defaults_move_the_projects_that_did_not_decide(tmp_path: Path) -> N
     assert registry.concurrency_for(registry.projects["raised"]) == 3  # its own answer stands
 
 
+def test_an_env_that_would_override_the_agent_cli_refuses_to_load(tmp_path: Path) -> None:
+    # `CLAUDE_CODE_EFFORT_LEVEL` beats `--effort` and `ANTHROPIC_API_KEY` beats the login,
+    # so a project that sets either would run on something routing never chose.
+    body = (
+        MAIN_AS_BASE.replace('base_branch = "main"', 'base_branch = "v2"')
+        + '\n[projects.python-harness.env]\nCLAUDE_CODE_EFFORT_LEVEL = "max"\n'
+    )
+    path = tmp_path / "projects.toml"
+    path.write_text(body)
+    with pytest.raises(RegistryError, match="CLAUDE_CODE_EFFORT_LEVEL"):
+        load_registry(path)
+
+
 def test_a_zero_writer_limit_refuses_to_load(tmp_path: Path) -> None:
     # Zero is not "paused", it is a project that can never be claimed and says nothing
     # about why — the failure a poller would report once per tick, forever.

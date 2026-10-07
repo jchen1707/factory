@@ -8,6 +8,7 @@ the call, so a future author cannot add one without also editing this file and n
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -81,15 +82,72 @@ def test_no_module_shells_out_through_a_shell() -> None:
         assert "shell=True" not in body, f"shell=True appears in {path}"
 
 
-def test_nothing_writes_to_the_codex_config() -> None:
-    # Writing to a user's agent-trust store from an automated process defeats the
-    # trust store. The factory reads that file in exactly one place and never opens it
-    # for writing.
-    for path, body in _bodies():
-        if ".codex" not in body:
+#: The two modules allowed to look at the operator's home directory: `doctor` reports on
+#: the machine, and `registry` names the two installed things beside this checkout.
+_HOME_READERS = frozenset({"doctor.py", "registry.py"})
+
+
+def _home_reads(tree: ast.AST) -> list[str]:
+    """Every expression that reaches the operator's home: `Path.home()`, `.expanduser()`,
+    or a string carrying `~/.claude` or `~/.codex`. Found in the AST, so a comment naming
+    them is not a hit while any string a function could build a path from is."""
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "expanduser":
+            hits.append("expanduser")
+        if isinstance(node, ast.Name) and node.id == "expanduser":
+            hits.append("expanduser")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "home"
+        ):
+            hits.append("Path.home()")
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if "~/.claude" in node.value or "~/.codex" in node.value:
+                hits.append(node.value[:60])
+            if node.value == "HOME":
+                hits.append("HOME")
+    return hits
+
+
+def test_only_doctor_and_registry_read_the_operators_home() -> None:
+    # The suite is hermetic because the code is: a module that resolves `~` at import or
+    # at run time reads host state no fixture controls, and a test that passed on the
+    # operator's machine fails on CI for a reason nowhere in the diff.
+    for path in SOURCES:
+        if path.name in _HOME_READERS:
             continue
-        assert not re.search(r"config\.toml[\"'][^\n]*write", body), path
-        assert "write_text" not in body or "codex" not in path.name
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        assert not _home_reads(tree), f"{path} reaches the operator's home"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import pathlib\na = pathlib.Path.home()\n",
+        "from pathlib import Path as P\na = P.home()\n",
+        "from os.path import expanduser\na = expanduser('~')\n",
+        "import os\na = os.environ['HOME']\n",
+        "import os\na = os.getenv('HOME')\n",
+    ],
+)
+def test_the_home_guard_sees_the_spelled_out_reaches(source: str) -> None:
+    assert _home_reads(ast.parse(source))
+
+
+def test_the_home_guard_catches_each_way_of_reaching_home() -> None:
+    source = (
+        "from pathlib import Path\n"
+        "a = Path.home() / 'x'\n"
+        "b = Path(y).expanduser()\n"
+        "c = '~/.claude/settings.json'\n"
+    )
+    assert set(_home_reads(ast.parse(source))) == {
+        "Path.home()",
+        "expanduser",
+        "~/.claude/settings.json",
+    }
 
 
 def test_the_sandbox_namespace_appears_only_as_a_factory_prefix() -> None:

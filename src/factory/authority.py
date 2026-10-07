@@ -91,12 +91,11 @@ def snapshot(
         dst = staging / relative
         dst.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / "harness.config.json", dst / "harness.config.json")
-        for name in (".codex/hooks.json", ".codex/config.toml"):
-            wiring = src / name
-            _safe_tree(wiring, source)
-            if wiring.is_file():
-                (dst / name).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(wiring, dst / name)
+        wiring = src / ".claude" / "settings.json"
+        _safe_tree(wiring, source)
+        if wiring.is_file():
+            (dst / ".claude").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(wiring, dst / ".claude" / "settings.json")
         review = cfg.get("review", {})
         for location in (
             ".agents/vendor/harness",

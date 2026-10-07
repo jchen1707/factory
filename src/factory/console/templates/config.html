@@ -8,6 +8,6 @@ $banner
 <p class="muted">Model names and supported efforts are validated against the available model catalog before saving.</p>
 <h2>Budget limits</h2>
 $budget_error
-<div class="fields"><label>Per-run estimated USD ceiling<input name="usd_per_run" value="$usd_per_run" inputmode="decimal"></label><label>Estimated USD warning threshold<input name="usd_warn_at" value="$usd_warn_at" inputmode="decimal"></label></div><p>API-equivalent estimates, not Codex account charges.</p>
+<div class="fields"><label>Per-run estimated USD ceiling<input name="usd_per_run" value="$usd_per_run" inputmode="decimal"></label><label>Estimated USD warning threshold<input name="usd_warn_at" value="$usd_warn_at" inputmode="decimal"></label></div><p>List-price figures the agent reports, not account charges.</p>
 <div class="form-actions"><button type="submit">Save configuration</button><p class="muted">Changes apply to future invocations. Current work continues.</p></div></section></form>
 <details class="panel configuration-sources" id="configuration-sources"><summary>Configuration sources · project registry is read-only</summary><dl><dt>Editable routing</dt><dd><code>config/models.toml</code></dd><dt>Project registry · read-only</dt><dd><code>config/projects.toml</code></dd></dl><p>A project's template, mount set and static MCP set are fixed at creation. Edit the registry deliberately and rename the sandbox.</p><ul>$project_rows</ul></details>

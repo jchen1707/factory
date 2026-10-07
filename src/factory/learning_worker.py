@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 
 from factory.artifacts import SecretFound
-from factory.learning import _write, _write_text, evidence, native_prefix, native_session
+from factory.learning import _write, _write_text, evidence
 
 
-def run(script: Path, events: Path, project: Path, vault: Path) -> None:
+def run(script: Path, events: Path, project: Path, vault: Path, *, resumed: bool = False) -> None:
     receipt = events.with_suffix(".learning.json")
     lock = events.with_suffix(".learning.lock")
     with lock.open("a") as stream:
@@ -29,14 +29,13 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
                 if (project / "harness.config.json").is_file()
                 else ()
             )
-            text, digest, session = evidence(events, extra_names=extra_names)
-            evidence_kind = (
-                "retained-native-transcript" if native_session(text) else "retained-events-partial"
-            )
-            if native_session(text) and native_prefix(
-                events.with_suffix(".native.jsonl").read_text(errors="replace")
-            ):
-                evidence_kind = "retained-native-prefix"
+            from factory.artifacts import scan_for_secrets
+
+            retained = evidence(events)
+            text, digest, session = retained.text, retained.sha256, retained.session
+            scan_for_secrets(text, str(events), extra_names=extra_names)
+            complete = retained.ended and not resumed
+            evidence_kind = "retained-events" if complete else "retained-events-partial"
             old = json.loads(receipt.read_text()) if receipt.exists() else {}
             if (
                 old.get("sha256") == digest
@@ -60,7 +59,7 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
             _write_text(snapshot, text)
             payload = {
                 "cwd": str(project),
-                "runtime": "codex",
+                "runtime": "claude",
                 "evidence": evidence_kind,
                 "session_id": session,
                 "transcript_path": str(snapshot),
@@ -86,4 +85,10 @@ def run(script: Path, events: Path, project: Path, vault: Path) -> None:
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]))
+    run(
+        Path(sys.argv[1]),
+        Path(sys.argv[2]),
+        Path(sys.argv[3]),
+        Path(sys.argv[4]),
+        resumed=len(sys.argv) > 5 and sys.argv[5] == "resumed",
+    )

@@ -30,6 +30,24 @@ class Usage:
     def context_tokens(self) -> int:
         return self.input + self.cache_read + self.cache_write
 
+    def __add__(self, other: Usage) -> Usage:
+        return Usage(
+            input=self.input + other.input,
+            cache_read=self.cache_read + other.cache_read,
+            cache_write=self.cache_write + other.cache_write,
+            output=self.output + other.output,
+            thinking=self.thinking + other.thinking,
+        )
+
+    def __sub__(self, other: Usage) -> Usage:
+        return Usage(
+            input=self.input - other.input,
+            cache_read=self.cache_read - other.cache_read,
+            cache_write=self.cache_write - other.cache_write,
+            output=self.output - other.output,
+            thinking=self.thinking - other.thinking,
+        )
+
 
 @dataclass(frozen=True)
 class ModelUsage:
@@ -380,6 +398,8 @@ def _strict(number: int, line: str) -> list[Event]:
 
 
 _SESSION_LOST = "No conversation found with session ID"
+#: The `model` of the assistant line the CLI writes itself when the API never answered.
+SYNTHETIC = "<synthetic>"
 
 
 def _is_auth(result: Result) -> bool:
@@ -496,6 +516,9 @@ def fold(
             case Init():
                 init = init or event
             case Message():
+                if event.model != SYNTHETIC:
+                    # The API answered, so whatever a retry said before this is history.
+                    auth_failing = False
                 context_tokens = event.usage.context_tokens
                 for use in event.tool_uses:
                     tool_uses.setdefault(use.id, use)

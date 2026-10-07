@@ -245,7 +245,7 @@ def _runtime_status(store: Store, project: str, run_id: str | None = None) -> st
     return (
         f"<h2>Runtime status</h2><p>{observed['active_agents']} active agents</p>"
         f"<p>API-equivalent estimated USD: {estimate_prefix}${observed['api_equivalent_estimate_usd']:.4f} · {completeness}. "
-        "These are not Codex account charges.</p>"
+        "These are list-price figures the agent reports, not account charges.</p>"
         + f"<details><summary>Effective limits, waiting reasons and accounting details</summary><pre>{_e(json.dumps(observed, indent=2))}</pre></details>"
     )
 

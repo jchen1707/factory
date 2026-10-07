@@ -1,15 +1,14 @@
 """A collector repair can reuse completed readiness without buying another model turn."""
 
 import json
-from pathlib import Path
 
 import pytest
 
 from factory import accounting, driver, recovery
-from factory.agent.base import SchemaInvalid
 from factory.artifacts import AttemptDir
 from factory.machine import Blocked, State
 from factory.steps import Context, advance, record_stop
+from tests.integration.conftest import plan_finished
 from tests.integration.test_clone_plan_collection import prepare
 from tests.integration.test_phase4 import _fake
 
@@ -70,23 +69,22 @@ def test_resume_recollects_ready_evidence_without_another_planner_and_holds_buil
 @pytest.mark.parametrize("damage", ["exit", "transcript", "schema", "not-ready", "required-file"])
 def test_resume_rechecks_failed_evidence_before_unblocking(ctx: Context, damage: str) -> None:
     attempt = parked_readiness(ctx)
+    result = json.loads(attempt.path("plan-last-message.json").read_text())
     if damage == "exit":
         attempt.path("plan-exit").write_text("1")
     elif damage == "transcript":
-        fixture = Path(__file__).parents[1] / "fixtures/codex-exec-turn-failed.jsonl"
-        attempt.path("plan-events.jsonl").write_bytes(fixture.read_bytes())
+        # The planner's credential was refused: `success` subtype, `is_error: true`.
+        plan_finished(ctx, attempt, result, outcome="not_logged_in", exit_code=1)
     elif damage == "schema":
-        attempt.path("plan-last-message.json").write_text("{}")
+        plan_finished(ctx, attempt, {})
     elif damage == "not-ready":
-        result = json.loads(attempt.path("plan-last-message.json").read_text())
-        result["status"] = "needs-human"
-        attempt.path("plan-last-message.json").write_text(json.dumps(result))
+        plan_finished(ctx, attempt, {**result, "status": "needs-human"})
     else:
         request = json.loads(attempt.path("plan-request.json").read_text())
         request.update(role="test_designer", required_artifacts=["test-plan.md"])
         attempt.path("plan-request.json").write_text(json.dumps(request))
 
-    with pytest.raises((Blocked, SchemaInvalid)):
+    with pytest.raises(Blocked):
         recovery.resume(ctx)
     assert ctx.state is State.BLOCKED
     assert ctx.run.attempt == 1

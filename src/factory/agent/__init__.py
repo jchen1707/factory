@@ -1,1 +1,1 @@
-"""Agent adapters. `base` is the contract; `codex` is the only implementation."""
+"""The agent boundary: `claude` builds a launch, `stream` reads what it wrote."""

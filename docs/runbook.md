@@ -111,7 +111,7 @@ is merged by the factory, and that is a unit-tested invariant
 ```
 launchctl print gui/$(id -u)/com.jchen.factory   # is it loaded?
 tail -50 ~/factory/logs/daemon.err.log           # the last tick's failure
-factory doctor                                   # registry, routing, sbx, codex, gh, disk, db
+factory doctor                                   # registry, routing, sbx, gh, disk, db
 ```
 
 Common causes:

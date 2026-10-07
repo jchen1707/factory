@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -19,7 +20,6 @@ from typing import Any
 import pytest
 
 from factory import driver
-from factory.agent.codex import CodexAdapter
 from factory.harness import load_harness_config
 from factory.intake.linear import Issue
 from factory.machine import State
@@ -30,25 +30,10 @@ from factory.steps import Context
 from factory.steps import implement as implement_step
 from factory.steps import sandbox as sandbox_step
 from factory.store import Store
+from tests.support import claude_stream
 
-HELLO_EVENTS: list[dict[str, Any]] = [
-    {"type": "thread.started", "thread_id": "01a0-fake-thread"},
-    {"type": "turn.started"},
-    {
-        "type": "item.completed",
-        "item": {"id": "item_0", "type": "agent_message", "text": "done"},
-    },
-    {
-        "type": "turn.completed",
-        "usage": {
-            "input_tokens": 12000,
-            "cached_input_tokens": 9000,
-            "cache_write_input_tokens": 0,
-            "output_tokens": 300,
-            "reasoning_output_tokens": 40,
-        },
-    },
-]
+#: The exit code a wrapper writes after its body took the group's `TERM`.
+KILLED = 143
 
 GOOD_RESULT: dict[str, Any] = {
     "status": "implemented",
@@ -145,6 +130,51 @@ def advance_state(ctx: Context, *, until: State | None = None, limit: int = 24) 
     )
 
 
+@dataclass(frozen=True)
+class Launch:
+    """What one detached agent script asked `claude` for, read back out of the script the
+    way the CLI would read its argv: the session it pins or resumes, the model, the tool
+    set, the schema it must answer in, and where the wrapper redirects the stream."""
+
+    session: str
+    resume: bool
+    model: str
+    tools: tuple[str, ...]
+    schema: dict[str, Any]
+    prompt: Path
+    events: Path
+    stderr: Path
+
+    @property
+    def review(self) -> bool:
+        return "findings" in self.schema.get("properties", {})
+
+    @property
+    def init_tools(self) -> tuple[str, ...]:
+        # `--json-schema` adds `StructuredOutput` to `init.tools` (measured e5).
+        return (*self.tools, "StructuredOutput")
+
+
+def parse_launch(script: str) -> Launch:
+    """The `claude ...` line of a detached script, or raise: the fake answers only what the
+    real CLI would have been asked."""
+    line = next(line for line in script.splitlines() if line.startswith("claude "))
+    argv = shlex.split(line)
+    flag = {argv[i]: argv[i + 1] for i in range(len(argv) - 1) if argv[i].startswith("-")}
+    redirect = {argv[i]: argv[i + 1] for i in range(len(argv) - 1) if argv[i] in ("<", ">", "2>")}
+    resume = "--resume" in flag
+    return Launch(
+        session=flag["--resume" if resume else "--session-id"],
+        resume=resume,
+        model=flag["--model"],
+        tools=tuple(flag["--tools"].split(",")),
+        schema=json.loads(flag["--json-schema"]),
+        prompt=Path(redirect["<"]),
+        events=Path(redirect[">"]),
+        stderr=Path(redirect["2>"]),
+    )
+
+
 @dataclass
 class FakeSandbox:
     """Writes the canned files the real wrapper would have written.
@@ -152,12 +182,20 @@ class FakeSandbox:
     It writes them *synchronously* inside `exec_detached`, which is the one place the
     fake diverges from reality: the control plane's polling loop then finds `exit`
     already present. The polling loop itself is exercised by its own unit test.
+
+    The agent's stream is a `tests.support.claude_stream` scenario, named by `outcome`,
+    in the shape Claude Code 2.1.292 was measured to write. Its `init` event echoes the
+    launch (session, model, tools) the way the real CLI does, so the host's attestation
+    passes for a faithful fake and fails for a drifted one.
     """
 
-    events: list[dict[str, Any]] = field(default_factory=lambda: list(HELLO_EVENTS))
+    #: The structured answer a builder or planner returns.
     result: dict[str, Any] = field(default_factory=lambda: dict(GOOD_RESULT))
-    exit_code: int = 0
-    stderr: str = ""
+    #: Which `claude_stream` scenario every agent launch writes.
+    outcome: str = "success"
+    #: Override the scenario's exit code and stderr; `None` keeps the scenario's own.
+    exit_code: int | None = None
+    stderr: str | None = None
     created: list[SandboxSpec] = field(default_factory=list)
     sync_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     canary_exit: int = 2
@@ -167,8 +205,8 @@ class FakeSandbox:
     #: When set, returned verbatim as the report call's stdout instead of serialising
     #: `gate_report` — the one way to make the verify step see a non-JSON document.
     gate_report_raw_stdout: str | None = None
-    #: What a reviewer axis writes to its `-o` path when that path is writable from
-    #: inside the sandbox. Tests override it to exercise the finding transitions.
+    #: The structured answer a reviewer axis returns. Tests override it to exercise the
+    #: finding transitions.
     review_findings: dict[str, Any] = field(default_factory=lambda: {"findings": []})
     #: The credential names that are set, and non-empty, inside the VM's environment.
     #: A different channel from `secrets`: `sbx inspect` cannot see it, which is exactly
@@ -205,10 +243,16 @@ class FakeSandbox:
     detach_without_finishing: bool = False
     #: Every detached invocation, so a test can prove a resume passed a session id.
     detached: list[tuple[str, str]] = field(default_factory=list)
+    #: The parsed launch of each detached agent script, parallel to `detached`; `None` for
+    #: a gate report.
+    launches: list[Launch | None] = field(default_factory=list)
     #: The attempt directory of each detached invocation, parallel to `detached`. The real
-    #: wrapper writes `exit` into the attempt dir it was handed; the fake's `kill_agent` has
-    #: only the sandbox name, so it reads the dir back from here.
+    #: wrapper writes its exit file into the attempt dir it was handed; the fake's
+    #: `kill_agent` has only the sandbox name, so it reads the dir back from here.
     detached_dirs: list[Path] = field(default_factory=list)
+    #: The exit file each detached wrapper writes (`exit`, or `plan-exit` for the plan
+    #: phase), parallel to `detached`.
+    detached_exit_names: list[str] = field(default_factory=list)
     #: When true (default), `kill_agent` writes the `exit` file, modelling the wrapper's
     #: graceful-exit-on-signal — the real `kill_agent` only signals; the wrapper traps it and
     #: writes `exit` last. This is what gives a suspended attempt a real terminal record
@@ -219,7 +263,7 @@ class FakeSandbox:
     #: process name and nothing else: a caller that names the wrong process signals nothing,
     #: the wrapper never traps, and no `exit` file lands. A fake that ignored the argument
     #: reported a successful kill for every name and could not tell those two worlds apart —
-    #: which is how `reap` came to signal `codex` at a `verifying` attempt that runs `node`.
+    #: which is how `reap` came to signal the agent at a `verifying` attempt that runs `node`.
     detached_procs: list[str] = field(default_factory=list)
     #: The in-VM process group of each detached invocation, parallel to `detached`, and
     #: the fake's whole reason for existing at this level of detail. The real wrapper
@@ -361,20 +405,6 @@ class FakeSandbox:
     ) -> Completed:
         self.sync_calls.append((name, tuple(argv)))
         self._start(name)
-        if any("prepare_runtime(json.loads" in str(arg) for arg in argv):
-            return Completed(
-                tuple(argv),
-                0,
-                json.dumps(
-                    {
-                        "thread_id": "synthetic-preparation",
-                        "configuration_before": "a" * 64,
-                        "configuration_after": "b" * 64,
-                        "model_turns": 0,
-                    }
-                ),
-                "",
-            )
         if argv and argv[0] == "git" and self.clone_dir(name) is not None:
             # Run it, for real, against the clone. Faking git here would fake exactly the
             # thing the clone path is made of: cutting the branch inside the VM, and the
@@ -429,31 +459,18 @@ class FakeSandbox:
             # The preflight's env probe. It asks which of the repository's `secretVars`
             # are set inside the VM and gets back names, never values.
             return Completed(tuple(argv), 0, "\n".join(self.env_credentials), "")
-        if argv and argv[0] == "codex" and "-o" in argv:
-            # A reviewer axis. It writes its findings to the `-o` path — but only when
-            # that path is inside one of the sandbox's writable workspaces, exactly as
-            # the real one does. Outside, codex exits 0 and says so on stderr, which is
-            # the shape BAC-4's run 2efa19065ce6476e produced.
-            out = Path(argv[argv.index("-o") + 1])
-            roots = self._writable_roots(name)
-            if any(root == out.parent or root in out.parents for root in roots):
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(json.dumps(self.review_findings), encoding="utf-8")
-                return Completed(tuple(argv), 0, "", "")
-            return Completed(
-                tuple(argv),
-                0,
-                "",
-                f'Failed to write last message file "{out}": No such file or directory (os error 2)',
-            )
         return Completed(tuple(argv), 0, "/usr/bin/node\n/usr/bin/git\nv22.22.1", "")
 
     def exec_detached(self, handle: RunHandle, script: str, env: Mapping[str, str]) -> None:
         self._start(handle.sandbox)
         self.detached.append((handle.sandbox, script))
         self.detached_dirs.append(handle.attempt_dir)
-        # The gate report is `node gate_report.mjs`; every other detached body is `codex`.
-        self.detached_procs.append("node" if "gate_report.mjs" in script else "codex")
+        self.detached_exit_names.append(handle.exit_name)
+        is_verify = "gate_report.mjs" in script
+        launch = None if is_verify else parse_launch(script)
+        self.launches.append(launch)
+        # The gate report is `node gate_report.mjs`; every other detached body is `claude`.
+        self.detached_procs.append("node" if is_verify else "claude")
         # Model the wrapper publishing its process group. `pgid` for every phase but the
         # plan half of a rewind, which writes its own so the two cannot signal each other.
         self.next_pgid += 1
@@ -466,18 +483,15 @@ class FakeSandbox:
             directory = handle.attempt_dir
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "heartbeat").write_text(str(int(time.time())))
-            # A running attempt has already streamed `thread.started` — it is the first
-            # line codex writes, long before the first turn ends. Measured on BAC-6
-            # attempt 1, suspended nine minutes in: `events.jsonl` 120 KB, heartbeat
-            # fresh, no `exit`. A fake that wrote only the heartbeat modelled a
-            # sessionless agent that does not exist, and hid the fact that nothing on
-            # the detached path ever captured the id.
-            (directory / "events.jsonl").write_text(json.dumps(HELLO_EVENTS[0]) + "\n")
+            if launch is not None:
+                # A running attempt has already streamed `init` — it is the first line
+                # the CLI writes, long before the first turn ends. A fake that wrote only
+                # the heartbeat would model a sessionless agent that does not exist, and
+                # hide whether the resume switch reads the stream or the row.
+                self._write_stream(launch, [self._init_line(launch)], None, "")
             return
         clone = self.clone_dir(handle.sandbox)
-        is_verify = "gate_report.mjs" in script
-        is_review = handle.sandbox.startswith("factory-review-")
-        if clone is not None and not is_verify and not is_review:
+        if clone is not None and not is_verify and not (launch and launch.review):
             # The agent's commits land in the clone and nowhere else, which is what makes
             # `clone.fetch_back` a real fetch rather than a formality. Only the implement
             # run commits; verify runs the gates and the review runs in a different sandbox.
@@ -486,16 +500,47 @@ class FakeSandbox:
         directory.mkdir(parents=True, exist_ok=True)
         if is_verify:
             self._write_verify_artifacts(directory)
-        elif is_review:
-            self._write_review_artifacts(directory, script)
-        else:
-            (directory / "events.jsonl").write_text(
-                "\n".join(json.dumps(event) for event in self.events) + "\n"
-            )
-            (directory / "stderr.log").write_text(self.stderr)
-            (directory / "last-message.json").write_text(json.dumps(self.result))
-            (directory / "heartbeat").write_text("0")
-            (directory / "exit").write_text(str(self.exit_code))
+            return
+        assert launch is not None
+        scenario = self._scenario(launch)
+        exit_code = scenario.exit_code if self.exit_code is None else self.exit_code
+        stderr = scenario.stderr if self.stderr is None else self.stderr
+        self._write_stream(launch, scenario.lines, exit_code, stderr)
+        (directory / "heartbeat").write_text("0")
+        if exit_code is not None:
+            (directory / handle.exit_name).write_text(str(exit_code))
+
+    def _init_line(self, launch: Launch) -> str:
+        return claude_stream.line(
+            claude_stream.init(session=launch.session, model=launch.model, tools=launch.init_tools)
+        )
+
+    def _scenario(self, launch: Launch) -> claude_stream.Scenario:
+        """The stream this launch writes: `outcome` names the shape, the launch fills in
+        what the CLI echoes back, and the role decides which answer it carries."""
+        kwargs: dict[str, Any] = {
+            "session": launch.session,
+            "model": launch.model,
+            "tools": launch.init_tools,
+        }
+        if self.outcome == "success":
+            answer = self.review_findings if launch.review else self.result
+            return claude_stream.success(answer, **kwargs)
+        if self.outcome == "session_in_use":
+            return claude_stream.session_in_use(session=launch.session)
+        if self.outcome == "session_lost":
+            return claude_stream.session_lost(session=launch.session, model=launch.model)
+        scenario = getattr(claude_stream, self.outcome)
+        return scenario(**kwargs)
+
+    def _write_stream(
+        self, launch: Launch, lines: list[str], exit_code: int | None, stderr: str
+    ) -> None:
+        """What the wrapper's redirects leave behind: the stream and stderr at the paths
+        the script named, which for a reviewer are inside its scratch mount."""
+        launch.events.parent.mkdir(parents=True, exist_ok=True)
+        launch.events.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+        launch.stderr.write_text(stderr, encoding="utf-8")
 
     def _write_verify_artifacts(self, directory: Path) -> None:
         """The detached gate report: the canned JSON to `gates.stdout.txt` and an exit
@@ -514,19 +559,6 @@ class FakeSandbox:
         (directory / "exit").write_text(
             str(exit_for.get(self.gate_report.get("verdict", "incomplete"), 3))
         )
-
-    def _write_review_artifacts(self, directory: Path, script: str) -> None:
-        """The detached review fan-out: write the canned findings to each axis's `-o`
-        scratch path (parsed out of the script the way the real codex `-o` names it), plus
-        the heartbeat and exit the wrapper writes. The findings land in the per-project
-        scratch and `collect` moves them into the run's own directory — same as the real
-        path, modelled synchronously."""
-        for match in re.finditer(r"(?:^|\s)-o (\S+)", script):
-            out = Path(match.group(1).strip("'\""))
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps(self.review_findings), encoding="utf-8")
-        (directory / "heartbeat").write_text("0")
-        (directory / "exit").write_text(str(self.exit_code))
 
     def poll(self, handle: RunHandle) -> RunStatus:
         if self.poll_status is not None:
@@ -564,7 +596,7 @@ class FakeSandbox:
         git(clone, "add", "-A")
         git(clone, "commit", "-m", "feat: the agent's turn")
 
-    def kill_agent(self, name: str, proc: str = "codex") -> None:
+    def kill_agent(self, name: str, proc: str = "claude") -> None:
         # The real `kill_agent` runs `pkill -x <proc>`; the wrapper traps the signal and
         # writes the `exit` file. The fake models both steps so a suspend gets a real
         # terminal record. The last detached run in this sandbox is the one to stop.
@@ -577,7 +609,7 @@ class FakeSandbox:
             return
         if proc != self.detached_procs[-1]:
             return
-        (self.detached_dirs[-1] / "exit").write_text(str(self.exit_code))
+        (self.detached_dirs[-1] / self.detached_exit_names[-1]).write_text(str(KILLED))
 
     def kill_group(self, name: str, pgid: int) -> None:
         """Signal exactly the attempt that published this pgid, and nothing else.
@@ -593,7 +625,9 @@ class FakeSandbox:
             return
         for index, published in enumerate(self.detached_pgids):
             if published == pgid:
-                (self.detached_dirs[index] / "exit").write_text(str(self.exit_code))
+                (self.detached_dirs[index] / self.detached_exit_names[index]).write_text(
+                    str(KILLED)
+                )
                 return
 
     def stop(self, name: str) -> None:
@@ -601,6 +635,70 @@ class FakeSandbox:
 
     def remove(self, name: str) -> None:
         return None
+
+
+def planner_invocation(ctx: Context, attempt: Any, *, attempt_number: int = 1) -> str:
+    """The invocation record a `plan.start` would have written, with the attestation the
+    stream fake echoes by default, for tests that stage a finished plan by hand."""
+    from factory import accounting
+
+    return accounting.begin(
+        ctx,
+        attempt_number,
+        ctx.routing.role("planner"),
+        "plan",
+        attempt.path("plan-events.jsonl"),
+        extra_metadata={
+            "expected": {
+                "session": claude_stream.SESSION,
+                "model": claude_stream.MODEL,
+                "tools": sorted(claude_stream.TOOLS),
+                "plugins": [],
+                "permission_mode": "default",
+            }
+        },
+    )
+
+
+def plan_finished(
+    ctx: Context,
+    attempt: Any,
+    result: Mapping[str, object],
+    *,
+    attempt_number: int = 1,
+    exit_code: int = 0,
+    outcome: str = "success",
+) -> None:
+    """What a finished planner leaves in its attempt directory, written the way the
+    wrapper and the host would: the stream carrying `result` as its structured answer,
+    an empty stderr, the exit file, and the answer file a previous collect materialized.
+
+    The stream echoes the launch the invocation recorded (session, model, tools) so the
+    attestation passes; a test that never launched gets the scenario defaults.
+    """
+    from factory import accounting
+
+    record = ctx.store.runtime.invocation(accounting.key(ctx, attempt_number, "plan"))
+    expected = ((record or {}).get("metadata") or {}).get("expected") or {}
+    kwargs: dict[str, Any] = {
+        "session": expected.get("session", claude_stream.SESSION),
+        "model": expected.get("model", claude_stream.MODEL),
+        "tools": tuple(expected.get("tools", claude_stream.TOOLS)),
+    }
+    scenario = (
+        claude_stream.success(result, **kwargs)
+        if outcome == "success"
+        else getattr(claude_stream, outcome)(**kwargs)
+    )
+    attempt.path("plan-events.jsonl").write_text(
+        "".join(f"{line}\n" for line in scenario.lines), encoding="utf-8"
+    )
+    attempt.path("plan-stderr.log").write_text(scenario.stderr, encoding="utf-8")
+    attempt.path("plan-exit").write_text(str(exit_code))
+    if outcome == "success":
+        attempt.path("plan-last-message.json").write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 #: The BAC team's real label set, read from Linear on 2026-08-21. `needs-info` is in it,
@@ -918,7 +1016,6 @@ def _make_ctx(
         store=store,
         linear=FakeLinear(TICKET),  # type: ignore[arg-type]
         sandbox=sandbox,
-        agent=CodexAdapter(),
         project=registry.projects["python-harness"],
         run=store.run_by_id(run.id),  # type: ignore[arg-type]
         issue=TICKET,
