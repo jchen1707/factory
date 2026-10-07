@@ -151,12 +151,10 @@ def reconcile(ctx: Context) -> None:
         handle = launches.handle(invocation["id"])
         if (handle.attempt_dir / handle.exit_name).exists():
             learning.collect_invocation(ctx, invocation)
-    reconcile_run(ctx.store, ctx.home, ctx.sandbox, ctx.run.id, ctx.project.name)
+    reconcile_run(ctx.store, ctx.sandbox, ctx.run.id, ctx.project.name)
 
 
-def reconcile_run(
-    store: Store, home: Path, sandbox: DetachedExecution, run_id: str, project: str
-) -> None:
+def reconcile_run(store: Store, sandbox: DetachedExecution, run_id: str, project: str) -> None:
     """Retain terminal costs before cancellation can archive/remove execution evidence."""
     from factory import accounting
     from factory.runtime_jobs import RuntimeJobs
@@ -180,7 +178,6 @@ def reconcile_run(
             collect=partial(
                 accounting.collect_invocation,
                 store,
-                home,
                 invocation["id"],
                 Path(invocation["metadata"]["events"]),
             ),

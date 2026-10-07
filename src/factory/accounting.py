@@ -72,10 +72,10 @@ def collect(
 ) -> None:
     """Legacy aggregate usage cannot establish request-level tier or context pricing."""
     invocation_id = invocation_id or key(ctx, attempt, step)
-    collect_invocation(ctx.store, ctx.home, invocation_id, events)
+    collect_invocation(ctx.store, invocation_id, events)
 
 
-def collect_invocation(store: Store, home: Path, invocation_id: str, events: Path) -> None:
+def collect_invocation(store: Store, invocation_id: str, events: Path) -> None:
     """Reconcile retained usage without loading workflow, routing or tracker dependencies."""
     invocation = store.runtime.invocation(invocation_id)
     if invocation is None or not events.exists():
@@ -101,8 +101,7 @@ def collect_invocation(store: Store, home: Path, invocation_id: str, events: Pat
             "reason": "request service tier and context band unavailable",
         },
     }
-    if not store.runtime.observe(invocation_id, len(valid), payload):
-        store.runtime.refresh_pricing(invocation_id, len(valid), payload)
+    store.runtime.observe(invocation_id, len(valid), payload)
     # Reconcile even a duplicate observation: a process may have died after the
     # telemetry commit and before its cost update. Never regress to an older payload.
     retained = store.runtime.invocation(invocation_id)

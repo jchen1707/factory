@@ -1193,7 +1193,7 @@ def _cancel_run(
     from factory import workflow_launches
     from factory.runtime_jobs import RuntimeJobs
 
-    workflow_launches.reconcile_run(store, home, sbx, run.id, project.name)
+    workflow_launches.reconcile_run(store, sbx, run.id, project.name)
     if any(row["run_id"] == run.id for row in RuntimeJobs(store).active_agents(project.name)):
         raise Blocked(
             "cancellation-stop-unverified", "Owned agents still need terminal reconciliation"
