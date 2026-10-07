@@ -57,7 +57,14 @@ from factory.registry import Project, Registry, RegistryError, load_registry
 from factory.repo import GitError
 from factory.routing import Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, SbxError
-from factory.steps import Context, advance, factory_dir_for, record_stop, redphase
+from factory.steps import (
+    Context,
+    advance,
+    bind_factory_dir,
+    factory_dir_for,
+    record_stop,
+    redphase,
+)
 from factory.steps import block as block_step
 from factory.steps import claim as claim_step
 from factory.steps import clone as clone_step
@@ -1207,14 +1214,14 @@ def _cancel_run(
     for path in paths:
         # Archive before removing. A rollback that destroys the evidence of why the run
         # needed rolling back is not a rollback, it is a cover-up.
-        attempts = path / ".factory" / "run"
+        attempts = bind_factory_dir(path, run.id) / "run"
         if attempts.is_dir():
             harness = load_harness_config(project.path)
             for directory in sorted(attempts.iterdir()):
                 if directory.is_dir():
                     kept = artifacts.archive(
                         directory,
-                        home / "artifacts" / run.linear_id / directory.name,
+                        home / "artifacts" / run.linear_id / run.id / directory.name,
                         extra_names=harness.secret_vars,
                     )
                     from factory import learning

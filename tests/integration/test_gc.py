@@ -7,6 +7,7 @@ worse than a sweep that removes nothing at all.
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -109,7 +110,7 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
     # Order matters: for a bind-mounted project the evidence lives *inside* the worktree,
     # so archiving afterwards would archive nothing and report success.
     _finished_run(ctx)
-    attempt = Path(ctx.run.worktree or "") / ".factory" / "run" / "1"
+    attempt = ctx.factory_dir / "run" / "1"
     attempt.mkdir(parents=True, exist_ok=True)
     (attempt / "events.jsonl").write_text('{"type":"thread.started"}\n')
 
@@ -118,6 +119,21 @@ def test_the_attempt_evidence_is_archived_before_the_worktree_goes(ctx: Context)
     archived = ctx.home / "artifacts" / ctx.run.linear_id / ctx.run.id / "1" / "events.jsonl"
     assert archived.exists()
     assert not Path(ctx.run.worktree or "").exists()
+
+
+def test_evidence_seeded_before_run_scoping_is_archived_where_it_was_written(
+    ctx: Context,
+) -> None:
+    _finished_run(ctx)
+    root = Path(ctx.run.worktree or "") / ".factory"
+    (root / "run.json").write_text(json.dumps({"run_id": ctx.run.id}))
+    (root / "run" / "1").mkdir(parents=True)
+    (root / "run" / "1" / "events.jsonl").write_text('{"type":"thread.started"}\n')
+
+    _sweep(ctx, dry_run=False)
+
+    archived = ctx.home / "artifacts" / ctx.run.linear_id / ctx.run.id / "1" / "events.jsonl"
+    assert archived.read_text() == '{"type":"thread.started"}\n'
 
 
 def test_a_run_still_inside_the_age_floor_is_left_entirely_alone(ctx: Context) -> None:

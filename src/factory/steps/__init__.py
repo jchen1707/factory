@@ -12,6 +12,7 @@ pick it up". Returning normally means the state advanced.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from collections.abc import Callable, Mapping
@@ -34,6 +35,7 @@ __all__ = [
     "advance",
     "attempt_files",
     "attempt_names",
+    "bind_factory_dir",
     "factory_dir_for",
     "kill_target",
     "record_effect",
@@ -350,22 +352,23 @@ def factory_dir_for(home: Path, project: Project, run: Run) -> Path:
     the same shape of defect that cost FRO-6 a stale verdict when two functions read the
     same input differently.
 
-    For a bind-mounted project that is `<worktree>/.factory`, addressed by the same absolute
-    string on both sides. For a clone project the worktree is inside the VM and its untracked
-    content never reaches the host, so `.factory/` moves onto the clone mount
+    For a bind-mounted project that is `<worktree>/.factory/<run-id>`, addressed by the same
+    absolute string on both sides. For a clone project the worktree is inside the VM and its
+    untracked content never reaches the host, so `.factory/` moves onto the clone mount
     (`home/state/clone/<project>`), which keeps the identity property that matters: one path,
     both sides. Stable across `clone.fetch_back`, which repoints `ctx.worktree` at a host
     checkout; the evidence stays where it was written.
 
-    Keyed by **run id**, not by ticket. A bind-mounted project gets a fresh tree for free,
-    because `cancel` removes the worktree the evidence lives in — but the clone mount
-    survives every run, so a ticket-keyed path put a second run of the same ticket on top
-    of the first one's attempt directory. Measured on 2026-08-22: the second
-    `factory run FRO-6` found the first run's `exit` file already present, returned from its
-    wait instantly, read the first run's `last-message.json` and reported a four-hour-old
-    verdict — with the first run's token counts, to the digit — while its own agent was
-    still running in the sandbox. A run id in the path makes two runs of one ticket
-    structurally unable to collide, and keeps the earlier run's evidence intact.
+    Keyed by **run id**, not by ticket, in both layouts. The clone mount survives every run,
+    so a ticket-keyed path put a second run of the same ticket on top of the first one's
+    attempt directory. Measured on 2026-08-22: the second `factory run FRO-6` found the first
+    run's `exit` file already present, returned from its wait instantly, read the first
+    run's `last-message.json` and reported a four-hour-old verdict — with the first run's
+    token counts, to the digit — while its own agent was still running in the sandbox. A
+    bind worktree is removed on cancel, but it comes back at the same ticket-keyed path, and
+    the cancelled run's retained launch effect still owns that attempt directory, so a
+    ticket-keyed bind path refused the rerun's launch instead. A run id in the path makes
+    two runs of one ticket structurally unable to collide.
 
     Raises `Blocked("no-worktree")` for a bind-mounted run that has not reached
     `worktree_ready` — there is no `.factory` to address yet, and a reader that invented one
@@ -375,7 +378,22 @@ def factory_dir_for(home: Path, project: Project, run: Run) -> Path:
         return home / "state" / "clone" / project.name / run.linear_id / run.id / ".factory"
     if not run.worktree:
         raise Blocked("no-worktree", f"run {run.id} has no worktree recorded")
-    return Path(run.worktree) / ".factory"
+    return bind_factory_dir(Path(run.worktree), run.id)
+
+
+def bind_factory_dir(worktree: Path, run_id: str) -> Path:
+    """`<worktree>/.factory/<run-id>`, or `<worktree>/.factory` for a run seeded there.
+
+    Runs seeded before evidence was keyed by run id record themselves in
+    `.factory/run.json`; their evidence stays where they wrote it, or gc would archive
+    nothing and then remove the worktree holding it.
+    """
+    root = worktree / ".factory"
+    try:
+        seeded = json.loads((root / "run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seeded = None
+    return root if isinstance(seeded, dict) and seeded.get("run_id") == run_id else root / run_id
 
 
 def advance(

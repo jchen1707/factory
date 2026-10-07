@@ -64,12 +64,12 @@ def run(ctx: Context) -> None:
 
 
 def _seed(ctx: Context, path: Path) -> None:
-    """`.factory/` inside the worktree — §7.3.
+    """The run's `.factory/<run-id>/` inside the worktree — §7.3.
 
     Kept out of every product diff by the **global** gitignore rather than by a commit
     to any repository, which is the same treatment the note prescribes for `.sbx/`.
     """
-    factory_dir = path / ".factory"
+    factory_dir = ctx.factory_dir
     (factory_dir / "run").mkdir(parents=True, exist_ok=True)
 
     staged = ctx.state_dir / "context"
@@ -78,6 +78,12 @@ def _seed(ctx: Context, path: Path) -> None:
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(staged, destination)
+        # Target repositories' reviewer policies name `.factory/context/…` relative to
+        # the worktree.
+        alias = path / ".factory" / "context"
+        if alias.is_symlink():
+            alias.unlink()
+        alias.symlink_to(destination.relative_to(alias.parent), target_is_directory=True)
 
     (factory_dir / "run.json").write_text(
         json.dumps(

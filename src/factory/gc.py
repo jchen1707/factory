@@ -30,6 +30,7 @@ from factory.machine import TERMINAL, State
 from factory.registry import Project, Registry
 from factory.sandbox.base import SandboxAdapter
 from factory.sandbox.sbx import SbxError
+from factory.steps import bind_factory_dir
 from factory.store import Run, Store
 
 __all__ = ["Action", "sweep"]
@@ -158,7 +159,7 @@ def _archive_attempts(home: Path, run: Run, *, dry_run: bool) -> list[Action]:
     """
     if not run.worktree:
         return []
-    source = Path(run.worktree) / ".factory" / "run"
+    source = bind_factory_dir(Path(run.worktree), run.id) / "run"
     if not source.is_dir():
         return []
     destination = home / "artifacts" / run.linear_id / run.id
