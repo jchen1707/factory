@@ -160,7 +160,10 @@ timed out.
      before the read-only one, so the probe cannot see the mount. Restore the write bit on
      that file in the project's checkout; the capture keeps the modes of the vendored and
      review trees.
-2. Stop the build VM and `sbx rm` it; the factory creates a fresh one with the `:ro` mount.
+   - `ENOENT`, `not-a-file` or `not-a-directory` means the VM does not see what the host
+     published at that path. Either the mount is missing or something inside the VM covers it.
+2. Skip this step for `EACCES`. Otherwise stop the build VM and `sbx rm` it; the factory
+   creates a fresh one with the `:ro` mount.
    Read the preservation boundary in
    [the incident archive](archive/codex-era-build-runtime-incidents.md) before removing any VM
    that holds a run's source.

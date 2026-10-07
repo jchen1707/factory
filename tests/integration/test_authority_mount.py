@@ -95,8 +95,10 @@ def _authority_check(ctx: Context) -> dict[str, str]:
         ({".claude/": "writable"}, ".claude/: writable"),
         # A mode-0444 file on a `:ro` share answers this; it says nothing about the mount.
         ({".claude/settings.json": "EACCES"}, ".claude/settings.json: EACCES"),
+        # What a VM answers for a capture its mounts do not show it, as measured on 2026-10-07.
+        ({"snapshot.json": "ENOENT"}, "snapshot.json: ENOENT"),
     ],
-    ids=["writable-file", "writable-directory", "permission-denied"],
+    ids=["writable-file", "writable-directory", "permission-denied", "not-visible"],
 )
 def test_a_vm_that_does_not_refuse_a_write_to_captured_authority_blocks_before_preflight(
     ctx: Context, writes: dict[str, str], named: str
