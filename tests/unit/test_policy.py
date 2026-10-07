@@ -78,6 +78,7 @@ def test_the_deny_list_is_not_empty() -> None:
     [
         ("factory-build-python-harness", True),
         ("factory-review-python-harness", True),
+        ("factory-doctor-python-harness", True),
         ("codex-python-harness", False),
         ("codex-factory", False),
         ("factory-probe-py", False),

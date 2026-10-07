@@ -125,7 +125,7 @@ def host_execution_verdict(changed_paths: Sequence[str]) -> tuple[str, list[str]
 # §8.5 — the sandbox namespace
 # --------------------------------------------------------------------------------
 
-_FACTORY_SANDBOX_PREFIXES = ("factory-build-", "factory-review-")
+_FACTORY_SANDBOX_PREFIXES = ("factory-build-", "factory-review-", "factory-doctor-")
 
 
 def sandbox_is_factory_owned(name: str) -> bool:

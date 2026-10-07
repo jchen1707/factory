@@ -76,6 +76,9 @@ EXPECTED_OUTCOME = {
     "session-in-use": "session-in-use",
     "schema-rejected": "launch-refused",
     "tool-output-nel": "Completed",
+    "ping": "Completed",
+    "resume-known": "Completed",
+    "protected-write": "Completed",
 }
 
 

@@ -81,7 +81,7 @@ def test_a_broken_registry_skips_its_dependents_rather_than_hiding_them(
     by_name = {r.name: r for r in results}
 
     assert by_name["registry"].status is Status.FAIL
-    for dependent in ("vendored layer A", "sensitive paths", "codex hook canary"):
+    for dependent in ("vendored layer A", "sensitive paths", "layer-A hooks", "claude live probe"):
         assert by_name[dependent].status is Status.SKIPPED, dependent
         assert "registry did not load" in by_name[dependent].detail
 
@@ -118,7 +118,7 @@ def test_the_summary_cannot_be_read_as_a_clean_bill_of_health(tmp_path: Path) ->
         Result("state table", Status.FAIL, "unreachable"),
         Result("vendored layer A", Status.SKIPPED, "registry did not load"),
         Result("sensitive paths", Status.SKIPPED, "registry did not load"),
-        Result("codex hook canary", Status.SKIPPED, "registry did not load"),
+        Result("claude live probe", Status.SKIPPED, "registry did not load"),
         Result("disk", Status.SKIPPED, "registry did not load"),
     ]
 
@@ -162,7 +162,68 @@ def test_load_context_reports_its_own_checks_and_hands_back_what_it_loaded(tmp_p
     ctx.store.close()
 
 
-def test_the_deep_canary_is_opt_in(tmp_path: Path) -> None:
-    """It spends a model call, so it must not run because someone typed `factory doctor`."""
+def test_the_live_probe_is_opt_in(tmp_path: Path) -> None:
+    """It spends model calls, so it must not run because someone typed `factory doctor`."""
     names = {r.name for r in doctor.run(_broken_home(tmp_path))}
-    assert "codex hook canary" not in names
+    assert "claude live probe" not in names
+
+
+def _home(tmp_path: Path) -> Path:
+    (tmp_path / "config").mkdir()
+    for filename in ("projects.toml", "models.toml"):
+        (tmp_path / "config" / filename).write_bytes((HOME / "config" / filename).read_bytes())
+    return tmp_path
+
+
+def test_the_live_probe_without_sbx_login_says_what_to_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    measured = (
+        "ERROR: list sandboxes: list local runtimes: list runtimes: request failed: 401 "
+        "Unauthorized: user is not authenticated to Docker: secret not found\n"
+        "no valid user session found, please sign in to Docker to proceed\n\n"
+        "Sign in with: sbx login"
+    )
+    monkeypatch.setattr(doctor, "sbx_available", lambda: (False, measured))
+    ctx, _ = doctor.load_context(_home(tmp_path), deep=True)
+
+    results = doctor.check("claude live probe").run(ctx)
+
+    assert [(r.name, r.status) for r in results] == [("live: sandbox", Status.FAIL)]
+    assert "Run `sbx login`, then `factory doctor --deep` again." in results[0].detail
+    assert ctx.store is not None
+    ctx.store.close()
+
+
+#: `sbx secret ls` on 2026-10-07: no anthropic entry in any scope.
+SBX_LISTING = """SCOPE                    TYPE      NAME     SECRET
+codex-factory            service   github   (stored)
+(global)                 service   openai   (oauth configured)
+
+CUSTOM SECRETS
+SCOPE                        TARGETS          ENV                    PLACEHOLDER               SECRET
+factory-build-nemoclaw-dev   172.18.194.183   FACTORY_GITLAB_TOKEN   sbx-cs-veqNHLin40GtZzi2   glpat-***
+"""
+
+
+def test_no_anthropic_row_fails_and_says_the_oauth_listing_is_unmeasured() -> None:
+    result = doctor.anthropic_credential(SBX_LISTING)
+    assert result.status is Status.FAIL
+    assert "unmeasured" in result.detail
+    assert "factory doctor --deep" in result.detail
+
+
+def test_an_anthropic_row_passes_without_claiming_the_token_works() -> None:
+    listed = SBX_LISTING.replace(
+        "(global)                 service   openai",
+        "(global)                 service   anthropic   (stored)\n(global) service openai",
+    )
+    result = doctor.anthropic_credential(listed)
+    assert result.status is Status.OK
+    assert "(global) service anthropic (stored)" in result.detail
+    assert "validity" in result.detail
+
+
+def test_a_custom_secret_named_anthropic_is_not_the_model_credential() -> None:
+    custom = SBX_LISTING + "factory-build-x   api.example   anthropic   sbx-cs-abc   ***\n"
+    assert doctor.anthropic_credential(custom).status is Status.FAIL

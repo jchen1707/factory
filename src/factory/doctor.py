@@ -44,11 +44,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from factory import machine
-from factory.harness import load_harness_config, vendor_check
+from factory import machine, repo
+from factory.harness import CLAUDE_SETTINGS, unwired_hooks, vendor_check
 from factory.intake.linear import LinearError, keychain_secret
 from factory.registry import Project, Registry, RegistryError, load_registry
-from factory.routing import RoutingError, load_routing
+from factory.routing import Routing, RoutingError, load_routing
 from factory.sandbox.sbx import SbxAdapter, sbx_available
 from factory.steps import review as review_step
 from factory.store import Store
@@ -85,6 +85,7 @@ class DoctorContext:
 
     home: Path
     registry: Registry | None = None
+    routing: Routing | None = None
     store: Store | None = None
     deep: bool = False
 
@@ -93,8 +94,8 @@ class DoctorContext:
 class Check:
     name: str
     run: Callable[[DoctorContext], Sequence[Result]]
-    #: What this check cannot run without. `"registry"` is the only dependency today,
-    #: and it is the one that used to make checks disappear.
+    #: What this check cannot run without: `"registry"` (the one that used to make checks
+    #: disappear) or `"routing"`.
     needs: tuple[str, ...] = ()
     #: Opt-in, because it spends a model call.
     deep: bool = False
@@ -143,6 +144,7 @@ def load_context(home: Path, *, deep: bool = False) -> tuple[DoctorContext, list
     except _CONFIG_ERRORS as exc:
         results += _one("registry", False, str(exc))
 
+    routing: Routing | None = None
     try:
         routing = load_routing(home / "config" / "models.toml")
         results += _one(
@@ -168,7 +170,10 @@ def load_context(home: Path, *, deep: bool = False) -> tuple[DoctorContext, list
     except Exception as exc:  # a database that will not open is a fact, not a crash
         results += _one("database", False, str(exc))
 
-    return DoctorContext(home=home, registry=registry, store=store, deep=deep), results
+    return (
+        DoctorContext(home=home, registry=registry, routing=routing, store=store, deep=deep),
+        results,
+    )
 
 
 # --------------------------------------------------------------------------------
@@ -291,15 +296,82 @@ def _sandbox_delivery(ctx: DoctorContext) -> list[Result]:
     return results
 
 
+def _hooks_wired(ctx: DoctorContext) -> list[Result]:
+    """The preflight's `layer-a-hooks-wired`, asked before a run rather than by one."""
+    registry = ctx.registry
+    if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
+        return []
+    results: list[Result] = []
+    for project in registry.projects.values():
+        unwired = unwired_hooks(repo.file_at_ref(project.path, project.base_ref, CLAUDE_SETTINGS))
+        results += _one(
+            f"layer-A hooks in {project.name}",
+            not unwired,
+            f"{project.base_ref}: " + ("; ".join(unwired) or "PreToolUse and Stop wired"),
+        )
+    return results
+
+
+def _anthropic(_ctx: DoctorContext) -> list[Result]:
+    name = "anthropic credential (sbx)"
+    try:
+        proc = subprocess.run(
+            ["sbx", "secret", "ls"], capture_output=True, text=True, check=False, timeout=60
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [Result(name, Status.SKIPPED, f"sbx unusable: {exc}")]
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        return [Result(name, Status.SKIPPED, detail[0] if detail else "sbx secret ls failed")]
+    return [anthropic_credential(proc.stdout)]
+
+
+def anthropic_credential(secret_ls: str) -> Result:
+    """Is an `anthropic` service secret listed by `sbx secret ls`? Presence, not validity.
+
+    Measured: the service table's rows read `<scope> service <name> <state>`, e.g.
+    `(global) service openai (oauth configured)`. How the anthropic secret is listed is
+    not measured, for either route: the API key (`sbx secret set anthropic`) or the OAuth
+    token `sbx run claude <dir> -- auth login` stores. So absence is reported as what was
+    seen, and `factory doctor --deep`'s ping is the check that settles it.
+    """
+    name = "anthropic credential (sbx)"
+    service_rows = secret_ls.split("CUSTOM SECRETS", 1)[0].splitlines()
+    rows = [line.split() for line in service_rows if "anthropic" in line.split()]
+    if rows:
+        listed = "; ".join(" ".join(row) for row in rows)
+        return Result(name, Status.OK, f"listed ({listed}); validity is the deep ping's to prove")
+    return Result(
+        name,
+        Status.FAIL,
+        "no anthropic row in `sbx secret ls`. Store one (docs/runbook.md, first Claude use). "
+        "How sbx lists the OAuth route's token is unmeasured: if you took that route, "
+        "`factory doctor --deep` decides",
+    )
+
+
 def _plan_copy(ctx: DoctorContext) -> list[Result]:
     return _from_triple(_plan_copy_check(ctx.home))
 
 
-def _canary(ctx: DoctorContext) -> list[Result]:
-    registry = ctx.registry
-    if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
+def _live(ctx: DoctorContext) -> list[Result]:
+    """`live_probe` against the first project, after naming what stops it from starting."""
+    from factory import live_probe
+
+    registry, routing = ctx.registry, ctx.routing
+    if registry is None or routing is None:  # unreachable: `needs` guards it.
         return []
-    return _from_triple(_deep_canary(registry))
+    available, detail = sbx_available()
+    if not available:
+        return [Result("live: sandbox", Status.FAIL, live_probe.sbx_unready(detail))]
+    project = next(iter(registry.projects.values()))
+    return live_probe.run(
+        SbxAdapter(),
+        project,
+        root=ctx.home / "state" / "doctor" / project.name,
+        builder_model=routing.roles["builder"].model,
+        deny_network=registry.defaults.deny_network,
+    )
 
 
 #: Every check, in report order. The config four are not here — they run first, in
@@ -308,15 +380,17 @@ CHECKS: tuple[Check, ...] = (
     Check("external tools", _tools),
     Check("sbx", _sbx),
     Check("global gitignore", _global_gitignore),
+    Check("anthropic credential (sbx)", _anthropic),
     Check("linear credential", _keychain),
     Check("mattpocock execution set", _skills),
     Check("~/.factory absent", _factory_home_absent),
     Check("disk", _disk),
     Check("vendored layer A", _vendored_layer_a, needs=("registry",)),
     Check("sensitive paths", _sensitive_paths, needs=("registry",)),
+    Check("layer-A hooks", _hooks_wired, needs=("registry",)),
     Check("sandbox delivery", _sandbox_delivery, needs=("registry",)),
     Check("plan copy", _plan_copy),
-    Check("codex hook canary", _canary, needs=("registry",), deep=True),
+    Check("claude live probe", _live, needs=("registry", "routing"), deep=True),
 )
 
 
@@ -336,7 +410,11 @@ def check(name: str) -> Check:
 def run(home: Path, *, deep: bool = False) -> list[Result]:
     """Every check, in order, against one machine. Nothing here prints."""
     ctx, results = load_context(home, deep=deep)
-    have = {"registry": ctx.registry is not None, "store": ctx.store is not None}
+    have = {
+        "registry": ctx.registry is not None,
+        "routing": ctx.routing is not None,
+        "store": ctx.store is not None,
+    }
 
     for candidate in CHECKS:
         if candidate.deep and not deep:
@@ -534,40 +612,4 @@ def _skills_check() -> tuple[str, bool, str]:
         "mattpocock execution set",
         not drifted,
         f"pinned {version}, installed {installed or 'unknown'}",
-    )
-
-
-def _deep_canary(registry: Registry) -> tuple[str, bool, str]:
-    """The only real proof that Codex is wired to the hooks — and it costs a model call.
-
-    P0-6 established that at an untrusted path the enforcement layer is invisible: a
-    protected-path edit succeeded at exit 0, in silence. There is no `codex hooks trust`
-    subcommand and `codex doctor` reports nothing about trust, so a live canary is the
-    only verification. It is opt-in because it spends money.
-    """
-    project = next(iter(registry.projects.values()))
-    harness = load_harness_config(project.path)
-    protected = harness.first_protected_glob()
-    if protected is None:
-        return "codex hook canary", False, "the repo declares no protected path to canary"
-    proc = subprocess.run(
-        [
-            "codex",
-            "exec",
-            "-C",
-            str(project.path),
-            "--dangerously-bypass-hook-trust",
-            f"Append the line '# factory canary' to {protected.glob} and report what happened.",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=600,
-        stdin=subprocess.DEVNULL,
-    )
-    blocked = "blocked by" in (proc.stdout + proc.stderr).lower()
-    return (
-        "codex hook canary",
-        blocked,
-        "protect_paths refused the write" if blocked else "the write was NOT refused",
     )
