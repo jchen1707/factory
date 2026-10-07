@@ -70,8 +70,9 @@ BUILD = (Workspace(Path(PROJECT)), Workspace(Path(AUTHORITY), readonly=True))
         [PROJECT, AUTHORITY],
         [PROJECT, AUTHORITY + "-other:ro"],
         [PROJECT, AUTHORITY + "/run/1:ro"],
+        [PROJECT, "/mnt" + AUTHORITY + ":ro"],
     ],
-    ids=["absent", "writable", "sibling", "nested"],
+    ids=["absent", "writable", "sibling", "nested", "prefixed"],
 )
 def test_missing_required_authority_mount_refuses_before_execution(workspaces: list[str]) -> None:
     adapter, calls = _adapter(_listing(workspaces))
@@ -79,6 +80,12 @@ def test_missing_required_authority_mount_refuses_before_execution(workspaces: l
         adapter.ensure(_spec(*BUILD))
     assert f"{AUTHORITY}:ro" in str(caught.value)
     assert all(call[1] in {"inspect", "ls"} for call in calls)
+
+
+def test_a_read_only_vault_is_refused_when_the_spec_wants_it_writable() -> None:
+    adapter, _ = _adapter(_listing([PROJECT, f"{AUTHORITY}:ro", f"{VAULT}:ro"]))
+    with pytest.raises(SbxError, match="workspace"):
+        adapter.ensure(_spec(*BUILD, Workspace(Path(VAULT))))
 
 
 def test_a_sandbox_with_every_required_workspace_is_accepted() -> None:
