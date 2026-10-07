@@ -32,7 +32,8 @@ __all__ = [
 #: filesystem, which is the one that ran out.
 VM_HOME = "/home/agent"
 
-_SCRIPT = 'df -Pk "$@" && df -Pi "$@"'
+#: `LC_ALL=C` keeps the headers the parser looks for out of translation.
+_SCRIPT = 'LC_ALL=C df -Pk "$@" && LC_ALL=C df -Pi "$@"'
 
 
 class ProbeError(Exception):

@@ -324,12 +324,11 @@ def _sandbox_delivery(ctx: DoctorContext) -> list[Result]:
 
 
 def _build_vm_disk(ctx: DoctorContext) -> list[Result]:
-    """The preflight's `vm-disk-floor`, asked of every existing build VM before a run.
+    """The preflight's `vm-disk-floor`, asked of every running build VM before a run.
 
-    Measured 2026-10-07: `sbx exec` starts a stopped sandbox, and a sandbox stopped at
-    zero free inodes failed to start (`500 ... failed to start runtime`). So a stopped VM
-    is measured too, and one that cannot start is a failure, not a skip. A VM not yet
-    created passes: the factory creates it fresh.
+    A stopped VM is skipped, because `sbx exec` would start it (measured 2026-10-07) and
+    a doctor must not undo a `factory suspend`. The preflight measures it when a run
+    starts it. A VM not yet created passes: the factory creates it fresh.
     """
     registry = ctx.registry
     if registry is None:  # unreachable: `needs` guards it. Typed, not asserted.
@@ -349,6 +348,16 @@ def _build_vm_disk(ctx: DoctorContext) -> list[Result]:
         name = f"build VM disk for {project.name}"
         if project.build_sandbox not in existing:
             results += _one(name, True, f"{project.build_sandbox} is not created yet")
+            continue
+        try:
+            stopped = adapter.inspect(project.build_sandbox).get("state") == "stopped"
+        except (SbxError, OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            results.append(Result(name, Status.SKIPPED, f"sbx inspect failed: {exc}"))
+            continue
+        if stopped:
+            results.append(
+                Result(name, Status.SKIPPED, f"{project.build_sandbox} is stopped; not started")
+            )
             continue
         try:
             rows = vm_disk.measure(

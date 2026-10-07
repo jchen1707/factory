@@ -128,7 +128,13 @@ def test_measure_runs_one_df_over_every_path() -> None:
     sandbox = _Sandbox(Completed((), 0, _fixture("df-fresh.txt"), ""))
     rows = vm_disk.measure(sandbox, "factory-build-x", PATHS)  # type: ignore[arg-type]
     assert [row.path for row in rows] == list(PATHS)
-    assert sandbox.argv == ["/bin/sh", "-c", 'df -Pk "$@" && df -Pi "$@"', "sh", *PATHS]
+    assert sandbox.argv == [
+        "/bin/sh",
+        "-c",
+        'LC_ALL=C df -Pk "$@" && LC_ALL=C df -Pi "$@"',
+        "sh",
+        *PATHS,
+    ]
 
 
 def test_a_failed_df_is_an_error_not_a_pass() -> None:

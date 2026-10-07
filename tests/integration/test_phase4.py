@@ -1626,6 +1626,8 @@ def test_a_build_vm_below_its_disk_floor_blocks_before_any_agent_launch(
         defaults=replace(ctx.registry.defaults, vm_min_free_gb=2, vm_min_free_inodes=50_000),
     )
     _fake(ctx).vm_df = df
+    # The enforcement preflight would fail too; the disk reason must still be the one named.
+    _fake(ctx).canary_exit = 0
 
     for _ in range(6):
         _tick(ctx)

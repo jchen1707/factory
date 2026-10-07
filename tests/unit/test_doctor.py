@@ -314,12 +314,22 @@ def test_the_doctrine_row_checks_every_declared_skill_against_the_cache(
 class _BuildVMs:
     """`sbx ls` and `sbx exec` for the build-VM disk row, without a VM."""
 
-    def __init__(self, existing: set[str], stdout: str, returncode: int = 0) -> None:
-        self.existing, self.stdout, self.returncode = existing, stdout, returncode
+    def __init__(
+        self, existing: set[str], stdout: str, returncode: int = 0, state: str = "running"
+    ) -> None:
+        self.existing, self.stdout, self.returncode, self.state = (
+            existing,
+            stdout,
+            returncode,
+            state,
+        )
         self.probed: list[str] = []
 
     def names(self) -> set[str]:
         return self.existing
+
+    def inspect(self, name: str) -> dict[str, str]:
+        return {"state": self.state}
 
     def exec_sync(self, name: str, argv: list[str], **_: object) -> Completed:
         self.probed.append(name)
@@ -363,10 +373,18 @@ def test_the_build_vm_row_fails_an_inode_exhausted_vm_and_passes_an_absent_one(
     assert vms.probed == ["factory-build-full"]
 
 
+def test_a_stopped_build_vm_is_skipped_rather_than_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vms = _BuildVMs({"factory-build-full"}, "", state="stopped")
+    rows = _vm_rows(tmp_path, monkeypatch, vms)
+    assert rows["build VM disk for full"].status is Status.SKIPPED
+    assert vms.probed == []
+
+
 def test_a_build_vm_that_cannot_be_measured_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Measured: `sbx exec` on a stopped VM at zero free inodes could not start it.
     vms = _BuildVMs({"factory-build-full"}, "", returncode=1)
     rows = _vm_rows(tmp_path, monkeypatch, vms)
     assert rows["build VM disk for full"].status is Status.FAIL
