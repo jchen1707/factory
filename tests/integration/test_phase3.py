@@ -952,11 +952,7 @@ def test_both_tiers_write_where_the_sandbox_can_actually_write(
     plan = review_step._read_plan(ctx.state_dir / "review")
     assert all(Path(axis["out"]).exists() for axis in plan["axes"])
     assert all(Path(axis["events"]).exists() for axis in plan["axes"])
-    # Copied, so the stream each invocation record names is still there for accounting.
-    assert all(
-        Path(axis["events"]).read_bytes() == Path(axis["scratch_events"]).read_bytes()
-        for axis in plan["axes"]
-    )
+    assert not list(scratch.rglob("*.jsonl"))  # moved, not copied
 
 
 def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
@@ -1189,6 +1185,71 @@ def test_each_review_launch_record_names_the_stream_accounting_priced(
     for invocation in reviews:
         recorded = Path(invocation["metadata"]["events"])
         assert invocation["sequence"] == len(recorded.read_text().splitlines())
+        # Later axes of the run can write the scratch; a stream priced from there could
+        # be rewritten to lift the budget ceiling.
+        assert not recorded.is_relative_to(ctx.home / "state" / "review")
+
+
+def test_the_final_review_pass_reads_nothing_a_later_axis_could_have_replaced(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _to_reviewing(ctx)
+    _stub_redphase(monkeypatch)
+    _seed_vendored_review_tree(Path(ctx.run.worktree or ""))
+    _fake(ctx).review_findings = {"findings": []}
+    original = review_step._axis_files
+    planted: list[Path] = []
+
+    def later_axis(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        plan = review_step._read_plan(ctx.state_dir / "review")
+        done = [Path(a["scratch_events"]) for a in plan["axes"] if a.get("complete")]
+        if done and not planted:
+            # The second axis replaces the first axis's stream with a FIFO.
+            done[0].unlink(missing_ok=True)
+            os.mkfifo(done[0])
+            planted.append(done[0])
+        return original(attempt_dir, out_path)
+
+    review_step.start(ctx)
+    monkeypatch.setattr(review_step, "_axis_files", later_axis)
+
+    def hung(signum: int, frame: Any) -> None:
+        raise AssertionError("the final pass read a stream a later axis replaced")
+
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(20)
+    try:
+        advance_state(ctx)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert planted
+    assert ctx.state is State.PR_READY
+
+
+def test_the_host_never_writes_a_prompt_through_a_launch_directory_swapped_for_a_link(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = _first_axis_in_flight(ctx, monkeypatch)
+    victim = tmp_path / "another-runs-launch"
+    victim.mkdir()
+    original = review_step._axis_files
+
+    def swapped(attempt_dir: AttemptDir, out_path: Path) -> Any:
+        if attempt_dir.root != first and not attempt_dir.root.is_symlink():
+            attempt_dir.root.rmdir()
+            attempt_dir.root.symlink_to(victim)
+        return original(attempt_dir, out_path)
+
+    monkeypatch.setattr(review_step, "_axis_files", swapped)
+    _finish_axis(ctx, first)
+
+    with pytest.raises(Blocked) as caught:
+        review_step.collect(ctx, AttemptDir(first), ctx.run.attempt)
+
+    assert caught.value.reason == "review-scratch-tampered"
+    assert list(victim.iterdir()) == []
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
