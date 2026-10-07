@@ -34,7 +34,7 @@ from tests.integration.conftest import (
     advance_state,
     git,
 )
-from tests.integration.test_pipeline import _fake, _to_verifying
+from tests.integration.test_pipeline import _fake, _second_run_in, _to_verifying
 from tests.support import claude_stream
 
 # --------------------------------------------------------------------------------
@@ -1008,6 +1008,34 @@ def test_every_path_the_review_script_touches_is_inside_a_review_workspace(
     ]
     unwritable = [p for p in written if not any(p.is_relative_to(w) for w in writable)]
     assert not unwritable, f"written by the reviewer but not on a writable mount: {unwritable}"
+
+
+def test_a_review_launch_cannot_write_another_runs_review_files(
+    ctx: Context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reviewer holds Bash, and Claude Code does not confine Bash to its cwd (measured
+    c4-default-outside-cwd), so the review sandbox's `rw` mounts are its whole write wall.
+    A second run's reviewer must not be able to reach the first run's live stream, exit or
+    pgid file: a forged `exit` or stream is read as that run's own verdict."""
+    fake = _fake(ctx)
+    _to_reviewing(ctx)
+    other = _second_run_in(ctx, "BAC-9")
+    _to_reviewing(other)
+    _stub_redphase(monkeypatch)
+    for run_ctx in (ctx, other):
+        _seed_vendored_review_tree(Path(run_ctx.run.worktree or ""))
+    fake.detach_without_finishing = True
+
+    review_step.start(ctx)
+    first_files = [p for p in fake.detached_dirs[-1].rglob("*") if p.is_file()]
+    review_step.start(other)
+    second_sandbox = fake.detached[-1][0]
+
+    assert {p.name for p in first_files} >= {"events.jsonl", "pgid", "prompt.md"}
+    writable = fake._writable_roots(second_sandbox)
+    assert writable, "the review sandbox has no writable mount at all"
+    reachable = [p for p in first_files if any(p.is_relative_to(root) for root in writable)]
+    assert not reachable, f"{other.run.id}'s reviewer can write {ctx.run.id}'s files: {reachable}"
 
 
 def test_full_review_runs_tier2_on_a_diff_that_would_have_skipped_it(
