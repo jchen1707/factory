@@ -4,6 +4,10 @@
 # project's `template`, mount set or `static_mcp` changes a sandbox specification
 # that `sbx` fixes at creation time (§9.1), so an edit to one of those three keys
 # is only real once the sandbox is recreated under a new name.
+#
+# `root_size = "40g"` sets a project's build VM root disk (sbx's default is 20g). It is
+# also fixed at creation, but it is measured rather than trusted: a build sandbox of
+# another size is refused until it is removed, and the next tick recreates it.
 
 [vault]
 # Host-scope name (§9.2). The factory emits OBSIDIAN_VAULT_DIRECTORY into the

@@ -193,7 +193,13 @@ factory-build-nemoclaw-dev       172.18.194.183   FACTORY_GITLAB_TOKEN   sbx-cs-
 def _adapter_listing(stdout: str, *, ok: bool = True) -> SbxAdapter:
     adapter = SbxAdapter()
 
-    def run(argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None):  # type: ignore[no-untyped-def]
+    def run(
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: object = None,
+    ) -> Completed:
         return Completed(tuple(argv), 0 if ok else 1, stdout, "")
 
     adapter._run = run  # type: ignore[method-assign]
@@ -536,7 +542,11 @@ def _adapter_answering(
     answers = {("sbx", "inspect", _SANDBOX, "--json"): inspect, ("sbx", "ls", "--json"): ls}
 
     def run(
-        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: object = None,
     ) -> Completed:
         if calls is not None:
             calls.append(tuple(argv))
@@ -649,7 +659,11 @@ def test_stop_converges_on_a_sandbox_that_is_already_down(
     answer = adapter._run
 
     def run(
-        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: object = None,
     ) -> Completed:
         if argv[:2] == ["sbx", "stop"]:
             return Completed(tuple(argv), 1, "", "ERROR: sandbox not found")
@@ -669,7 +683,11 @@ def test_confirm_gone_defers_to_an_exit_that_lands_while_sbx_answers(tmp_path: P
     adapter = SbxAdapter()
 
     def run(
-        argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: object = None,
     ) -> Completed:
         (tmp_path / handle.exit_name).write_text("0")
         return Completed(tuple(argv), 0, json.dumps({"state": "stopped"}), "")

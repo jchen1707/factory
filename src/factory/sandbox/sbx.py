@@ -64,6 +64,11 @@ _PLACEHOLDER_PREFIX = "sbx-cs-"
 #: and cheap because the common case returns as soon as the file appears.
 START_TIMEOUT_SECONDS = 120
 
+#: `sbx create` v0.38.0 has no root-size flag. It reads this variable from the creating
+#: process instead: measured 2026-10-07, `40g` gave a 41,956,900,864-byte root and a
+#: malformed value made `create` exit 1 with no sandbox.
+ROOT_SIZE_ENV = "DOCKER_SANDBOXES_ROOT_SIZE"
+
 
 class SbxError(Exception):
     """An `sbx` command that failed, with its output attached."""
@@ -117,6 +122,15 @@ def create_argv(spec: SandboxSpec) -> list[str]:
         argv.append("--no-share-skills")
     argv += [workspace.as_argument() for workspace in spec.workspaces]
     return argv
+
+
+def _create_env(spec: SandboxSpec, inherited: Mapping[str, str]) -> dict[str, str]:
+    """The environment `sbx create` runs in. The spec alone sizes the root: a value
+    inherited from the operator's shell would make a VM the spec does not describe."""
+    env = {key: value for key, value in inherited.items() if key != ROOT_SIZE_ENV}
+    if spec.root_size_gib is not None:
+        env[ROOT_SIZE_ENV] = f"{spec.root_size_gib}g"
+    return env
 
 
 def exec_argv(
@@ -196,7 +210,12 @@ class SbxAdapter:
     # -- plumbing -----------------------------------------------------------------
 
     def _run(
-        self, argv: Sequence[str], *, timeout: int | None = None, stdin: str | None = None
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: int | None = None,
+        stdin: str | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> Completed:
         proc = subprocess.run(
             list(argv),
@@ -205,6 +224,7 @@ class SbxAdapter:
             check=False,
             timeout=timeout or self.timeout,
             input=stdin,
+            env=env,
         )
         return Completed(tuple(argv), proc.returncode, proc.stdout, proc.stderr)
 
@@ -246,9 +266,16 @@ class SbxAdapter:
         if self.exists(spec.name):
             self._assert_spec_matches(spec)
             return
-        result = self._run(create_argv(spec))
+        result = self._run(create_argv(spec), env=_create_env(spec, os.environ))
         if not result.ok:
             raise SbxError(f"sbx create for {spec.name} failed:\n{result.stdout}\n{result.stderr}")
+        if spec.root_size_gib is not None:
+            self._assert_root_size(
+                spec.name,
+                spec.root_size_gib,
+                remedy=f"sbx ignored {ROOT_SIZE_ENV}, so recreating it would not help: check "
+                "whether this sbx version still reads it.",
+            )
 
     def _assert_spec_matches(self, spec: SandboxSpec) -> None:
         # `sbx inspect` reports only the primary workspace. `sbx ls --json` lists every one
@@ -283,6 +310,32 @@ class SbxAdapter:
                 f"sandbox {spec.name} has injected secrets {offending}; factory "
                 "sandboxes carry none (§8.7). Remove it and let the factory recreate "
                 "it: the secret set is fixed at creation and cannot be narrowed later."
+            )
+        if spec.root_size_gib is not None:
+            self._assert_root_size(
+                spec.name,
+                spec.root_size_gib,
+                remedy="The root size is fixed at creation: `sbx rm --force` it once no run "
+                f"is using it, and the next tick recreates it at {spec.root_size_gib}g.",
+            )
+
+    def _assert_root_size(self, name: str, gib: int, *, remedy: str) -> None:
+        # Neither `sbx inspect --json` nor `sbx ls --json` reports the root size, so it is
+        # measured from inside. Filesystem overhead leaves 96.8-97.9% of the requested
+        # size (measured from 5g to 100g on v0.38.0). The band holds the VM to the capacity
+        # declared; above about 50g it cannot tell sizes one GiB apart.
+        declared = gib * 1024**3
+        result = self._run(exec_argv(name, ["df", "-B1", "--output=size", "/"]), timeout=120)
+        try:
+            if not result.ok:
+                raise ValueError(result.stderr.strip())
+            total = int(result.stdout.split()[-1])
+        except (ValueError, IndexError) as exc:
+            raise SbxError(f"sandbox {name}: cannot measure its root filesystem: {exc!r}") from exc
+        if not 0.96 * declared <= total <= declared:
+            raise SbxError(
+                f"sandbox {name} has a {total:,}-byte root, but the registry declares "
+                f'root_size = "{gib}g". {remedy}'
             )
 
     def git_daemon_url(self, name: str) -> str | None:
