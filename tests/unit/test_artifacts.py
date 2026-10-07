@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from factory.artifacts import (
     AttemptDir,
     SecretFound,
+    archive,
     log_event,
     scan_directory,
     scan_for_secrets,
@@ -59,6 +61,28 @@ def test_a_planted_secret_quarantines_the_directory(tmp_path: Path) -> None:
     (tmp_path / "events.jsonl").write_text('{"text":"ghp_0123456789abcdefghij"}')
     with pytest.raises(SecretFound):
         scan_directory(tmp_path)
+
+
+def test_archive_never_copies_content_from_behind_a_directory_symlink(tmp_path: Path) -> None:
+    secret = "ghp_" + "B" * 36  # synthetic scanner hit, never a real credential
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "env.txt").write_text(f"{secret}\n")
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    (attempt / "notes.txt").write_text("fine\n")
+    (attempt / "link").symlink_to(outside, target_is_directory=True)
+
+    kept = archive(attempt, tmp_path / "artifacts" / "1")
+
+    stored = [
+        Path(root) / name
+        for root, _, names in os.walk(kept)
+        for name in names
+        if not (Path(root) / name).is_symlink()
+    ]
+    assert (kept / "notes.txt") in stored
+    assert not [path for path in stored if secret in path.read_text()]
 
 
 def test_manifest_hashes_every_file_but_itself(tmp_path: Path) -> None:

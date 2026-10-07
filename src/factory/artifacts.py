@@ -254,7 +254,8 @@ def archive(attempt_dir: Path, destination: Path, *, extra_names: Sequence[str] 
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         shutil.rmtree(destination)
-    shutil.copytree(attempt_dir, destination)
+    # The scan does not descend through a directory link, so neither may the copy.
+    shutil.copytree(attempt_dir, destination, symlinks=True)
     return destination
 
 
